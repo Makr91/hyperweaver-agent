@@ -1,10 +1,11 @@
-// Package logging wires slog to a rotating JSON file and, optionally, a
-// human-readable console handler. File logging is mandatory because the
-// Windows GUI build (-H=windowsgui) has no console at all.
+// Package logging wires slog to a rotating log file and, optionally, the
+// console. File logging is mandatory because the Windows GUI build
+// (-H=windowsgui) has no console at all. One handler writes to all sinks via
+// io.MultiWriter — no custom slog.Handler implementation to maintain.
 package logging
 
 import (
-	"context"
+	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -12,6 +13,7 @@ import (
 	"gopkg.in/natefinch/lumberjack.v2"
 
 	"github.com/Makr91/hyperweaver-agent/internal/config"
+	"github.com/Makr91/hyperweaver-agent/internal/safepath"
 )
 
 // Setup installs the default slog logger per the configuration and returns a
@@ -20,6 +22,10 @@ func Setup(cfg *config.Config) (func() error, error) {
 	level := parseLevel(cfg.Logging.Level)
 
 	logPath, err := cfg.LogFilePath()
+	if err != nil {
+		return nil, err
+	}
+	logPath, err = safepath.CleanAbs(logPath)
 	if err != nil {
 		return nil, err
 	}
@@ -33,14 +39,13 @@ func Setup(cfg *config.Config) (func() error, error) {
 		MaxBackups: cfg.Logging.MaxBackups,
 	}
 
-	handlers := []slog.Handler{
-		slog.NewJSONHandler(fileSink, &slog.HandlerOptions{Level: level}),
-	}
+	sinks := []io.Writer{fileSink}
 	if cfg.Logging.Console {
-		handlers = append(handlers, slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: level}))
+		sinks = append(sinks, os.Stderr)
 	}
 
-	slog.SetDefault(slog.New(fanout{handlers: handlers}))
+	handler := slog.NewTextHandler(io.MultiWriter(sinks...), &slog.HandlerOptions{Level: level})
+	slog.SetDefault(slog.New(handler))
 	return fileSink.Close, nil
 }
 
@@ -55,48 +60,4 @@ func parseLevel(s string) slog.Level {
 	default:
 		return slog.LevelInfo
 	}
-}
-
-// fanout duplicates records to every wrapped handler.
-type fanout struct {
-	handlers []slog.Handler
-}
-
-func (f fanout) Enabled(ctx context.Context, level slog.Level) bool {
-	for _, h := range f.handlers {
-		if h.Enabled(ctx, level) {
-			return true
-		}
-	}
-	return false
-}
-
-//nolint:gocritic // hugeParam: the signature is fixed by the slog.Handler interface
-func (f fanout) Handle(ctx context.Context, record slog.Record) error {
-	var firstErr error
-	for _, h := range f.handlers {
-		if !h.Enabled(ctx, record.Level) {
-			continue
-		}
-		if err := h.Handle(ctx, record.Clone()); err != nil && firstErr == nil {
-			firstErr = err
-		}
-	}
-	return firstErr
-}
-
-func (f fanout) WithAttrs(attrs []slog.Attr) slog.Handler {
-	next := make([]slog.Handler, len(f.handlers))
-	for i, h := range f.handlers {
-		next[i] = h.WithAttrs(attrs)
-	}
-	return fanout{handlers: next}
-}
-
-func (f fanout) WithGroup(name string) slog.Handler {
-	next := make([]slog.Handler, len(f.handlers))
-	for i, h := range f.handlers {
-		next[i] = h.WithGroup(name)
-	}
-	return fanout{handlers: next}
 }

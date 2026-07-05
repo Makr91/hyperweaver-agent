@@ -313,3 +313,19 @@ jobs:
             --pattern 'hyperweaver-agent_*'
           sha256sum HyperweaverAgent-* hyperweaver-agent_* > SHA256SUMS.txt
           gh release upload "${{ inputs.tag_name }}" SHA256SUMS.txt --clobber
+
+      - name: Generate and upload update-info.json
+        # The in-app update check polls this document at the stable
+        # releases/latest/download URL (SHI's versioninfo.json model).
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          cat > update-info.json << EOF
+          {
+            "version": "${{ inputs.version }}",
+            "releaseUrl": "https://github.com/${{ github.repository }}/releases/tag/${{ inputs.tag_name }}",
+            "releaseDate": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+            "changelog": "https://github.com/${{ github.repository }}/blob/main/CHANGELOG.md"
+          }
+          EOF
+          gh release upload "${{ inputs.tag_name }}" update-info.json --clobber

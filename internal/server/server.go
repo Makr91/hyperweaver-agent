@@ -9,28 +9,41 @@ import (
 	"errors"
 	"io/fs"
 	"log/slog"
+	"net"
 	"net/http"
+	"os"
 	"path"
 	"strings"
 	"time"
 
+	"github.com/Makr91/hyperweaver-agent/internal/auth"
 	"github.com/Makr91/hyperweaver-agent/internal/config"
+	"github.com/Makr91/hyperweaver-agent/internal/keys"
 	"github.com/Makr91/hyperweaver-agent/internal/version"
 	"github.com/Makr91/hyperweaver-agent/internal/webui"
 )
 
 // Server is the agent's HTTP server.
 type Server struct {
-	cfg       *config.Config
-	httpSrv   *http.Server
-	startedAt time.Time
+	cfg        *config.Config
+	keys       *keys.Store
+	trayTokens *auth.TrayTokens
+	httpSrv    *http.Server
+	startedAt  time.Time
+
+	// restartArgs are the arguments a restart-spawned successor process gets —
+	// built by main from parsed flag values (never raw os.Args).
+	restartArgs []string
 }
 
 // New builds the server and its routes.
-func New(cfg *config.Config) (*Server, error) {
+func New(cfg *config.Config, keyStore *keys.Store, trayTokens *auth.TrayTokens, restartArgs []string) (*Server, error) {
 	s := &Server{
-		cfg:       cfg,
-		startedAt: time.Now(),
+		cfg:         cfg,
+		keys:        keyStore,
+		trayTokens:  trayTokens,
+		startedAt:   time.Now(),
+		restartArgs: restartArgs,
 	}
 
 	mux := http.NewServeMux()
@@ -39,6 +52,33 @@ func New(cfg *config.Config) (*Server, error) {
 	// /status is the canonical path, /api/status the SPA's discovery alias.
 	mux.HandleFunc("GET /status", s.handleStatus)
 	mux.HandleFunc("GET /api/status", s.handleStatus)
+
+	// API-key surface (Agent API v1 local tier). Bootstrap is public (gated
+	// by config + the setup token); everything else goes through the auth
+	// middleware, whose central policy enforces the role model per path.
+	requireKey := auth.Middleware(s.keys)
+	mux.HandleFunc("POST /api-keys/bootstrap", s.handleBootstrapKey)
+	mux.HandleFunc("POST /auth/tray-claim", s.handleTrayClaim)
+	mux.Handle("POST /api-keys/generate", requireKey(http.HandlerFunc(s.handleGenerateKey)))
+	mux.Handle("GET /api-keys", requireKey(http.HandlerFunc(s.handleListKeys)))
+	mux.Handle("GET /api-keys/info", requireKey(http.HandlerFunc(s.handleKeyInfo)))
+	mux.Handle("DELETE /api-keys/{id}", requireKey(http.HandlerFunc(s.handleDeleteKey)))
+	mux.Handle("PUT /api-keys/{id}/revoke", requireKey(http.HandlerFunc(s.handleRevokeKey)))
+
+	// Version / update / prerequisite surfaces (Agent API v1 System group).
+	mux.Handle("GET /version", requireKey(http.HandlerFunc(s.handleVersion)))
+	mux.Handle("GET /app/updates/check", requireKey(http.HandlerFunc(s.handleUpdateCheck)))
+	mux.Handle("GET /provisioning/status", requireKey(http.HandlerFunc(s.handleProvisioningStatus)))
+
+	// Settings surface (Agent API v1) — admin-only via the central role policy.
+	mux.Handle("GET /settings", requireKey(http.HandlerFunc(s.handleGetSettings)))
+	mux.Handle("GET /settings/schema", requireKey(http.HandlerFunc(s.handleSettingsSchema)))
+	mux.Handle("PUT /settings", requireKey(http.HandlerFunc(s.handleUpdateSettings)))
+	mux.Handle("POST /settings/backup", requireKey(http.HandlerFunc(s.handleCreateBackup)))
+	mux.Handle("GET /settings/backups", requireKey(http.HandlerFunc(s.handleListBackups)))
+	mux.Handle("DELETE /settings/backups/{filename}", requireKey(http.HandlerFunc(s.handleDeleteBackup)))
+	mux.Handle("POST /settings/restore/{filename}", requireKey(http.HandlerFunc(s.handleRestoreBackup)))
+	mux.Handle("POST /server/restart", requireKey(http.HandlerFunc(s.handleServerRestart)))
 
 	uiFS, err := webui.FS(cfg.UI.Path)
 	if err != nil {
@@ -147,12 +187,41 @@ func (s *Server) handleRootInfo(w http.ResponseWriter, _ *http.Request) {
 
 // Start blocks serving HTTP until Shutdown is called or the listener fails.
 func (s *Server) Start() error {
+	listener, err := s.listen()
+	if err != nil {
+		return err
+	}
 	slog.Info("http server listening", "addr", s.httpSrv.Addr, "ui_enabled", s.cfg.UI.Enabled)
-	err := s.httpSrv.ListenAndServe()
+	err = s.httpSrv.Serve(listener)
 	if errors.Is(err, http.ErrServerClosed) {
 		return nil
 	}
 	return err
+}
+
+// listen binds the configured address. A process spawned by /server/restart
+// (HYPERWEAVER_RESTART=1) retries for a few seconds while its predecessor
+// releases the port.
+func (s *Server) listen() (net.Listener, error) {
+	attempts := 1
+	if os.Getenv("HYPERWEAVER_RESTART") == "1" {
+		attempts = 20
+	}
+
+	// Server-lifetime bind, not request-scoped — Background is correct here.
+	listenConfig := net.ListenConfig{}
+	var lastErr error
+	for i := 0; i < attempts; i++ {
+		listener, err := listenConfig.Listen(context.Background(), "tcp", s.cfg.ListenAddr())
+		if err == nil {
+			return listener, nil
+		}
+		lastErr = err
+		if attempts > 1 {
+			time.Sleep(500 * time.Millisecond)
+		}
+	}
+	return nil, lastErr
 }
 
 // Shutdown gracefully drains connections.

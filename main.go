@@ -16,7 +16,9 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/Makr91/hyperweaver-agent/internal/auth"
 	"github.com/Makr91/hyperweaver-agent/internal/config"
+	"github.com/Makr91/hyperweaver-agent/internal/keys"
 	"github.com/Makr91/hyperweaver-agent/internal/logging"
 	"github.com/Makr91/hyperweaver-agent/internal/openbrowser"
 	"github.com/Makr91/hyperweaver-agent/internal/server"
@@ -28,7 +30,7 @@ import (
 // defers) live in run.
 func main() {
 	if err := run(); err != nil {
-		fmt.Fprintln(os.Stderr, err) //nolint:forbidigo // final error report before exit
+		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
 }
@@ -40,7 +42,7 @@ func run() error {
 	flag.Parse()
 
 	if *showVersion {
-		fmt.Println(version.Version) //nolint:forbidigo // --version output is the console contract
+		fmt.Fprintln(os.Stdout, version.Version)
 		return nil
 	}
 
@@ -55,7 +57,7 @@ func run() error {
 	}
 	defer func() {
 		if cerr := closeLog(); cerr != nil {
-			fmt.Fprintln(os.Stderr, cerr) //nolint:forbidigo // logger is already closed
+			fmt.Fprintln(os.Stderr, cerr)
 		}
 	}()
 
@@ -65,7 +67,31 @@ func run() error {
 		"headless", *headless,
 	)
 
-	srv, err := server.New(cfg)
+	keyStore, err := keys.Open(cfg.KeyStorePath())
+	if err != nil {
+		slog.Error("key store setup failed", "error", err)
+		return err
+	}
+
+	// First-boot claim token: while the agent can still be bootstrapped (no
+	// keys yet), ensure the setup token exists and print it so a host admin
+	// can read it. It guards POST /api-keys/bootstrap. No-op once a key exists.
+	if cfg.APIKeys.BootstrapEnabled && cfg.APIKeys.BootstrapRequireClaimToken && keyStore.Count() == 0 {
+		if token := auth.GetOrGenerateSetupToken(cfg.SetupTokenPath()); token != "" {
+			slog.Info("Setup token (required to create the first API key): " + token)
+		}
+	}
+
+	trayTokens := auth.NewTrayTokens()
+
+	// Arguments a restart-spawned successor gets: rebuilt from parsed flag
+	// values (the sanitized config path), never raw process arguments.
+	restartArgs := []string{"--config", resolvedPath}
+	if *headless {
+		restartArgs = append(restartArgs, "--headless")
+	}
+
+	srv, err := server.New(cfg, keyStore, trayTokens, restartArgs)
 	if err != nil {
 		slog.Error("server setup failed", "error", err)
 		return err
@@ -113,7 +139,15 @@ func run() error {
 		Title:   "Hyperweaver Agent v" + version.Version,
 		Tooltip: "Hyperweaver Agent",
 		OnOpen: func() {
-			openbrowser.Open(cfg.LocalURL(), cfg.Browser.Path)
+			// Local presence is the credential: carry a single-use token in
+			// the URL fragment so the SPA signs in without a login screen.
+			url := cfg.LocalURL()
+			if token, mintErr := trayTokens.Mint(); mintErr == nil {
+				url += "#tray=" + token
+			} else {
+				slog.Error("mint tray token", "error", mintErr)
+			}
+			openbrowser.Open(url, cfg.Browser.Path)
 		},
 		OnExit: shutdown,
 	})

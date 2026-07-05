@@ -10,10 +10,14 @@ import (
 	"strings"
 
 	"github.com/cli/browser"
+
+	"github.com/Makr91/hyperweaver-agent/internal/safepath"
 )
 
 // Open launches url. browserPath optionally names a specific browser
 // executable (or a .app bundle on macOS); empty uses the system default.
+// The configured path is settable through the settings API, so it is treated
+// as untrusted and validated before anything is spawned.
 func Open(url, browserPath string) {
 	if browserPath == "" {
 		if err := browser.OpenURL(url); err != nil {
@@ -27,9 +31,19 @@ func Open(url, browserPath string) {
 	ctx := context.Background()
 	var cmd *exec.Cmd
 	if runtime.GOOS == "darwin" && strings.HasSuffix(browserPath, ".app") {
-		cmd = exec.CommandContext(ctx, "open", "-a", browserPath, url) // #nosec G204 -- browserPath is the user's own configured browser
+		bundle, err := safepath.ValidateAppBundle(browserPath)
+		if err != nil {
+			slog.Error("configured browser is not a valid app bundle", "browser", browserPath, "error", err)
+			return
+		}
+		cmd = exec.CommandContext(ctx, "open", "-a", bundle, url)
 	} else {
-		cmd = exec.CommandContext(ctx, browserPath, url) // #nosec G204 -- browserPath is the user's own configured browser
+		exe, err := safepath.ValidateExecutable(browserPath)
+		if err != nil {
+			slog.Error("configured browser is not a valid executable", "browser", browserPath, "error", err)
+			return
+		}
+		cmd = exec.CommandContext(ctx, exe, url)
 	}
 
 	if err := cmd.Start(); err != nil {

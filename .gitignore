@@ -22,8 +22,10 @@ go.work.sum
 logs/
 *.log
 
-# Local dev config
+# Local dev config + credentials that live beside it
 /config.yaml
+/keys.json
+/setup.token
 
 # SSL certificates / keys
 ssl/

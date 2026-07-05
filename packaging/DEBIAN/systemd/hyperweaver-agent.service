@@ -9,8 +9,9 @@ User=hyperweaver-agent
 Group=hyperweaver-agent
 WorkingDirectory=/var/lib/hyperweaver-agent
 ExecStart=/usr/bin/hyperweaver-agent --headless --config /etc/hyperweaver-agent/config.yaml
-Restart=on-failure
-RestartSec=10
+# always: a clean exit is how the in-app "Restart" button restarts the service
+Restart=always
+RestartSec=3
 
 # Security settings
 NoNewPrivileges=yes

@@ -47,6 +47,11 @@ func (s *Server) handleStatus(w http.ResponseWriter, _ *http.Request) {
 		hostname = "unknown"
 	}
 
+	// Mirror the exact availability check the bootstrap endpoint enforces.
+	akCfg := s.cfg.APIKeys
+	bootstrapAvailable := akCfg.BootstrapEnabled &&
+		(s.keys.Count() == 0 || !akCfg.BootstrapAutoDisable)
+
 	payload := statusPayload{
 		Role:        "agent",
 		Agent:       "hyperweaver-agent",
@@ -55,11 +60,10 @@ func (s *Server) handleStatus(w http.ResponseWriter, _ *http.Request) {
 		Arch:        archName(),
 		Version:     version.Version,
 		Hostname:    hostname,
-		// Capability tokens mean "implemented" (presence = supported). API-key
-		// auth is the next milestone; until its endpoints exist, advertising
-		// it would send the UI into a dead-end login. Empty until then.
-		Auth:               []string{},
-		BootstrapAvailable: false,
+		// Shared auth-token namespace {apikey, local, ldap, oidc}: this agent
+		// accepts API keys ('apikey', never 'local' — different login form).
+		Auth:               []string{"apikey"},
+		BootstrapAvailable: bootstrapAvailable,
 		Console:            []string{},
 		Features:           []string{},
 		Uptime:             int64(time.Since(s.startedAt).Seconds()),

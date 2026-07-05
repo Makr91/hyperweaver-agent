@@ -30,3 +30,21 @@ logging:
   file: /var/log/hyperweaver-agent/agent.log
   max_size_mb: 20
   max_backups: 5
+
+api_keys:
+  # Allow POST /api-keys/bootstrap to create the first API key.
+  bootstrap_enabled: true
+  # Lock the bootstrap endpoint once any key exists.
+  bootstrap_auto_disable: true
+  # Require the setup (claim) token — written to setup.token beside this file
+  # and printed to the startup log/journal — as proof of host ownership.
+  bootstrap_require_claim_token: true
+  # Bcrypt cost for stored key hashes.
+  hash_rounds: 12
+  # Random bytes of key material (base64url-encoded after the hw_ prefix).
+  key_length: 64
+
+updates:
+  # Version document the update check compares against (JSON: version,
+  # releaseUrl, releaseDate, changelog). Empty disables update checking.
+  versioninfo_url: https://github.com/Makr91/hyperweaver-agent/releases/latest/download/update-info.json

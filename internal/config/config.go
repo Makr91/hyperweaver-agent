@@ -10,44 +10,69 @@ import (
 	"strconv"
 
 	"github.com/goccy/go-yaml"
+
+	"github.com/Makr91/hyperweaver-agent/internal/safepath"
 )
 
 // ServerConfig controls the HTTP listener.
 type ServerConfig struct {
-	BindAddress string `yaml:"bind_address"`
-	Port        int    `yaml:"port"`
+	BindAddress string `yaml:"bind_address" json:"bind_address"`
+	Port        int    `yaml:"port"         json:"port"`
 }
 
 // UIConfig controls serving of the embedded Hyperweaver UI.
 type UIConfig struct {
-	Enabled bool `yaml:"enabled"`
+	Enabled bool `yaml:"enabled" json:"enabled"`
 	// Path optionally serves the UI from a directory on disk instead of the
 	// artifact embedded in the binary (dev override, mirrors the Node agent).
-	Path string `yaml:"path"`
+	Path string `yaml:"path" json:"path"`
 }
 
 // BrowserConfig controls how the tray "Open" action launches a browser.
 type BrowserConfig struct {
 	// Path is an optional browser executable (or macOS .app bundle). Empty
 	// means the operating system's default browser.
-	Path string `yaml:"path"`
+	Path string `yaml:"path" json:"path"`
 }
 
 // LoggingConfig controls slog output.
 type LoggingConfig struct {
-	Level      string `yaml:"level"`
-	Console    bool   `yaml:"console"`
-	File       string `yaml:"file"`
-	MaxSizeMB  int    `yaml:"max_size_mb"`
-	MaxBackups int    `yaml:"max_backups"`
+	Level      string `yaml:"level"       json:"level"`
+	Console    bool   `yaml:"console"     json:"console"`
+	File       string `yaml:"file"        json:"file"`
+	MaxSizeMB  int    `yaml:"max_size_mb" json:"max_size_mb"`
+	MaxBackups int    `yaml:"max_backups" json:"max_backups"`
+}
+
+// APIKeysConfig controls API-key authentication (Agent API v1 local tier).
+// Field names and defaults mirror the Node agent's api_keys block.
+type APIKeysConfig struct {
+	BootstrapEnabled           bool `yaml:"bootstrap_enabled"             json:"bootstrap_enabled"`
+	BootstrapAutoDisable       bool `yaml:"bootstrap_auto_disable"        json:"bootstrap_auto_disable"`
+	BootstrapRequireClaimToken bool `yaml:"bootstrap_require_claim_token" json:"bootstrap_require_claim_token"`
+	HashRounds                 int  `yaml:"hash_rounds"                   json:"hash_rounds"`
+	KeyLength                  int  `yaml:"key_length"                    json:"key_length"`
+}
+
+// UpdatesConfig controls update checking (SHI/Node-agent versioninfo model).
+type UpdatesConfig struct {
+	// VersionInfoURL points at a JSON document {version, releaseUrl,
+	// releaseDate, changelog}; empty disables update checking.
+	VersionInfoURL string `yaml:"versioninfo_url" json:"versioninfo_url"`
 }
 
 // Config is the root of config.yaml.
 type Config struct {
-	Server  ServerConfig  `yaml:"server"`
-	UI      UIConfig      `yaml:"ui"`
-	Browser BrowserConfig `yaml:"browser"`
-	Logging LoggingConfig `yaml:"logging"`
+	Server  ServerConfig  `yaml:"server"   json:"server"`
+	UI      UIConfig      `yaml:"ui"       json:"ui"`
+	Browser BrowserConfig `yaml:"browser"  json:"browser"`
+	Logging LoggingConfig `yaml:"logging"  json:"logging"`
+	APIKeys APIKeysConfig `yaml:"api_keys" json:"api_keys"`
+	Updates UpdatesConfig `yaml:"updates"  json:"updates"`
+
+	// path is where this configuration was loaded from; the setup token, key
+	// store, and config backups live beside it.
+	path string
 }
 
 // defaultConfigYAML is written verbatim on first run so the on-disk file keeps
@@ -83,6 +108,24 @@ logging:
   file: ''
   max_size_mb: 20
   max_backups: 5
+
+api_keys:
+  # Allow POST /api-keys/bootstrap to create the first API key.
+  bootstrap_enabled: true
+  # Lock the bootstrap endpoint once any key exists.
+  bootstrap_auto_disable: true
+  # Require the setup (claim) token — written to setup.token beside this file
+  # and printed to the startup log — as proof of host ownership.
+  bootstrap_require_claim_token: true
+  # Bcrypt cost for stored key hashes.
+  hash_rounds: 12
+  # Random bytes of key material (base64url-encoded after the hw_ prefix).
+  key_length: 64
+
+updates:
+  # Version document the update check compares against (JSON: version,
+  # releaseUrl, releaseDate, changelog). Empty disables update checking.
+  versioninfo_url: https://github.com/Makr91/hyperweaver-agent/releases/latest/download/update-info.json
 `
 
 // Default returns the built-in configuration values.
@@ -92,6 +135,16 @@ func Default() *Config {
 		UI:      UIConfig{Enabled: true},
 		Browser: BrowserConfig{},
 		Logging: LoggingConfig{Level: "info", Console: true, MaxSizeMB: 20, MaxBackups: 5},
+		APIKeys: APIKeysConfig{
+			BootstrapEnabled:           true,
+			BootstrapAutoDisable:       true,
+			BootstrapRequireClaimToken: true,
+			HashRounds:                 12,
+			KeyLength:                  64,
+		},
+		Updates: UpdatesConfig{
+			VersionInfoURL: "https://github.com/Makr91/hyperweaver-agent/releases/latest/download/update-info.json",
+		},
 	}
 }
 
@@ -126,12 +179,22 @@ func Load(path string) (*Config, string, error) {
 			return nil, "", err
 		}
 		resolved = defaultPath
-		if err := ensureDefaultFile(resolved); err != nil {
-			return nil, "", err
+	}
+
+	// Sanitize before any filesystem access; everything derived from the
+	// config location (key store, setup token, backups) inherits this.
+	resolved, err := safepath.CleanAbs(resolved)
+	if err != nil {
+		return nil, "", err
+	}
+
+	if path == "" {
+		if derr := ensureDefaultFile(resolved); derr != nil {
+			return nil, "", derr
 		}
 	}
 
-	data, err := os.ReadFile(resolved) // #nosec G304 -- path is the user's own config file
+	data, err := os.ReadFile(filepath.Clean(resolved))
 	if err != nil {
 		return nil, "", fmt.Errorf("read config %s: %w", resolved, err)
 	}
@@ -143,6 +206,7 @@ func Load(path string) (*Config, string, error) {
 	if err := cfg.validate(); err != nil {
 		return nil, "", fmt.Errorf("invalid config %s: %w", resolved, err)
 	}
+	cfg.path = resolved
 	return cfg, resolved, nil
 }
 
@@ -173,6 +237,12 @@ func (c *Config) validate() error {
 	default:
 		return fmt.Errorf("logging.level %q must be one of error, warn, info, debug", c.Logging.Level)
 	}
+	if c.APIKeys.HashRounds < 4 || c.APIKeys.HashRounds > 20 {
+		return fmt.Errorf("api_keys.hash_rounds %d out of range 4-20", c.APIKeys.HashRounds)
+	}
+	if c.APIKeys.KeyLength < 16 || c.APIKeys.KeyLength > 256 {
+		return fmt.Errorf("api_keys.key_length %d out of range 16-256", c.APIKeys.KeyLength)
+	}
 	return nil
 }
 
@@ -202,4 +272,21 @@ func (c *Config) LogFilePath() (string, error) {
 		return "", err
 	}
 	return filepath.Join(dir, "logs", "agent.log"), nil
+}
+
+// Path returns where this configuration was loaded from.
+func (c *Config) Path() string {
+	return c.path
+}
+
+// SetupTokenPath returns the setup (claim) token location: setup.token beside
+// the loaded configuration file, mirroring the Node agent.
+func (c *Config) SetupTokenPath() string {
+	return filepath.Join(filepath.Dir(c.path), "setup.token")
+}
+
+// KeyStorePath returns the API-key store location: keys.json beside the
+// loaded configuration file.
+func (c *Config) KeyStorePath() string {
+	return filepath.Join(filepath.Dir(c.path), "keys.json")
 }
