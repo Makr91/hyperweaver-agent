@@ -20,6 +20,8 @@ import (
 	"github.com/Makr91/hyperweaver-agent/internal/auth"
 	"github.com/Makr91/hyperweaver-agent/internal/config"
 	"github.com/Makr91/hyperweaver-agent/internal/keys"
+	"github.com/Makr91/hyperweaver-agent/internal/machines"
+	"github.com/Makr91/hyperweaver-agent/internal/tasks"
 	"github.com/Makr91/hyperweaver-agent/internal/version"
 	"github.com/Makr91/hyperweaver-agent/internal/webui"
 )
@@ -29,6 +31,8 @@ type Server struct {
 	cfg        *config.Config
 	keys       *keys.Store
 	trayTokens *auth.TrayTokens
+	tasks      *tasks.Queue
+	machines   *machines.Store
 	httpSrv    *http.Server
 	listener   net.Listener
 	startedAt  time.Time
@@ -44,11 +48,13 @@ type Server struct {
 }
 
 // New builds the server and its routes.
-func New(cfg *config.Config, keyStore *keys.Store, trayTokens *auth.TrayTokens, restartArgs []string, openUI func()) (*Server, error) {
+func New(cfg *config.Config, keyStore *keys.Store, trayTokens *auth.TrayTokens, taskQueue *tasks.Queue, machineStore *machines.Store, restartArgs []string, openUI func()) (*Server, error) {
 	s := &Server{
 		cfg:         cfg,
 		keys:        keyStore,
 		trayTokens:  trayTokens,
+		tasks:       taskQueue,
+		machines:    machineStore,
 		startedAt:   time.Now(),
 		restartArgs: restartArgs,
 		openUI:      openUI,
@@ -85,6 +91,36 @@ func New(cfg *config.Config, keyStore *keys.Store, trayTokens *auth.TrayTokens, 
 	// serves this publicly (stats.public_access, default false) — this agent
 	// keeps it keyed; add the knob only if a consumer ever needs it public.
 	mux.Handle("GET /stats", requireKey(http.HandlerFunc(s.handleStats)))
+
+	// Task queue (Agent API v1 Task Management group). Literal patterns
+	// (/tasks/stats, /tasks/completed) win over the {taskId} wildcards in
+	// ServeMux precedence.
+	mux.Handle("GET /tasks", requireKey(http.HandlerFunc(s.handleListTasks)))
+	mux.Handle("GET /tasks/stats", requireKey(http.HandlerFunc(s.handleTaskStats)))
+	mux.Handle("GET /tasks/{taskId}", requireKey(http.HandlerFunc(s.handleTaskDetails)))
+	mux.Handle("GET /tasks/{taskId}/output", requireKey(http.HandlerFunc(s.handleTaskOutput)))
+	mux.Handle("DELETE /tasks/completed", requireKey(http.HandlerFunc(s.handleClearCompletedTasks)))
+	mux.Handle("DELETE /tasks/{taskId}", requireKey(http.HandlerFunc(s.handleCancelTask)))
+
+	// Machines (Agent API v1, canonical /machines/* noun only — design D-E).
+	// Literal segments (ids, bulk) win over {machineName} in ServeMux
+	// precedence.
+	mux.Handle("GET /machines", requireKey(http.HandlerFunc(s.handleListMachines)))
+	mux.Handle("GET /machines/ids", requireKey(http.HandlerFunc(s.handleServerIDs)))
+	mux.Handle("GET /machines/ids/next", requireKey(http.HandlerFunc(s.handleNextServerID)))
+	mux.Handle("POST /machines/bulk/start", requireKey(http.HandlerFunc(s.handleBulkStart)))
+	mux.Handle("POST /machines/bulk/stop", requireKey(http.HandlerFunc(s.handleBulkStop)))
+	mux.Handle("GET /machines/{machineName}", requireKey(http.HandlerFunc(s.handleMachineDetails)))
+	mux.Handle("GET /machines/{machineName}/config", requireKey(http.HandlerFunc(s.handleMachineConfig)))
+	mux.Handle("POST /machines/{machineName}/start", requireKey(http.HandlerFunc(s.handleStartMachine)))
+	mux.Handle("POST /machines/{machineName}/stop", requireKey(http.HandlerFunc(s.handleStopMachine)))
+	mux.Handle("POST /machines/{machineName}/restart", requireKey(http.HandlerFunc(s.handleRestartMachine)))
+	mux.Handle("POST /machines/{machineName}/suspend", requireKey(http.HandlerFunc(s.handleSuspendMachine)))
+	mux.Handle("DELETE /machines/{machineName}", requireKey(http.HandlerFunc(s.handleDeleteMachine)))
+	mux.Handle("GET /machines/{machineName}/notes", requireKey(http.HandlerFunc(s.handleGetMachineNotes)))
+	mux.Handle("PUT /machines/{machineName}/notes", requireKey(http.HandlerFunc(s.handleUpdateMachineNotes)))
+	mux.Handle("GET /machines/{machineName}/tags", requireKey(http.HandlerFunc(s.handleGetMachineTags)))
+	mux.Handle("PUT /machines/{machineName}/tags", requireKey(http.HandlerFunc(s.handleUpdateMachineTags)))
 
 	// Settings surface (Agent API v1) — admin-only via the central role policy.
 	mux.Handle("GET /settings", requireKey(http.HandlerFunc(s.handleGetSettings)))

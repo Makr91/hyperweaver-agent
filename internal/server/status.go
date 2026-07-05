@@ -29,6 +29,15 @@ type statusPayload struct {
 	Uptime             int64    `json:"uptime"`
 }
 
+// platformFeatures are the capability tokens this agent always advertises
+// (the Node agent's PLATFORM_FEATURES model: no config kill-switch).
+// machine-suspend is an op-level token (agreed in hyperweaver-ai-sync.md):
+// the UI shows Suspend wherever it appears — VirtualBox suspends, bhyve does
+// not, and no UI code ever branches on hypervisor values. Grows per phase:
+// machine-create + provisioning (C); artifacts/templates join the
+// config-gated set when their subsystems land.
+var platformFeatures = []string{"tasks", "machines", "machine-suspend"}
+
 // archName maps Go architecture names to the Agent API contract values.
 func archName() string {
 	switch runtime.GOARCH {
@@ -65,7 +74,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, _ *http.Request) {
 		Auth:               []string{"apikey"},
 		BootstrapAvailable: bootstrapAvailable,
 		Console:            []string{},
-		Features:           []string{},
+		Features:           platformFeatures,
 		Uptime:             int64(time.Since(s.startedAt).Seconds()),
 	}
 

@@ -6,28 +6,51 @@ package vbox
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os/exec"
+	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/Makr91/hyperweaver-agent/internal/procattr"
 )
 
+// ErrNotFound reports that VirtualBox has no machine registered under the
+// requested name or UUID.
+var ErrNotFound = errors.New("machine not found in VirtualBox")
+
 // vmLinePattern matches the `"VM name" {uuid}` lines VBoxManage list emits.
-var vmLinePattern = regexp.MustCompile(`^"(?P<name>.+)" \{[0-9a-fA-F-]{36}\}$`)
+var vmLinePattern = regexp.MustCompile(`^"(?P<name>.+)" \{(?P<uuid>[0-9a-fA-F-]{36})\}$`)
+
+// Registered is one `VBoxManage list vms` entry.
+type Registered struct {
+	Name string
+	UUID string
+}
 
 // ListVMs returns the names of all registered VirtualBox machines.
 func ListVMs(ctx context.Context, vboxManage string) ([]string, error) {
-	return list(ctx, vboxManage, "vms")
+	regs, err := ListRegistered(ctx, vboxManage, "vms")
+	if err != nil {
+		return nil, err
+	}
+	return names(regs), nil
 }
 
 // ListRunningVMs returns the names of the currently running machines.
 func ListRunningVMs(ctx context.Context, vboxManage string) ([]string, error) {
-	return list(ctx, vboxManage, "runningvms")
+	regs, err := ListRegistered(ctx, vboxManage, "runningvms")
+	if err != nil {
+		return nil, err
+	}
+	return names(regs), nil
 }
 
-func list(ctx context.Context, vboxManage, subset string) ([]string, error) {
+// ListRegistered returns name+UUID pairs for a list subset ("vms" or
+// "runningvms").
+func ListRegistered(ctx context.Context, vboxManage, subset string) ([]Registered, error) {
 	cmd := exec.CommandContext(ctx, vboxManage, "list", subset)
 	cmd.SysProcAttr = procattr.NoConsole()
 	out, err := cmd.Output()
@@ -35,11 +58,138 @@ func list(ctx context.Context, vboxManage, subset string) ([]string, error) {
 		return nil, fmt.Errorf("VBoxManage list %s: %w", subset, err)
 	}
 
-	names := []string{}
+	regs := []Registered{}
 	for _, line := range strings.Split(string(out), "\n") {
 		if match := vmLinePattern.FindStringSubmatch(strings.TrimSpace(line)); match != nil {
-			names = append(names, match[1])
+			regs = append(regs, Registered{Name: match[1], UUID: match[2]})
 		}
 	}
-	return names, nil
+	return regs, nil
+}
+
+func names(regs []Registered) []string {
+	out := make([]string, 0, len(regs))
+	for _, r := range regs {
+		out = append(out, r.Name)
+	}
+	return out
+}
+
+// Info is one machine's `showvminfo --machinereadable` state — the
+// authoritative live view (SHI rule: VirtualBox outranks vagrant's cache).
+type Info struct {
+	Name       string
+	UUID       string
+	State      string // running | poweroff | saved | paused | aborted | starting | stopping ...
+	OSType     string
+	ConfigFile string
+	// Home is the directory holding the machine's .vbox file.
+	Home     string
+	MemoryMB int
+	CPUs     int
+	// Raw carries every machinereadable key — served as the machine's live
+	// configuration document.
+	Raw map[string]string
+}
+
+// machineReadableLine matches the machinereadable forms key="value",
+// key=value, and "quoted key"="value" (storage attachment lines).
+var machineReadableLine = regexp.MustCompile(`^(?:"([^"]+)"|([A-Za-z0-9_\-/]+))=(?:"(.*)"|(.*))$`)
+
+// ShowVMInfo fetches a machine's live state. ErrNotFound when VirtualBox no
+// longer knows the machine.
+func ShowVMInfo(ctx context.Context, vboxManage, nameOrUUID string) (*Info, error) {
+	cmd := exec.CommandContext(ctx, vboxManage, "showvminfo", nameOrUUID, "--machinereadable")
+	cmd.SysProcAttr = procattr.NoConsole()
+	out, err := cmd.Output()
+	if err != nil {
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) && strings.Contains(string(exitErr.Stderr), "Could not find a registered machine") {
+			return nil, ErrNotFound
+		}
+		return nil, fmt.Errorf("VBoxManage showvminfo %s: %w", nameOrUUID, err)
+	}
+
+	info := &Info{Raw: map[string]string{}}
+	for _, line := range strings.Split(string(out), "\n") {
+		match := machineReadableLine.FindStringSubmatch(strings.TrimSpace(line))
+		if match == nil {
+			continue
+		}
+		key := match[1]
+		if key == "" {
+			key = match[2]
+		}
+		value := match[3]
+		if value == "" {
+			value = match[4]
+		}
+		info.Raw[key] = value
+		switch key {
+		case "name":
+			info.Name = value
+		case "UUID":
+			info.UUID = value
+		case "VMState":
+			info.State = value
+		case "ostype":
+			info.OSType = value
+		case "CfgFile":
+			info.ConfigFile = value
+			info.Home = filepath.Dir(value)
+		case "memory":
+			if n, perr := strconv.Atoi(value); perr == nil {
+				info.MemoryMB = n
+			}
+		case "cpus":
+			if n, perr := strconv.Atoi(value); perr == nil {
+				info.CPUs = n
+			}
+		}
+	}
+	return info, nil
+}
+
+// StartVM boots a machine (`startvm --type headless|gui`) — the direct path
+// for machines that exist only in VirtualBox (design: dual-path management).
+func StartVM(ctx context.Context, vboxManage, name string, gui bool) error {
+	displayType := "headless"
+	if gui {
+		displayType = "gui"
+	}
+	return runSimple(ctx, vboxManage, "startvm", name, "--type", displayType)
+}
+
+// ControlVM drives a running machine: poweroff, acpipowerbutton, pause,
+// resume, or savestate.
+func ControlVM(ctx context.Context, vboxManage, name, action string) error {
+	return runSimple(ctx, vboxManage, "controlvm", name, action)
+}
+
+// UnregisterVM removes a machine from VirtualBox; deleteFiles also deletes
+// its media and directories. VirtualBox itself refuses to delete media still
+// attached to another machine — the shared-disk guard beyond that arrives
+// with the disks subsystem.
+func UnregisterVM(ctx context.Context, vboxManage, name string, deleteFiles bool) error {
+	args := []string{"unregistervm", name}
+	if deleteFiles {
+		args = append(args, "--delete")
+	}
+	return runSimple(ctx, vboxManage, args...)
+}
+
+// runSimple executes a short-lived VBoxManage command, folding stderr into
+// the returned error.
+func runSimple(ctx context.Context, vboxManage string, args ...string) error {
+	cmd := exec.CommandContext(ctx, vboxManage, args...)
+	cmd.SysProcAttr = procattr.NoConsole()
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		detail := strings.TrimSpace(string(out))
+		if detail != "" {
+			return fmt.Errorf("VBoxManage %s: %w: %s", args[0], err, detail)
+		}
+		return fmt.Errorf("VBoxManage %s: %w", args[0], err)
+	}
+	return nil
 }

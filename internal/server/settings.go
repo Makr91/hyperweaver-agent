@@ -159,6 +159,80 @@ var settingsSchema = map[string]any{
 			},
 		},
 	},
+	"data": map[string]any{
+		"description":      "Data storage locations",
+		"requires_restart": true,
+		"properties": map[string]any{
+			"dir": map[string]any{
+				"type":        "string",
+				"description": "Root directory for agent data — databases now; machine directories, provisioners, and the file cache later (empty = per-OS local app-data default)",
+				"default":     "",
+			},
+		},
+	},
+	"tasks": map[string]any{
+		"description":      "Task queue configuration",
+		"requires_restart": true,
+		"properties": map[string]any{
+			"poll_interval_seconds": map[string]any{
+				"type":        "integer",
+				"description": "Seconds between task-queue polls",
+				"default":     2,
+				"min":         1,
+				"max":         60,
+			},
+			"max_concurrent": map[string]any{
+				"type":        "integer",
+				"description": "Maximum number of tasks running at once",
+				"default":     5,
+				"min":         1,
+				"max":         64,
+			},
+			"default_pagination_limit": map[string]any{
+				"type":        "integer",
+				"description": "Default limit for GET /tasks when the request does not send one",
+				"default":     50,
+				"min":         1,
+				"max":         1000,
+			},
+			"retention_days": map[string]any{
+				"type":        "integer",
+				"description": "Completed/failed/cancelled tasks older than this many days are deleted by the periodic cleanup",
+				"default":     30,
+				"min":         1,
+				"max":         3650,
+			},
+			"output": map[string]any{
+				"type":        "object",
+				"description": "Task output capture: enabled, mode (full | circular), circular_max_lines, flush_interval_seconds, persist_log_file, log_directory",
+			},
+		},
+	},
+	"machines": map[string]any{
+		"description":      "Machine registry configuration",
+		"requires_restart": true,
+		"properties": map[string]any{
+			"auto_discovery": map[string]any{
+				"type":        "boolean",
+				"description": "Create a periodic background discover task that reconciles the registry against VirtualBox and vagrant (the startup discovery always runs)",
+				"default":     true,
+			},
+			"discovery_interval": map[string]any{
+				"type":        "integer",
+				"description": "Seconds between periodic discover tasks",
+				"default":     300,
+				"min":         10,
+				"max":         86400,
+			},
+			"server_id_start": map[string]any{
+				"type":        "integer",
+				"description": "Lowest auto-assigned server_id",
+				"default":     1,
+				"min":         1,
+				"max":         99999999,
+			},
+		},
+	},
 }
 
 func (s *Server) handleGetSettings(w http.ResponseWriter, _ *http.Request) {

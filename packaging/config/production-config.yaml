@@ -52,3 +52,43 @@ updates:
 api_docs:
   # Serve the interactive Agent API documentation (Swagger UI) at /api-docs.
   enabled: true
+
+data:
+  # Root directory for agent data: the SQLite databases (tasks.sqlite,
+  # agent.sqlite) today; machine directories, provisioners, and the file
+  # cache in later releases. The packaged service owns /var/lib.
+  dir: /var/lib/hyperweaver-agent
+
+tasks:
+  # Seconds between task-queue polls.
+  poll_interval_seconds: 2
+  # Maximum number of tasks running at once.
+  max_concurrent: 5
+  # Default limit for GET /tasks when the request does not send one.
+  default_pagination_limit: 50
+  # Completed/failed/cancelled tasks older than this many days are deleted
+  # by the periodic cleanup.
+  retention_days: 30
+  output:
+    # Capture task output (live streaming + persistence).
+    enabled: true
+    # full keeps every output line; circular caps the in-memory buffer at
+    # circular_max_lines, dropping the oldest.
+    mode: full
+    circular_max_lines: 10000
+    # Seconds between database flushes of a running task's output.
+    flush_interval_seconds: 10
+    # Also write a plain-text per-task log file when a task finishes.
+    persist_log_file: true
+    # Directory for those log files.
+    log_directory: /var/log/hyperweaver-agent/tasks
+
+machines:
+  # Create a periodic background discover task that reconciles the registry
+  # against VirtualBox and vagrant (imports machines built outside the agent,
+  # detects external shutdowns). The startup discovery always runs.
+  auto_discovery: true
+  # Seconds between periodic discover tasks.
+  discovery_interval: 300
+  # Lowest auto-assigned server_id.
+  server_id_start: 1

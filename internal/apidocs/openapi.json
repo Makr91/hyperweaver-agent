@@ -4,7 +4,7 @@
     "title": "Agent API",
     "version": "1.0.0",
     "x-app-version": "0.0.0",
-    "description": "Hyperweaver Agent API v1 — the shared host-agent contract (architecture D1), as implemented by hyperweaver-agent (VirtualBox/Vagrant, Go). Reference implementation: zoneweaver-agent (Bhyve/OmniOS, Node). Capabilities are advertised by the public GET /api/status (role, hypervisors, console, auth, features) and drive conditional UI rendering. This document describes only the endpoints this agent implements today and grows with it; the machines/tasks/console groups land with the provisioning engine. The implementing application version is `info.x-app-version`; `info.version` is the frozen contract line. Authorization is role-based (admin > operator > viewer) and enforced by a central method+path policy; each operation notes its minimum role.",
+    "description": "Hyperweaver Agent API v1 — the shared host-agent contract (architecture D1), as implemented by hyperweaver-agent (VirtualBox/Vagrant, Go). Reference implementation: zoneweaver-agent (Bhyve/OmniOS, Node). Capabilities are advertised by the public GET /api/status (role, hypervisors, console, auth, features) and drive conditional UI rendering. This document describes only the endpoints this agent implements today and grows with it; machine creation (POST /machines) and the console group land with the provisioning engine. The implementing application version is `info.x-app-version`; `info.version` is the frozen contract line. Authorization is role-based (admin > operator > viewer) and enforced by a central method+path policy; each operation notes its minimum role.",
     "license": {
       "name": "GPL-3.0",
       "url": "https://github.com/Makr91/hyperweaver-agent/blob/main/LICENSE.md"
@@ -23,6 +23,8 @@
     { "name": "API Keys", "description": "API-key lifecycle (Agent API v1 local auth tier)" },
     { "name": "Local Login", "description": "Local-presence sign-in: the tray Open handoff and the hwa:// protocol handler" },
     { "name": "System", "description": "Version, update checking, prerequisite detection" },
+    { "name": "Task Management", "description": "The task queue: every machine operation runs as a prioritized, dependency-chained task with streamed output" },
+    { "name": "Machine Management", "description": "VirtualBox machines — vagrant-backed or raw — discovered by reconciliation and operated through queued tasks" },
     { "name": "Settings", "description": "Agent configuration over the API (admin only)" }
   ],
   "components": {
@@ -74,7 +76,7 @@
           "auth": { "type": "array", "items": { "type": "string" }, "example": ["apikey"] },
           "bootstrapAvailable": { "type": "boolean", "example": true },
           "console": { "type": "array", "items": { "type": "string" }, "example": [] },
-          "features": { "type": "array", "items": { "type": "string" }, "example": [] },
+          "features": { "type": "array", "items": { "type": "string" }, "example": ["tasks", "machines", "machine-suspend"] },
           "uptime": { "type": "integer", "description": "Seconds since the agent started", "example": 86400 }
         }
       },
@@ -121,9 +123,89 @@
           "createdAt": { "type": "string", "format": "date-time" }
         }
       },
+      "Task": {
+        "type": "object",
+        "description": "One task-queue entry (Agent API v1 Task schema).",
+        "properties": {
+          "id": { "type": "string", "format": "uuid", "example": "123e4567-e89b-12d3-a456-426614174000" },
+          "machine_name": { "type": "string", "description": "Target machine name", "example": "domino-01" },
+          "operation": { "type": "string", "description": "Operation kind; the executable vocabulary grows with the machines/provisioning phases", "example": "start" },
+          "status": {
+            "type": "string",
+            "enum": ["pending", "running", "completed", "failed", "cancelled", "completed_with_errors"],
+            "description": "completed_with_errors is a parent-task terminal state: some children failed, some completed",
+            "example": "pending"
+          },
+          "priority": { "type": "integer", "description": "Higher runs first: 100 critical, 80 high, 60 medium, 50 service, 40 low, 20 background", "example": 60 },
+          "created_by": { "type": "string", "description": "API key name (or system source) that created the task", "example": "Hyperweaver-Production" },
+          "depends_on": { "type": "string", "format": "uuid", "nullable": true, "description": "Predecessor that must complete first; its failure or cancellation cancels this task" },
+          "parent_task_id": { "type": "string", "format": "uuid", "nullable": true, "description": "Progress-aggregation anchor this task reports into" },
+          "error_message": { "type": "string", "nullable": true },
+          "created_at": { "type": "string", "format": "date-time" },
+          "started_at": { "type": "string", "format": "date-time", "nullable": true },
+          "completed_at": { "type": "string", "format": "date-time", "nullable": true },
+          "updatedAt": { "type": "string", "format": "date-time", "description": "Last modification — the since query parameter compares against this" },
+          "metadata": { "type": "string", "nullable": true, "description": "JSON-encoded execution parameters" },
+          "progress_percent": { "type": "number", "example": 42.5 },
+          "progress_info": { "type": "object", "nullable": true, "description": "Freeform progress detail; parent tasks carry {completed_tasks, failed_tasks, total_tasks, status}" },
+          "output": { "type": "string", "nullable": true, "description": "JSON-encoded array of output entries as last flushed; GET /tasks/{taskId}/output serves the parsed, live view" }
+        }
+      },
+      "Machine": {
+        "type": "object",
+        "description": "One machine registry row (Agent API v1 Machine schema; backing/home are this agent's dual-path fields). Machine names are free user-chosen identifiers (design D-G).",
+        "properties": {
+          "id": { "type": "integer", "example": 1 },
+          "name": { "type": "string", "example": "domino-01" },
+          "host": { "type": "string", "description": "Hostname of the machine's host", "example": "desktop-01" },
+          "status": {
+            "type": "string",
+            "enum": ["configured", "running", "stopped", "suspended", "paused", "aborted", "starting", "stopping", "unknown"],
+            "description": "VirtualBox is authoritative; configured means a registry row with no VM behind it yet",
+            "example": "running"
+          },
+          "backing": {
+            "type": "string",
+            "enum": ["vagrant", "vbox"],
+            "description": "Provenance metadata: vagrant means a vagrant project (home) owns this VM — used by provisioning operations. Lifecycle always drives VBoxManage directly."
+          },
+          "home": { "type": "string", "nullable": true, "description": "Vagrant project directory (vagrant-owned machines)" },
+          "uuid": { "type": "string", "nullable": true, "description": "VirtualBox machine UUID" },
+          "server_id": { "type": "string", "nullable": true, "description": "Numeric server identifier (assigned at creation; see /machines/ids)" },
+          "is_orphaned": { "type": "boolean", "description": "In the registry but no longer present in VirtualBox" },
+          "auto_discovered": { "type": "boolean", "description": "Imported by the reconciliation sweep rather than created through the agent" },
+          "last_seen": { "type": "string", "format": "date-time", "nullable": true },
+          "notes": { "type": "string", "nullable": true },
+          "tags": { "type": "array", "nullable": true, "items": { "type": "string" } },
+          "configuration": { "type": "object", "nullable": true, "description": "Live machine configuration (VBoxManage showvminfo --machinereadable key/value map on this agent)" },
+          "created_at": { "type": "string", "format": "date-time" },
+          "updatedAt": { "type": "string", "format": "date-time" }
+        }
+      },
+      "QueuedOperation": {
+        "type": "object",
+        "description": "A queued lifecycle operation",
+        "properties": {
+          "success": { "type": "boolean", "example": true },
+          "task_id": { "type": "string", "format": "uuid" },
+          "machine_name": { "type": "string", "example": "domino-01" },
+          "operation": { "type": "string", "example": "start" },
+          "status": { "type": "string", "example": "pending" },
+          "message": { "type": "string", "example": "Start task queued successfully" }
+        }
+      },
+      "TaskOutputEntry": {
+        "type": "object",
+        "description": "One chunk of task output",
+        "properties": {
+          "stream": { "type": "string", "enum": ["stdout", "stderr", "system"], "example": "stdout" },
+          "data": { "type": "string", "example": "Bringing machine 'default' up with 'virtualbox' provider...\n" },
+          "timestamp": { "type": "integer", "format": "int64", "description": "Unix milliseconds", "example": 1751712000000 }
+        }
+      },
       "ServerStats": {
         "type": "object",
-        "description": "Host statistics in Node's os-module vocabulary (the shared v1 stats shape). The zones field names are the contract's; on this agent they carry VirtualBox machine names.",
+        "description": "Host statistics in Node's os-module vocabulary (the shared v1 stats shape) plus the machine name lists.",
         "properties": {
           "hostname": { "type": "string", "example": "desktop-01" },
           "eol": { "type": "string", "example": "\r\n" },
@@ -137,8 +219,8 @@
           "type": { "type": "string", "description": "Node os.type() vocabulary", "example": "Windows_NT" },
           "uptime": { "type": "integer", "description": "Host uptime in seconds (not process uptime)", "example": 86400 },
           "version": { "type": "string", "description": "OS marketing name", "example": "Windows 10 Pro" },
-          "allzones": { "type": "array", "items": { "type": "string" }, "description": "All registered machine names (VBoxManage list vms)", "example": ["domino-01", "domino-02"] },
-          "runningzones": { "type": "array", "items": { "type": "string" }, "description": "Running machine names (VBoxManage list runningvms)", "example": ["domino-01"] }
+          "allmachines": { "type": "array", "items": { "type": "string" }, "description": "All registered machine names (VBoxManage list vms)", "example": ["domino-01", "domino-02"] },
+          "runningmachines": { "type": "array", "items": { "type": "string" }, "description": "Running machine names (VBoxManage list runningvms)", "example": ["domino-01"] }
         }
       }
     }
@@ -612,6 +694,616 @@
                   "type": "object",
                   "additionalProperties": { "type": "boolean" },
                   "example": { "vagrant": true, "virtualbox": true, "git": true }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/tasks": {
+      "get": {
+        "tags": ["Task Management"],
+        "summary": "List tasks",
+        "description": "Minimum role: viewer. Filterable and sortable; the total count is computed only when include_count=true.",
+        "parameters": [
+          { "name": "status", "in": "query", "schema": { "type": "string", "enum": ["pending", "running", "completed", "failed", "cancelled", "completed_with_errors"] } },
+          { "name": "machine_name", "in": "query", "schema": { "type": "string" }, "description": "Filter by machine name" },
+          { "name": "operation", "in": "query", "schema": { "type": "string" } },
+          { "name": "operation_ne", "in": "query", "schema": { "type": "string" }, "description": "Exclude one operation kind" },
+          { "name": "min_priority", "in": "query", "schema": { "type": "integer" } },
+          { "name": "parent_task_id", "in": "query", "schema": { "type": "string", "format": "uuid" } },
+          { "name": "since", "in": "query", "schema": { "type": "string", "format": "date-time" }, "description": "Only tasks modified (updatedAt) at or after this time — incremental refresh" },
+          { "name": "limit", "in": "query", "schema": { "type": "integer", "default": 50 } },
+          { "name": "sort", "in": "query", "schema": { "type": "string", "enum": ["created_at", "priority", "status", "machine_name", "operation", "started_at", "completed_at"], "default": "created_at" } },
+          { "name": "order", "in": "query", "schema": { "type": "string", "enum": ["ASC", "DESC"], "default": "DESC" } },
+          { "name": "include_count", "in": "query", "schema": { "type": "string", "enum": ["true"] }, "description": "Also return the total matching count" }
+        ],
+        "responses": {
+          "200": {
+            "description": "Tasks retrieved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "tasks": { "type": "array", "items": { "$ref": "#/components/schemas/Task" } },
+                    "running_count": { "type": "integer", "example": 1 },
+                    "total": { "type": "integer", "description": "Present only when include_count=true" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/tasks/stats": {
+      "get": {
+        "tags": ["Task Management"],
+        "summary": "Task queue statistics",
+        "description": "Minimum role: viewer.",
+        "responses": {
+          "200": {
+            "description": "Queue statistics",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "pending_tasks": { "type": "integer" },
+                    "running_tasks": { "type": "integer" },
+                    "completed_tasks": { "type": "integer" },
+                    "failed_tasks": { "type": "integer" },
+                    "cancelled_tasks": { "type": "integer" },
+                    "max_concurrent_tasks": { "type": "integer", "example": 5 },
+                    "task_processor_running": { "type": "boolean", "example": true }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/tasks/{taskId}": {
+      "get": {
+        "tags": ["Task Management"],
+        "summary": "Task details",
+        "description": "Minimum role: viewer.",
+        "parameters": [
+          { "name": "taskId", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "The task",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Task" } } }
+          },
+          "404": {
+            "description": "Task not found",
+            "content": { "application/json": { "schema": { "type": "object", "properties": { "error": { "type": "string", "example": "Task not found" } } } } }
+          }
+        }
+      },
+      "delete": {
+        "tags": ["Task Management"],
+        "summary": "Cancel a task",
+        "description": "Minimum role: operator. Pending tasks are cancelled immediately. Running tasks are cancellable too (this agent's D-F extension over the Node reference): the executor's child processes are killed, its per-operation cleanup runs, and the task lands in cancelled with its output preserved. Tasks pending on a cancelled task are cancelled by dependency propagation.",
+        "parameters": [
+          { "name": "taskId", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "Cancelled (pending) or cancellation in progress (running)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": { "type": "boolean", "example": true },
+                    "task_id": { "type": "string" },
+                    "message": { "type": "string", "example": "Task cancelled successfully" }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Task already in a terminal state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": { "type": "string", "example": "Can only cancel pending or running tasks" },
+                    "current_status": { "type": "string", "example": "completed" }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Task not found",
+            "content": { "application/json": { "schema": { "type": "object", "properties": { "error": { "type": "string", "example": "Task not found" } } } } }
+          }
+        }
+      }
+    },
+    "/tasks/{taskId}/output": {
+      "get": {
+        "tags": ["Task Management"],
+        "summary": "Task output",
+        "description": "Minimum role: viewer. The live in-memory buffer while the task runs; the persisted output afterwards.",
+        "parameters": [
+          { "name": "taskId", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "Output entries",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "task_id": { "type": "string" },
+                    "status": { "type": "string" },
+                    "output": { "type": "array", "items": { "$ref": "#/components/schemas/TaskOutputEntry" } }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Task not found",
+            "content": { "application/json": { "schema": { "type": "object", "properties": { "error": { "type": "string", "example": "Task not found" } } } } }
+          }
+        }
+      }
+    },
+    "/tasks/completed": {
+      "delete": {
+        "tags": ["Task Management"],
+        "summary": "Clear finished tasks",
+        "description": "Minimum role: operator. Hard-deletes every completed, completed_with_errors, failed, and cancelled task immediately. Pending and running tasks are untouched.",
+        "responses": {
+          "200": {
+            "description": "Finished tasks deleted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": { "type": "boolean", "example": true },
+                    "message": { "type": "string", "example": "Deleted 12 completed/failed/cancelled tasks" },
+                    "deleted_count": { "type": "integer", "example": 12 }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/machines": {
+      "get": {
+        "tags": ["Machine Management"],
+        "summary": "List machines",
+        "description": "Minimum role: viewer. Machines built outside the agent appear here once the reconciliation sweep imports them.",
+        "parameters": [
+          { "name": "status", "in": "query", "schema": { "type": "string", "enum": ["configured", "running", "stopped", "suspended", "paused", "aborted", "starting", "stopping", "unknown"] } },
+          { "name": "orphaned", "in": "query", "schema": { "type": "boolean" } },
+          { "name": "tag", "in": "query", "schema": { "type": "string" }, "description": "Only machines carrying this tag" }
+        ],
+        "responses": {
+          "200": {
+            "description": "Machines retrieved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "machines": { "type": "array", "items": { "$ref": "#/components/schemas/Machine" } },
+                    "total": { "type": "integer" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/machines/ids": {
+      "get": {
+        "tags": ["Machine Management"],
+        "summary": "Server ID usage",
+        "description": "Minimum role: viewer. Used server_ids, constraints, and the next available id (auto-assigned MAX+1, design D-G).",
+        "responses": {
+          "200": {
+            "description": "Server ID information",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "used": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "server_id": { "type": "string", "example": "0001" },
+                          "machine_name": { "type": "string", "example": "domino-01" },
+                          "status": { "type": "string", "example": "running" }
+                        }
+                      }
+                    },
+                    "constraints": { "type": "object" },
+                    "next_available": { "type": "string", "example": "0002" },
+                    "total_used": { "type": "integer" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/machines/ids/next": {
+      "get": {
+        "tags": ["Machine Management"],
+        "summary": "Next available server ID",
+        "description": "Minimum role: viewer.",
+        "responses": {
+          "200": {
+            "description": "Next server ID",
+            "content": {
+              "application/json": {
+                "schema": { "type": "object", "properties": { "server_id": { "type": "string", "example": "0002" } } }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/machines/{machineName}": {
+      "get": {
+        "tags": ["Machine Management"],
+        "summary": "Machine details",
+        "description": "Minimum role: viewer. Live-checks VirtualBox (updating the registry on drift) and returns the record, its live configuration, and pending tasks.",
+        "parameters": [
+          { "name": "machineName", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "Machine details",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "machine_info": { "$ref": "#/components/schemas/Machine" },
+                    "configuration": { "type": "object" },
+                    "active_vnc_session": { "nullable": true },
+                    "pending_tasks": { "type": "array", "items": { "$ref": "#/components/schemas/Task" } },
+                    "system_status": { "type": "string", "description": "Live VirtualBox state, or not_found", "example": "running" }
+                  }
+                }
+              }
+            }
+          },
+          "404": { "description": "Machine not found" }
+        }
+      },
+      "delete": {
+        "tags": ["Machine Management"],
+        "summary": "Delete a machine",
+        "description": "Minimum role: operator. Running machines need force=true, which chains a CRITICAL stop before the CRITICAL delete. The machine is powered off if still running, unregistered from VirtualBox with media deletion, its registry row removed, and its leftover pending tasks cancelled.",
+        "parameters": [
+          { "name": "machineName", "in": "path", "required": true, "schema": { "type": "string" } },
+          { "name": "force", "in": "query", "schema": { "type": "boolean", "default": false } }
+        ],
+        "responses": {
+          "200": {
+            "description": "Delete tasks queued",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": { "type": "boolean" },
+                    "delete_tasks": { "type": "array", "items": { "type": "string" } },
+                    "machine_name": { "type": "string" },
+                    "operation": { "type": "string", "example": "delete" },
+                    "status": { "type": "string", "example": "pending" },
+                    "message": { "type": "string" },
+                    "force": { "type": "boolean" }
+                  }
+                }
+              }
+            }
+          },
+          "400": { "description": "Machine is running and force is not set" },
+          "404": { "description": "Machine not found" }
+        }
+      }
+    },
+    "/machines/{machineName}/config": {
+      "get": {
+        "tags": ["Machine Management"],
+        "summary": "Machine configuration",
+        "description": "Minimum role: viewer. The live configuration document (VBoxManage showvminfo --machinereadable view on this agent), falling back to the last reconciled copy.",
+        "parameters": [
+          { "name": "machineName", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "Machine configuration",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "machine_name": { "type": "string" },
+                    "configuration": { "type": "object" }
+                  }
+                }
+              }
+            }
+          },
+          "404": { "description": "Machine not found" }
+        }
+      }
+    },
+    "/machines/{machineName}/start": {
+      "post": {
+        "tags": ["Machine Management"],
+        "summary": "Start a machine",
+        "description": "Minimum role: operator. Queues a start task: VBoxManage startvm --type headless — immediate power-on, no provisioning machinery. Idempotent: already-running machines answer already_running; an existing pending/running start task is reused.",
+        "parameters": [
+          { "name": "machineName", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "Start task queued (or machine already running)",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/QueuedOperation" } } }
+          },
+          "404": { "description": "Machine not found" }
+        }
+      }
+    },
+    "/machines/{machineName}/stop": {
+      "post": {
+        "tags": ["Machine Management"],
+        "summary": "Stop a machine",
+        "description": "Minimum role: operator. Queues a stop task and cancels pending starts: ACPI power button (graceful), falling back to hard poweroff when the guest ignores it — or straight poweroff with force=true.",
+        "parameters": [
+          { "name": "machineName", "in": "path", "required": true, "schema": { "type": "string" } },
+          { "name": "force", "in": "query", "schema": { "type": "boolean", "default": false } }
+        ],
+        "responses": {
+          "200": {
+            "description": "Stop task queued (or machine already stopped)",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/QueuedOperation" } } }
+          },
+          "404": { "description": "Machine not found" }
+        }
+      }
+    },
+    "/machines/{machineName}/restart": {
+      "post": {
+        "tags": ["Machine Management"],
+        "summary": "Restart a machine",
+        "description": "Minimum role: operator. Queues a HIGH-priority stop and a MEDIUM-priority start chained on it.",
+        "parameters": [
+          { "name": "machineName", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "Restart tasks queued",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": { "type": "boolean" },
+                    "restart_tasks": {
+                      "type": "object",
+                      "properties": {
+                        "stop_task_id": { "type": "string" },
+                        "start_task_id": { "type": "string" }
+                      }
+                    },
+                    "machine_name": { "type": "string" },
+                    "operation": { "type": "string", "example": "restart" },
+                    "status": { "type": "string", "example": "pending" },
+                    "message": { "type": "string" }
+                  }
+                }
+              }
+            }
+          },
+          "404": { "description": "Machine not found" }
+        }
+      }
+    },
+    "/machines/{machineName}/suspend": {
+      "post": {
+        "tags": ["Machine Management"],
+        "summary": "Suspend a machine",
+        "description": "Minimum role: operator. Saves the machine's state (VBoxManage controlvm savestate). Advertised by the machine-suspend capability token — the UI shows Suspend only on agents that carry it.",
+        "parameters": [
+          { "name": "machineName", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "Suspend task queued",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/QueuedOperation" } } }
+          },
+          "400": { "description": "Machine is not running" },
+          "404": { "description": "Machine not found" }
+        }
+      }
+    },
+    "/machines/{machineName}/notes": {
+      "get": {
+        "tags": ["Machine Management"],
+        "summary": "Machine notes",
+        "description": "Minimum role: viewer.",
+        "parameters": [
+          { "name": "machineName", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "Notes",
+            "content": {
+              "application/json": {
+                "schema": { "type": "object", "properties": { "machine_name": { "type": "string" }, "notes": { "type": "string", "nullable": true } } }
+              }
+            }
+          },
+          "404": { "description": "Machine not found" }
+        }
+      },
+      "put": {
+        "tags": ["Machine Management"],
+        "summary": "Update machine notes",
+        "description": "Minimum role: operator. Registry-only, no task.",
+        "parameters": [
+          { "name": "machineName", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["notes"],
+                "properties": { "notes": { "type": "string", "nullable": true } }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "Notes updated" },
+          "404": { "description": "Machine not found" }
+        }
+      }
+    },
+    "/machines/{machineName}/tags": {
+      "get": {
+        "tags": ["Machine Management"],
+        "summary": "Machine tags",
+        "description": "Minimum role: viewer.",
+        "parameters": [
+          { "name": "machineName", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "Tags",
+            "content": {
+              "application/json": {
+                "schema": { "type": "object", "properties": { "machine_name": { "type": "string" }, "tags": { "type": "array", "items": { "type": "string" } } } }
+              }
+            }
+          },
+          "404": { "description": "Machine not found" }
+        }
+      },
+      "put": {
+        "tags": ["Machine Management"],
+        "summary": "Update machine tags",
+        "description": "Minimum role: operator. Registry-only, no task.",
+        "parameters": [
+          { "name": "machineName", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["tags"],
+                "properties": { "tags": { "type": "array", "nullable": true, "items": { "type": "string" } } }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "Tags updated" },
+          "404": { "description": "Machine not found" }
+        }
+      }
+    },
+    "/machines/bulk/start": {
+      "post": {
+        "tags": ["Machine Management"],
+        "summary": "Bulk start machines",
+        "description": "Minimum role: operator. machines is \"all\" (every stopped, non-orphaned machine) or a name array; already-running machines are skipped with a reason.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["machines"],
+                "properties": { "machines": { "description": "\"all\" or an array of machine names" } }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Bulk start queued",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": { "type": "boolean" },
+                    "operation": { "type": "string", "example": "bulk_start" },
+                    "tasks_created": { "type": "integer" },
+                    "skipped": { "type": "array", "items": { "type": "object", "properties": { "machine": { "type": "string" }, "reason": { "type": "string" } } } },
+                    "task_ids": { "type": "array", "items": { "type": "string" } },
+                    "message": { "type": "string" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/machines/bulk/stop": {
+      "post": {
+        "tags": ["Machine Management"],
+        "summary": "Bulk stop machines",
+        "description": "Minimum role: operator. machines is \"all\" (every running, non-orphaned machine) or a name array; already-stopped machines are skipped with a reason. Pending starts for targeted machines are cancelled.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["machines"],
+                "properties": { "machines": { "description": "\"all\" or an array of machine names" } }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Bulk stop queued",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": { "type": "boolean" },
+                    "operation": { "type": "string", "example": "bulk_stop" },
+                    "tasks_created": { "type": "integer" },
+                    "skipped": { "type": "array", "items": { "type": "object", "properties": { "machine": { "type": "string" }, "reason": { "type": "string" } } } },
+                    "task_ids": { "type": "array", "items": { "type": "string" } },
+                    "message": { "type": "string" }
+                  }
                 }
               }
             }

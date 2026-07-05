@@ -103,6 +103,70 @@ Interactive API documentation.
 Boolean serving the Agent API documentation (Swagger UI) at /api-docs
 (default: true)
 .El
+.Ss data
+Data storage locations.
+.Bl -tag -width "dir"
+.It Cm dir
+Root directory for agent data: the SQLite databases
+.Pa ( tasks.sqlite ,
+.Pa agent.sqlite )
+today; machine directories, provisioners, and the file cache in later
+releases. Empty selects the per-OS local app-data default
+.Pa ( %LOCALAPPDATA%\ehyperweaver-agent
+on Windows,
+.Pa ~/Library/Application Support/hyperweaver-agent
+on macOS,
+.Pa ~/.local/share/hyperweaver-agent
+on Linux); the packaged service sets
+.Pa /var/lib/hyperweaver-agent .
+.El
+.Ss tasks
+Task queue configuration.
+.Bl -tag -width "poll_interval_seconds"
+.It Cm poll_interval_seconds
+Seconds between task-queue polls, 1-60 (default: 2)
+.It Cm max_concurrent
+Maximum number of tasks running at once, 1-64 (default: 5)
+.It Cm default_pagination_limit
+Default limit for GET /tasks when the request does not send one, 1-1000
+(default: 50)
+.It Cm retention_days
+Completed, failed, and cancelled tasks older than this many days are deleted
+by the periodic cleanup, 1-3650 (default: 30)
+.It Cm output.enabled
+Boolean enabling task output capture — live streaming and persistence
+(default: true)
+.It Cm output.mode
+"full" keeps every output line; "circular" caps the in-memory buffer at
+.Cm circular_max_lines ,
+dropping the oldest (default: "full")
+.It Cm output.circular_max_lines
+Buffer cap for circular mode, minimum 100 (default: 10000)
+.It Cm output.flush_interval_seconds
+Seconds between database flushes of a running task's output, 1-300
+(default: 10)
+.It Cm output.persist_log_file
+Boolean also writing a plain-text per-task log file when a task finishes
+(default: true)
+.It Cm output.log_directory
+Directory for those log files. Empty uses
+.Pa <config dir>/logs/tasks ;
+the packaged service sets
+.Pa /var/log/hyperweaver-agent/tasks .
+.El
+.Ss machines
+Machine registry configuration.
+.Bl -tag -width "discovery_interval"
+.It Cm auto_discovery
+Boolean creating a periodic background discover task that reconciles the
+registry against VirtualBox and vagrant — importing machines built outside
+the agent, refreshing every machine's live state, and detecting external
+shutdowns (default: true). The startup discovery task always runs.
+.It Cm discovery_interval
+Seconds between periodic discover tasks, 10-86400 (default: 300)
+.It Cm server_id_start
+Lowest auto-assigned server_id, 1-99999999 (default: 1)
+.El
 .Sh FILES
 .Bl -tag -width ".Pa /var/log/hyperweaver-agent/"
 .It Pa /etc/hyperweaver-agent/config.yaml
@@ -111,6 +175,8 @@ Service-mode configuration
 Per-user configuration
 .It Pa /var/log/hyperweaver-agent/
 Service log directory
+.It Pa /var/lib/hyperweaver-agent/
+Service data directory (SQLite databases)
 .El
 .Pp
 Beside the configuration file the agent also keeps
@@ -121,7 +187,13 @@ Beside the configuration file the agent also keeps
 .Pa protocol.secret
 (per-boot hwa:// handoff secret, 0600), and
 .Pa backups/
-(configuration backups).
+(configuration backups). Under the data directory
+.Pq Cm data.dir
+it keeps
+.Pa tasks.sqlite
+(the task queue and its output) and
+.Pa agent.sqlite
+(core state), both 0600.
 .Sh EXAMPLES
 The packaged default:
 .Bd -literal -offset indent

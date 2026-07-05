@@ -7,6 +7,7 @@ package keys
 
 import (
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -59,6 +60,16 @@ type Store struct {
 	// lastUsed writes are throttled: bumps always land in memory, but only
 	// persist when another mutation happens or the interval elapses.
 	lastUsedFlush time.Time
+
+	// verified caches SHA-256 digests of key material that has already
+	// passed a bcrypt comparison this process lifetime, mapped to the entity
+	// id. Without it every request pays a full bcrypt scan over all active
+	// keys (~250ms per key at cost 12) — with a UI polling several endpoints
+	// and one tray-minted key per desktop Open, that compounds into
+	// multi-second request latency. Digests exist only in process memory;
+	// bcrypt hashes remain the sole persistent form. Entries are dropped on
+	// revoke/delete.
+	verified map[[sha256.Size]byte]int64
 }
 
 type storeFile struct {
@@ -74,7 +85,11 @@ func Open(path string) (*Store, error) {
 	if err != nil {
 		return nil, err
 	}
-	s := &Store{path: clean, data: storeFile{NextID: 1}}
+	s := &Store{
+		path:     clean,
+		data:     storeFile{NextID: 1},
+		verified: map[[sha256.Size]byte]int64{},
+	}
 
 	raw, err := os.ReadFile(filepath.Clean(clean))
 	if errors.Is(err, os.ErrNotExist) {
@@ -164,30 +179,66 @@ func (s *Store) Create(apiKey, name, description, role string, hashRounds int) (
 	return k.clone(), nil
 }
 
-// Verify bcrypt-compares apiKey against every active key, mirroring the Node
-// agent. Returns the matching key or nil. lastUsed is bumped in memory on
-// every hit and flushed to disk at most once per interval.
+// Verify authenticates apiKey: a constant-time cache lookup for key material
+// that has already proven itself this process lifetime, else a bcrypt
+// comparison against every active key (Node-agent semantics). The bcrypt
+// scan runs OUTSIDE the store mutex — at cost 12 each comparison takes
+// ~250ms, and holding the lock through a scan would serialize every request
+// in the process (including the public /status probe, which counts keys)
+// behind it. Returns the matching key or nil. lastUsed is bumped in memory
+// on every hit and flushed to disk at most once per interval.
 func (s *Store) Verify(apiKey string) (*Key, error) {
 	candidate := truncateForBcrypt(apiKey)
+	digest := sha256.Sum256(candidate)
 
 	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	for _, k := range s.data.Keys {
-		if !k.IsActive {
-			continue
+	if id, hit := s.verified[digest]; hit {
+		k := s.find(id)
+		if k != nil && k.IsActive {
+			match, err := s.recordUse(k)
+			s.mu.Unlock()
+			return match, err
 		}
-		if bcrypt.CompareHashAndPassword([]byte(k.APIKeyHash), candidate) == nil {
-			k.LastUsed = time.Now()
-			if time.Since(s.lastUsedFlush) > lastUsedFlushInterval {
-				if err := s.persist(); err != nil {
-					return nil, err
-				}
-			}
-			return k.clone(), nil
+		delete(s.verified, digest)
+	}
+	// Snapshot the active keys so the bcrypt scan runs unlocked.
+	active := make([]*Key, 0, len(s.data.Keys))
+	for _, k := range s.data.Keys {
+		if k.IsActive {
+			active = append(active, k.clone())
 		}
 	}
+	s.mu.Unlock()
+
+	for _, k := range active {
+		if bcrypt.CompareHashAndPassword([]byte(k.APIKeyHash), candidate) != nil {
+			continue
+		}
+		s.mu.Lock()
+		live := s.find(k.ID)
+		if live == nil || !live.IsActive {
+			// Deleted or revoked while the scan ran — the answer is no.
+			s.mu.Unlock()
+			return nil, nil
+		}
+		s.verified[digest] = live.ID
+		match, err := s.recordUse(live)
+		s.mu.Unlock()
+		return match, err
+	}
 	return nil, nil
+}
+
+// recordUse bumps a key's lastUsed (throttled persistence) and returns its
+// clone. Callers must hold s.mu.
+func (s *Store) recordUse(k *Key) (*Key, error) {
+	k.LastUsed = time.Now()
+	if time.Since(s.lastUsedFlush) > lastUsedFlushInterval {
+		if err := s.persist(); err != nil {
+			return nil, err
+		}
+	}
+	return k.clone(), nil
 }
 
 // List returns all keys, newest first.
@@ -242,6 +293,7 @@ func (s *Store) Delete(id int64) (*Key, error) {
 		}
 	}
 	s.data.Keys = kept
+	s.dropVerified(id)
 
 	if err := s.persist(); err != nil {
 		return nil, err
@@ -263,11 +315,22 @@ func (s *Store) Revoke(id int64) (*Key, error) {
 	}
 
 	k.IsActive = false
+	s.dropVerified(id)
 	if err := s.persist(); err != nil {
 		k.IsActive = true
 		return nil, err
 	}
 	return k.clone(), nil
+}
+
+// dropVerified removes any cached verification for a key id (revocation and
+// deletion must take effect immediately). Callers must hold s.mu.
+func (s *Store) dropVerified(id int64) {
+	for digest, cachedID := range s.verified {
+		if cachedID == id {
+			delete(s.verified, digest)
+		}
+	}
 }
 
 // find returns the live (unclones) key with id. Callers must hold s.mu.

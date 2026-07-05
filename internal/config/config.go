@@ -7,6 +7,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 
 	"github.com/goccy/go-yaml"
@@ -67,15 +68,73 @@ type APIDocsConfig struct {
 	Enabled bool `yaml:"enabled" json:"enabled"`
 }
 
+// DataConfig locates the agent's data root — SQLite databases today; machine
+// working directories, provisioners, and the file cache in later phases.
+// Distinct from the config directory: on Windows the config lives in the
+// Roaming profile, and VM-scale data must not sync with it.
+type DataConfig struct {
+	// Dir is the data root. Empty selects the per-OS local-appdata default
+	// (see DataDir).
+	Dir string `yaml:"dir" json:"dir"`
+}
+
+// TaskOutputConfig controls task output buffering and persistence (the Node
+// agent's provisioning.task_output block).
+type TaskOutputConfig struct {
+	Enabled              bool   `yaml:"enabled"                json:"enabled"`
+	Mode                 string `yaml:"mode"                   json:"mode"`
+	CircularMaxLines     int    `yaml:"circular_max_lines"     json:"circular_max_lines"`
+	FlushIntervalSeconds int    `yaml:"flush_interval_seconds" json:"flush_interval_seconds"`
+	PersistLogFile       bool   `yaml:"persist_log_file"       json:"persist_log_file"`
+	// LogDirectory receives per-task log files; empty means
+	// <config dir>/logs/tasks.
+	LogDirectory string `yaml:"log_directory" json:"log_directory"`
+}
+
+// TasksConfig controls the task queue (the Node agent's zones.* task knobs +
+// provisioning.task_output, regrouped under one section).
+type TasksConfig struct {
+	// PollIntervalSeconds is the queue tick (the Node agent hardcodes 2).
+	PollIntervalSeconds int `yaml:"poll_interval_seconds" json:"poll_interval_seconds"`
+	// MaxConcurrent caps simultaneously running tasks (Node:
+	// zones.max_concurrent_tasks).
+	MaxConcurrent int `yaml:"max_concurrent" json:"max_concurrent"`
+	// DefaultPaginationLimit is GET /tasks' default limit (Node:
+	// zones.default_pagination_limit).
+	DefaultPaginationLimit int `yaml:"default_pagination_limit" json:"default_pagination_limit"`
+	// RetentionDays: finished tasks older than this are deleted by the
+	// periodic cleanup (Node: host_monitoring.retention.tasks).
+	RetentionDays int              `yaml:"retention_days" json:"retention_days"`
+	Output        TaskOutputConfig `yaml:"output"         json:"output"`
+}
+
+// MachinesConfig controls the machine registry (the Node agent's zones.*
+// discovery knobs).
+type MachinesConfig struct {
+	// AutoDiscovery enables the periodic discover tasks (Node:
+	// zones.auto_discovery). The startup discovery task always runs.
+	AutoDiscovery bool `yaml:"auto_discovery" json:"auto_discovery"`
+	// DiscoveryInterval is seconds between periodic discover tasks (Node:
+	// zones.discovery_interval). Discovery reconciles the registry against
+	// VirtualBox and vagrant — external-shutdown detection included.
+	DiscoveryInterval int `yaml:"discovery_interval" json:"discovery_interval"`
+	// ServerIDStart is the lowest auto-assigned server_id (Node:
+	// zones.server_id_start).
+	ServerIDStart int `yaml:"server_id_start" json:"server_id_start"`
+}
+
 // Config is the root of config.yaml.
 type Config struct {
-	Server  ServerConfig  `yaml:"server"   json:"server"`
-	UI      UIConfig      `yaml:"ui"       json:"ui"`
-	Browser BrowserConfig `yaml:"browser"  json:"browser"`
-	Logging LoggingConfig `yaml:"logging"  json:"logging"`
-	APIKeys APIKeysConfig `yaml:"api_keys" json:"api_keys"`
-	Updates UpdatesConfig `yaml:"updates"  json:"updates"`
-	APIDocs APIDocsConfig `yaml:"api_docs" json:"api_docs"`
+	Server   ServerConfig   `yaml:"server"   json:"server"`
+	UI       UIConfig       `yaml:"ui"       json:"ui"`
+	Browser  BrowserConfig  `yaml:"browser"  json:"browser"`
+	Logging  LoggingConfig  `yaml:"logging"  json:"logging"`
+	APIKeys  APIKeysConfig  `yaml:"api_keys" json:"api_keys"`
+	Updates  UpdatesConfig  `yaml:"updates"  json:"updates"`
+	APIDocs  APIDocsConfig  `yaml:"api_docs" json:"api_docs"`
+	Data     DataConfig     `yaml:"data"     json:"data"`
+	Tasks    TasksConfig    `yaml:"tasks"    json:"tasks"`
+	Machines MachinesConfig `yaml:"machines" json:"machines"`
 
 	// path is where this configuration was loaded from; the setup token, key
 	// store, protocol-handoff secret, and config backups live beside it.
@@ -137,6 +196,49 @@ updates:
 api_docs:
   # Serve the interactive Agent API documentation (Swagger UI) at /api-docs.
   enabled: true
+
+data:
+  # Root directory for agent data: the SQLite databases (tasks.sqlite,
+  # agent.sqlite) today; machine directories, provisioners, and the file
+  # cache in later releases. Empty = the per-OS local app-data default
+  # (%LOCALAPPDATA%\hyperweaver-agent on Windows,
+  # ~/Library/Application Support/hyperweaver-agent on macOS,
+  # ~/.local/share/hyperweaver-agent on Linux).
+  dir: ''
+
+tasks:
+  # Seconds between task-queue polls.
+  poll_interval_seconds: 2
+  # Maximum number of tasks running at once.
+  max_concurrent: 5
+  # Default limit for GET /tasks when the request does not send one.
+  default_pagination_limit: 50
+  # Completed/failed/cancelled tasks older than this many days are deleted
+  # by the periodic cleanup.
+  retention_days: 30
+  output:
+    # Capture task output (live streaming + persistence).
+    enabled: true
+    # full keeps every output line; circular caps the in-memory buffer at
+    # circular_max_lines, dropping the oldest.
+    mode: full
+    circular_max_lines: 10000
+    # Seconds between database flushes of a running task's output.
+    flush_interval_seconds: 10
+    # Also write a plain-text per-task log file when a task finishes.
+    persist_log_file: true
+    # Directory for those log files. Empty = <config dir>/logs/tasks
+    log_directory: ''
+
+machines:
+  # Create a periodic background discover task that reconciles the registry
+  # against VirtualBox and vagrant (imports machines built outside the agent,
+  # detects external shutdowns). The startup discovery always runs.
+  auto_discovery: true
+  # Seconds between periodic discover tasks.
+  discovery_interval: 300
+  # Lowest auto-assigned server_id.
+  server_id_start: 1
 `
 
 // Default returns the built-in configuration values.
@@ -157,6 +259,25 @@ func Default() *Config {
 			VersionInfoURL: "https://github.com/Makr91/hyperweaver-agent/releases/latest/download/update-info.json",
 		},
 		APIDocs: APIDocsConfig{Enabled: true},
+		Data:    DataConfig{},
+		Tasks: TasksConfig{
+			PollIntervalSeconds:    2,
+			MaxConcurrent:          5,
+			DefaultPaginationLimit: 50,
+			RetentionDays:          30,
+			Output: TaskOutputConfig{
+				Enabled:              true,
+				Mode:                 "full",
+				CircularMaxLines:     10000,
+				FlushIntervalSeconds: 10,
+				PersistLogFile:       true,
+			},
+		},
+		Machines: MachinesConfig{
+			AutoDiscovery:     true,
+			DiscoveryInterval: 300,
+			ServerIDStart:     1,
+		},
 	}
 }
 
@@ -255,6 +376,35 @@ func (c *Config) validate() error {
 	if c.APIKeys.KeyLength < 16 || c.APIKeys.KeyLength > 256 {
 		return fmt.Errorf("api_keys.key_length %d out of range 16-256", c.APIKeys.KeyLength)
 	}
+	if c.Tasks.PollIntervalSeconds < 1 || c.Tasks.PollIntervalSeconds > 60 {
+		return fmt.Errorf("tasks.poll_interval_seconds %d out of range 1-60", c.Tasks.PollIntervalSeconds)
+	}
+	if c.Tasks.MaxConcurrent < 1 || c.Tasks.MaxConcurrent > 64 {
+		return fmt.Errorf("tasks.max_concurrent %d out of range 1-64", c.Tasks.MaxConcurrent)
+	}
+	switch c.Tasks.Output.Mode {
+	case "full", "circular":
+	default:
+		return fmt.Errorf("tasks.output.mode %q must be full or circular", c.Tasks.Output.Mode)
+	}
+	if c.Tasks.Output.CircularMaxLines < 100 {
+		return fmt.Errorf("tasks.output.circular_max_lines %d must be at least 100", c.Tasks.Output.CircularMaxLines)
+	}
+	if c.Tasks.Output.FlushIntervalSeconds < 1 || c.Tasks.Output.FlushIntervalSeconds > 300 {
+		return fmt.Errorf("tasks.output.flush_interval_seconds %d out of range 1-300", c.Tasks.Output.FlushIntervalSeconds)
+	}
+	if c.Tasks.DefaultPaginationLimit < 1 || c.Tasks.DefaultPaginationLimit > 1000 {
+		return fmt.Errorf("tasks.default_pagination_limit %d out of range 1-1000", c.Tasks.DefaultPaginationLimit)
+	}
+	if c.Tasks.RetentionDays < 1 || c.Tasks.RetentionDays > 3650 {
+		return fmt.Errorf("tasks.retention_days %d out of range 1-3650", c.Tasks.RetentionDays)
+	}
+	if c.Machines.DiscoveryInterval < 10 || c.Machines.DiscoveryInterval > 86400 {
+		return fmt.Errorf("machines.discovery_interval %d out of range 10-86400", c.Machines.DiscoveryInterval)
+	}
+	if c.Machines.ServerIDStart < 1 || c.Machines.ServerIDStart > 99999999 {
+		return fmt.Errorf("machines.server_id_start %d out of range 1-99999999", c.Machines.ServerIDStart)
+	}
 	return nil
 }
 
@@ -312,4 +462,73 @@ func (c *Config) KeyStorePath() string {
 // protocol.secret beside the loaded configuration file.
 func (c *Config) ProtocolSecretPath() string {
 	return filepath.Join(filepath.Dir(c.path), "protocol.secret")
+}
+
+// DataDir returns the agent's data root: data.dir when configured, else the
+// per-OS local app-data location — deliberately NOT the (Windows-roaming)
+// config directory, since machine working copies and databases must not ride
+// a roaming profile.
+func (c *Config) DataDir() (string, error) {
+	if c.Data.Dir != "" {
+		return safepath.CleanAbs(c.Data.Dir)
+	}
+	switch runtime.GOOS {
+	case "windows":
+		// os.UserCacheDir is %LocalAppData% on Windows.
+		base, err := os.UserCacheDir()
+		if err != nil {
+			return "", fmt.Errorf("resolve local app data dir: %w", err)
+		}
+		return filepath.Join(base, "hyperweaver-agent"), nil
+	case "darwin":
+		// macOS has no roaming/local split; Application Support serves both.
+		base, err := os.UserConfigDir()
+		if err != nil {
+			return "", fmt.Errorf("resolve application support dir: %w", err)
+		}
+		return filepath.Join(base, "hyperweaver-agent"), nil
+	default:
+		if xdg := os.Getenv("XDG_DATA_HOME"); xdg != "" {
+			return filepath.Join(xdg, "hyperweaver-agent"), nil
+		}
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", fmt.Errorf("resolve home dir: %w", err)
+		}
+		return filepath.Join(home, ".local", "share", "hyperweaver-agent"), nil
+	}
+}
+
+// TasksDBPath returns the task-queue database location: tasks.sqlite under
+// the data root (its own file so the queue's write churn never contends
+// with core state — architecture D-A).
+func (c *Config) TasksDBPath() (string, error) {
+	dir, err := c.DataDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, "tasks.sqlite"), nil
+}
+
+// AgentDBPath returns the core-state database location: agent.sqlite under
+// the data root (machines, templates, artifacts — populated by later phases).
+func (c *Config) AgentDBPath() (string, error) {
+	dir, err := c.DataDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, "agent.sqlite"), nil
+}
+
+// TaskLogDir returns where per-task output log files land, defaulting to
+// logs/tasks beside the agent log.
+func (c *Config) TaskLogDir() (string, error) {
+	if c.Tasks.Output.LogDirectory != "" {
+		return c.Tasks.Output.LogDirectory, nil
+	}
+	dir, err := Dir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, "logs", "tasks"), nil
 }

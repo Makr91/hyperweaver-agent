@@ -22,11 +22,14 @@ import (
 
 	"github.com/Makr91/hyperweaver-agent/internal/auth"
 	"github.com/Makr91/hyperweaver-agent/internal/config"
+	"github.com/Makr91/hyperweaver-agent/internal/db"
 	"github.com/Makr91/hyperweaver-agent/internal/keys"
 	"github.com/Makr91/hyperweaver-agent/internal/logging"
+	"github.com/Makr91/hyperweaver-agent/internal/machines"
 	"github.com/Makr91/hyperweaver-agent/internal/openbrowser"
 	"github.com/Makr91/hyperweaver-agent/internal/protocol"
 	"github.com/Makr91/hyperweaver-agent/internal/server"
+	"github.com/Makr91/hyperweaver-agent/internal/tasks"
 	"github.com/Makr91/hyperweaver-agent/internal/tray"
 	"github.com/Makr91/hyperweaver-agent/internal/version"
 )
@@ -137,7 +140,14 @@ func run() error {
 		restartArgs = append(restartArgs, "--headless")
 	}
 
-	srv, err := server.New(cfg, keyStore, trayTokens, restartArgs, openUI)
+	taskQueue, machineStore, reconciler, closeDBs, err := setupTasks(cfg)
+	if err != nil {
+		slog.Error("task system setup failed", "error", err)
+		return err
+	}
+	defer closeDBs()
+
+	srv, err := server.New(cfg, keyStore, trayTokens, taskQueue, machineStore, restartArgs, openUI)
 	if err != nil {
 		slog.Error("server setup failed", "error", err)
 		return err
@@ -156,6 +166,12 @@ func run() error {
 		return handleBindConflict(cfg, lerr)
 	}
 
+	// The queue and reconciler start only once this process owns the port —
+	// a duplicate desktop launch (resolved above) must never process tasks
+	// or sweep the registry.
+	taskQueue.Start()
+	reconciler.Start()
+
 	serverErr := make(chan error, 1)
 	go func() {
 		serverErr <- srv.Start()
@@ -166,6 +182,8 @@ func run() error {
 	}
 
 	shutdown := func() {
+		reconciler.Stop()
+		taskQueue.Stop()
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		if serr := srv.Shutdown(ctx); serr != nil {
@@ -223,6 +241,68 @@ func run() error {
 	default:
 		return nil
 	}
+}
+
+// setupTasks opens the agent's databases and builds the task queue and the
+// machine subsystem on top of it: tasks.sqlite carries the queue,
+// agent.sqlite the machine registry; the lifecycle executors are registered
+// before the queue ever starts. The returned closer releases both database
+// handles.
+func setupTasks(cfg *config.Config) (*tasks.Queue, *machines.Store, *machines.Reconciler, func(), error) {
+	tasksPath, err := cfg.TasksDBPath()
+	if err != nil {
+		return nil, nil, nil, nil, err
+	}
+	agentPath, err := cfg.AgentDBPath()
+	if err != nil {
+		return nil, nil, nil, nil, err
+	}
+	taskLogDir, err := cfg.TaskLogDir()
+	if err != nil {
+		return nil, nil, nil, nil, err
+	}
+
+	// Startup-scoped, not request-scoped — Background is correct here.
+	tasksDB, err := db.Open(context.Background(), tasksPath, tasks.Migrations)
+	if err != nil {
+		return nil, nil, nil, nil, err
+	}
+	agentDB, err := db.Open(context.Background(), agentPath, machines.Migrations)
+	if err != nil {
+		_ = tasksDB.Close()
+		return nil, nil, nil, nil, err
+	}
+	closer := func() {
+		if cerr := tasksDB.Close(); cerr != nil {
+			slog.Error("close tasks database", "error", cerr)
+		}
+		if cerr := agentDB.Close(); cerr != nil {
+			slog.Error("close agent database", "error", cerr)
+		}
+	}
+
+	store := tasks.NewStore(tasksDB)
+	output := tasks.NewOutputManager(store, tasks.OutputConfig{
+		Enabled:          cfg.Tasks.Output.Enabled,
+		Mode:             cfg.Tasks.Output.Mode,
+		CircularMaxLines: cfg.Tasks.Output.CircularMaxLines,
+		FlushInterval:    time.Duration(cfg.Tasks.Output.FlushIntervalSeconds) * time.Second,
+		PersistLogFile:   cfg.Tasks.Output.PersistLogFile,
+		LogDirectory:     taskLogDir,
+	})
+	queue := tasks.NewQueue(store, output, tasks.QueueConfig{
+		PollInterval:  time.Duration(cfg.Tasks.PollIntervalSeconds) * time.Second,
+		MaxConcurrent: cfg.Tasks.MaxConcurrent,
+		RetentionDays: cfg.Tasks.RetentionDays,
+	})
+
+	machineStore := machines.NewStore(agentDB)
+	reconciler := machines.NewReconciler(machineStore, store,
+		cfg.Machines.AutoDiscovery,
+		time.Duration(cfg.Machines.DiscoveryInterval)*time.Second)
+	machines.RegisterExecutors(queue, machineStore, reconciler)
+
+	return queue, machineStore, reconciler, closer, nil
 }
 
 func runHeadless(serverErr chan error, shutdown func()) error {
