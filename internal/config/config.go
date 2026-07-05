@@ -9,16 +9,80 @@ import (
 	"path/filepath"
 	"runtime"
 	"strconv"
+	"strings"
 
 	"github.com/goccy/go-yaml"
 
 	"github.com/Makr91/hyperweaver-agent/internal/safepath"
 )
 
-// ServerConfig controls the HTTP listener.
+// ServerConfig controls the HTTP and HTTPS listeners.
 type ServerConfig struct {
 	BindAddress string `yaml:"bind_address" json:"bind_address"`
 	Port        int    `yaml:"port"         json:"port"`
+	// HTTPSPort is the TLS listener's port (the Node agent's
+	// server.https_port); bound only when ssl.enabled.
+	HTTPSPort int `yaml:"https_port" json:"https_port"`
+}
+
+// SSLConfig controls the agent's HTTPS listener (the Node agent's ssl block,
+// lib/SSLManager.js semantics: certificate problems never stop the agent —
+// HTTPS is skipped with an error in the log and HTTP keeps serving).
+type SSLConfig struct {
+	Enabled bool `yaml:"enabled" json:"enabled"`
+	// GenerateSSL creates a self-signed certificate at the paths below when
+	// none exists (the Node agent's generateSSLCertificatesIfNeeded, done
+	// with crypto/x509 instead of shelling out to openssl).
+	GenerateSSL bool `yaml:"generate_ssl" json:"generate_ssl"`
+	// KeyPath/CertPath locate the private key and certificate. Empty selects
+	// <config dir>/ssl/server.key and <config dir>/ssl/server.crt.
+	KeyPath  string `yaml:"key_path"  json:"key_path"`
+	CertPath string `yaml:"cert_path" json:"cert_path"`
+}
+
+// CORSConfig controls Cross-Origin Resource Sharing (the Node agent's cors
+// block): this is an API-key-authenticated backend in a many-to-many mesh —
+// the key, not the browser Origin, is the access boundary, so allow_all
+// defaults to true. allow_all: false falls back to the explicit whitelist.
+type CORSConfig struct {
+	AllowAll  bool     `yaml:"allow_all" json:"allow_all"`
+	Whitelist []string `yaml:"whitelist" json:"whitelist"`
+}
+
+// StatsConfig controls the /stats endpoint (the Node agent's stats block).
+type StatsConfig struct {
+	// PublicAccess serves GET /stats without an API key.
+	PublicAccess bool `yaml:"public_access" json:"public_access"`
+}
+
+// CleanupConfig controls the periodic cleanup service (the Node agent's
+// cleanup block — its CleanupService cadence; task retention runs on it).
+type CleanupConfig struct {
+	// Interval is seconds between cleanup runs.
+	Interval int `yaml:"interval" json:"interval"`
+}
+
+// SQLiteOptionsConfig tunes the SQLite session pragmas applied to both agent
+// databases (the Node agent's database.sqlite_options). Its pool and retry
+// sub-blocks are deliberately not ported: this agent runs one pooled
+// connection per database (single-writer by construction — no busy retries
+// between its own goroutines to configure).
+type SQLiteOptionsConfig struct {
+	JournalMode       string `yaml:"journal_mode"       json:"journal_mode"`
+	Synchronous       string `yaml:"synchronous"        json:"synchronous"`
+	CacheSizeMB       int    `yaml:"cache_size_mb"      json:"cache_size_mb"`
+	TempStore         string `yaml:"temp_store"         json:"temp_store"`
+	MmapSizeMB        int    `yaml:"mmap_size_mb"       json:"mmap_size_mb"`
+	BusyTimeoutMS     int    `yaml:"busy_timeout_ms"    json:"busy_timeout_ms"`
+	WALAutocheckpoint int    `yaml:"wal_autocheckpoint" json:"wal_autocheckpoint"`
+	Optimize          bool   `yaml:"optimize"           json:"optimize"`
+}
+
+// DatabaseConfig groups database tuning. Dialect and storage paths are not
+// configuration on this agent: SQLite is the only engine and the files live
+// under data.dir (architecture D-A).
+type DatabaseConfig struct {
+	SQLiteOptions SQLiteOptionsConfig `yaml:"sqlite_options" json:"sqlite_options"`
 }
 
 // UIConfig controls serving of the embedded Hyperweaver UI.
@@ -43,6 +107,14 @@ type LoggingConfig struct {
 	File       string `yaml:"file"        json:"file"`
 	MaxSizeMB  int    `yaml:"max_size_mb" json:"max_size_mb"`
 	MaxBackups int    `yaml:"max_backups" json:"max_backups"`
+	// Compression gzips rotated log files (the Node agent's
+	// logging.enable_compression; lumberjack compresses at rotation time, so
+	// its compression_age_days delay has no analog here).
+	Compression bool `yaml:"compression" json:"compression"`
+	// Categories overrides the level per log category (the Node agent's
+	// logging.categories / per-category winston loggers). Categories this
+	// agent emits: app (the default), api_requests, auth, tasks, machines.
+	Categories map[string]string `yaml:"categories" json:"categories"`
 }
 
 // APIKeysConfig controls API-key authentication (Agent API v1 local tier).
@@ -121,20 +193,29 @@ type MachinesConfig struct {
 	// ServerIDStart is the lowest auto-assigned server_id (Node:
 	// zones.server_id_start).
 	ServerIDStart int `yaml:"server_id_start" json:"server_id_start"`
+	// ShutdownTimeout is how many seconds a graceful stop waits for the
+	// guest to power off after the ACPI signal before forcing poweroff
+	// (Node: zones.orchestration.timeouts.zone_shutdown).
+	ShutdownTimeout int `yaml:"shutdown_timeout" json:"shutdown_timeout"`
 }
 
 // Config is the root of config.yaml.
 type Config struct {
 	Server   ServerConfig   `yaml:"server"   json:"server"`
+	SSL      SSLConfig      `yaml:"ssl"      json:"ssl"`
+	CORS     CORSConfig     `yaml:"cors"     json:"cors"`
 	UI       UIConfig       `yaml:"ui"       json:"ui"`
 	Browser  BrowserConfig  `yaml:"browser"  json:"browser"`
 	Logging  LoggingConfig  `yaml:"logging"  json:"logging"`
 	APIKeys  APIKeysConfig  `yaml:"api_keys" json:"api_keys"`
 	Updates  UpdatesConfig  `yaml:"updates"  json:"updates"`
 	APIDocs  APIDocsConfig  `yaml:"api_docs" json:"api_docs"`
+	Stats    StatsConfig    `yaml:"stats"    json:"stats"`
 	Data     DataConfig     `yaml:"data"     json:"data"`
+	Database DatabaseConfig `yaml:"database" json:"database"`
 	Tasks    TasksConfig    `yaml:"tasks"    json:"tasks"`
 	Machines MachinesConfig `yaml:"machines" json:"machines"`
+	Cleanup  CleanupConfig  `yaml:"cleanup"  json:"cleanup"`
 
 	// path is where this configuration was loaded from; the setup token, key
 	// store, protocol-handoff secret, and config backups live beside it.
@@ -151,6 +232,29 @@ server:
   # the agent reachable from other machines.
   bind_address: 127.0.0.1
   port: 9420
+  # Port for the HTTPS listener (bound only when ssl.enabled).
+  https_port: 9421
+
+ssl:
+  # Serve HTTPS on server.https_port alongside HTTP. Certificate problems
+  # never stop the agent — HTTPS is skipped with an error in the log.
+  enabled: false
+  # Generate a self-signed certificate at the paths below when none exists.
+  generate_ssl: true
+  # Private key / certificate locations. Empty = <config dir>/ssl/server.key
+  # and <config dir>/ssl/server.crt
+  key_path: ''
+  cert_path: ''
+
+cors:
+  # This is an API-key-authenticated backend in a many-to-many mesh: the API
+  # key — not the browser Origin — is the access boundary, so by default the
+  # agent answers any Origin. Set allow_all: false to fall back to the
+  # explicit whitelist and lock down direct browser access; proxied,
+  # API-key-authenticated calls are unaffected either way.
+  allow_all: true
+  # Origins allowed when allow_all is false (scheme://host:port).
+  whitelist: []
 
 ui:
   # Serve the bundled Hyperweaver UI at /ui/ (and / redirects there).
@@ -174,6 +278,13 @@ logging:
   file: ''
   max_size_mb: 20
   max_backups: 5
+  # Compress rotated log files (gzip).
+  compression: true
+  # Per-category log levels overriding the global level, e.g.
+  #   categories:
+  #     tasks: debug
+  # Categories this agent emits: app, api_requests, auth, tasks, machines.
+  categories: {}
 
 api_keys:
   # Allow POST /api-keys/bootstrap to create the first API key.
@@ -197,6 +308,10 @@ api_docs:
   # Serve the interactive Agent API documentation (Swagger UI) at /api-docs.
   enabled: true
 
+stats:
+  # Serve GET /stats without an API key.
+  public_access: false
+
 data:
   # Root directory for agent data: the SQLite databases (tasks.sqlite,
   # agent.sqlite) today; machine directories, provisioners, and the file
@@ -205,6 +320,25 @@ data:
   # ~/Library/Application Support/hyperweaver-agent on macOS,
   # ~/.local/share/hyperweaver-agent on Linux).
   dir: ''
+
+database:
+  # SQLite tuning applied to both agent databases (tasks.sqlite,
+  # agent.sqlite).
+  sqlite_options:
+    # DELETE | TRUNCATE | PERSIST | MEMORY | WAL | OFF
+    journal_mode: WAL
+    # OFF | NORMAL | FULL | EXTRA
+    synchronous: NORMAL
+    cache_size_mb: 128
+    # DEFAULT | FILE | MEMORY
+    temp_store: MEMORY
+    # 0 disables memory-mapped I/O.
+    mmap_size_mb: 512
+    busy_timeout_ms: 30000
+    # WAL checkpoint threshold in pages; 0 disables automatic checkpoints.
+    wal_autocheckpoint: 1000
+    # Run PRAGMA optimize when opening each database.
+    optimize: true
 
 tasks:
   # Seconds between task-queue polls.
@@ -239,15 +373,31 @@ machines:
   discovery_interval: 300
   # Lowest auto-assigned server_id.
   server_id_start: 1
+  # Seconds a graceful stop waits for the guest to power off after the ACPI
+  # signal before forcing poweroff.
+  shutdown_timeout: 120
+
+cleanup:
+  # Seconds between periodic cleanup runs (task retention).
+  interval: 300
 `
 
 // Default returns the built-in configuration values.
 func Default() *Config {
 	return &Config{
-		Server:  ServerConfig{BindAddress: "127.0.0.1", Port: 9420},
+		Server:  ServerConfig{BindAddress: "127.0.0.1", Port: 9420, HTTPSPort: 9421},
+		SSL:     SSLConfig{Enabled: false, GenerateSSL: true},
+		CORS:    CORSConfig{AllowAll: true, Whitelist: []string{}},
 		UI:      UIConfig{Enabled: true},
 		Browser: BrowserConfig{},
-		Logging: LoggingConfig{Level: "info", Console: true, MaxSizeMB: 20, MaxBackups: 5},
+		Logging: LoggingConfig{
+			Level:       "info",
+			Console:     true,
+			MaxSizeMB:   20,
+			MaxBackups:  5,
+			Compression: true,
+			Categories:  map[string]string{},
+		},
 		APIKeys: APIKeysConfig{
 			BootstrapEnabled:           true,
 			BootstrapAutoDisable:       true,
@@ -259,7 +409,20 @@ func Default() *Config {
 			VersionInfoURL: "https://github.com/Makr91/hyperweaver-agent/releases/latest/download/update-info.json",
 		},
 		APIDocs: APIDocsConfig{Enabled: true},
+		Stats:   StatsConfig{PublicAccess: false},
 		Data:    DataConfig{},
+		Database: DatabaseConfig{
+			SQLiteOptions: SQLiteOptionsConfig{
+				JournalMode:       "WAL",
+				Synchronous:       "NORMAL",
+				CacheSizeMB:       128,
+				TempStore:         "MEMORY",
+				MmapSizeMB:        512,
+				BusyTimeoutMS:     30000,
+				WALAutocheckpoint: 1000,
+				Optimize:          true,
+			},
+		},
 		Tasks: TasksConfig{
 			PollIntervalSeconds:    2,
 			MaxConcurrent:          5,
@@ -277,7 +440,9 @@ func Default() *Config {
 			AutoDiscovery:     true,
 			DiscoveryInterval: 300,
 			ServerIDStart:     1,
+			ShutdownTimeout:   120,
 		},
+		Cleanup: CleanupConfig{Interval: 300},
 	}
 }
 
@@ -358,17 +523,34 @@ func ensureDefaultFile(path string) error {
 	return nil
 }
 
+// logLevelValid reports whether s is part of the logging level vocabulary.
+func logLevelValid(s string) bool {
+	switch s {
+	case "error", "warn", "info", "debug":
+		return true
+	default:
+		return false
+	}
+}
+
 func (c *Config) validate() error {
 	if c.Server.Port < 1 || c.Server.Port > 65535 {
 		return fmt.Errorf("server.port %d out of range 1-65535", c.Server.Port)
 	}
+	if c.Server.HTTPSPort < 1 || c.Server.HTTPSPort > 65535 {
+		return fmt.Errorf("server.https_port %d out of range 1-65535", c.Server.HTTPSPort)
+	}
 	if c.Server.BindAddress != "" && net.ParseIP(c.Server.BindAddress) == nil {
 		return fmt.Errorf("server.bind_address %q is not an IP address", c.Server.BindAddress)
 	}
-	switch c.Logging.Level {
-	case "error", "warn", "info", "debug":
-	default:
+	if !logLevelValid(c.Logging.Level) {
 		return fmt.Errorf("logging.level %q must be one of error, warn, info, debug", c.Logging.Level)
+	}
+	for category, level := range c.Logging.Categories {
+		if !logLevelValid(level) {
+			return fmt.Errorf("logging.categories.%s %q must be one of error, warn, info, debug",
+				category, level)
+		}
 	}
 	if c.APIKeys.HashRounds < 4 || c.APIKeys.HashRounds > 20 {
 		return fmt.Errorf("api_keys.hash_rounds %d out of range 4-20", c.APIKeys.HashRounds)
@@ -405,12 +587,76 @@ func (c *Config) validate() error {
 	if c.Machines.ServerIDStart < 1 || c.Machines.ServerIDStart > 99999999 {
 		return fmt.Errorf("machines.server_id_start %d out of range 1-99999999", c.Machines.ServerIDStart)
 	}
+	if c.Machines.ShutdownTimeout < 5 || c.Machines.ShutdownTimeout > 3600 {
+		return fmt.Errorf("machines.shutdown_timeout %d out of range 5-3600", c.Machines.ShutdownTimeout)
+	}
+	if c.Cleanup.Interval < 60 || c.Cleanup.Interval > 86400 {
+		return fmt.Errorf("cleanup.interval %d out of range 60-86400", c.Cleanup.Interval)
+	}
+	return c.Database.SQLiteOptions.validate()
+}
+
+// validate checks the SQLite tuning values against SQLite's own vocabularies.
+func (o *SQLiteOptionsConfig) validate() error {
+	switch strings.ToUpper(o.JournalMode) {
+	case "DELETE", "TRUNCATE", "PERSIST", "MEMORY", "WAL", "OFF":
+	default:
+		return fmt.Errorf("database.sqlite_options.journal_mode %q must be one of DELETE, TRUNCATE, PERSIST, MEMORY, WAL, OFF",
+			o.JournalMode)
+	}
+	switch strings.ToUpper(o.Synchronous) {
+	case "OFF", "NORMAL", "FULL", "EXTRA":
+	default:
+		return fmt.Errorf("database.sqlite_options.synchronous %q must be one of OFF, NORMAL, FULL, EXTRA",
+			o.Synchronous)
+	}
+	switch strings.ToUpper(o.TempStore) {
+	case "DEFAULT", "FILE", "MEMORY":
+	default:
+		return fmt.Errorf("database.sqlite_options.temp_store %q must be one of DEFAULT, FILE, MEMORY",
+			o.TempStore)
+	}
+	if o.CacheSizeMB < 1 || o.CacheSizeMB > 8192 {
+		return fmt.Errorf("database.sqlite_options.cache_size_mb %d out of range 1-8192", o.CacheSizeMB)
+	}
+	if o.MmapSizeMB < 0 || o.MmapSizeMB > 16384 {
+		return fmt.Errorf("database.sqlite_options.mmap_size_mb %d out of range 0-16384", o.MmapSizeMB)
+	}
+	if o.BusyTimeoutMS < 100 || o.BusyTimeoutMS > 600000 {
+		return fmt.Errorf("database.sqlite_options.busy_timeout_ms %d out of range 100-600000", o.BusyTimeoutMS)
+	}
+	if o.WALAutocheckpoint < 0 || o.WALAutocheckpoint > 1000000 {
+		return fmt.Errorf("database.sqlite_options.wal_autocheckpoint %d out of range 0-1000000", o.WALAutocheckpoint)
+	}
 	return nil
 }
 
 // ListenAddr returns the host:port the HTTP server binds to.
 func (c *Config) ListenAddr() string {
 	return net.JoinHostPort(c.Server.BindAddress, strconv.Itoa(c.Server.Port))
+}
+
+// HTTPSListenAddr returns the host:port the HTTPS server binds to.
+func (c *Config) HTTPSListenAddr() string {
+	return net.JoinHostPort(c.Server.BindAddress, strconv.Itoa(c.Server.HTTPSPort))
+}
+
+// SSLKeyPath returns the TLS private key location: ssl.key_path when
+// configured, else ssl/server.key beside the loaded configuration file.
+func (c *Config) SSLKeyPath() string {
+	if c.SSL.KeyPath != "" {
+		return c.SSL.KeyPath
+	}
+	return filepath.Join(filepath.Dir(c.path), "ssl", "server.key")
+}
+
+// SSLCertPath returns the TLS certificate location: ssl.cert_path when
+// configured, else ssl/server.crt beside the loaded configuration file.
+func (c *Config) SSLCertPath() string {
+	if c.SSL.CertPath != "" {
+		return c.SSL.CertPath
+	}
+	return filepath.Join(filepath.Dir(c.path), "ssl", "server.crt")
 }
 
 // BaseURL returns the agent's locally reachable HTTP origin. A wildcard bind
