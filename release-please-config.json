@@ -1,0 +1,28 @@
+{
+  "bump-minor-pre-major": false,
+  "bump-patch-for-minor-pre-major": false,
+  "packages": {
+    ".": {
+      "release-type": "node",
+      "package-name": "zoneweaver-agent",
+      "include-component-in-tag": false,
+      "extra-files": [
+        "index.js",
+        "config/swagger.js",
+        "packaging/config/production-config.yaml",
+        "packaging/omnios/man/zoneweaver-agent.8",
+        "packaging/omnios/man/zoneweaver-agent.yaml.5"
+      ],
+      "changelog-sections": [
+        { "type": "feat", "section": "Features", "hidden": false },
+        { "type": "fix", "section": "Bug Fixes", "hidden": false },
+        { "type": "chore", "section": "Miscellaneous", "hidden": true },
+        { "type": "docs", "section": "Documentation", "hidden": false },
+        { "type": "style", "section": "Miscellaneous", "hidden": true },
+        { "type": "refactor", "section": "Miscellaneous", "hidden": true },
+        { "type": "perf", "section": "Performance", "hidden": false },
+        { "type": "test", "section": "Miscellaneous", "hidden": true }
+      ]
+    }
+  }
+}

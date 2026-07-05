@@ -1,0 +1,89 @@
+name: Build OmniOS Packages
+
+on:
+  workflow_call:
+    inputs:
+      tag_name:
+        required: true
+        type: string
+      version:
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  build-omnios-package:
+    runs-on: self-hosted
+    steps:
+      # OmniOS Build Steps - Just sync source and build on OmniOS
+      - name: Checkout for OmniOS build
+        uses: actions/checkout@v7
+        with:
+          clean: true
+
+      - name: Set package variables
+        run: |
+          echo "VERSION=${{ inputs.version }}" >> $GITHUB_ENV
+          echo "PACKAGE_NAME=zoneweaver-agent" >> $GITHUB_ENV
+
+      - name: Clean OmniOS build directory
+        run: |
+          ssh ghrunner@omnios.packages.startcloud.com "rm -rf /local/builds/zoneweaver-agent/* /local/builds/zoneweaver-agent/.*" || true
+
+      - name: Sync source code to OmniOS
+        run: |
+          rsync -av \
+            --exclude='.git' \
+            --exclude='node_modules' \
+            --exclude='*.p5p' \
+            ./ ghrunner@omnios.packages.startcloud.com:/local/builds/zoneweaver-agent/
+
+      - name: Build package on OmniOS
+        run: |
+          ssh ghrunner@omnios.packages.startcloud.com "
+            cd /local/builds/zoneweaver-agent && 
+            export PATH=/opt/ooce/bin:/opt/ooce/node-22/bin:\$PATH &&
+            export MAKE=gmake &&
+            chmod +x packaging/omnios/build.sh &&
+            ./packaging/omnios/build.sh
+          "
+
+      - name: Transfer OmniOS package back
+        run: |
+          rsync -av ghrunner@omnios.packages.startcloud.com:/local/builds/zoneweaver-agent/*.p5p ./ || echo "No .p5p files found"
+
+      - name: Install GitHub CLI
+        run: |
+          if ! command -v gh &> /dev/null; then
+            curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | sudo dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg
+            sudo chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg
+            echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null
+            sudo apt update
+            sudo apt install gh -y
+          fi
+
+      - name: Upload OmniOS package to release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          for file in *.p5p; do
+            if [ -f "$file" ]; then
+              echo "Uploading $file..."
+              gh release upload ${{ inputs.tag_name }} "$file" --clobber
+            fi
+          done
+
+      - name: Publish OmniOS package to repository
+        run: |
+          ssh ghrunner@omnios.packages.startcloud.com "
+            cd /local/builds/zoneweaver-agent &&
+            pfexec pkgsend publish -d proto -s file:///local/public/r151054/pkg zoneweaver-agent.p5m.final &&
+            pfexec pkgrepo refresh -s /local/public/r151054/pkg &&
+            pfexec svcadm restart pkg/server:r151054_STARTcloud
+          "
+
+      - name: Clean up OmniOS build directory
+        run: |
+          ssh ghrunner@omnios.packages.startcloud.com "rm -rf /local/builds/zoneweaver-agent/*"

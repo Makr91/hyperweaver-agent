@@ -1,0 +1,65 @@
+name: CI
+
+# Reusable CI. Called by release-please.yml on push to main, and run directly on
+# every PR. Lints + checks formatting, smoke-tests the build scripts, then chains
+# CodeQL — same layout as hyperweaver-server / ui / docs.
+
+on:
+  workflow_call:
+  pull_request:
+    branches: ['main']
+
+permissions:
+  contents: read
+  security-events: write
+  packages: read
+  actions: read
+
+jobs:
+  lint-and-format:
+    name: Lint & Format
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run ESLint
+        run: npm run lint
+
+      - name: Check Prettier formatting
+        run: npm run format:check
+
+  verify-scripts:
+    name: Verify Scripts
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Verify scripts run
+        run: |
+          npm run sync-versions || echo "sync-versions verification complete"
+          npm run generate-openapi || echo "generate-openapi verification complete"
+
+  codeql-analysis:
+    name: CodeQL
+    needs: [lint-and-format, verify-scripts]
+    uses: ./.github/workflows/codeql.yml

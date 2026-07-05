@@ -1,0 +1,1232 @@
+# Hyperweaver Server Production Configuration
+# This file is installed to /etc/hyperweaver-server/config.yaml
+# All settings use metadata format for configuration-driven UI
+
+# Section metadata - descriptions for each settings category
+_sections:
+  Frontend:
+    description: 'Configure user interface behavior, appearance, and client-side functionality.'
+    icon: 'fas fa-desktop'
+  Server:
+    description: 'Configure server networking, SSL certificates, and connection settings.'
+    icon: 'fas fa-server'
+  Security:
+    description: 'Configure Cross-Origin Resource Sharing (CORS) and access control policies.'
+    icon: 'fas fa-lock'
+  Database:
+    description: 'Configure database connection, pooling, and storage settings.'
+    icon: 'fas fa-database'
+  Mail:
+    description: 'Configure SMTP email settings for notifications and user invitations.'
+    icon: 'fas fa-envelope'
+  Authentication:
+    description: 'Configure user authentication methods, security policies, and external providers.'
+    icon: 'fas fa-shield-alt'
+  Logging:
+    description: 'Configure application logging levels and output settings.'
+    icon: 'fas fa-file-alt'
+  Performance:
+    description: 'Configure rate limiting, resource usage limits, and performance optimization.'
+    icon: 'fas fa-tachometer-alt'
+  Integrations:
+    description: 'Configure third-party service integrations and API connections.'
+    icon: 'fas fa-puzzle-piece'
+  Agents:
+    description: 'Configure how the Server polls registered agents for health and capabilities.'
+    icon: 'fas fa-network-wired'
+
+frontend:
+  name:
+    type: string
+    value: Hyperweaver
+    description: 'Application display name'
+    section: 'Frontend'
+    required: true
+    order: 1
+  version:
+    value: 0.9.6 # x-release-please-version
+    description: 'Current application version'
+    section: 'Frontend'
+    required: true
+    order: 2
+  frontend_url:
+    type: string
+    value: https://localhost:3443
+    description: 'Base URL for the frontend application'
+    section: 'Frontend'
+    required: true
+    order: 3
+  port:
+    type: integer
+    value: 3443
+    min: 1
+    max: 65535
+    description: 'Frontend serving port'
+    section: 'Frontend'
+    required: true
+    order: 4
+  auto_refresh_interval:
+    type: integer
+    value: 5
+    min: 1
+    max: 300
+    description: 'Dashboard auto-refresh interval in seconds'
+    section: 'Frontend'
+    required: true
+    order: 5
+  enable_notifications:
+    type: boolean
+    value: true
+    description: 'Enable browser notifications for alerts'
+    section: 'Frontend'
+    required: true
+    order: 6
+  enable_dark_mode:
+    type: boolean
+    value: true
+    description: 'Enable dark mode theme by default'
+    section: 'Frontend'
+    required: true
+    order: 7
+  trust_proxy:
+    type: integer
+    value: 1
+    min: 0
+    max: 10
+    description: 'Trust proxy level for Express.js: 0=Direct connection (no proxies), 1=Behind single proxy (nginx/Apache/CloudFlare), 2=Behind 2 proxies (load balancer + nginx), 3+=Behind multiple proxies (complex setups). Controls X-Forwarded headers trust for accurate client IPs.'
+    section: 'Frontend'
+    required: true
+    order: 8
+
+mail:
+  smtp_host:
+    type: string
+    value: localhost
+    description: 'SMTP server hostname (e.g., smtp.gmail.com, smtp.office365.com)'
+    section: 'Mail'
+    required: true
+    order: 1
+  smtp_port:
+    type: integer
+    value: 587
+    min: 1
+    max: 65535
+    description: 'SMTP server port: 587=TLS/STARTTLS (recommended), 465=SSL/TLS (secure), 25=plain (not recommended)'
+    section: 'Mail'
+    required: true
+    order: 2
+  smtp_secure:
+    type: boolean
+    value: false
+    description: 'Use SSL/TLS encryption: true=SSL (port 465), false=STARTTLS (port 587)'
+    section: 'Mail'
+    required: true
+    order: 3
+  smtp_user:
+    type: string
+    value: ''
+    description: 'SMTP authentication username (usually your email address or app-specific username)'
+    section: 'Mail'
+    required: false
+    order: 4
+  smtp_password:
+    type: password
+    value: ''
+    description: 'SMTP authentication password (use app-specific passwords for Gmail/Outlook)'
+    section: 'Mail'
+    required: false
+    order: 5
+  smtp_from:
+    type: string
+    value: 'Hyperweaver <noreply@localhost>'
+    description: 'From address for outgoing emails (must be authorized by SMTP server)'
+    section: 'Mail'
+    required: true
+    order: 6
+
+server:
+  hostname:
+    type: host
+    value: localhost
+    description: 'Server hostname or IP address'
+    required: true
+  port:
+    type: integer
+    value: 3443
+    min: 1
+    max: 65535
+    description: 'Server port number'
+    required: true
+  ssl_enabled:
+    type: boolean
+    value: true
+    description: 'Enable SSL/HTTPS for the server'
+    required: true
+  ssl_generate:
+    type: boolean
+    value: true
+    description: "Auto-generate SSL certificates if they don't exist"
+    required: false
+    depends_on: ssl_enabled
+    show_when: [true]
+  ssl_key_path:
+    type: string
+    value: '/etc/hyperweaver-server/ssl/key.pem'
+    description: 'Path to SSL private key file'
+    required: false
+    depends_on: ssl_enabled
+    show_when: [true]
+  ssl_cert_path:
+    type: string
+    value: '/etc/hyperweaver-server/ssl/cert.pem'
+    description: 'Path to SSL certificate file'
+    required: false
+    depends_on: ssl_enabled
+    show_when: [true]
+  ssl_ca_path:
+    type: string
+    value: '/etc/hyperweaver-server/ssl/ca.pem'
+    description: 'Path to SSL Certificate Authority (CA) file for certificate chain validation'
+    required: false
+    depends_on: ssl_enabled
+    show_when: [true]
+
+security:
+  cors:
+    whitelist:
+      type: array
+      value:
+        - 'https://localhost:3443'
+        - 'https://localhost'
+      description: 'List of allowed CORS origins (one per line). CORS (Cross-Origin Resource Sharing) controls which web origins can access your API from browsers. Add each allowed domain/protocol/port combination on a separate line.'
+      section: 'Security'
+      required: true
+      order: 1
+    allow_origin:
+      type: select
+      value: true
+      options: [true, false, 'specific']
+      description: 'CORS origin policy: true=allow all origins in whitelist, false=deny all, specific=use exact whitelist matching'
+      section: 'Security'
+      required: true
+      order: 2
+    preflight_continue:
+      type: boolean
+      value: true
+      description: 'Pass CORS preflight response to next handler (recommended: true for most configurations)'
+      section: 'Security'
+      required: true
+      order: 3
+    credentials:
+      type: boolean
+      value: true
+      description: 'Allow credentials (cookies, authorization headers) in CORS requests (required for authenticated API calls)'
+      section: 'Security'
+      required: true
+      order: 4
+
+logging:
+  level:
+    type: select
+    value: info
+    options: ['error', 'warn', 'info', 'debug', 'silent']
+    description: 'Global logging level: error=critical only, warn=errors+warnings, info=general operations, debug=detailed diagnostics, silent=disable all'
+    section: 'Logging'
+    subsection: 'General'
+    required: true
+    order: 1
+
+  console_enabled:
+    type: boolean
+    value: true
+    description: 'Enable console output (automatically disabled in production)'
+    section: 'Logging'
+    subsection: 'General'
+    required: true
+    order: 2
+
+  log_directory:
+    type: string
+    value: '/var/log/hyperweaver-server'
+    description: 'Directory for log files (must be writable by application)'
+    section: 'Logging'
+    subsection: 'General'
+    required: true
+    order: 3
+
+  file_rotation:
+    max_size:
+      type: integer
+      value: 50
+      min: 10
+      max: 500
+      description: 'Maximum log file size in MB before rotation'
+      section: 'Logging'
+      subsection: 'Rotation'
+      required: true
+      order: 1
+    max_files:
+      type: integer
+      value: 5
+      min: 1
+      max: 30
+      description: 'Number of rotated log files to keep'
+      section: 'Logging'
+      subsection: 'Rotation'
+      required: true
+      order: 2
+
+  performance_threshold_ms:
+    type: integer
+    value: 1000
+    min: 100
+    max: 10000
+    description: 'Log operations slower than this threshold (milliseconds)'
+    section: 'Logging'
+    subsection: 'Performance'
+    required: true
+    order: 1
+
+  categories:
+    auth:
+      type: select
+      value: info
+      options: ['error', 'warn', 'info', 'debug']
+      description: 'Authentication/authorization logging level (login, registration, LDAP, OIDC)'
+      section: 'Logging'
+      subsection: 'Categories'
+      required: true
+      order: 1
+    database:
+      type: select
+      value: warn
+      options: ['error', 'warn', 'info', 'debug']
+      description: 'Database operations logging level (queries, migrations, connections)'
+      section: 'Logging'
+      subsection: 'Categories'
+      required: true
+      order: 2
+    api:
+      type: select
+      value: info
+      options: ['error', 'warn', 'info', 'debug']
+      description: 'API request/response logging level'
+      section: 'Logging'
+      subsection: 'Categories'
+      required: true
+      order: 3
+    proxy:
+      type: select
+      value: warn
+      options: ['error', 'warn', 'info', 'debug']
+      description: 'Zoneweaver API proxy request logging level'
+      section: 'Logging'
+      subsection: 'Categories'
+      required: true
+      order: 4
+    mail:
+      type: select
+      value: info
+      options: ['error', 'warn', 'info', 'debug']
+      description: 'Email operations logging level'
+      section: 'Logging'
+      subsection: 'Categories'
+      required: true
+      order: 5
+    websocket:
+      type: select
+      value: warn
+      options: ['error', 'warn', 'info', 'debug']
+      description: 'WebSocket connections logging level (terminal, VNC, zlogin)'
+      section: 'Logging'
+      subsection: 'Categories'
+      required: true
+      order: 6
+    performance:
+      type: select
+      value: warn
+      options: ['error', 'warn', 'info', 'debug']
+      description: 'Performance monitoring logging level'
+      section: 'Logging'
+      subsection: 'Categories'
+      required: true
+      order: 7
+    app:
+      type: select
+      value: info
+      options: ['error', 'warn', 'info', 'debug']
+      description: 'General application logging level'
+      section: 'Logging'
+      subsection: 'Categories'
+      required: true
+      order: 8
+
+# Security & Performance Limits Configuration
+limits:
+  # General Limits
+  max_servers_per_user:
+    type: integer
+    value: 10
+    min: 1
+    max: 1000
+    description: 'Maximum number of servers a single user can manage (prevents resource abuse)'
+    section: 'Performance'
+    subsection: 'General Limits'
+    required: true
+    order: 1
+
+  # API Client Timeouts for Large File Operations
+  api_timeouts:
+    default_request:
+      type: integer
+      value: 60000
+      min: 5000
+      max: 600000
+      description: 'Default API request timeout in milliseconds'
+      section: 'Performance'
+      subsection: 'API Client Timeouts'
+      required: true
+      order: 1
+
+    file_upload:
+      type: integer
+      value: 1800000
+      min: 300000
+      max: 7200000
+      description: 'File upload timeout in milliseconds (30 minutes for large ISOs/images)'
+      section: 'Performance'
+      subsection: 'API Client Timeouts'
+      required: true
+      order: 2
+
+  # File Upload Server Limits
+  file_uploads:
+    max_file_size_gb:
+      type: integer
+      value: 50
+      min: 1
+      max: 1000
+      description: 'Maximum file size in GB for uploads (must coordinate with backend settings)'
+      section: 'Performance'
+      subsection: 'File Upload Limits'
+      required: true
+      order: 1
+
+  # Authentication Rate Limiting (CodeQL Security Fix)
+  authentication:
+    windowMs:
+      type: integer
+      value: 900000
+      description: 'Time window in milliseconds (900000 = 15 minutes)'
+      section: 'Performance'
+      subsection: 'Authentication Rate Limits'
+      required: true
+      validation:
+        min: 60000
+        max: 3600000
+      order: 1
+    max:
+      type: integer
+      value: 25
+      description: 'Maximum login/registration attempts allowed per time window'
+      section: 'Performance'
+      subsection: 'Authentication Rate Limits'
+      required: true
+      validation:
+        min: 5
+        max: 1000
+      order: 2
+    message:
+      type: string
+      value: 'Too many authentication attempts, please try again later'
+      description: 'Error message shown when rate limit is exceeded'
+      section: 'Performance'
+      subsection: 'Authentication Rate Limits'
+      required: true
+      order: 3
+
+  admin:
+    windowMs:
+      type: integer
+      value: 900000
+      description: 'Time window in milliseconds (900000 = 15 minutes)'
+      section: 'Performance'
+      subsection: 'Administrative Rate Limits'
+      required: true
+      validation:
+        min: 60000
+        max: 3600000
+      order: 1
+    max:
+      type: integer
+      value: 500
+      description: 'Maximum admin operations allowed per time window'
+      section: 'Performance'
+      subsection: 'Administrative Rate Limits'
+      required: true
+      validation:
+        min: 10
+        max: 10000
+      order: 2
+    message:
+      type: string
+      value: 'Too many admin requests, please try again later'
+      description: 'Error message shown when admin rate limit is exceeded'
+      section: 'Performance'
+      subsection: 'Administrative Rate Limits'
+      required: true
+      order: 3
+
+  apiProxy:
+    windowMs:
+      type: integer
+      value: 60000
+      description: 'Time window in milliseconds (60000 = 1 minute)'
+      section: 'Performance'
+      subsection: 'API Proxy Rate Limits'
+      required: true
+      validation:
+        min: 10000
+        max: 600000
+      order: 1
+    max:
+      type: integer
+      value: 2000
+      description: 'Maximum API proxy requests allowed per time window'
+      section: 'Performance'
+      subsection: 'API Proxy Rate Limits'
+      required: true
+      validation:
+        min: 10
+        max: 10000
+      order: 2
+    message:
+      type: string
+      value: 'Too many API proxy requests, please try again later'
+      description: 'Error message shown when API proxy rate limit is exceeded'
+      section: 'Performance'
+      subsection: 'API Proxy Rate Limits'
+      required: true
+      order: 3
+
+  standard:
+    windowMs:
+      type: integer
+      value: 900000
+      description: 'Time window in milliseconds (900000 = 15 minutes)'
+      section: 'Performance'
+      subsection: 'Standard Rate Limits'
+      required: true
+      validation:
+        min: 60000
+        max: 3600000
+      order: 1
+    max:
+      type: integer
+      value: 1000
+      description: 'Maximum standard API requests allowed per time window'
+      section: 'Performance'
+      subsection: 'Standard Rate Limits'
+      required: true
+      validation:
+        min: 100
+        max: 100000
+      order: 2
+    message:
+      type: string
+      value: 'Too many requests, please try again later'
+      description: 'Error message shown when standard rate limit is exceeded'
+      section: 'Performance'
+      subsection: 'Standard Rate Limits'
+      required: true
+      order: 3
+
+  staticFiles:
+    windowMs:
+      type: integer
+      value: 900000
+      description: 'Time window in milliseconds (900000 = 15 minutes)'
+      section: 'Performance'
+      subsection: 'Static File Rate Limits'
+      required: true
+      validation:
+        min: 60000
+        max: 3600000
+      order: 1
+    max:
+      type: integer
+      value: 5000
+      description: 'Maximum static file requests (CSS, JS, images) per time window'
+      section: 'Performance'
+      subsection: 'Static File Rate Limits'
+      required: true
+      validation:
+        min: 1000
+        max: 100000
+      order: 2
+    message:
+      type: string
+      value: 'Too many static file requests, please try again later'
+      description: 'Error message shown when static file rate limit is exceeded'
+      section: 'Performance'
+      subsection: 'Static File Rate Limits'
+      required: true
+      order: 3
+
+authentication:
+  enabled_strategies:
+    type: array
+    value: ['local', 'jwt']
+    description: 'List of enabled authentication strategies'
+    section: 'Authentication'
+    subsection: 'General'
+    required: true
+    order: 1
+
+  default_strategy:
+    type: select
+    value: local
+    options: ['local', 'jwt']
+    description: 'Default authentication strategy'
+    section: 'Authentication'
+    subsection: 'General'
+    required: true
+    order: 2
+
+  # JWT Strategy Settings
+  jwt_secret:
+    type: password
+    value: '__JWT_SECRET_FROM_FILE__'
+    description: 'JWT signing secret (use strong random string)'
+    section: 'Authentication'
+    subsection: 'JWT Settings'
+    required: true
+    order: 1
+
+  jwt_expiration:
+    type: string
+    value: '24h'
+    description: "JWT token expiration time (e.g., '24h', '7d', '1h')"
+    section: 'Authentication'
+    subsection: 'JWT Settings'
+    required: true
+    order: 2
+
+  jwt_issuer:
+    type: string
+    value: 'hyperweaver-server'
+    description: 'JWT token issuer identifier'
+    section: 'Authentication'
+    subsection: 'JWT Settings'
+    required: true
+    order: 3
+
+  jwt_audience:
+    type: string
+    value: 'hyperweaver-ui'
+    description: 'JWT token audience identifier'
+    section: 'Authentication'
+    subsection: 'JWT Settings'
+    required: true
+    order: 4
+
+  # Local Authentication Settings
+  local_enabled:
+    type: boolean
+    value: true
+    description: 'Enable username/password authentication'
+    section: 'Authentication'
+    subsection: 'Local Authentication'
+    required: true
+    order: 1
+
+  local_require_email_verification:
+    type: boolean
+    value: false
+    description: 'Require email verification for new local accounts'
+    section: 'Authentication'
+    subsection: 'Local Authentication'
+    required: true
+    order: 2
+
+  local_password_min_length:
+    type: integer
+    value: 8
+    min: 4
+    max: 128
+    description: 'Minimum password length for local accounts'
+    section: 'Authentication'
+    subsection: 'Local Authentication'
+    required: true
+    order: 3
+
+  local_password_require_uppercase:
+    type: boolean
+    value: false
+    description: 'Require uppercase letters in passwords'
+    section: 'Authentication'
+    subsection: 'Local Authentication'
+    required: true
+    order: 4
+
+  local_password_require_lowercase:
+    type: boolean
+    value: false
+    description: 'Require lowercase letters in passwords'
+    section: 'Authentication'
+    subsection: 'Local Authentication'
+    required: true
+    order: 5
+
+  local_password_require_numbers:
+    type: boolean
+    value: false
+    description: 'Require numbers in passwords'
+    section: 'Authentication'
+    subsection: 'Local Authentication'
+    required: true
+    order: 6
+
+  local_password_require_symbols:
+    type: boolean
+    value: false
+    description: 'Require special symbols in passwords'
+    section: 'Authentication'
+    subsection: 'Local Authentication'
+    required: true
+    order: 7
+
+  local_bcrypt_rounds:
+    type: integer
+    value: 10
+    min: 8
+    max: 15
+    description: 'Bcrypt hashing rounds (higher = more secure but slower)'
+    section: 'Authentication'
+    subsection: 'Local Authentication'
+    required: true
+    order: 8
+
+  local_session_timeout:
+    type: integer
+    value: 24
+    min: 1
+    max: 168
+    description: 'Session timeout in hours'
+    section: 'Authentication'
+    subsection: 'Local Authentication'
+    required: true
+    order: 9
+
+  local_allow_new_organizations:
+    type: boolean
+    value: true
+    description: 'Allow users to create new organizations during registration'
+    section: 'Authentication'
+    subsection: 'Local Authentication'
+    required: true
+    order: 10
+
+  local_registration_enabled:
+    type: boolean
+    value: true
+    description: 'Allow self-service local account registration. When false, the Register action routes to the identity provider (prompt=create) instead of the local form. The first-user bootstrap is always allowed.'
+    section: 'Authentication'
+    subsection: 'Local Authentication'
+    required: true
+    order: 11
+
+  # LDAP Configuration
+  ldap_enabled:
+    type: boolean
+    value: false
+    description: 'Enable LDAP authentication'
+    section: 'Authentication'
+    subsection: 'LDAP Configuration'
+    required: true
+    order: 1
+
+  ldap_url:
+    type: string
+    value: 'ldap://localhost:389'
+    description: 'LDAP server URL (ldap:// for plain, ldaps:// for SSL)'
+    section: 'Authentication'
+    subsection: 'LDAP Configuration'
+    required: false
+    depends_on: ldap_enabled
+    show_when: [true]
+    order: 2
+
+  ldap_bind_dn:
+    type: string
+    value: 'cn=admin,dc=example,dc=com'
+    description: 'LDAP bind DN for authentication'
+    section: 'Authentication'
+    subsection: 'LDAP Configuration'
+    required: false
+    depends_on: ldap_enabled
+    show_when: [true]
+    order: 3
+
+  ldap_bind_credentials:
+    type: password
+    value: 'admin_password'
+    description: 'LDAP bind password'
+    section: 'Authentication'
+    subsection: 'LDAP Configuration'
+    required: false
+    depends_on: ldap_enabled
+    show_when: [true]
+    order: 4
+
+  ldap_search_base:
+    type: string
+    value: 'ou=users,dc=example,dc=com'
+    description: 'LDAP search base DN'
+    section: 'Authentication'
+    subsection: 'LDAP Configuration'
+    required: false
+    depends_on: ldap_enabled
+    show_when: [true]
+    order: 5
+
+  ldap_search_filter:
+    type: string
+    value: '(uid={{username}})'
+    description: 'LDAP search filter ({{username}} will be replaced)'
+    section: 'Authentication'
+    subsection: 'LDAP Configuration'
+    required: false
+    depends_on: ldap_enabled
+    show_when: [true]
+    order: 6
+
+  ldap_search_attributes:
+    type: string
+    value: 'displayName,mail,memberOf'
+    description: 'Comma-separated list of LDAP attributes to retrieve'
+    section: 'Authentication'
+    subsection: 'LDAP Configuration'
+    required: false
+    depends_on: ldap_enabled
+    show_when: [true]
+    order: 7
+
+  ldap_tls_reject_unauthorized:
+    type: boolean
+    value: false
+    description: 'Reject unauthorized TLS certificates for LDAPS'
+    section: 'Authentication'
+    subsection: 'LDAP Configuration'
+    required: false
+    depends_on: ldap_enabled
+    show_when: [true]
+    order: 8
+
+  # OIDC Providers - dynamic keyed collection managed via the settings UI
+  # (PUT/POST/DELETE /api/settings/collections/authentication.oidc_providers).
+  # Each provider is stored under value.<name> as { <field>: { value } } — the
+  # shape auth/passport.js reads. Adding/editing/removing a provider requires a
+  # server restart to (re)register its passport strategy.
+  oidc_providers:
+    type: collection
+    label: 'OIDC Providers'
+    icon: 'fab fa-openid'
+    description: 'Configure OpenID Connect authentication providers for single sign-on integration. Adding, editing, or removing a provider requires a server restart to take effect.'
+    section: 'Authentication'
+    subsection: 'OIDC Providers'
+    required: false
+    order: 50
+    requires_restart: true
+    item_noun: 'Provider'
+    key_label: 'Provider Name'
+    item_label_field: 'display_name'
+    secret_fields: ['client_secret']
+    item_schema:
+      enabled:
+        type: boolean
+        label: 'Enabled'
+        value: true
+        order: 1
+      display_name:
+        type: string
+        label: 'Display Name'
+        placeholder: 'e.g., Sign in with Company SSO'
+        required: true
+        order: 2
+      issuer:
+        type: string
+        label: 'Issuer URL'
+        placeholder: 'https://your-provider.com'
+        description: "The OIDC issuer URL (check your provider's documentation)."
+        required: true
+        order: 3
+      client_id:
+        type: string
+        label: 'Client ID'
+        required: true
+        order: 4
+      client_secret:
+        type: password
+        label: 'Client Secret'
+        required: true
+        order: 5
+      scope:
+        type: string
+        label: 'Scope'
+        value: 'openid profile email'
+        order: 6
+      response_type:
+        type: select
+        label: 'Response Type'
+        value: 'code'
+        options: ['code', 'id_token', 'code id_token']
+        order: 7
+    value: {}
+
+  # External Provider Settings
+  external_domain_mapping_enabled:
+    type: boolean
+    value: false
+    description: 'Enable automatic organization assignment based on email domain'
+    section: 'Authentication'
+    subsection: 'External Providers'
+    required: true
+    order: 1
+
+  external_domain_mappings:
+    type: textarea
+    value: |
+      {
+        "ORG001": ["m4kr.net", "example.com"],
+        "ORG002": ["company.com", "corp.local"]
+      }
+    description: 'JSON mapping of organization codes to email domains. Format: {"ORG_CODE": ["domain1.com", "domain2.com"]}. Users with matching email domains will be auto-assigned to the specified organization.'
+    section: 'Authentication'
+    subsection: 'External Providers'
+    required: false
+    conditional:
+      field: 'authentication.external_domain_mapping_enabled'
+      value: true
+    order: 2
+
+  external_provisioning_enabled:
+    type: boolean
+    value: false
+    description: 'Enable automatic user provisioning for external authentication'
+    section: 'Authentication'
+    subsection: 'External Providers'
+    required: true
+    order: 3
+
+  external_provisioning_policy:
+    type: select
+    value: 'invite_only'
+    options: ['invite_only', 'auto_provision', 'manual_approval', 'disabled']
+    description: 'Policy for handling new external users'
+    section: 'Authentication'
+    subsection: 'External Providers'
+    required: false
+    depends_on: external_provisioning_enabled
+    show_when: [true]
+    order: 3
+
+  external_provisioning_default_role:
+    type: select
+    value: 'user'
+    options: ['user', 'admin', 'super-admin']
+    description: 'Default role for auto-provisioned users'
+    section: 'Authentication'
+    subsection: 'External Providers'
+    required: false
+    depends_on: external_provisioning_enabled
+    show_when: [true]
+    order: 4
+
+  external_provisioning_fallback_action:
+    type: select
+    value: 'require_invite'
+    options: ['require_invite', 'create_org', 'deny_access']
+    description: 'Action when no organization mapping found'
+    section: 'Authentication'
+    subsection: 'External Providers'
+    required: false
+    depends_on: external_provisioning_enabled
+    show_when: [true]
+    order: 5
+
+  external_profile_sync_enabled:
+    type: boolean
+    value: true
+    description: 'Sync user profile from external providers'
+    section: 'Authentication'
+    subsection: 'External Providers'
+    required: true
+    order: 6
+
+  external_profile_update_on_login:
+    type: boolean
+    value: true
+    description: 'Update profile information on each login'
+    section: 'Authentication'
+    subsection: 'External Providers'
+    required: false
+    depends_on: external_profile_sync_enabled
+    show_when: [true]
+    order: 7
+
+  external_profile_sync_fields:
+    type: string
+    value: 'displayName,email,groups'
+    description: 'Comma-separated list of profile fields to sync'
+    section: 'Authentication'
+    subsection: 'External Providers'
+    required: false
+    depends_on: external_profile_sync_enabled
+    show_when: [true]
+    order: 8
+
+# Database configuration with UI metadata
+database:
+  dialect:
+    type: select
+    value: sqlite
+    options: ['sqlite', 'mysql', 'postgresql', 'mariadb']
+    description: 'Database type - SQLite for simple deployments, MySQL/PostgreSQL/MariaDB for production'
+    section: 'Database'
+    subsection: 'General'
+    required: true
+    order: 1
+
+  # SQLite specific settings
+  storage:
+    type: string
+    value: '/var/lib/hyperweaver-server/database/hyperweaver-server.db'
+    description: 'SQLite database file path (absolute path recommended)'
+    section: 'Database'
+    subsection: 'SQLite Configuration'
+    required: false
+    conditional:
+      field: 'database.dialect'
+      value: 'sqlite'
+    order: 1
+
+  # Network database settings (MySQL, PostgreSQL, MariaDB)
+  host:
+    type: host
+    value: localhost
+    description: 'Database server hostname or IP address'
+    section: 'Database'
+    subsection: 'Network Database'
+    required: false
+    conditional:
+      field: 'database.dialect'
+      value: ['mysql', 'postgresql', 'mariadb']
+    order: 1
+
+  port:
+    type: integer
+    value: 3306
+    description: 'Database server port (3306=MySQL/MariaDB, 5432=PostgreSQL)'
+    section: 'Database'
+    subsection: 'Network Database'
+    required: false
+    conditional:
+      field: 'database.dialect'
+      value: ['mysql', 'postgresql', 'mariadb']
+    validation:
+      min: 1
+      max: 65535
+    order: 2
+
+  user:
+    type: string
+    value: hyperweaver_server
+    description: 'Database username for authentication'
+    section: 'Database'
+    subsection: 'Network Database'
+    required: false
+    conditional:
+      field: 'database.dialect'
+      value: ['mysql', 'postgresql', 'mariadb']
+    order: 3
+
+  password:
+    type: password
+    value: ''
+    description: 'Database password for authentication'
+    section: 'Database'
+    subsection: 'Network Database'
+    required: false
+    conditional:
+      field: 'database.dialect'
+      value: ['mysql', 'postgresql', 'mariadb']
+    order: 4
+
+  database_name:
+    type: string
+    value: hyperweaver_server
+    description: 'Name of the database to connect to'
+    section: 'Database'
+    subsection: 'Network Database'
+    required: false
+    conditional:
+      field: 'database.dialect'
+      value: ['mysql', 'postgresql', 'mariadb']
+    order: 5
+
+  # Connection pooling settings (non-SQLite databases)
+  pool:
+    max:
+      type: integer
+      value: 5
+      description: 'Maximum number of simultaneous database connections'
+      section: 'Database'
+      subsection: 'Connection Pooling'
+      required: false
+      conditional:
+        field: 'database.dialect'
+        value: ['mysql', 'postgresql', 'mariadb']
+      validation:
+        min: 1
+        max: 100
+      order: 1
+    min:
+      type: integer
+      value: 0
+      description: 'Minimum number of idle connections to maintain'
+      section: 'Database'
+      subsection: 'Connection Pooling'
+      required: false
+      conditional:
+        field: 'database.dialect'
+        value: ['mysql', 'postgresql', 'mariadb']
+      validation:
+        min: 0
+        max: 20
+      order: 2
+    acquire:
+      type: integer
+      value: 30000
+      description: 'Maximum time (ms) to wait for a connection before timeout'
+      section: 'Database'
+      subsection: 'Connection Pooling'
+      required: false
+      conditional:
+        field: 'database.dialect'
+        value: ['mysql', 'postgresql', 'mariadb']
+      validation:
+        min: 1000
+        max: 300000
+      order: 3
+    idle:
+      type: integer
+      value: 10000
+      description: 'Maximum time (ms) a connection can be idle before being released'
+      section: 'Database'
+      subsection: 'Connection Pooling'
+      required: false
+      conditional:
+        field: 'database.dialect'
+        value: ['mysql', 'postgresql', 'mariadb']
+      validation:
+        min: 1000
+        max: 300000
+      order: 4
+
+  # General database settings
+  logging:
+    type: boolean
+    value: false
+    description: 'Log SQL queries to console (for debugging - may impact performance)'
+    section: 'Database'
+    subsection: 'General'
+    required: true
+    order: 2
+
+# Agent capability polling — the Server aggregates agents and owns health/capability
+# freshness (architecture D11). Poll GET {agent}/status on this interval.
+agents:
+  poll_interval:
+    type: integer
+    value: 60000
+    min: 10000
+    max: 600000
+    description: 'How often (ms) the Server polls each registered agent /status for health and capabilities'
+    section: 'Agents'
+    required: true
+    order: 1
+  poll_timeout:
+    type: integer
+    value: 5000
+    min: 1000
+    max: 60000
+    description: 'Per-agent /status poll timeout in milliseconds'
+    section: 'Agents'
+    required: true
+    order: 2
+
+# Third-party integrations
+integrations:
+  gravatar:
+    api_key:
+      type: string
+      value: ''
+      description: 'Gravatar API key for enhanced profile images and user info (get from https://gravatar.com/). Optional but provides better user experience with profile photos.'
+      section: 'Integrations'
+      required: false
+      order: 1
+
+# Help-desk / ticket system (profile dropdown link). Exposed via GET /api/config/ticket.
+ticket_system:
+  enabled:
+    type: boolean
+    value: false
+    description: 'Enable the help-desk / ticket link in the profile dropdown'
+    section: 'Integrations'
+    subsection: 'Ticket System'
+    required: true
+    order: 1
+  base_url:
+    type: string
+    value: ''
+    description: 'Base URL of your ticket system (e.g., https://support.example.com)'
+    section: 'Integrations'
+    subsection: 'Ticket System'
+    required: false
+    order: 2
+  req_type:
+    type: string
+    value: ''
+    description: 'Ticket request type / category identifier (system-specific)'
+    section: 'Integrations'
+    subsection: 'Ticket System'
+    required: false
+    order: 3
+  context:
+    type: string
+    value: ''
+    description: 'Ticket system context / queue identifier (system-specific)'
+    section: 'Integrations'
+    subsection: 'Ticket System'
+    required: false
+    order: 4
+
+# Aggregate-root ("datacenter") display name for the tree, + whether to expose it pre-auth.
+branding:
+  datacenter_label:
+    type: string
+    value: 'Hyperweaver'
+    description: 'Display name for the aggregate-root ("datacenter") node in the tree'
+    section: 'Frontend'
+    subsection: 'Branding'
+    required: true
+    order: 20
+  public_datacenter_label:
+    type: boolean
+    value: true
+    description: 'Expose the datacenter label on the public /api/status probe (pre-auth). Disable to avoid revealing the deployment name to anonymous visitors; the label is still delivered post-login via /api/auth/verify.'
+    section: 'Frontend'
+    subsection: 'Branding'
+    required: true
+    order: 21
