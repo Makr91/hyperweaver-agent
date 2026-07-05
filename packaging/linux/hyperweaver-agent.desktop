@@ -2,9 +2,10 @@
 Type=Application
 Name=Hyperweaver Agent
 Comment=VirtualBox/Vagrant host-agent with a system-tray web UI
-Exec=/usr/bin/hyperweaver-agent
+Exec=/usr/bin/hyperweaver-agent %u
 Icon=hyperweaver-agent
 Terminal=false
 Categories=System;Utility;
 Keywords=hyperweaver;virtualbox;vagrant;vm;
 StartupNotify=false
+MimeType=x-scheme-handler/hwa;

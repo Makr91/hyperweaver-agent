@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Hyperweaver Agent Documentation</title>
+  <link rel="stylesheet" href="./swagger-ui.css">
+  <link rel="stylesheet" href="./swagger-theme.css">
+</head>
+<body>
+  <div id="swagger-ui"></div>
+  <script src="./swagger-ui-bundle.js" charset="UTF-8"></script>
+  <script src="./swagger-ui-standalone-preset.js" charset="UTF-8"></script>
+  <script>
+    // Same initializer swagger-ui-express generates for the Node agent's
+    // /api-docs, so both agents' pages behave identically (server selector,
+    // Authorize dialog, deep links). The theme hides StandaloneLayout's topbar.
+    window.onload = () => {
+      window.ui = SwaggerUIBundle({
+        url: './swagger.json',
+        dom_id: '#swagger-ui',
+        deepLinking: true,
+        presets: [SwaggerUIBundle.presets.apis, SwaggerUIStandalonePreset],
+        plugins: [SwaggerUIBundle.plugins.DownloadUrl],
+        layout: 'StandaloneLayout',
+      });
+    };
+  </script>
+</body>
+</html>

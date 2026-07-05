@@ -23,6 +23,20 @@
 	<!-- Tray-only agent app: no Dock icon, no Force Quit entry. -->
 	<key>LSUIElement</key>
 	<true/>
+	<!-- hwa:// custom URL scheme (architecture item 5): Launch Services
+	     delivers opens as a kAEGetURL Apple Event to the running instance
+	     (received in-process by internal/protocol's handler). -->
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>com.startcloud.hyperweaver-agent.protocol</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>hwa</string>
+			</array>
+		</dict>
+	</array>
 	<key>NSHighResolutionCapable</key>
 	<true/>
 	<key>NSHumanReadableCopyright</key>

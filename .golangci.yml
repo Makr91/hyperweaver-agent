@@ -54,8 +54,9 @@ linters:
           msg: no console printing — use log/slog
   exclusions:
     # std-error-handling only; deliberately NOT common-false-positives so
-    # gosec subprocess findings (G204 etc.) stay visible and are suppressed
-    # per-line with a written justification.
+    # every finding stays visible. Findings are fixed in code — never
+    # suppressed inline; a rule-level exclusion (see gosec above) requires an
+    # explicit recorded decision.
     presets:
       - std-error-handling
 

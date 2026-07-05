@@ -48,3 +48,7 @@ updates:
   # Version document the update check compares against (JSON: version,
   # releaseUrl, releaseDate, changelog). Empty disables update checking.
   versioninfo_url: https://github.com/Makr91/hyperweaver-agent/releases/latest/download/update-info.json
+
+api_docs:
+  # Serve the interactive Agent API documentation (Swagger UI) at /api-docs.
+  enabled: true

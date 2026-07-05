@@ -1,7 +1,8 @@
 // Package webui provides the Hyperweaver UI artifact as an fs.FS. The dist
-// directory is embedded at build time; releases bake the published
-// hyperweaver-ui artifact into it (scripts/fetch-ui.sh), while the committed
-// placeholder keeps development and CI builds compiling without it.
+// directory is embedded at build time; the release workflow bakes the
+// published hyperweaver-ui artifact into it (pinned by .ui-version), while
+// the committed placeholder keeps development and CI builds compiling
+// without it.
 package webui
 
 import (

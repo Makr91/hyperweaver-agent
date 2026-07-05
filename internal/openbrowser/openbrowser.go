@@ -11,6 +11,7 @@ import (
 
 	"github.com/cli/browser"
 
+	"github.com/Makr91/hyperweaver-agent/internal/procattr"
 	"github.com/Makr91/hyperweaver-agent/internal/safepath"
 )
 
@@ -45,6 +46,7 @@ func Open(url, browserPath string) {
 		}
 		cmd = exec.CommandContext(ctx, exe, url)
 	}
+	cmd.SysProcAttr = procattr.NoConsole()
 
 	if err := cmd.Start(); err != nil {
 		slog.Error("open configured browser", "browser", browserPath, "url", url, "error", err)

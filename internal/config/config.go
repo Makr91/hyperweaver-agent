@@ -61,6 +61,12 @@ type UpdatesConfig struct {
 	VersionInfoURL string `yaml:"versioninfo_url" json:"versioninfo_url"`
 }
 
+// APIDocsConfig controls the interactive Agent API documentation (Swagger UI
+// at /api-docs), mirroring the Node agent's api_docs block.
+type APIDocsConfig struct {
+	Enabled bool `yaml:"enabled" json:"enabled"`
+}
+
 // Config is the root of config.yaml.
 type Config struct {
 	Server  ServerConfig  `yaml:"server"   json:"server"`
@@ -69,9 +75,10 @@ type Config struct {
 	Logging LoggingConfig `yaml:"logging"  json:"logging"`
 	APIKeys APIKeysConfig `yaml:"api_keys" json:"api_keys"`
 	Updates UpdatesConfig `yaml:"updates"  json:"updates"`
+	APIDocs APIDocsConfig `yaml:"api_docs" json:"api_docs"`
 
 	// path is where this configuration was loaded from; the setup token, key
-	// store, and config backups live beside it.
+	// store, protocol-handoff secret, and config backups live beside it.
 	path string
 }
 
@@ -126,6 +133,10 @@ updates:
   # Version document the update check compares against (JSON: version,
   # releaseUrl, releaseDate, changelog). Empty disables update checking.
   versioninfo_url: https://github.com/Makr91/hyperweaver-agent/releases/latest/download/update-info.json
+
+api_docs:
+  # Serve the interactive Agent API documentation (Swagger UI) at /api-docs.
+  enabled: true
 `
 
 // Default returns the built-in configuration values.
@@ -145,6 +156,7 @@ func Default() *Config {
 		Updates: UpdatesConfig{
 			VersionInfoURL: "https://github.com/Makr91/hyperweaver-agent/releases/latest/download/update-info.json",
 		},
+		APIDocs: APIDocsConfig{Enabled: true},
 	}
 }
 
@@ -251,14 +263,19 @@ func (c *Config) ListenAddr() string {
 	return net.JoinHostPort(c.Server.BindAddress, strconv.Itoa(c.Server.Port))
 }
 
-// LocalURL returns the URL the tray "Open" action launches. A wildcard bind
-// address is rewritten to a loopback address the browser can actually reach.
-func (c *Config) LocalURL() string {
+// BaseURL returns the agent's locally reachable HTTP origin. A wildcard bind
+// address is rewritten to a loopback address the local machine can reach.
+func (c *Config) BaseURL() string {
 	host := c.Server.BindAddress
 	if host == "" || host == "0.0.0.0" || host == "::" {
 		host = "127.0.0.1"
 	}
-	return fmt.Sprintf("http://%s/ui/", net.JoinHostPort(host, strconv.Itoa(c.Server.Port)))
+	return "http://" + net.JoinHostPort(host, strconv.Itoa(c.Server.Port))
+}
+
+// LocalURL returns the URL the tray "Open" action launches.
+func (c *Config) LocalURL() string {
+	return c.BaseURL() + "/ui/"
 }
 
 // LogFilePath returns the configured log file, defaulting to
@@ -289,4 +306,10 @@ func (c *Config) SetupTokenPath() string {
 // loaded configuration file.
 func (c *Config) KeyStorePath() string {
 	return filepath.Join(filepath.Dir(c.path), "keys.json")
+}
+
+// ProtocolSecretPath returns the hwa:// handoff-secret location:
+// protocol.secret beside the loaded configuration file.
+func (c *Config) ProtocolSecretPath() string {
+	return filepath.Join(filepath.Dir(c.path), "protocol.secret")
 }

@@ -9,6 +9,7 @@ import (
 
 	"github.com/Makr91/hyperweaver-agent/internal/auth"
 	"github.com/Makr91/hyperweaver-agent/internal/keys"
+	"github.com/Makr91/hyperweaver-agent/internal/protocol"
 )
 
 // trayKeyName names tray-minted keys after the local OS account so the UI
@@ -67,5 +68,36 @@ func (s *Server) handleTrayClaim(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]any{
 		"api_key": apiKey,
 		"message": "Tray login successful",
+	})
+}
+
+type protocolOpenRequest struct {
+	Secret string `json:"secret"`
+}
+
+// handleProtocolOpen serves the hwa:// single-instance handoff (Windows and
+// Linux): the OS spawns a fresh agent process for a protocol invocation, and
+// that process forwards the action here before exiting. The per-boot secret
+// file (0600, beside the config) authenticates it — a web page cannot read
+// local files, so possession proves a local same-user process, the same
+// trust a tray click carries. The signed-in token only ever appears in the
+// fresh browser tab this agent opens, never in this response.
+func (s *Server) handleProtocolOpen(w http.ResponseWriter, r *http.Request) {
+	var body protocolOpenRequest
+	if err := decodeBody(r, &body); err != nil || body.Secret == "" {
+		auth.WriteMsg(w, http.StatusBadRequest, "Protocol secret required")
+		return
+	}
+	if !protocol.VerifySecret(s.cfg.ProtocolSecretPath(), body.Secret) {
+		slog.Warn("protocol handoff with invalid secret", "remote", r.RemoteAddr)
+		auth.WriteMsg(w, http.StatusForbidden, "Invalid protocol secret")
+		return
+	}
+	slog.Info("protocol handoff accepted; opening the signed-in UI")
+	// The response must not wait on the browser launch.
+	go s.openUI()
+
+	writeJSON(w, map[string]any{
+		"message": "Opening the Hyperweaver UI",
 	})
 }

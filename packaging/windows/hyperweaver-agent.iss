@@ -41,6 +41,16 @@ Name: "startupicon"; Description: "Start {#AppName} when Windows starts"; GroupD
 [Files]
 Source: "..\..\bin\{#AppExeName}"; DestDir: "{app}"; Flags: ignoreversion
 
+[Registry]
+; hwa:// custom URL scheme (architecture item 5): browsers hand hwa://open to
+; Windows, Windows spawns the agent with the URI as an argument, and that
+; process forwards the action to the running instance (single-instance
+; handoff). HKA resolves to HKLM for admin installs, HKCU otherwise.
+Root: HKA; Subkey: "Software\Classes\hwa"; ValueType: string; ValueName: ""; ValueData: "URL:Hyperweaver Agent Protocol"; Flags: uninsdeletekey
+Root: HKA; Subkey: "Software\Classes\hwa"; ValueType: string; ValueName: "URL Protocol"; ValueData: ""
+Root: HKA; Subkey: "Software\Classes\hwa\DefaultIcon"; ValueType: string; ValueName: ""; ValueData: "{app}\{#AppExeName},0"
+Root: HKA; Subkey: "Software\Classes\hwa\shell\open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\{#AppExeName}"" ""%1"""
+
 [Icons]
 Name: "{group}\{#AppName}"; Filename: "{app}\{#AppExeName}"
 Name: "{userstartup}\{#AppName}"; Filename: "{app}\{#AppExeName}"; Tasks: startupicon

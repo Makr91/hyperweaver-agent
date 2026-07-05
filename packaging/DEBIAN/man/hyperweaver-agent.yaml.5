@@ -69,6 +69,40 @@ Maximum log file size in megabytes before rotation (default: 20)
 .It Cm max_backups
 Number of rotated log files to keep (default: 5)
 .El
+.Ss api_keys
+API-key authentication (the Agent API v1 local tier).
+.Bl -tag -width "bootstrap_require_claim_token"
+.It Cm bootstrap_enabled
+Boolean enabling POST /api-keys/bootstrap to create the first API key
+(default: true)
+.It Cm bootstrap_auto_disable
+Boolean locking the bootstrap endpoint once any key exists (default: true)
+.It Cm bootstrap_require_claim_token
+Boolean requiring the setup (claim) token — written to
+.Pa setup.token
+beside this file and printed to the startup log — as proof of host
+ownership (default: true)
+.It Cm hash_rounds
+Bcrypt cost for stored key hashes, 4-20 (default: 12)
+.It Cm key_length
+Random bytes of key material, 16-256, base64url-encoded after the hw_
+prefix (default: 64)
+.El
+.Ss updates
+Application update checking.
+.Bl -tag -width "versioninfo_url"
+.It Cm versioninfo_url
+URL of the remote versioninfo JSON document (version, releaseUrl,
+releaseDate, changelog) the update check compares against. Empty disables
+update checking.
+.El
+.Ss api_docs
+Interactive API documentation.
+.Bl -tag -width "enabled"
+.It Cm enabled
+Boolean serving the Agent API documentation (Swagger UI) at /api-docs
+(default: true)
+.El
 .Sh FILES
 .Bl -tag -width ".Pa /var/log/hyperweaver-agent/"
 .It Pa /etc/hyperweaver-agent/config.yaml
@@ -78,6 +112,16 @@ Per-user configuration
 .It Pa /var/log/hyperweaver-agent/
 Service log directory
 .El
+.Pp
+Beside the configuration file the agent also keeps
+.Pa setup.token
+(first-key claim token, 0600),
+.Pa keys.json
+(hashed API keys, 0600),
+.Pa protocol.secret
+(per-boot hwa:// handoff secret, 0600), and
+.Pa backups/
+(configuration backups).
 .Sh EXAMPLES
 The packaged default:
 .Bd -literal -offset indent

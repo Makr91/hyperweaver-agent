@@ -16,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Makr91/hyperweaver-agent/internal/apidocs"
 	"github.com/Makr91/hyperweaver-agent/internal/auth"
 	"github.com/Makr91/hyperweaver-agent/internal/config"
 	"github.com/Makr91/hyperweaver-agent/internal/keys"
@@ -29,21 +30,28 @@ type Server struct {
 	keys       *keys.Store
 	trayTokens *auth.TrayTokens
 	httpSrv    *http.Server
+	listener   net.Listener
 	startedAt  time.Time
 
 	// restartArgs are the arguments a restart-spawned successor process gets —
 	// built by main from parsed flag values (never raw os.Args).
 	restartArgs []string
+
+	// openUI opens the signed-in UI in the user's browser — the same action a
+	// tray Open click performs, injected by main so the hwa:// protocol
+	// handoff (POST /protocol/open) shares it exactly.
+	openUI func()
 }
 
 // New builds the server and its routes.
-func New(cfg *config.Config, keyStore *keys.Store, trayTokens *auth.TrayTokens, restartArgs []string) (*Server, error) {
+func New(cfg *config.Config, keyStore *keys.Store, trayTokens *auth.TrayTokens, restartArgs []string, openUI func()) (*Server, error) {
 	s := &Server{
 		cfg:         cfg,
 		keys:        keyStore,
 		trayTokens:  trayTokens,
 		startedAt:   time.Now(),
 		restartArgs: restartArgs,
+		openUI:      openUI,
 	}
 
 	mux := http.NewServeMux()
@@ -59,6 +67,9 @@ func New(cfg *config.Config, keyStore *keys.Store, trayTokens *auth.TrayTokens, 
 	requireKey := auth.Middleware(s.keys)
 	mux.HandleFunc("POST /api-keys/bootstrap", s.handleBootstrapKey)
 	mux.HandleFunc("POST /auth/tray-claim", s.handleTrayClaim)
+	// hwa:// single-instance handoff: public route, authenticated by the
+	// per-boot secret file only a local same-user process can read.
+	mux.HandleFunc("POST /protocol/open", s.handleProtocolOpen)
 	mux.Handle("POST /api-keys/generate", requireKey(http.HandlerFunc(s.handleGenerateKey)))
 	mux.Handle("GET /api-keys", requireKey(http.HandlerFunc(s.handleListKeys)))
 	mux.Handle("GET /api-keys/info", requireKey(http.HandlerFunc(s.handleKeyInfo)))
@@ -70,6 +81,11 @@ func New(cfg *config.Config, keyStore *keys.Store, trayTokens *auth.TrayTokens, 
 	mux.Handle("GET /app/updates/check", requireKey(http.HandlerFunc(s.handleUpdateCheck)))
 	mux.Handle("GET /provisioning/status", requireKey(http.HandlerFunc(s.handleProvisioningStatus)))
 
+	// Host statistics (shared v1 stats shape). The Node agent optionally
+	// serves this publicly (stats.public_access, default false) — this agent
+	// keeps it keyed; add the knob only if a consumer ever needs it public.
+	mux.Handle("GET /stats", requireKey(http.HandlerFunc(s.handleStats)))
+
 	// Settings surface (Agent API v1) — admin-only via the central role policy.
 	mux.Handle("GET /settings", requireKey(http.HandlerFunc(s.handleGetSettings)))
 	mux.Handle("GET /settings/schema", requireKey(http.HandlerFunc(s.handleSettingsSchema)))
@@ -79,6 +95,14 @@ func New(cfg *config.Config, keyStore *keys.Store, trayTokens *auth.TrayTokens, 
 	mux.Handle("DELETE /settings/backups/{filename}", requireKey(http.HandlerFunc(s.handleDeleteBackup)))
 	mux.Handle("POST /settings/restore/{filename}", requireKey(http.HandlerFunc(s.handleRestoreBackup)))
 	mux.Handle("POST /server/restart", requireKey(http.HandlerFunc(s.handleServerRestart)))
+
+	// Interactive Agent API documentation (Swagger UI), Node-agent parity:
+	// public /api-docs page + /api-docs/swagger.json, gated by configuration.
+	if cfg.APIDocs.Enabled {
+		if err := apidocs.Mount(mux); err != nil {
+			return nil, err
+		}
+	}
 
 	uiFS, err := webui.FS(cfg.UI.Path)
 	if err != nil {
@@ -185,14 +209,28 @@ func (s *Server) handleRootInfo(w http.ResponseWriter, _ *http.Request) {
 	}
 }
 
-// Start blocks serving HTTP until Shutdown is called or the listener fails.
-func (s *Server) Start() error {
+// Listen binds the configured address without serving yet. Split from Start
+// so main can detect a bind conflict — the single-instance signal — before
+// any tray icon is shown, and hand the action to the instance that owns the
+// port instead.
+func (s *Server) Listen() error {
 	listener, err := s.listen()
 	if err != nil {
 		return err
 	}
+	s.listener = listener
+	return nil
+}
+
+// Start blocks serving HTTP until Shutdown is called or the listener fails.
+func (s *Server) Start() error {
+	if s.listener == nil {
+		if err := s.Listen(); err != nil {
+			return err
+		}
+	}
 	slog.Info("http server listening", "addr", s.httpSrv.Addr, "ui_enabled", s.cfg.UI.Enabled)
-	err = s.httpSrv.Serve(listener)
+	err := s.httpSrv.Serve(s.listener)
 	if errors.Is(err, http.ErrServerClosed) {
 		return nil
 	}

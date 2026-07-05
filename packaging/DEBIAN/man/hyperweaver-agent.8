@@ -70,7 +70,26 @@ The agent serves the Hyperweaver web UI at:
 .Pp
 The root path redirects to the UI when it is enabled. The bundled
 documentation site, when present in the UI artifact, is served at
-.Pa /docs .
+.Pa /docs ,
+and the interactive Agent API documentation (Swagger UI) at
+.Pa /api-docs .
+.Sh PROTOCOL HANDLER
+Desktop installs register the
+.Ql hwa://
+custom URL scheme.
+.Ql hwa://open
+behaves exactly like the tray Open action: the running agent opens the
+signed-in web UI in the user's browser. On Windows and Linux the OS spawns a
+fresh agent process with the URI as an argument; that process hands the
+action to the running instance (authenticated by a per-boot secret file only
+the same user can read) and exits, or becomes the running agent itself when
+none is up. Launching
+.Nm
+in desktop mode while another instance already owns the port is resolved the
+same way: the duplicate hands the running instance an open action and exits
+instead of starting a second tray icon. Protocol login is only available for
+per-user desktop agents — not for the packaged systemd service, which runs
+as a different user.
 .Sh API ENDPOINTS
 The public identity and capability probe of the Agent API contract:
 .Pp
@@ -104,7 +123,7 @@ Check the agent is up:
 $ curl http://127.0.0.1:9420/api/status
 .Ed
 .Sh DIAGNOSTICS
-The agent logs to a rotating JSON log file (see
+The agent logs to a rotating text log file (see
 .Xr hyperweaver-agent.yaml 5 )
 and, when a console is attached, to standard error. Under systemd, console
 output is captured by the journal:

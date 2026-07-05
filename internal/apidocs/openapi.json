@@ -1,0 +1,814 @@
+{
+  "openapi": "3.0.0",
+  "info": {
+    "title": "Agent API",
+    "version": "1.0.0",
+    "x-app-version": "0.0.0",
+    "description": "Hyperweaver Agent API v1 — the shared host-agent contract (architecture D1), as implemented by hyperweaver-agent (VirtualBox/Vagrant, Go). Reference implementation: zoneweaver-agent (Bhyve/OmniOS, Node). Capabilities are advertised by the public GET /api/status (role, hypervisors, console, auth, features) and drive conditional UI rendering. This document describes only the endpoints this agent implements today and grows with it; the machines/tasks/console groups land with the provisioning engine. The implementing application version is `info.x-app-version`; `info.version` is the frozen contract line. Authorization is role-based (admin > operator > viewer) and enforced by a central method+path policy; each operation notes its minimum role.",
+    "license": {
+      "name": "GPL-3.0",
+      "url": "https://github.com/Makr91/hyperweaver-agent/blob/main/LICENSE.md"
+    },
+    "contact": {
+      "name": "Hyperweaver Agent",
+      "url": "https://github.com/Makr91/hyperweaver-agent"
+    }
+  },
+  "externalDocs": {
+    "description": "View on GitHub",
+    "url": "https://github.com/Makr91/hyperweaver-agent"
+  },
+  "tags": [
+    { "name": "Status", "description": "Public identity and capability discovery (Hyperweaver dual-mode contract)" },
+    { "name": "API Keys", "description": "API-key lifecycle (Agent API v1 local auth tier)" },
+    { "name": "Local Login", "description": "Local-presence sign-in: the tray Open handoff and the hwa:// protocol handler" },
+    { "name": "System", "description": "Version, update checking, prerequisite detection" },
+    { "name": "Settings", "description": "Agent configuration over the API (admin only)" }
+  ],
+  "components": {
+    "securitySchemes": {
+      "ApiKeyAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "API Key",
+        "description": "API key in Bearer format: `Authorization: Bearer hw_your_api_key_here`"
+      },
+      "XApiKeyAuth": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "X-API-Key",
+        "description": "API key in the X-API-Key header (equivalent to the Bearer form)"
+      }
+    },
+    "schemas": {
+      "Error": {
+        "type": "object",
+        "properties": {
+          "msg": {
+            "type": "string",
+            "description": "Error message",
+            "example": "Invalid API key"
+          }
+        }
+      },
+      "WrappedError": {
+        "type": "object",
+        "properties": {
+          "success": { "type": "boolean", "example": false },
+          "error": { "type": "string", "example": "Failed to check for updates" },
+          "timestamp": { "type": "string", "format": "date-time" },
+          "details": { "type": "string", "nullable": true }
+        }
+      },
+      "Status": {
+        "type": "object",
+        "description": "Public identity + capabilities document (drives dual-mode UI rendering)",
+        "properties": {
+          "role": { "type": "string", "enum": ["agent", "server"], "example": "agent" },
+          "agent": { "type": "string", "example": "hyperweaver-agent" },
+          "hypervisors": { "type": "array", "items": { "type": "string" }, "example": ["virtualbox"] },
+          "platform": { "type": "string", "example": "windows" },
+          "arch": { "type": "string", "example": "x86_64" },
+          "version": { "type": "string", "example": "0.1.1" },
+          "hostname": { "type": "string", "example": "desktop-01" },
+          "auth": { "type": "array", "items": { "type": "string" }, "example": ["apikey"] },
+          "bootstrapAvailable": { "type": "boolean", "example": true },
+          "console": { "type": "array", "items": { "type": "string" }, "example": [] },
+          "features": { "type": "array", "items": { "type": "string" }, "example": [] },
+          "uptime": { "type": "integer", "description": "Seconds since the agent started", "example": 86400 }
+        }
+      },
+      "Entity": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "integer", "example": 1 },
+          "name": { "type": "string", "example": "Hyperweaver-Production" },
+          "description": { "type": "string", "example": "API key for the Hyperweaver Server" },
+          "role": {
+            "type": "string",
+            "enum": ["admin", "operator", "viewer"],
+            "description": "Authorization role of the key (Agent API v1 role model)",
+            "example": "admin"
+          },
+          "is_active": { "type": "boolean", "example": true },
+          "created_at": { "type": "string", "format": "date-time" },
+          "last_used": { "type": "string", "format": "date-time" }
+        }
+      },
+      "Tool": {
+        "type": "object",
+        "description": "One detected prerequisite (SHI parity: presence + version)",
+        "properties": {
+          "name": { "type": "string", "example": "vagrant" },
+          "installed": { "type": "boolean", "example": true },
+          "version": { "type": "string", "example": "2.4.3" },
+          "path": { "type": "string", "example": "C:\\HashiCorp\\Vagrant\\bin\\vagrant.exe" }
+        }
+      },
+      "HostInfo": {
+        "type": "object",
+        "properties": {
+          "os": { "type": "string", "example": "Windows 10 Pro" },
+          "arch": { "type": "string", "example": "amd64" },
+          "cpus": { "type": "integer", "example": 32 },
+          "memory_bytes": { "type": "integer", "format": "int64", "example": 68719476736 }
+        }
+      },
+      "Backup": {
+        "type": "object",
+        "properties": {
+          "filename": { "type": "string", "example": "config-1751712000000.yaml" },
+          "createdAt": { "type": "string", "format": "date-time" }
+        }
+      },
+      "ServerStats": {
+        "type": "object",
+        "description": "Host statistics in Node's os-module vocabulary (the shared v1 stats shape). The zones field names are the contract's; on this agent they carry VirtualBox machine names.",
+        "properties": {
+          "hostname": { "type": "string", "example": "desktop-01" },
+          "eol": { "type": "string", "example": "\r\n" },
+          "arch": { "type": "string", "description": "Node os.arch() vocabulary", "example": "x64" },
+          "endianness": { "type": "string", "example": "LE" },
+          "freemem": { "type": "integer", "format": "int64", "description": "Available physical memory in bytes", "example": 34359738368 },
+          "loadavg": { "type": "array", "items": { "type": "number" }, "description": "1/5/15-minute load averages (zeros on Windows)", "example": [0.42, 0.31, 0.25] },
+          "platform": { "type": "string", "description": "Node os.platform() vocabulary", "example": "win32" },
+          "release": { "type": "string", "description": "Kernel version", "example": "10.0.19045" },
+          "totalmem": { "type": "integer", "format": "int64", "description": "Total physical memory in bytes", "example": 68719476736 },
+          "type": { "type": "string", "description": "Node os.type() vocabulary", "example": "Windows_NT" },
+          "uptime": { "type": "integer", "description": "Host uptime in seconds (not process uptime)", "example": 86400 },
+          "version": { "type": "string", "description": "OS marketing name", "example": "Windows 10 Pro" },
+          "allzones": { "type": "array", "items": { "type": "string" }, "description": "All registered machine names (VBoxManage list vms)", "example": ["domino-01", "domino-02"] },
+          "runningzones": { "type": "array", "items": { "type": "string" }, "description": "Running machine names (VBoxManage list runningvms)", "example": ["domino-01"] }
+        }
+      }
+    }
+  },
+  "security": [{ "ApiKeyAuth": [] }, { "XApiKeyAuth": [] }],
+  "paths": {
+    "/status": {
+      "get": {
+        "tags": ["Status"],
+        "summary": "Public identity and capabilities",
+        "description": "Canonical path of the public status probe. No authentication.",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Agent identity and capabilities",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Status" } } }
+          }
+        }
+      }
+    },
+    "/api/status": {
+      "get": {
+        "tags": ["Status"],
+        "summary": "Public identity and capabilities (SPA discovery alias)",
+        "description": "Unconditional alias of GET /status — the single mode-discovery probe URL for the Hyperweaver UI. No authentication.",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Agent identity and capabilities",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Status" } } }
+          }
+        }
+      }
+    },
+    "/stats": {
+      "get": {
+        "tags": ["System"],
+        "summary": "Host statistics and machine lists",
+        "description": "Minimum role: viewer. OS-level host statistics plus the registered and running VirtualBox machine name lists. Machine-list failures degrade to empty arrays — a broken VBoxManage never fails the host stats.",
+        "responses": {
+          "200": {
+            "description": "Host statistics",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ServerStats" } } }
+          },
+          "401": {
+            "description": "Missing API key",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+          },
+          "403": {
+            "description": "Invalid API key",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+          }
+        }
+      }
+    },
+    "/api-keys/bootstrap": {
+      "post": {
+        "tags": ["API Keys"],
+        "summary": "Create the first API key",
+        "description": "Public, but gated: requires `api_keys.bootstrap_enabled`, locks after the first key when `bootstrap_auto_disable` is on, and (by default) demands the setup claim token written to `setup.token` beside the agent's config file and printed to the startup log — proof of host ownership. The first key is always an admin key.",
+        "security": [],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": { "type": "string", "example": "Bootstrap-Key" },
+                  "description": { "type": "string", "example": "Initial bootstrap API key" },
+                  "setupToken": { "type": "string", "description": "64-character claim token from the agent host" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Key created — shown once, only a hash is stored",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "api_key": { "type": "string", "example": "hw_abc123def456..." },
+                    "message": { "type": "string", "example": "Bootstrap API key generated successfully" },
+                    "note": { "type": "string", "example": "Bootstrap endpoint will be auto-disabled for future requests" }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid JSON body",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+          },
+          "403": {
+            "description": "Bootstrap disabled, auto-disabled, or setup token invalid",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+          }
+        }
+      }
+    },
+    "/auth/tray-claim": {
+      "post": {
+        "tags": ["Local Login"],
+        "summary": "Exchange a tray one-time token for an admin API key",
+        "description": "Public: the token itself is the credential — minted seconds earlier by the local user's physical tray Open click (or an hwa:// protocol invocation), carried in the URL fragment, single-use, 60-second TTL. This is how a desktop user gets a signed-in UI without ever seeing a login screen.",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["token"],
+                "properties": {
+                  "token": { "type": "string", "description": "Single-use tray token from the #tray= URL fragment" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Fresh admin key, named after the local OS account",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "api_key": { "type": "string", "example": "hw_abc123def456..." },
+                    "message": { "type": "string", "example": "Tray login successful" }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Missing token",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+          },
+          "403": {
+            "description": "Unknown, expired, or already-used token",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+          }
+        }
+      }
+    },
+    "/protocol/open": {
+      "post": {
+        "tags": ["Local Login"],
+        "summary": "hwa:// single-instance handoff",
+        "description": "Public but secret-gated: when the OS spawns a fresh agent process for an hwa://open invocation (Windows registry handler, Linux .desktop handler), that process forwards the action here and exits. The per-boot secret file (0600, beside the running agent's config) authenticates it — web pages cannot read local files, so possession proves a local same-user process. On success the running agent opens the signed-in UI in the user's browser, exactly like a tray Open click.",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["secret"],
+                "properties": {
+                  "secret": { "type": "string", "description": "Contents of the running agent's protocol.secret file" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Action accepted; the agent is opening the browser",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "message": { "type": "string", "example": "Opening the Hyperweaver UI" }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Missing secret",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+          },
+          "403": {
+            "description": "Invalid secret",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+          }
+        }
+      }
+    },
+    "/api-keys/generate": {
+      "post": {
+        "tags": ["API Keys"],
+        "summary": "Generate a new API key",
+        "description": "Minimum role: admin.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["name"],
+                "properties": {
+                  "name": { "type": "string", "example": "Hyperweaver-Production" },
+                  "description": { "type": "string", "example": "API key for the Hyperweaver Server" },
+                  "role": {
+                    "type": "string",
+                    "enum": ["admin", "operator", "viewer"],
+                    "description": "Defaults to admin when omitted"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Key created — shown once, only a hash is stored",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "api_key": { "type": "string", "example": "hw_abc123def456..." },
+                    "entity_id": { "type": "integer", "example": 2 },
+                    "name": { "type": "string" },
+                    "description": { "type": "string" },
+                    "role": { "type": "string", "enum": ["admin", "operator", "viewer"] },
+                    "message": { "type": "string", "example": "API key generated successfully" }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Missing name or invalid role",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+          },
+          "401": {
+            "description": "Missing API key",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+          },
+          "403": {
+            "description": "Invalid key or insufficient role",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+          }
+        }
+      }
+    },
+    "/api-keys": {
+      "get": {
+        "tags": ["API Keys"],
+        "summary": "List all API keys",
+        "description": "Minimum role: admin. Hashes are never returned.",
+        "responses": {
+          "200": {
+            "description": "All keys, newest first",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "entities": { "type": "array", "items": { "$ref": "#/components/schemas/Entity" } },
+                    "total": { "type": "integer", "example": 3 }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing API key",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+          },
+          "403": {
+            "description": "Invalid key or insufficient role",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+          }
+        }
+      }
+    },
+    "/api-keys/info": {
+      "get": {
+        "tags": ["API Keys"],
+        "summary": "Describe the calling key",
+        "description": "Minimum role: viewer (every valid key may inspect itself).",
+        "responses": {
+          "200": {
+            "description": "The calling key's attributes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": { "type": "integer" },
+                    "name": { "type": "string" },
+                    "description": { "type": "string" },
+                    "role": { "type": "string", "enum": ["admin", "operator", "viewer"] },
+                    "created_at": { "type": "string", "format": "date-time" },
+                    "last_used": { "type": "string", "format": "date-time" }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing API key",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+          },
+          "403": {
+            "description": "Invalid API key",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+          }
+        }
+      }
+    },
+    "/api-keys/{id}": {
+      "delete": {
+        "tags": ["API Keys"],
+        "summary": "Permanently delete an API key",
+        "description": "Minimum role: admin. Deleting the last active admin key is refused (lockout guard).",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "Key deleted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "message": { "type": "string", "example": "API key deleted successfully" },
+                    "entity_id": { "type": "string", "example": "2" },
+                    "name": { "type": "string" }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No key with that id",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+          },
+          "409": {
+            "description": "Would remove the last active admin key",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+          }
+        }
+      }
+    },
+    "/api-keys/{id}/revoke": {
+      "put": {
+        "tags": ["API Keys"],
+        "summary": "Deactivate an API key",
+        "description": "Minimum role: admin. Revoking the last active admin key is refused (lockout guard).",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "Key deactivated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "message": { "type": "string", "example": "API key revoked successfully" },
+                    "entity_id": { "type": "string", "example": "2" },
+                    "name": { "type": "string" }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No key with that id",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+          },
+          "409": {
+            "description": "Would deactivate the last active admin key",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+          }
+        }
+      }
+    },
+    "/version": {
+      "get": {
+        "tags": ["System"],
+        "summary": "Application version and host environment",
+        "description": "Minimum role: viewer. Includes the detected provisioning prerequisites (Vagrant, VirtualBox, Git) and host information — SHI's footer data.",
+        "responses": {
+          "200": {
+            "description": "Version information",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": { "type": "boolean", "example": true },
+                    "message": { "type": "string", "example": "Version information retrieved" },
+                    "timestamp": { "type": "string", "format": "date-time" },
+                    "version": { "type": "string", "example": "0.1.1" },
+                    "name": { "type": "string", "example": "hyperweaver-agent" },
+                    "go_version": { "type": "string", "example": "go1.25.0" },
+                    "platform": { "type": "string", "example": "windows" },
+                    "arch": { "type": "string", "example": "amd64" },
+                    "uptime_seconds": { "type": "integer", "example": 86400 },
+                    "tools": { "type": "array", "items": { "$ref": "#/components/schemas/Tool" } },
+                    "host": { "$ref": "#/components/schemas/HostInfo" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/app/updates/check": {
+      "get": {
+        "tags": ["System"],
+        "summary": "Check for application updates",
+        "description": "Minimum role: viewer. Fetches the configured versioninfo document (updates.versioninfo_url) and compares against the running build.",
+        "responses": {
+          "200": {
+            "description": "Update check result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": { "type": "boolean", "example": true },
+                    "message": { "type": "string", "example": "Update check completed" },
+                    "timestamp": { "type": "string", "format": "date-time" },
+                    "current_version": { "type": "string", "example": "0.1.1" },
+                    "latest_version": { "type": "string", "example": "0.2.0" },
+                    "update_available": { "type": "boolean", "example": true },
+                    "release_url": { "type": "string", "nullable": true },
+                    "release_date": { "type": "string", "nullable": true },
+                    "changelog": { "type": "string", "nullable": true }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Update checking not configured",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/WrappedError" } } }
+          },
+          "500": {
+            "description": "Versioninfo fetch or parse failure",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/WrappedError" } } }
+          }
+        }
+      }
+    },
+    "/provisioning/status": {
+      "get": {
+        "tags": ["System"],
+        "summary": "Provisioning prerequisite availability",
+        "description": "Minimum role: viewer. A bare tool-name → installed map; this agent's tools are vagrant, virtualbox, and git (the Node agent lists its OmniOS set — same endpoint, platform-appropriate contents).",
+        "responses": {
+          "200": {
+            "description": "Tool availability map",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": { "type": "boolean" },
+                  "example": { "vagrant": true, "virtualbox": true, "git": true }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/settings": {
+      "get": {
+        "tags": ["Settings"],
+        "summary": "Current agent configuration",
+        "description": "Minimum role: admin. Returns the live configuration with the same section and key names as config.yaml.",
+        "responses": {
+          "200": {
+            "description": "The configuration document",
+            "content": { "application/json": { "schema": { "type": "object" } } }
+          }
+        }
+      },
+      "put": {
+        "tags": ["Settings"],
+        "summary": "Update agent configuration",
+        "description": "Minimum role: admin. Shallow-merges the submitted top-level sections onto the on-disk YAML, validates the result, backs up the current file, and writes atomically. The running process keeps its loaded values — most changes apply on restart.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "description": "Top-level configuration sections to replace",
+                "example": { "logging": { "level": "debug", "console": true, "file": "", "max_size_mb": 20, "max_backups": 5 } }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Settings persisted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": { "type": "boolean", "example": true },
+                    "message": { "type": "string", "example": "Settings updated successfully. Some changes may require a server restart." }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid JSON body",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/WrappedError" } } }
+          },
+          "500": {
+            "description": "Merged configuration invalid or write failure",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/WrappedError" } } }
+          }
+        }
+      }
+    },
+    "/settings/schema": {
+      "get": {
+        "tags": ["Settings"],
+        "summary": "Settings schema",
+        "description": "Minimum role: admin. Section/field types, descriptions, defaults, ranges, and restart requirements — the document the settings UI renders its tabs from.",
+        "responses": {
+          "200": {
+            "description": "The schema document",
+            "content": { "application/json": { "schema": { "type": "object" } } }
+          }
+        }
+      }
+    },
+    "/settings/backup": {
+      "post": {
+        "tags": ["Settings"],
+        "summary": "Create a configuration backup",
+        "description": "Minimum role: admin.",
+        "responses": {
+          "200": {
+            "description": "Backup created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": { "type": "boolean", "example": true },
+                    "message": { "type": "string", "example": "Backup created successfully" },
+                    "backup": { "$ref": "#/components/schemas/Backup" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/settings/backups": {
+      "get": {
+        "tags": ["Settings"],
+        "summary": "List configuration backups",
+        "description": "Minimum role: admin. Newest first.",
+        "responses": {
+          "200": {
+            "description": "All backups",
+            "content": {
+              "application/json": {
+                "schema": { "type": "array", "items": { "$ref": "#/components/schemas/Backup" } }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/settings/backups/{filename}": {
+      "delete": {
+        "tags": ["Settings"],
+        "summary": "Delete a configuration backup",
+        "description": "Minimum role: admin. Only agent-generated backup names (config-<unix-ms>.yaml) are accepted.",
+        "parameters": [
+          { "name": "filename", "in": "path", "required": true, "schema": { "type": "string" }, "example": "config-1751712000000.yaml" }
+        ],
+        "responses": {
+          "200": {
+            "description": "Backup deleted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": { "type": "boolean", "example": true },
+                    "message": { "type": "string" }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Backup not found",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/WrappedError" } } }
+          }
+        }
+      }
+    },
+    "/settings/restore/{filename}": {
+      "post": {
+        "tags": ["Settings"],
+        "summary": "Restore configuration from a backup",
+        "description": "Minimum role: admin. The backup is validated as a working configuration and the current file is backed up first.",
+        "parameters": [
+          { "name": "filename", "in": "path", "required": true, "schema": { "type": "string" }, "example": "config-1751712000000.yaml" }
+        ],
+        "responses": {
+          "200": {
+            "description": "Configuration restored",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": { "type": "boolean", "example": true },
+                    "message": { "type": "string" }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Backup not found",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/WrappedError" } } }
+          }
+        }
+      }
+    },
+    "/server/restart": {
+      "post": {
+        "tags": ["Settings"],
+        "summary": "Restart the agent",
+        "description": "Minimum role: admin. Under systemd the unit's Restart=always brings the agent back after a clean exit; everywhere else the agent spawns its own successor before shutting down.",
+        "responses": {
+          "200": {
+            "description": "Restart initiated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": { "type": "boolean", "example": true },
+                    "message": { "type": "string", "example": "Server restart initiated. Please wait a few seconds before reconnecting. The server will reload all configuration changes." }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

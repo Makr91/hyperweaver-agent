@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Makr91/hyperweaver-agent/internal/procattr"
 	"github.com/Makr91/hyperweaver-agent/internal/safepath"
 )
 
@@ -119,7 +120,9 @@ func probePath(ctx context.Context, name, path string, args ...string) Tool {
 	}
 
 	tool := Tool{Name: name, Installed: true, Path: exe}
-	out, err := exec.CommandContext(ctx, exe, args...).Output()
+	cmd := exec.CommandContext(ctx, exe, args...)
+	cmd.SysProcAttr = procattr.NoConsole()
+	out, err := cmd.Output()
 	if err != nil {
 		return tool
 	}

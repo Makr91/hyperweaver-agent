@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/Makr91/hyperweaver-agent/internal/auth"
+	"github.com/Makr91/hyperweaver-agent/internal/procattr"
 	"github.com/Makr91/hyperweaver-agent/internal/safepath"
 )
 
@@ -147,6 +148,17 @@ var settingsSchema = map[string]any{
 			},
 		},
 	},
+	"api_docs": map[string]any{
+		"description":      "Interactive API documentation (Swagger UI)",
+		"requires_restart": true,
+		"properties": map[string]any{
+			"enabled": map[string]any{
+				"type":        "boolean",
+				"description": "Serve the Agent API documentation at /api-docs",
+				"default":     true,
+			},
+		},
+	},
 }
 
 func (s *Server) handleGetSettings(w http.ResponseWriter, _ *http.Request) {
@@ -273,6 +285,7 @@ func (s *Server) restartSelf(parent context.Context) {
 		}
 		cmd := exec.CommandContext(parent, validated, s.restartArgs...)
 		cmd.Env = append(os.Environ(), "HYPERWEAVER_RESTART=1")
+		cmd.SysProcAttr = procattr.NoConsole()
 		if err := cmd.Start(); err != nil {
 			slog.Error("restart: spawn successor", "error", err)
 			return
