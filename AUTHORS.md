@@ -1,10 +1,11 @@
 # Authors
 
-This file lists the people who have contributed to Zoneweaver Agent.
+This file lists the people who have contributed to Hyperweaver Agent.
 
 ## Project Maintainer
 
 **Primary Maintainer:** Makr91
+
 - GitHub: [@Makr91](https://github.com/Makr91)
 - Role: Creator, Lead Developer, and Maintainer
 - Contributions: Initial development, architecture, ongoing maintenance
@@ -30,7 +31,7 @@ We welcome contributions from the community! Contributors who make significant i
 We encourage contributions of all types:
 
 - **Code contributions**: Bug fixes, new features, performance improvements
-- **Documentation**: Guides, API documentation, examples, translations  
+- **Documentation**: Guides, API documentation, examples, translations
 - **Testing**: Bug reports, feature testing, compatibility testing
 - **Community support**: Helping others in discussions and issues
 
@@ -41,7 +42,7 @@ See our [Contributing Guide](CONTRIBUTING.md) for details on how to get started.
 Contributors are added to this file when they:
 
 - Submit accepted pull requests with code changes
-- Contribute significant documentation improvements  
+- Contribute significant documentation improvements
 - Provide ongoing community support and assistance
 - Report critical bugs or security issues
 
@@ -51,7 +52,7 @@ All contributors retain copyright to their contributions while licensing them un
 
 Special recognition for those who have helped the project in unique ways:
 
-- **Community Members**: Thank you to everyone who uses Zoneweaver Agent, reports issues, asks questions, and provides feedback
+- **Community Members**: Thank you to everyone who uses Hyperweaver Agent, reports issues, asks questions, and provides feedback
 - **Beta Testers**: Early users who helped identify issues and improve stability
 - **Documentation Reviewers**: Those who help improve our documentation through feedback and suggestions
 

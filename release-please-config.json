@@ -3,16 +3,10 @@
   "bump-patch-for-minor-pre-major": false,
   "packages": {
     ".": {
-      "release-type": "node",
-      "package-name": "zoneweaver-agent",
+      "release-type": "go",
+      "package-name": "hyperweaver-agent",
       "include-component-in-tag": false,
-      "extra-files": [
-        "index.js",
-        "config/swagger.js",
-        "packaging/config/production-config.yaml",
-        "packaging/omnios/man/zoneweaver-agent.8",
-        "packaging/omnios/man/zoneweaver-agent.yaml.5"
-      ],
+      "extra-files": ["internal/version/version.go"],
       "changelog-sections": [
         { "type": "feat", "section": "Features", "hidden": false },
         { "type": "fix", "section": "Bug Fixes", "hidden": false },

@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Hyperweaver Agent</title>
+    <style>
+      body {
+        font-family: system-ui, sans-serif;
+        background: #14141b;
+        color: #e6e6ef;
+        display: flex;
+        min-height: 100vh;
+        margin: 0;
+        align-items: center;
+        justify-content: center;
+      }
+      main {
+        max-width: 34rem;
+        padding: 2rem;
+        text-align: center;
+      }
+      h1 { font-weight: 600; }
+      code {
+        background: #23232f;
+        border-radius: 4px;
+        padding: 0.15rem 0.4rem;
+      }
+      a { color: #9d8cff; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Hyperweaver Agent</h1>
+      <p>The agent is running, but this build does not include the Hyperweaver UI.</p>
+      <p>
+        Official release builds ship with the UI included — download one from the
+        <a href="https://github.com/Makr91/hyperweaver-agent/releases">releases page</a>.
+        If you compiled from source, unpack a
+        <a href="https://github.com/MarkProminic/hyperweaver-ui/releases">hyperweaver-ui release artifact</a>
+        into <code>internal/webui/dist/</code> before building, or set
+        <code>ui.path</code> in config.yaml to a directory containing it.
+      </p>
+      <p>The API is live: <a href="/api/status"><code>GET /api/status</code></a></p>
+    </main>
+  </body>
+</html>

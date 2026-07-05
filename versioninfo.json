@@ -1,0 +1,39 @@
+{
+  "FixedFileInfo": {
+    "FileVersion": {
+      "Major": 0,
+      "Minor": 0,
+      "Patch": 0,
+      "Build": 0
+    },
+    "ProductVersion": {
+      "Major": 0,
+      "Minor": 0,
+      "Patch": 0,
+      "Build": 0
+    },
+    "FileFlagsMask": "3f",
+    "FileFlags": "00",
+    "FileOS": "040004",
+    "FileType": "01",
+    "FileSubType": "00"
+  },
+  "StringFileInfo": {
+    "Comments": "VirtualBox/Vagrant host-agent for the Hyperweaver control plane",
+    "CompanyName": "STARTcloud",
+    "FileDescription": "Hyperweaver Agent",
+    "InternalName": "hyperweaver-agent",
+    "LegalCopyright": "GPL-3.0 — https://github.com/Makr91/hyperweaver-agent",
+    "OriginalFilename": "hyperweaver-agent.exe",
+    "ProductName": "Hyperweaver Agent",
+    "ProductVersion": "0.0.0"
+  },
+  "VarFileInfo": {
+    "Translation": {
+      "LangID": "0409",
+      "CharsetID": "04B0"
+    }
+  },
+  "IconPath": "internal/tray/assets/icon.ico",
+  "ManifestPath": ""
+}

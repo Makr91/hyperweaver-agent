@@ -1,4 +1,11 @@
-name: Build OmniOS Packages
+name: Build Packages
+
+# Builds and publishes the Windows, macOS, and Linux applications for a release.
+# Modeled on Super.Human.Installer's release pipeline, simplified for Go:
+# hosted runners, Inno Setup (preinstalled on windows-latest), hand-built
+# .app + productbuild on macOS, dpkg-deb on Linux. Signing/notarization steps
+# run only when the corresponding secrets are configured, so forks and early
+# releases still build.
 
 on:
   workflow_call:
@@ -14,76 +21,295 @@ permissions:
   contents: write
 
 jobs:
-  build-omnios-package:
-    runs-on: self-hosted
+  build-windows:
+    name: Build Windows
+    runs-on: windows-latest
+    env:
+      # secrets are not usable in step `if:` expressions — evaluate here.
+      HAVE_WINDOWS_SIGNING: ${{ secrets.SM_HOST != '' }}
     steps:
-      # OmniOS Build Steps - Just sync source and build on OmniOS
-      - name: Checkout for OmniOS build
+      - name: Checkout code
         uses: actions/checkout@v7
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
         with:
-          clean: true
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
 
-      - name: Set package variables
+      - name: Bake Hyperweaver UI artifact
+        shell: bash
         run: |
-          echo "VERSION=${{ inputs.version }}" >> $GITHUB_ENV
-          echo "PACKAGE_NAME=zoneweaver-agent" >> $GITHUB_ENV
+          UI_VERSION="$(tr -d ' \r\n' < .ui-version)"
+          echo "Baking hyperweaver-ui v${UI_VERSION}"
+          rm -rf internal/webui/dist
+          mkdir -p internal/webui/dist
+          curl -fsSL "https://github.com/MarkProminic/hyperweaver-ui/releases/download/v${UI_VERSION}/hyperweaver-ui-${UI_VERSION}.tar.gz" | tar -xz -C internal/webui/dist
 
-      - name: Clean OmniOS build directory
+      - name: Embed Windows resources (icon, version info)
+        shell: bash
         run: |
-          ssh ghrunner@omnios.packages.startcloud.com "rm -rf /local/builds/zoneweaver-agent/* /local/builds/zoneweaver-agent/.*" || true
+          go install github.com/josephspurrier/goversioninfo/cmd/goversioninfo@latest
+          goversioninfo -platform-specific=true \
+            -product-version "${{ inputs.version }}" \
+            -file-version "${{ inputs.version }}.0" \
+            -ver-major "$(echo '${{ inputs.version }}' | cut -d. -f1)" \
+            -ver-minor "$(echo '${{ inputs.version }}' | cut -d. -f2)" \
+            -ver-patch "$(echo '${{ inputs.version }}' | cut -d. -f3)"
 
-      - name: Sync source code to OmniOS
+      - name: Build
+        shell: bash
         run: |
-          rsync -av \
-            --exclude='.git' \
-            --exclude='node_modules' \
-            --exclude='*.p5p' \
-            ./ ghrunner@omnios.packages.startcloud.com:/local/builds/zoneweaver-agent/
+          mkdir -p bin dist
+          CGO_ENABLED=0 go build -trimpath \
+            -ldflags "-H=windowsgui -s -w -X github.com/Makr91/hyperweaver-agent/internal/version.Version=${{ inputs.version }}" \
+            -o bin/hyperweaver-agent.exe .
 
-      - name: Build package on OmniOS
+      - name: Sign binary
+        if: ${{ env.HAVE_WINDOWS_SIGNING == 'true' }}
+        uses: moonshine-ide/digicert-sign-action@v1.1
+        with:
+          bin-path: bin/hyperweaver-agent.exe
+          sm-host: ${{ secrets.SM_HOST }}
+          sm-api-key: ${{ secrets.SM_API_KEY }}
+          sm-client-cert-file-b64: ${{ secrets.SM_CLIENT_CERT_FILE_B64 }}
+          sm-client-cert-password: ${{ secrets.SM_CLIENT_CERT_PASSWORD }}
+          sm-thumbprint: ${{ secrets.SM_THUMBPRINT }}
+          sm-keypair-alias: ${{ secrets.SM_KEYPAIR_ALIAS }}
+
+      - name: Create Inno Setup installer
+        shell: pwsh
         run: |
-          ssh ghrunner@omnios.packages.startcloud.com "
-            cd /local/builds/zoneweaver-agent && 
-            export PATH=/opt/ooce/bin:/opt/ooce/node-22/bin:\$PATH &&
-            export MAKE=gmake &&
-            chmod +x packaging/omnios/build.sh &&
-            ./packaging/omnios/build.sh
-          "
+          & 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe' `
+            /DAppVersion=${{ inputs.version }} `
+            packaging\windows\hyperweaver-agent.iss
 
-      - name: Transfer OmniOS package back
+      - name: Sign installer
+        if: ${{ env.HAVE_WINDOWS_SIGNING == 'true' }}
+        uses: moonshine-ide/digicert-sign-action@v1.1
+        with:
+          bin-path: dist/HyperweaverAgent-Setup.exe
+          sm-host: ${{ secrets.SM_HOST }}
+          sm-api-key: ${{ secrets.SM_API_KEY }}
+          sm-client-cert-file-b64: ${{ secrets.SM_CLIENT_CERT_FILE_B64 }}
+          sm-client-cert-password: ${{ secrets.SM_CLIENT_CERT_PASSWORD }}
+          sm-thumbprint: ${{ secrets.SM_THUMBPRINT }}
+          sm-keypair-alias: ${{ secrets.SM_KEYPAIR_ALIAS }}
+
+      - name: Zip bare binary
+        shell: bash
         run: |
-          rsync -av ghrunner@omnios.packages.startcloud.com:/local/builds/zoneweaver-agent/*.p5p ./ || echo "No .p5p files found"
+          cd bin
+          7z a "../dist/HyperweaverAgent-${{ inputs.version }}-windows-amd64.zip" hyperweaver-agent.exe
 
-      - name: Install GitHub CLI
-        run: |
-          if ! command -v gh &> /dev/null; then
-            curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | sudo dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg
-            sudo chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg
-            echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null
-            sudo apt update
-            sudo apt install gh -y
-          fi
-
-      - name: Upload OmniOS package to release
+      - name: Upload release assets
+        shell: bash
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          for file in *.p5p; do
-            if [ -f "$file" ]; then
-              echo "Uploading $file..."
-              gh release upload ${{ inputs.tag_name }} "$file" --clobber
-            fi
-          done
+          gh release upload "${{ inputs.tag_name }}" \
+            dist/HyperweaverAgent-Setup.exe \
+            "dist/HyperweaverAgent-${{ inputs.version }}-windows-amd64.zip" \
+            --clobber
 
-      - name: Publish OmniOS package to repository
-        run: |
-          ssh ghrunner@omnios.packages.startcloud.com "
-            cd /local/builds/zoneweaver-agent &&
-            pfexec pkgsend publish -d proto -s file:///local/public/r151054/pkg zoneweaver-agent.p5m.final &&
-            pfexec pkgrepo refresh -s /local/public/r151054/pkg &&
-            pfexec svcadm restart pkg/server:r151054_STARTcloud
-          "
+  build-macos:
+    name: Build macOS
+    runs-on: macos-latest
+    env:
+      # secrets are not usable in step `if:` expressions — evaluate here.
+      HAVE_MAC_SIGNING: ${{ secrets.MAC_KEYCHAIN_PASS != '' }}
+      HAVE_MAC_NOTARIZATION: ${{ secrets.MAC_NOTARIZATION_APPLE_ID != '' }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
 
-      - name: Clean up OmniOS build directory
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+
+      - name: Bake Hyperweaver UI artifact
         run: |
-          ssh ghrunner@omnios.packages.startcloud.com "rm -rf /local/builds/zoneweaver-agent/*"
+          UI_VERSION="$(tr -d ' \r\n' < .ui-version)"
+          echo "Baking hyperweaver-ui v${UI_VERSION}"
+          rm -rf internal/webui/dist
+          mkdir -p internal/webui/dist
+          curl -fsSL "https://github.com/MarkProminic/hyperweaver-ui/releases/download/v${UI_VERSION}/hyperweaver-ui-${UI_VERSION}.tar.gz" | tar -xz -C internal/webui/dist
+
+      - name: Build universal binary
+        run: |
+          mkdir -p bin dist
+          export SDKROOT="$(xcrun --sdk macosx --show-sdk-path)"
+          LDFLAGS="-s -w -X github.com/Makr91/hyperweaver-agent/internal/version.Version=${{ inputs.version }}"
+          CGO_ENABLED=1 GOARCH=arm64 go build -trimpath -ldflags "$LDFLAGS" -o bin/hyperweaver-agent-arm64 .
+          CGO_ENABLED=1 GOARCH=amd64 go build -trimpath -ldflags "$LDFLAGS" -o bin/hyperweaver-agent-amd64 .
+          lipo -create -output bin/hyperweaver-agent bin/hyperweaver-agent-arm64 bin/hyperweaver-agent-amd64
+          lipo -info bin/hyperweaver-agent
+
+      - name: Assemble .app bundle
+        # No space in the bundle directory name — composite actions and shell
+        # plumbing downstream handle it more reliably; the display name comes
+        # from Info.plist.
+        run: |
+          APP="dist/HyperweaverAgent.app"
+          mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
+          cp bin/hyperweaver-agent "$APP/Contents/MacOS/hyperweaver-agent"
+          sed "s/__VERSION__/${{ inputs.version }}/g" packaging/macos/Info.plist > "$APP/Contents/Info.plist"
+
+      - name: Sign app
+        if: ${{ env.HAVE_MAC_SIGNING == 'true' }}
+        uses: Moonshine-IDE/macos-sign-app-action@main
+        with:
+          app-path: dist/HyperweaverAgent.app
+          mac-keychain-pass: ${{ secrets.MAC_KEYCHAIN_PASS }}
+          mac-application-certkey: ${{ secrets.MAC_APPLICATION_CERTKEY }}
+          mac-certkey-pass: ${{ secrets.MAC_CERTKEY_PASS }}
+
+      - name: Create installer package
+        run: |
+          productbuild \
+            --version ${{ inputs.version }} \
+            --identifier com.startcloud.hyperweaver-agent \
+            --component dist/HyperweaverAgent.app \
+            /Applications \
+            dist/HyperweaverAgent-Setup-Unsigned.pkg
+
+      - name: Sign installer
+        if: ${{ env.HAVE_MAC_SIGNING == 'true' }}
+        uses: Moonshine-IDE/macos-sign-installer-action@v1.0
+        with:
+          unsigned-pkg-path: dist/HyperweaverAgent-Setup-Unsigned.pkg
+          signed-pkg-path: dist/HyperweaverAgent-Setup.pkg
+          mac-keychain-pass: ${{ secrets.MAC_KEYCHAIN_PASS }}
+          mac-installer-certkey: ${{ secrets.MAC_INSTALLER_CERTKEY }}
+          mac-certkey-pass: ${{ secrets.MAC_CERTKEY_PASS }}
+
+      - name: Notarize installer
+        if: ${{ env.HAVE_MAC_NOTARIZATION == 'true' }}
+        uses: Moonshine-IDE/macos-notarize-action@v1.0
+        with:
+          app-path: dist/HyperweaverAgent-Setup.pkg
+          mac-notarization-apple-id: ${{ secrets.MAC_NOTARIZATION_APPLE_ID }}
+          mac-notarization-team-id: ${{ secrets.MAC_NOTARIZATION_TEAM_ID }}
+          mac-notarization-pass: ${{ secrets.MAC_NOTARIZATION_PASS }}
+
+      - name: Finalize unsigned package name
+        if: ${{ env.HAVE_MAC_SIGNING != 'true' }}
+        run: mv dist/HyperweaverAgent-Setup-Unsigned.pkg dist/HyperweaverAgent-Setup.pkg
+
+      - name: Zip app bundle
+        run: |
+          cd dist
+          ditto -c -k --keepParent HyperweaverAgent.app "HyperweaverAgent-${{ inputs.version }}-macos-universal.zip"
+
+      - name: Upload release assets
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release upload "${{ inputs.tag_name }}" \
+            dist/HyperweaverAgent-Setup.pkg \
+            "dist/HyperweaverAgent-${{ inputs.version }}-macos-universal.zip" \
+            --clobber
+
+  build-linux:
+    name: Build Linux
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+
+      - name: Bake Hyperweaver UI artifact
+        run: |
+          UI_VERSION="$(tr -d ' \r\n' < .ui-version)"
+          echo "Baking hyperweaver-ui v${UI_VERSION}"
+          rm -rf internal/webui/dist
+          mkdir -p internal/webui/dist
+          curl -fsSL "https://github.com/MarkProminic/hyperweaver-ui/releases/download/v${UI_VERSION}/hyperweaver-ui-${UI_VERSION}.tar.gz" | tar -xz -C internal/webui/dist
+
+      - name: Build
+        run: |
+          mkdir -p bin dist
+          CGO_ENABLED=0 go build -trimpath \
+            -ldflags "-s -w -X github.com/Makr91/hyperweaver-agent/internal/version.Version=${{ inputs.version }}" \
+            -o bin/hyperweaver-agent .
+
+      - name: Build Debian package
+        run: |
+          VERSION="${{ inputs.version }}"
+          ARCH=amd64
+          STAGE="dist/hyperweaver-agent_${VERSION}_${ARCH}"
+          mkdir -p "$STAGE"/usr/bin \
+                   "$STAGE"/etc/hyperweaver-agent \
+                   "$STAGE"/etc/systemd/system \
+                   "$STAGE"/usr/share/applications \
+                   "$STAGE"/usr/share/icons/hicolor/192x192/apps \
+                   "$STAGE"/usr/share/man/man8 \
+                   "$STAGE"/usr/share/man/man5 \
+                   "$STAGE"/DEBIAN
+          cp bin/hyperweaver-agent "$STAGE/usr/bin/"
+          cp packaging/config/production-config.yaml "$STAGE/etc/hyperweaver-agent/config.yaml"
+          cp packaging/DEBIAN/systemd/hyperweaver-agent.service "$STAGE/etc/systemd/system/"
+          cp packaging/linux/hyperweaver-agent.desktop "$STAGE/usr/share/applications/"
+          cp internal/tray/assets/icon.png "$STAGE/usr/share/icons/hicolor/192x192/apps/hyperweaver-agent.png"
+          gzip -9 -c packaging/DEBIAN/man/hyperweaver-agent.8 > "$STAGE/usr/share/man/man8/hyperweaver-agent.8.gz"
+          gzip -9 -c packaging/DEBIAN/man/hyperweaver-agent.yaml.5 > "$STAGE/usr/share/man/man5/hyperweaver-agent.yaml.5.gz"
+          cp packaging/DEBIAN/postinst packaging/DEBIAN/prerm packaging/DEBIAN/postrm "$STAGE/DEBIAN/"
+
+          cat > "$STAGE/DEBIAN/control" << EOF
+          Package: hyperweaver-agent
+          Version: ${VERSION}
+          Section: misc
+          Priority: optional
+          Architecture: ${ARCH}
+          Maintainer: Makr91 <makr91@users.noreply.github.com>
+          Description: Hyperweaver Agent - VirtualBox/Vagrant host-agent
+           Single-binary host-agent with a system-tray icon that serves the
+           Hyperweaver web UI to the user's own browser. Runs headless as a
+           systemd service or as a desktop tray application.
+          Homepage: https://github.com/Makr91/hyperweaver-agent
+          EOF
+
+          find "$STAGE" -type d -exec chmod 755 {} \;
+          find "$STAGE" -type f -exec chmod 644 {} \;
+          chmod 755 "$STAGE/usr/bin/hyperweaver-agent" "$STAGE/DEBIAN"/postinst "$STAGE/DEBIAN"/prerm "$STAGE/DEBIAN"/postrm
+
+          dpkg-deb --build --root-owner-group "$STAGE" "dist/hyperweaver-agent_${VERSION}_${ARCH}.deb"
+
+      - name: Tar bare binary
+        run: |
+          tar -C bin -czf "dist/HyperweaverAgent-${{ inputs.version }}-linux-amd64.tar.gz" hyperweaver-agent
+
+      - name: Upload release assets
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release upload "${{ inputs.tag_name }}" \
+            "dist/hyperweaver-agent_${{ inputs.version }}_amd64.deb" \
+            "dist/HyperweaverAgent-${{ inputs.version }}-linux-amd64.tar.gz" \
+            --clobber
+
+  checksums:
+    name: Publish checksums
+    needs: [build-windows, build-macos, build-linux]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Generate and upload SHA256SUMS
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir assets && cd assets
+          gh release download "${{ inputs.tag_name }}" \
+            --pattern 'HyperweaverAgent-*' \
+            --pattern 'hyperweaver-agent_*'
+          sha256sum HyperweaverAgent-* hyperweaver-agent_* > SHA256SUMS.txt
+          gh release upload "${{ inputs.tag_name }}" SHA256SUMS.txt --clobber

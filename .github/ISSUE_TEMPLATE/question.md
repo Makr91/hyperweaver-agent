@@ -22,18 +22,17 @@ Provide context about what you're trying to achieve:
 
 **System Information:**
 
-- OS: [e.g., OmniOS r151048]
-- Node.js Version: [e.g., 22.x]
-- Hyperweaver Agent Version: [e.g., 0.0.26]
-- Installation Method: [package/source]
+- OS: [e.g., Windows 11 24H2, macOS 15.5]
+- Hyperweaver Agent Version: [e.g., 0.1.0]
+- Installation Method: [installer/source]
 
 ## What You've Tried
 
 Please describe what you've already attempted:
 
-- [ ] Checked the [documentation](https://hyperweaver-agent.startcloud.com/)
+- [ ] Checked the [README](../../blob/main/README.md) and configuration reference
 - [ ] Searched existing issues and discussions
-- [ ] Tried the interactive [API documentation](https://hyperweaver-agent.startcloud.com/docs/api/)
+- [ ] Checked the agent log (`<config dir>/logs/agent.log`)
 
 **Specific attempts:**
 
@@ -43,22 +42,20 @@ Please describe what you've already attempted:
 
 ## Code Examples (if applicable)
 
-If your question involves code, please provide examples:
+If your question involves configuration or API calls, please provide examples:
 
 **Configuration:**
 
 ```yaml
 # Your relevant configuration
 server:
-  http_port: 5000
+  port: 9420
 ```
 
 **API Request:**
 
 ```bash
-curl -X GET "http://localhost:5000/api/..." \
-     -H "Authorization: Bearer wh_..." \
-     -H "Content-Type: application/json"
+curl "http://127.0.0.1:9420/api/status"
 ```
 
 **Expected vs. Actual:**
@@ -86,12 +83,10 @@ Any other details that might be helpful:
 
 - [ ] Installation/Setup
 - [ ] Configuration
+- [ ] Tray / browser launch
+- [ ] Web UI
 - [ ] API Usage
-- [ ] Zone Management
-- [ ] Authentication
-- [ ] Networking
-- [ ] Storage/Database
-- [ ] Monitoring/Logging
+- [ ] Machine/VM management
 - [ ] Troubleshooting
 - [ ] Integration
 - [ ] Best Practices

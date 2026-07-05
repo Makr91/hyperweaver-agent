@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Hyperweaver Agent
+Comment=VirtualBox/Vagrant host-agent with a system-tray web UI
+Exec=/usr/bin/hyperweaver-agent
+Icon=hyperweaver-agent
+Terminal=false
+Categories=System;Utility;
+Keywords=hyperweaver;virtualbox;vagrant;vm;
+StartupNotify=false

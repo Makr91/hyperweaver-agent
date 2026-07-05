@@ -2,14 +2,14 @@
 set -e
 
 # Stop and disable service before removal
-if systemctl is-active --quiet hyperweaver-server; then
-    echo "Stopping Hyperweaver Server service..."
-    systemctl stop hyperweaver-server
+if systemctl is-active --quiet hyperweaver-agent; then
+    echo "Stopping Hyperweaver Agent service..."
+    systemctl stop hyperweaver-agent
 fi
 
-if systemctl is-enabled --quiet hyperweaver-server; then
-    echo "Disabling Hyperweaver Server service..."
-    systemctl disable hyperweaver-server
+if systemctl is-enabled --quiet hyperweaver-agent; then
+    echo "Disabling Hyperweaver Agent service..."
+    systemctl disable hyperweaver-agent
 fi
 
 #DEBHELPER#

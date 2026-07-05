@@ -1,58 +1,41 @@
 #!/bin/bash
 set -e
 
-# Create system user and group
-if ! getent passwd hyperweaver-server > /dev/null 2>&1; then
-    adduser --system --group --home /opt/hyperweaver-server \
+# Create system user and group for headless service mode
+if ! getent passwd hyperweaver-agent > /dev/null 2>&1; then
+    adduser --system --group --home /var/lib/hyperweaver-agent \
             --no-create-home --shell /usr/sbin/nologin \
-            --gecos "Hyperweaver Server system user" hyperweaver-server
+            --gecos "Hyperweaver Agent system user" hyperweaver-agent
 fi
+
+# Runtime directories
+mkdir -p /var/lib/hyperweaver-agent
+mkdir -p /var/log/hyperweaver-agent
 
 # Set ownership and permissions
-chown -R hyperweaver-server:hyperweaver-server /opt/hyperweaver-server
-chown -R hyperweaver-server:hyperweaver-server /var/lib/hyperweaver-server
-chown -R hyperweaver-server:hyperweaver-server /var/log/hyperweaver-server
-chown -R hyperweaver-server:hyperweaver-server /etc/hyperweaver-server
-
-
-# Generate JWT secret if it doesn't exist
-if [ ! -f /etc/hyperweaver-server/.jwt-secret ]; then
-    openssl rand -hex 32 > /etc/hyperweaver-server/.jwt-secret
-    chown hyperweaver-server:hyperweaver-server /etc/hyperweaver-server/.jwt-secret
-    chmod 600 /etc/hyperweaver-server/.jwt-secret
-    echo "Generated JWT secret in /etc/hyperweaver-server/.jwt-secret"
-fi
-
-# Update config file with actual JWT secret
-if [ -f /etc/hyperweaver-server/.jwt-secret ]; then
-    JWT_SECRET=$(cat /etc/hyperweaver-server/.jwt-secret)
-    sed -i "s/__JWT_SECRET_FROM_FILE__/${JWT_SECRET}/g" /etc/hyperweaver-server/config.yaml
-    echo "Updated config with JWT secret"
-fi
-
-# Initialize database directory
-mkdir -p /var/lib/hyperweaver-server/database
-chown hyperweaver-server:hyperweaver-server /var/lib/hyperweaver-server/database
-
-# Create SSL directory for certificate generation
-mkdir -p /etc/hyperweaver-server/ssl
-chown hyperweaver-server:hyperweaver-server /etc/hyperweaver-server/ssl
-chmod 700 /etc/hyperweaver-server/ssl
+chown -R hyperweaver-agent:hyperweaver-agent /var/lib/hyperweaver-agent
+chown -R hyperweaver-agent:hyperweaver-agent /var/log/hyperweaver-agent
+chown -R hyperweaver-agent:hyperweaver-agent /etc/hyperweaver-agent
+chmod 750 /etc/hyperweaver-agent
 
 # Reload systemd daemon
-systemctl daemon-reload
+systemctl daemon-reload || true
 
 echo ""
 echo "======================================================================"
-echo "Hyperweaver Server has been installed successfully!"
+echo "Hyperweaver Agent has been installed successfully!"
 echo ""
-echo "Next steps:"
-echo "1. Review configuration: /etc/hyperweaver-server/config.yaml"
-echo "2. Start the service: systemctl enable --now hyperweaver-server"
-echo "3. Check status: systemctl status hyperweaver-server"
-echo "4. View logs: journalctl -u hyperweaver-server -f"
+echo "Desktop (tray) mode:"
+echo "  Launch 'Hyperweaver Agent' from your application menu."
+echo "  Note: stock GNOME needs the AppIndicator extension to show tray icons."
 echo ""
-echo "Default access: https://localhost:3443 (with self-signed certificate)"
+echo "Headless service mode:"
+echo "1. Review configuration: /etc/hyperweaver-agent/config.yaml"
+echo "2. Start the service: systemctl enable --now hyperweaver-agent"
+echo "3. Check status: systemctl status hyperweaver-agent"
+echo "4. View logs: journalctl -u hyperweaver-agent -f"
+echo ""
+echo "Default access: http://127.0.0.1:9420/ui/"
 echo "======================================================================"
 echo ""
 

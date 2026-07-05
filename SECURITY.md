@@ -4,11 +4,11 @@
 
 **Please do not report security vulnerabilities through public GitHub issues.**
 
-If you discover a security vulnerability in Zoneweaver Agent, please report it responsibly:
+If you discover a security vulnerability in Hyperweaver Agent, please report it responsibly:
 
 ### Preferred Method: Security Advisory
 
-1. Go to the [GitHub Security Advisory page](https://github.com/Makr91/zoneweaver-agent/security/advisories)
+1. Go to the [GitHub Security Advisory page](https://github.com/Makr91/hyperweaver-agent/security/advisories)
 2. Click "Report a vulnerability"
 3. Fill out the advisory form with detailed information
 4. Submit the advisory
@@ -40,46 +40,45 @@ Due to limited development resources, please understand that:
 - **Medium**: Standard timeline (DoS, information disclosure)
 - **Low**: Lower priority (minor information leaks)
 
-## Security Considerations for Zoneweaver Agent
+## Security Considerations for Hyperweaver Agent
 
-Given that Zoneweaver Agent manages system-level operations on OmniOS, please pay special attention to:
+Hyperweaver Agent runs on end-user machines and orchestrates hypervisor tooling, so please pay special attention to:
 
 ### High-Risk Areas
-- **API Key Authentication**: Bypasses or privilege escalation
-- **Zone Management**: Unauthorized zone creation/modification/deletion
-- **File System Operations**: Path traversal or unauthorized file access
-- **Command Execution**: Any potential for command injection
-- **Network Operations**: Unauthorized network configuration changes
+
+- **Local web server exposure**: The agent binds to loopback by default — anything weakening that boundary
+- **Subprocess execution**: The agent will drive `vagrant`, `VBoxManage`, and `git` — any potential for command or argument injection
+- **File system operations**: Path traversal or unauthorized file access (config, logs, future file cache)
+- **Authentication**: API-key handling and the future tray token handoff
+- **Served UI integrity**: Tampering with the embedded or on-disk UI artifact
 
 ### Configuration Security
-- **Default Configurations**: Insecure defaults
-- **SSL/TLS Implementation**: Certificate validation, cipher suites
-- **CORS Configuration**: Origin validation bypasses
-- **Database Security**: SQL injection, unauthorized access
+
+- **Default configurations**: Insecure defaults
+- **Bind address**: Exposure beyond 127.0.0.1
+- **CORS/origin handling**: Once cross-origin consumers exist
 
 ## Best Practices for Users
 
 To maintain security:
 
-1. **Keep Updated**: Always run the latest stable version
-2. **Secure Configuration**: Follow the [security configuration guide](/docs/configuration/)
-3. **API Key Management**: Rotate API keys regularly, use strong keys
-4. **Network Security**: Use HTTPS, restrict network access appropriately
-5. **Monitor Logs**: Watch for suspicious activity in application logs
+1. **Keep Updated**: Always run the latest release
+2. **Keep loopback binding** unless you understand the exposure of a LAN-reachable agent
+3. **Protect your config directory**: It will hold credentials in future releases
+4. **Monitor Logs**: Watch for suspicious activity in the agent log file
 
-## Security Features
+## Security Tooling in CI
 
-Zoneweaver Agent includes several security features:
+Every change runs through:
 
-- **API Key Authentication**: Bcrypt-hashed keys with configurable rounds
-- **CORS Protection**: Whitelist-based origin validation
-- **SSL/TLS Support**: Configurable HTTPS with custom certificates
-- **Input Validation**: Parameter validation and sanitization
-- **Audit Logging**: API key usage tracking
+- **gosec** (via golangci-lint) — Go security static analysis
+- **govulncheck** — known-vulnerability scanning with call-graph reachability, on PRs and weekly
+- **CodeQL** — GitHub code scanning for Go and workflow files
+- **Dependabot** — dependency update automation
 
 ## Acknowledgments
 
-We appreciate the security research community's efforts in making Zoneweaver Agent more secure. Responsible disclosure helps protect all users.
+We appreciate the security research community's efforts in making Hyperweaver Agent more secure. Responsible disclosure helps protect all users.
 
 ### Hall of Fame
 
@@ -93,4 +92,4 @@ This security policy may be updated as the project evolves. Check back periodica
 
 ---
 
-**Remember**: Security is a shared responsibility. Your vigilance and responsible reporting help keep the entire Zoneweavercommunity safe.
+**Remember**: Security is a shared responsibility. Your vigilance and responsible reporting help keep the entire Hyperweaver community safe.

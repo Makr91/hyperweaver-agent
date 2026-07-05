@@ -1,11 +1,15 @@
 # Normalize line endings: text files are stored as LF in the repository.
-# A Windows CRLF in the Debian maintainer scripts produced a `#!/bin/bash\r`
-# shebang, so dpkg failed to exec preinst ("No such file or directory").
 * text=auto
 
-# Files executed on Linux must be LF in the working tree too
-*.sh                       text eol=lf
-packaging/DEBIAN/preinst   text eol=lf
+# Go source is always LF (gofmt output)
+*.go    text eol=lf
+go.mod  text eol=lf
+go.sum  text eol=lf
+
+# Files executed on Linux/macOS must be LF in the working tree too.
+# A CRLF shebang in the Debian maintainer scripts makes dpkg fail to exec
+# them ("No such file or directory") — keep them explicitly LF.
+*.sh    text eol=lf
 packaging/DEBIAN/postinst  text eol=lf
 packaging/DEBIAN/prerm     text eol=lf
 packaging/DEBIAN/postrm    text eol=lf
@@ -21,10 +25,12 @@ packaging/DEBIAN/postrm    text eol=lf
 *.jpeg  binary
 *.gif   binary
 *.ico   binary
+*.icns  binary
 *.webp  binary
 *.woff  binary
 *.woff2 binary
 *.ttf   binary
 *.eot   binary
-*.deb   binary
-*.p5p   binary
+*.exe   binary
+*.pkg   binary
+*.dmg   binary

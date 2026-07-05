@@ -1,0 +1,58 @@
+version: '2'
+
+run:
+  timeout: 5m
+
+linters:
+  # Standard group: errcheck, govet, ineffassign, staticcheck, unused.
+  default: standard
+  enable:
+    - bodyclose
+    - copyloopvar
+    - errorlint
+    - exhaustive
+    - forbidigo
+    - gocritic
+    - gosec
+    - misspell
+    - nilerr
+    - noctx
+    - revive
+    - unconvert
+    - unparam
+    - wastedassign
+  settings:
+    govet:
+      enable-all: true
+      disable:
+        - fieldalignment
+    gocritic:
+      enabled-tags:
+        - diagnostic
+        - performance
+        - style
+    exhaustive:
+      default-signifies-exhaustive: true
+    forbidigo:
+      forbid:
+        # The Windows GUI build has no console: stdout/stderr prints are
+        # invisible by definition. Diagnostics go through log/slog.
+        - pattern: ^fmt\.Print.*$
+          msg: no console printing — use log/slog (GUI builds have no console)
+        - pattern: ^print(ln)?$
+          msg: no console printing — use log/slog
+  exclusions:
+    # std-error-handling only; deliberately NOT common-false-positives so
+    # gosec subprocess findings (G204 etc.) stay visible and are suppressed
+    # per-line with a written justification.
+    presets:
+      - std-error-handling
+
+formatters:
+  enable:
+    - gofumpt
+    - goimports
+  settings:
+    goimports:
+      local-prefixes:
+        - github.com/Makr91/hyperweaver-agent

@@ -1,39 +1,46 @@
 # Getting Support
 
-Thank you for using Zoneweaver Agent! This document outlines the various ways you can get help with the project.
+Thank you for using Hyperweaver Agent! This document outlines the various ways you can get help with the project.
 
 ## Available Resources
 
 ### 📚 Documentation
-Start with our comprehensive documentation:
-- **[Main Documentation](https://zoneweaver-agent.startcloud.com/)** - Complete guides and API reference
-- **[Getting Started](https://zoneweaver-agent.startcloud.com/docs/guides/getting-started/)** - Quick start guide
-- **[Installation Guide](https://zoneweaver-agent.startcloud.com/docs/guides/production-installation/)** - Production setup
-- **[Configuration Reference](https://zoneweaver-agent.startcloud.com/docs/configuration/)** - All configuration options
-- **[API Documentation](https://zoneweaver-agent.startcloud.com/docs/api/)** - Interactive API reference
+
+Start with the available documentation:
+
+- **[README](README.md)** - Overview, installation, configuration reference
+- **[Hyperweaver Docs](https://github.com/MarkProminic/hyperweaver-docs)** - Platform-wide documentation (also served at `/docs` by the agent when the UI is bundled)
+- **[Architecture](https://github.com/Makr91/hyperweaver-agent)** - The platform architecture document tracks design decisions and the roadmap
 
 ### 🐛 Issues and Bug Reports
+
 For bugs and technical issues:
-- **[GitHub Issues](https://github.com/Makr91/zoneweaver-agent/issues)** - Report bugs or request features
+
+- **[GitHub Issues](https://github.com/Makr91/hyperweaver-agent/issues)** - Report bugs or request features
 - Use the appropriate issue template (bug report, feature request, question)
 - Search existing issues first to avoid duplicates
 
 ### 💬 Community Discussion
+
 For general questions and discussions:
-- **[GitHub Discussions](https://github.com/Makr91/zoneweaver-agent/discussions)** - Ask questions, share ideas
-- **[GitHub Issues](https://github.com/Makr91/zoneweaver-agent/issues)** - Use the "question" template for specific inquiries
+
+- **[GitHub Discussions](https://github.com/Makr91/hyperweaver-agent/discussions)** - Ask questions, share ideas
+- **[GitHub Issues](https://github.com/Makr91/hyperweaver-agent/issues)** - Use the "question" template for specific inquiries
 
 ## Support Expectations
 
 ### Resource Limitations
-Please understand that Zoneweaver Agent is maintained with limited development resources:
+
+Please understand that Hyperweaver Agent is maintained with limited development resources:
 
 - **Response Time**: We aim to respond to issues within a few days, but response times may vary based on current workload and complexity
 - **Priority**: Critical security issues and bugs affecting system stability receive highest priority
 - **Feature Requests**: Evaluated based on community needs and available development resources
 
 ### Community-Driven Support
-The Zoneweaver Agent community is encouraged to:
+
+The Hyperweaver community is encouraged to:
+
 - **Help each other** in discussions and issue comments
 - **Share solutions** to common problems
 - **Contribute documentation** improvements
@@ -44,13 +51,15 @@ The Zoneweaver Agent community is encouraged to:
 ### ✅ What We Can Help With
 
 **Technical Issues:**
+
 - Installation and configuration problems
-- API usage questions
+- Tray, browser-launch, and UI-serving questions
 - Bug reports with reproducible steps
 - Security concerns (see [SECURITY.md](SECURITY.md))
 - Feature requests (evaluated for feasibility)
 
 **Documentation:**
+
 - Clarification on existing documentation
 - Suggestions for documentation improvements
 - Examples and use cases
@@ -58,10 +67,11 @@ The Zoneweaver Agent community is encouraged to:
 ### ❌ What We Cannot Provide
 
 **Out of Scope:**
+
 - Custom development work
 - Extensive one-on-one troubleshooting
 - Support for modified or forked versions
-- Integration support for third-party tools (beyond basic guidance)
+- VirtualBox or Vagrant product support (beyond how the agent drives them)
 - 24/7 emergency support
 
 ## Getting Quality Help
@@ -69,13 +79,15 @@ The Zoneweaver Agent community is encouraged to:
 To get the best assistance:
 
 ### For Bug Reports
+
 1. **Use the bug report template**
-2. **Include system information** (OmniOS version, Node.js version, etc.)
+2. **Include system information** (OS and version, agent version, VirtualBox/Vagrant versions)
 3. **Provide reproduction steps** with expected vs. actual behavior
-4. **Include relevant logs** and error messages
+4. **Include relevant logs** — the agent log lives at `<config dir>/logs/agent.log`
 5. **Test with the latest version** when possible
 
 ### For Questions
+
 1. **Check the documentation first**
 2. **Search existing issues and discussions**
 3. **Be specific** about what you're trying to achieve
@@ -105,22 +117,10 @@ The best way to improve support for everyone:
 
 See our [Contributing Guide](CONTRIBUTING.md) for more information.
 
-## Alternative Resources
-
-### OmniOS Community
-For OmniOS-specific questions:
-- **[OmniOS Community](https://omnios.org/community)** - OS-level support
-- **[OmniOS Documentation](https://omnios.org/documentation)** - System administration
-
-### Node.js Resources
-For Node.js development questions:
-- **[Node.js Documentation](https://nodejs.org/docs/)**
-- **[Stack Overflow](https://stackoverflow.com/questions/tagged/node.js)**
-
 ## Updates to Support
 
 This support document may be updated as the project evolves and resources change. Check back periodically for updates.
 
 ---
 
-**Remember**: Community involvement directly impacts the level of support available. Your contributions help make Zoneweaver Agent better for everyone!
+**Remember**: Community involvement directly impacts the level of support available. Your contributions help make Hyperweaver Agent better for everyone!

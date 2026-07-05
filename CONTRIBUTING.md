@@ -1,10 +1,10 @@
-# Contributing to Zoneweaver Agent
+# Contributing to Hyperweaver Agent
 
-Thank you for your interest in contributing to Zoneweaver Agent! We welcome contributions from the community as they are essential for the project's continued growth and development.
+Thank you for your interest in contributing to Hyperweaver Agent! We welcome contributions from the community as they are essential for the project's continued growth and development.
 
 ## Important Note on Resources
 
-Zoneweaver Agent is maintained with limited development resources. **Community contributions directly impact the pace of feature development and bug fixes.** The more the community contributes, the faster the project can grow and improve.
+Hyperweaver Agent is maintained with limited development resources. **Community contributions directly impact the pace of feature development and bug fixes.** The more the community contributes, the faster the project can grow and improve.
 
 ## How to Contribute
 
@@ -15,50 +15,54 @@ Before creating an issue, please:
 1. **Search existing issues** to avoid duplicates
 2. **Use the appropriate issue template** (bug report, feature request, etc.)
 3. **Provide detailed information** to help us understand and prioritize the issue
-4. **Include system information** (OmniOS version, Node.js version, etc.)
+4. **Include system information** (OS and version, agent version, VirtualBox/Vagrant versions)
 
 ### Submitting Pull Requests
 
 We appreciate all pull requests! To ensure smooth collaboration:
 
 1. **Fork the repository** and create your feature branch from `main`
-2. **Follow the existing code style** and patterns
-3. **Add tests** for new functionality when possible
-4. **Update documentation** if your changes affect the API or configuration
-5. **Write clear commit messages** describing your changes
-6. **Fill out the pull request template** completely
+2. **Follow the existing code style** — `golangci-lint` (with gofumpt formatting) is the arbiter and runs in CI
+3. **Update documentation** if your changes affect the API or configuration
+4. **Use conventional commit messages** (`fix: ...`) — releases are automated from them
+5. **Fill out the pull request template** completely
 
 ### Development Setup
 
-1. Clone your fork of the repository
-2. Install dependencies: `npm install`
-3. Copy `config/config.yaml.example` to `config/config.yaml` and configure for development
-4. Run in development mode: `npm run dev`
-5. Access the API documentation at `http://localhost:5000/api-docs`
+1. Install Go 1.24 or newer
+2. Clone your fork of the repository
+3. Copy the tray icon assets from the UI project (see README "Building from source")
+4. Fetch dependencies: `go mod tidy`
+5. Build and run: `go build -o hyperweaver-agent . && ./hyperweaver-agent`
+6. The web UI is served at `http://127.0.0.1:9420/ui/` (placeholder page unless a UI artifact is unpacked into `internal/webui/dist/`)
+
+Platform notes:
+
+- Windows and Linux build pure Go; the Windows binary cross-compiles from any OS with `GOOS=windows CGO_ENABLED=0`.
+- macOS builds require a Mac (the tray uses Cocoa via cgo).
 
 ### Code Style Guidelines
 
-- Follow existing JavaScript/Node.js conventions
-- Use meaningful variable and function names
-- Comment complex logic appropriately
-- Maintain consistent indentation (2 spaces)
-- Keep functions focused and modular
+- `golangci-lint run` must pass — the configuration in `.golangci.yml` is strict on purpose
+- Format with gofumpt/goimports (both enforced by the linter)
+- Never write to stdout/stderr for diagnostics — use `log/slog` (the Windows GUI build has no console)
+- Keep dependencies minimal; prefer the standard library
 
 ### What We're Looking For
 
 **High Impact Contributions:**
+
 - Bug fixes (especially those affecting system stability)
 - Security improvements
 - Performance optimizations
 - Documentation improvements
-- Test coverage improvements
 
 **Feature Contributions:**
-- New zone management features
-- Enhanced monitoring capabilities
+
+- Provisioning engine features (Vagrant/VirtualBox orchestration)
+- Platform integration improvements (Windows/macOS/Linux quirks)
 - API improvements
 - Better error handling
-- Integration improvements
 
 ## Response Times and Review Process
 
@@ -75,7 +79,6 @@ If you need help with contributing:
 
 - **GitHub Discussions**: Ask questions about development
 - **Issues**: Use the "question" template for specific inquiries
-- **Documentation**: Check our [comprehensive documentation](https://zoneweaver-agent.startcloud.com/)
 
 ## Recognition
 
@@ -87,8 +90,8 @@ Please note that this project follows our [Code of Conduct](CODE_OF_CONDUCT.md).
 
 ## License
 
-By contributing to Zoneweaver Agent, you agree that your contributions will be licensed under the [GPL-3.0 License](LICENSE.md).
+By contributing to Hyperweaver Agent, you agree that your contributions will be licensed under the [GPL-3.0 License](LICENSE.md).
 
 ---
 
-**Remember**: Your contributions directly influence the project's development speed and capabilities. Thank you for helping make Zoneweaver Agent better for everyone!
+**Remember**: Your contributions directly influence the project's development speed and capabilities. Thank you for helping make Hyperweaver Agent better for everyone!

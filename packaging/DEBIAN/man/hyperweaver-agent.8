@@ -1,0 +1,129 @@
+.Dd $Mdocdate$
+.Dt HYPERWEAVER-AGENT 8
+.Os
+.Sh NAME
+.Nm hyperweaver-agent
+.Nd VirtualBox/Vagrant host-agent with a system-tray web UI
+.Sh SYNOPSIS
+.Nm
+.Op Fl -config Ar path
+.Op Fl -headless
+.Op Fl -version
+.Sh DESCRIPTION
+The
+.Nm
+utility is the VirtualBox/Vagrant host-agent of the Hyperweaver hypervisor
+management platform. It is a single Go binary that runs a local web server
+serving the Hyperweaver web UI to the user's own browser, and exposes the
+shared Agent API so a Hyperweaver Server can aggregate it alongside
+Zoneweaver Agents.
+.Pp
+.Nm
+runs in one of two modes:
+.Bl -bullet -offset indent
+.It
+Desktop (tray) mode: the default. A native system-tray icon offers Open
+(launch the web UI in the default or configured browser) and Quit.
+.It
+Headless service mode
+.Pq Fl -headless :
+no tray icon; intended for running under systemd with a shared
+configuration file.
+.El
+.Sh OPTIONS
+.Bl -tag -width ".Fl -config Ar path"
+.It Fl -config Ar path
+Read the configuration from
+.Ar path
+instead of the per-user default location.
+.It Fl -headless
+Run without the system-tray icon.
+.It Fl -version
+Print the application version and exit.
+.El
+.Sh CONFIGURATION
+In desktop mode
+.Nm
+reads (and on first run creates) a per-user configuration file, typically
+.Pa ~/.config/hyperweaver-agent/config.yaml
+on Linux. The packaged systemd service uses
+.Pa /etc/hyperweaver-agent/config.yaml
+instead.
+.Pp
+See
+.Xr hyperweaver-agent.yaml 5
+for the configuration file format.
+.Sh SERVICE MANAGEMENT
+The headless service is managed through systemd:
+.Pp
+.Dl # systemctl enable --now hyperweaver-agent
+.Dl # systemctl disable hyperweaver-agent
+.Dl # systemctl restart hyperweaver-agent
+.Pp
+Check service status:
+.Pp
+.Dl # systemctl status hyperweaver-agent
+.Sh WEB INTERFACE
+The agent serves the Hyperweaver web UI at:
+.Pp
+.Dl http://127.0.0.1:9420/ui/
+.Pp
+The root path redirects to the UI when it is enabled. The bundled
+documentation site, when present in the UI artifact, is served at
+.Pa /docs .
+.Sh API ENDPOINTS
+The public identity and capability probe of the Agent API contract:
+.Pp
+.Dl http://127.0.0.1:9420/api/status
+.Pp
+It reports the agent's role, hypervisor, platform, architecture, version,
+hostname, and capability tokens.
+.Sh FILES
+.Bl -tag -width ".Pa /etc/hyperweaver-agent/config.yaml"
+.It Pa /usr/bin/hyperweaver-agent
+The agent binary
+.It Pa /etc/hyperweaver-agent/config.yaml
+Service-mode configuration file
+.It Pa ~/.config/hyperweaver-agent/config.yaml
+Per-user (desktop mode) configuration file
+.It Pa /var/log/hyperweaver-agent/
+Service log directory
+.It Pa /etc/systemd/system/hyperweaver-agent.service
+Systemd service unit
+.El
+.Sh EXIT STATUS
+.Ex -std
+.Sh EXAMPLES
+Run headless in the foreground for testing:
+.Bd -literal -offset indent
+$ hyperweaver-agent --headless --config /etc/hyperweaver-agent/config.yaml
+.Ed
+.Pp
+Check the agent is up:
+.Bd -literal -offset indent
+$ curl http://127.0.0.1:9420/api/status
+.Ed
+.Sh DIAGNOSTICS
+The agent logs to a rotating JSON log file (see
+.Xr hyperweaver-agent.yaml 5 )
+and, when a console is attached, to standard error. Under systemd, console
+output is captured by the journal:
+.Pp
+.Dl # journalctl -u hyperweaver-agent
+.Pp
+Note for desktop Linux: stock GNOME Shell does not display system-tray
+icons without the AppIndicator extension; KDE, XFCE, and Cinnamon work out
+of the box.
+.Sh SEE ALSO
+.Xr hyperweaver-agent.yaml 5 ,
+.Xr systemctl 1 ,
+.Xr journalctl 1
+.Sh AUTHORS
+.An Hyperweaver Project
+.Sh SECURITY
+.Nm
+binds to 127.0.0.1 by default so the web server is reachable only from the
+local machine. Review
+.Cm server.bind_address
+before exposing it more widely, and keep the configuration directory's
+filesystem permissions restrictive.

@@ -14,17 +14,17 @@ A clear and concise description of what the bug is.
 
 **System Information:**
 
-- OS: [e.g., OmniOS r151048]
-- Node.js Version: [e.g., 22.x]
-- Hyperweaver Agent Version: [e.g., 0.0.26]
-- Installation Method: [package/source]
+- OS: [e.g., Windows 11 24H2, macOS 15.5]
+- Hyperweaver Agent Version: [e.g., 0.1.0]
+- Installation Method: [installer/source]
+- VirtualBox Version: [e.g., 7.1.x, if relevant]
+- Vagrant Version: [e.g., 2.4.x, if relevant]
 
 **Configuration:**
 
-- HTTP Port: [e.g., 5000]
-- HTTPS Port: [e.g., 5001]
-- Database: [e.g., SQLite]
-- Authentication: [e.g., API Key]
+- Port: [e.g., 9420]
+- Bind Address: [e.g., 127.0.0.1]
+- UI: [embedded/ui.path override/disabled]
 
 ## Steps to Reproduce
 
@@ -43,9 +43,9 @@ A clear and concise description of what you expected to happen.
 
 A clear and concise description of what actually happened.
 
-## Error Messages
+## Error Messages / Logs
 
-If applicable, add error messages or logs:
+If applicable, add error messages or log excerpts (the agent log lives at `<config dir>/logs/agent.log`):
 
 ```text
 Paste error messages here
@@ -56,9 +56,7 @@ Paste error messages here
 **Request:**
 
 ```bash
-curl -X GET "http://localhost:5000/api/..." \
-     -H "Authorization: Bearer wh_..." \
-     -H "Content-Type: application/json"
+curl "http://127.0.0.1:9420/api/status"
 ```
 
 **Response:**
@@ -86,12 +84,12 @@ Add any other context about the problem here.
 
 **Affected Functionality:**
 
-- [ ] Zone management
-- [ ] API authentication
-- [ ] Network operations
-- [ ] Storage management
-- [ ] Monitoring/stats
+- [ ] Tray icon / menu
+- [ ] Browser launch
+- [ ] Web UI serving
+- [ ] API endpoints
 - [ ] Configuration
+- [ ] Logging
 - [ ] Documentation
 
 ## Resource Understanding

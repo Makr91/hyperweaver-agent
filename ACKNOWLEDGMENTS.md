@@ -1,138 +1,106 @@
 # Acknowledgments
 
-Zoneweaver Agent is built using many excellent open-source projects and tools. We are grateful to the developers and communities behind these projects.
+Hyperweaver Agent is built using many excellent open-source projects and tools. We are grateful to the developers and communities behind these projects.
 
 ## Core Dependencies
 
 ### Runtime Dependencies
 
-**Express.js** - Fast, unopinionated, minimalist web framework for Node.js
-- Website: [expressjs.com](https://expressjs.com/)
+**fyne.io/systray** - Cross-platform system tray library (maintained by the Fyne team)
+
+- Repository: [github.com/fyne-io/systray](https://github.com/fyne-io/systray)
+- License: Apache-2.0
+- Usage: The native tray icon and menu on Windows, macOS, and Linux
+
+**cli/browser** - Open URLs in the user's default browser (maintained fork of pkg/browser by the GitHub CLI team)
+
+- Repository: [github.com/cli/browser](https://github.com/cli/browser)
+- License: BSD-2-Clause
+- Usage: The tray "Open" action
+
+**goccy/go-yaml** - Pure-Go YAML parser and emitter
+
+- Repository: [github.com/goccy/go-yaml](https://github.com/goccy/go-yaml)
 - License: MIT
-- Usage: Core web framework powering the API
+- Usage: Configuration file parsing (and future Hosts.yml generation)
 
-**Sequelize** - Promise-based Node.js ORM for multiple databases
-- Website: [sequelize.org](https://sequelize.org/)
-- License: MIT  
-- Usage: Database abstraction and ORM
+**golang.org/x/image** - Supplementary Go image libraries
 
-**bcrypt** - A library for hashing passwords
-- Repository: [github.com/kelektiv/node.bcrypt.js](https://github.com/kelektiv/node.bcrypt.js)
+- Repository: [golang.org/x/image](https://pkg.go.dev/golang.org/x/image)
+- License: BSD-3-Clause
+- Usage: Tray icon scaling for the macOS menu bar
+
+**lumberjack** - Rolling log file writer
+
+- Repository: [github.com/natefinch/lumberjack](https://github.com/natefinch/lumberjack)
 - License: MIT
-- Usage: Secure API key hashing
+- Usage: Log file rotation
 
-**cors** - Node.js CORS middleware
-- Repository: [github.com/expressjs/cors](https://github.com/expressjs/cors)
+### Development and Release Tooling
+
+**golangci-lint** - Go linter aggregator
+
+- Website: [golangci-lint.run](https://golangci-lint.run/)
+- License: GPL-3.0
+- Usage: Static analysis and formatting enforcement
+
+**govulncheck** - Go vulnerability scanner
+
+- Repository: [golang.org/x/vuln](https://pkg.go.dev/golang.org/x/vuln)
+- License: BSD-3-Clause
+- Usage: Dependency vulnerability scanning in CI
+
+**goversioninfo** - Windows resource embedding
+
+- Repository: [github.com/josephspurrier/goversioninfo](https://github.com/josephspurrier/goversioninfo)
 - License: MIT
-- Usage: Cross-Origin Resource Sharing support
+- Usage: Icon, version info, and manifest for the Windows executable
 
-**helmet** - Security middleware for Express.js
-- Repository: [github.com/helmetjs/helmet](https://github.com/helmetjs/helmet)
-- License: MIT
-- Usage: HTTP security headers
+**release-please** - Automated releases from conventional commits
 
-**swagger-ui-express** - Swagger UI Express middleware
-- Repository: [github.com/scottie1984/swagger-ui-express](https://github.com/scottie1984/swagger-ui-express)
-- License: MIT
-- Usage: Interactive API documentation
+- Repository: [github.com/googleapis/release-please](https://github.com/googleapis/release-please)
+- License: Apache-2.0
+- Usage: Versioning, changelog, and GitHub releases
 
-**ws** - Simple to use WebSocket library
-- Repository: [github.com/websockets/ws](https://github.com/websockets/ws)
-- License: MIT
-- Usage: WebSocket support for real-time features
+**Inno Setup** - Windows installer builder
 
-**yaml** - JavaScript parser and stringifier for YAML
-- Repository: [github.com/eemeli/yaml](https://github.com/eemeli/yaml)
-- License: ISC
-- Usage: Configuration file parsing
+- Website: [jrsoftware.org/isinfo.php](https://jrsoftware.org/isinfo.php)
+- Usage: The Windows setup executable
 
-## Development Dependencies
+## Platform and Ecosystem
 
-**nodemon** - Monitor for changes and automatically restart server
-- Repository: [github.com/remy/nodemon](https://github.com/remy/nodemon)
-- License: MIT
-- Usage: Development server auto-restart
+**Go** - The programming language and standard library
 
-## Platform and Infrastructure
+- Website: [go.dev](https://go.dev/)
+- License: BSD-3-Clause
+- Usage: Core language and runtime (net/http, log/slog, embed, and more)
 
-**Node.js** - JavaScript runtime built on Chrome's V8 JavaScript engine
-- Website: [nodejs.org](https://nodejs.org/)
-- License: MIT-style
-- Usage: Core runtime platform
+**Hyperweaver UI** - The shared React web interface served by this agent
 
-**SQLite** - Self-contained, high-reliability SQL database engine
-- Website: [sqlite.org](https://www.sqlite.org/)
-- License: Public Domain
-- Usage: Default database engine
+- Repository: [github.com/MarkProminic/hyperweaver-ui](https://github.com/MarkProminic/hyperweaver-ui)
+- Usage: The management UI embedded in release builds; the tray icon reuses its favicon artwork
 
-**OmniOS** - illumos-based server OS
-- Website: [omnios.org](https://omnios.org/)
-- License: CDDL/GPL
-- Usage: Target operating system and platform
+**VirtualBox** and **Vagrant** - The hypervisor and VM lifecycle engine this agent manages
 
-## Tools and Ecosystem
+- Websites: [virtualbox.org](https://www.virtualbox.org/), [vagrantup.com](https://developer.hashicorp.com/vagrant)
 
-**GitHub** - Development platform and code hosting
+**GitHub** - Code hosting, issue tracking, CI/CD
+
 - Website: [github.com](https://github.com/)
-- Usage: Code hosting, issue tracking, CI/CD
-
-**npm** - Package manager for Node.js
-- Website: [npmjs.com](https://www.npmjs.com/)
-- Usage: Dependency management and distribution
-
-**Jekyll** - Static site generator
-- Website: [jekyllrb.com](https://jekyllrb.com/)
-- License: MIT
-- Usage: Documentation website generation
-
-**Just the Docs** - Jekyll theme for documentation
-- Repository: [github.com/just-the-docs/just-the-docs](https://github.com/just-the-docs/just-the-docs)
-- License: MIT
-- Usage: Documentation website theme
-
-## Standards and Specifications
-
-**OpenAPI Specification** - API description format
-- Website: [openapis.org](https://www.openapis.org/)
-- Usage: API documentation standard
-
-**JSON Schema** - Vocabulary for validating JSON documents
-- Website: [json-schema.org](https://json-schema.org/)
-- Usage: API request/response validation
-
-**Semantic Versioning** - Versioning scheme for software
-- Website: [semver.org](https://semver.org/)
-- Usage: Project versioning strategy
 
 ## Community and Inspiration
 
-**illumos Community** - Open-source Unix operating system
-- Website: [illumos.org](https://illumos.org/)
-- Inspiration: Foundation for OmniOS and zone management concepts
+**LedFx** - The tray + local web server + "opens your own browser" model this agent follows
 
-**Bhyve** - BSD Hypervisor
-- Usage: Virtualization technology managed by Zoneweaver Agent
+- Repository: [github.com/LedFx/LedFx](https://github.com/LedFx/LedFx)
 
-**Solaris Zones** - Operating system-level virtualization
-- Inspiration: Container/zone management concepts
+**Super.Human.Installer** - The predecessor application this agent replaces; its provisioner design informs the roadmap
 
-## Documentation and Learning Resources
+- Repository: [github.com/Moonshine-IDE/Super.Human.Installer](https://github.com/Moonshine-IDE/Super.Human.Installer)
 
-**MDN Web Docs** - Web development documentation
-- Website: [developer.mozilla.org](https://developer.mozilla.org/)
-- Usage: JavaScript and web API reference
+**Zoneweaver Agent** - The reference implementation of the Agent API contract
 
-**Node.js Documentation** - Official Node.js documentation
-- Website: [nodejs.org/docs](https://nodejs.org/docs/)
-- Usage: Node.js API reference and best practices
-
-## Special Recognition
-
-**Open Source Community** - The broader open-source software community whose collaborative spirit makes projects like Zoneweaver Agent possible.
-
-**OmniOS Community** - For creating and maintaining the excellent OmniOS platform that Zoneweaver Agent is designed for.
-
-**Early Users and Testers** - Community members who provided valuable feedback during development and testing phases.
+- Repository: [github.com/Makr91/zoneweaver-agent](https://github.com/Makr91/zoneweaver-agent)
 
 ---
 
@@ -141,13 +109,3 @@ Zoneweaver Agent is built using many excellent open-source projects and tools. W
 This acknowledgment file may not be exhaustive. If you believe a project or individual should be acknowledged here, please let us know by opening an issue or contributing to this file.
 
 All trademarks and registered trademarks mentioned herein are the property of their respective owners.
-
-## Contributing to Acknowledgments
-
-If you notice missing acknowledgments or have suggestions for this file:
-
-1. Open an issue with the `documentation` label
-2. Submit a pull request with your proposed changes
-3. Ensure you have permission to acknowledge any individuals mentioned
-
-Remember: Due to limited development resources, community contributions help keep all aspects of the project, including documentation, up to date.

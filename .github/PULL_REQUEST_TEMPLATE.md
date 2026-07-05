@@ -12,26 +12,27 @@ Please delete options that are not relevant:
 - [ ] Documentation update
 - [ ] Performance improvement
 - [ ] Code refactoring (no functional changes)
-- [ ] Test coverage improvement
 
 ## Testing
 
-Please describe the tests you ran to verify your changes:
+Please describe how you verified your changes:
 
 - [ ] Manual testing performed
-- [ ] Automated tests added/updated
-- [ ] Tested on OmniOS environment
-- [ ] API documentation tested (if applicable)
+- [ ] Tested on Windows
+- [ ] Tested on macOS
+- [ ] Tested on Linux
+- [ ] `golangci-lint run` passes
+- [ ] `go build ./...` and `go vet ./...` pass
 
 **Test Configuration:**
 
-- OmniOS Version:
-- Node.js Version:
-- Installation Method: (package/source)
+- OS and Version:
+- Go Version:
+- Installation Method: (installer/source)
 
 ## Changes Made
 
-- [ ] Code follows the existing style patterns
+- [ ] Code follows the existing style patterns (gofumpt/golangci-lint clean)
 - [ ] Self-review of code completed
 - [ ] Comments added for complex logic
 - [ ] Documentation updated (if needed)
@@ -48,14 +49,14 @@ Please describe the tests you ran to verify your changes:
 
 **Areas Affected:**
 
-- [ ] Zone management
+- [ ] Tray / browser launch
+- [ ] Web UI serving
 - [ ] API endpoints
 - [ ] Authentication/security
 - [ ] Configuration
+- [ ] Logging
+- [ ] Packaging/CI
 - [ ] Documentation
-- [ ] Database/storage
-- [ ] Networking
-- [ ] Monitoring/logging
 
 ## Additional Context
 

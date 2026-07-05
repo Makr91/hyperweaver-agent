@@ -1,0 +1,27 @@
+[Unit]
+Description=Hyperweaver Agent - VirtualBox/Vagrant host-agent (headless)
+After=network.target
+Wants=network.target
+
+[Service]
+Type=simple
+User=hyperweaver-agent
+Group=hyperweaver-agent
+WorkingDirectory=/var/lib/hyperweaver-agent
+ExecStart=/usr/bin/hyperweaver-agent --headless --config /etc/hyperweaver-agent/config.yaml
+Restart=on-failure
+RestartSec=10
+
+# Security settings
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/var/lib/hyperweaver-agent /var/log/hyperweaver-agent
+
+# Logging (slog console output goes to the journal; file log per config.yaml)
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=hyperweaver-agent
+
+[Install]
+WantedBy=multi-user.target

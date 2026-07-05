@@ -1,0 +1,130 @@
+.Dd $Mdocdate$
+.Dt HYPERWEAVER-AGENT.YAML 5
+.Os
+.Sh NAME
+.Nm hyperweaver-agent.yaml
+.Nd configuration file for the Hyperweaver Agent
+.Sh DESCRIPTION
+The
+.Nm
+file is the configuration file for
+.Xr hyperweaver-agent 8 .
+It is written in YAML format.
+.Pp
+Locations:
+.Bl -bullet -offset indent
+.It
+Desktop (tray) mode:
+.Pa ~/.config/hyperweaver-agent/config.yaml
+(created with commented defaults on first run)
+.It
+Headless service mode:
+.Pa /etc/hyperweaver-agent/config.yaml
+(installed by the package, passed via
+.Fl -config )
+.El
+.Sh CONFIGURATION SECTIONS
+.Ss server
+HTTP server configuration.
+.Bl -tag -width "bind_address"
+.It Cm bind_address
+IP address to bind the web server to (default: "127.0.0.1"). Keep the
+loopback address unless the agent must be reachable from other machines.
+.It Cm port
+TCP port number for the web server (default: 9420)
+.El
+.Ss ui
+Web UI serving.
+.Bl -tag -width "enabled"
+.It Cm enabled
+Boolean enabling the Hyperweaver UI at /ui/ (default: true). When disabled
+the agent is API-only and the root path serves a small JSON info document.
+.It Cm path
+Optional directory to serve the UI from instead of the copy embedded in the
+binary (default: empty = embedded)
+.El
+.Ss browser
+Tray "Open" behavior (desktop mode only).
+.Bl -tag -width "path"
+.It Cm path
+Optional full path to a browser executable (or .app bundle on macOS) used by
+the tray Open action. Empty selects the operating system's default browser.
+.El
+.Ss logging
+Logging configuration.
+.Bl -tag -width "max_size_mb"
+.It Cm level
+Logging level: "error", "warn", "info", or "debug" (default: "info")
+.It Cm console
+Boolean enabling human-readable logging on standard error (default: true).
+Under systemd this output is captured by the journal. The Windows GUI build
+has no console; the log file is authoritative there.
+.It Cm file
+Log file path. Empty uses the default location
+.Pa <config dir>/logs/agent.log ;
+the packaged service sets
+.Pa /var/log/hyperweaver-agent/agent.log .
+.It Cm max_size_mb
+Maximum log file size in megabytes before rotation (default: 20)
+.It Cm max_backups
+Number of rotated log files to keep (default: 5)
+.El
+.Sh FILES
+.Bl -tag -width ".Pa /var/log/hyperweaver-agent/"
+.It Pa /etc/hyperweaver-agent/config.yaml
+Service-mode configuration
+.It Pa ~/.config/hyperweaver-agent/config.yaml
+Per-user configuration
+.It Pa /var/log/hyperweaver-agent/
+Service log directory
+.El
+.Sh EXAMPLES
+The packaged default:
+.Bd -literal -offset indent
+server:
+  bind_address: 127.0.0.1
+  port: 9420
+
+ui:
+  enabled: true
+  path: ''
+
+browser:
+  path: ''
+
+logging:
+  level: info
+  console: true
+  file: /var/log/hyperweaver-agent/agent.log
+  max_size_mb: 20
+  max_backups: 5
+.Ed
+.Sh DIAGNOSTICS
+Configuration errors prevent the agent from starting and are reported on
+standard error and in the journal:
+.Pp
+.Dl # journalctl -u hyperweaver-agent
+.Pp
+Common configuration issues:
+.Bl -bullet -offset indent
+.It
+Invalid YAML syntax (indentation, special characters)
+.It
+Unknown configuration keys (the parser is strict and rejects typos)
+.It
+Port conflicts with other services
+.It
+Log directory not writable by the service user
+.El
+.Sh SEE ALSO
+.Xr hyperweaver-agent 8 ,
+.Xr systemctl 1 ,
+.Xr journalctl 1
+.Sh STANDARDS
+The configuration file uses YAML 1.2 format as defined by the YAML
+specification.
+.Sh SECURITY CONSIDERATIONS
+Keep restrictive filesystem permissions on the configuration directory; it
+will hold credentials in future releases. Leave
+.Cm server.bind_address
+on 127.0.0.1 unless remote access is required and understood.
