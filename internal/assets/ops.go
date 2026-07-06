@@ -87,16 +87,18 @@ type ScanMetadata struct {
 }
 
 // RegisterExecutors wires the artifact operations into the task queue.
-func RegisterExecutors(queue *tasks.Queue, store *Store, resourceAuth ResourceAuth) {
-	e := &executors{queue: queue, store: store, resourceAuth: resourceAuth}
+func RegisterExecutors(queue *tasks.Queue, store *Store, resourceAuth ResourceAuth, hcl HCLTokens) {
+	e := &executors{queue: queue, store: store, resourceAuth: resourceAuth, hcl: hcl}
 	queue.Register(OpScan, tasks.Executor{Run: e.scan})
 	queue.Register(OpDownload, tasks.Executor{Run: e.download})
+	queue.Register(OpHCLDownload, tasks.Executor{Run: e.hclDownload})
 }
 
 type executors struct {
 	queue        *tasks.Queue
 	store        *Store
 	resourceAuth ResourceAuth
+	hcl          HCLTokens
 }
 
 // progress records download progress on the task row (zoneweaver's

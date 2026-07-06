@@ -117,6 +117,40 @@ func (s *Server) handleDownloadArtifact(w http.ResponseWriter, r *http.Request) 
 	acceptedTask(w, task.ID, "Artifact download task queued successfully")
 }
 
+// handleHCLDownload queues an hcl_download task: the SHI download-portal
+// flow — token exchange (rotation persisted), catalog lookup (its sha256 is
+// authoritative), verified streamed download into the cache.
+func (s *Server) handleHCLDownload(w http.ResponseWriter, r *http.Request) {
+	var meta assets.HCLDownloadMetadata
+	if err := decodeBody(r, &meta); err != nil {
+		taskError(w, http.StatusBadRequest, "Invalid JSON body")
+		return
+	}
+	if err := meta.Validate(); err != nil {
+		taskError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	raw, err := json.Marshal(meta)
+	if err != nil {
+		taskError(w, http.StatusInternalServerError, "Failed to queue HCL download task")
+		return
+	}
+	metadata := string(raw)
+	task, err := s.tasks.Store().Create(r.Context(), &tasks.NewTask{
+		MachineName: "system",
+		Operation:   assets.OpHCLDownload,
+		Priority:    tasks.PriorityMedium,
+		CreatedBy:   auth.FromContext(r.Context()).Name,
+		Metadata:    &metadata,
+	})
+	if err != nil {
+		slog.Error("queue hcl download", "error", err)
+		taskError(w, http.StatusInternalServerError, "Failed to queue HCL download task")
+		return
+	}
+	acceptedTask(w, task.ID, "HCL download task queued successfully")
+}
+
 // acceptedTask writes the 202 task-created shape.
 func acceptedTask(w http.ResponseWriter, taskID, message string) {
 	w.Header().Set("Content-Type", "application/json")

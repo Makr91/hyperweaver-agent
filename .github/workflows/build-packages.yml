@@ -61,7 +61,11 @@ jobs:
           # seedless.
           mkdir -p packaging/provisioners-seed
           for repo in STARTcloud/hcl_domino_standalone_provisioner STARTcloud/hcl_domino_additional_provisioner; do
-            if gh release download --repo "$repo" --pattern '*.tar.gz' --dir packaging/provisioners-seed; then
+            # Dual-asset releases (Provisioner AI, 2026-07-06): a versioned
+            # tar.gz plus a version-less stable one — fetch ONLY the
+            # version-less asset so the seed never carries duplicates.
+            asset="${repo##*/}.tar.gz"
+            if gh release download --repo "$repo" --pattern "$asset" --dir packaging/provisioners-seed; then
               echo "Staged seed archive(s) from $repo"
             else
               echo "WARNING: no seed archive from $repo — building without it"
@@ -168,7 +172,11 @@ jobs:
           # release assets from the provisioner repos; missing assets tolerated.
           mkdir -p packaging/provisioners-seed
           for repo in STARTcloud/hcl_domino_standalone_provisioner STARTcloud/hcl_domino_additional_provisioner; do
-            if gh release download --repo "$repo" --pattern '*.tar.gz' --dir packaging/provisioners-seed; then
+            # Dual-asset releases (Provisioner AI, 2026-07-06): a versioned
+            # tar.gz plus a version-less stable one — fetch ONLY the
+            # version-less asset so the seed never carries duplicates.
+            asset="${repo##*/}.tar.gz"
+            if gh release download --repo "$repo" --pattern "$asset" --dir packaging/provisioners-seed; then
               echo "Staged seed archive(s) from $repo"
             else
               echo "WARNING: no seed archive from $repo — building without it"
@@ -299,7 +307,11 @@ jobs:
           # release assets from the provisioner repos; missing assets tolerated.
           mkdir -p packaging/provisioners-seed
           for repo in STARTcloud/hcl_domino_standalone_provisioner STARTcloud/hcl_domino_additional_provisioner; do
-            if gh release download --repo "$repo" --pattern '*.tar.gz' --dir packaging/provisioners-seed; then
+            # Dual-asset releases (Provisioner AI, 2026-07-06): a versioned
+            # tar.gz plus a version-less stable one — fetch ONLY the
+            # version-less asset so the seed never carries duplicates.
+            asset="${repo##*/}.tar.gz"
+            if gh release download --repo "$repo" --pattern "$asset" --dir packaging/provisioners-seed; then
               echo "Staged seed archive(s) from $repo"
             else
               echo "WARNING: no seed archive from $repo — building without it"
@@ -404,12 +416,20 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          # The platform URLs + checksumsUrl feed POST /app/updates/apply:
+          # the agent downloads its installer, verifies it against
+          # SHA256SUMS.txt (mandatory), launches it, and exits.
+          DL="https://github.com/${{ github.repository }}/releases/download/${{ inputs.tag_name }}"
           cat > update-info.json << EOF
           {
             "version": "${{ inputs.version }}",
             "releaseUrl": "https://github.com/${{ github.repository }}/releases/tag/${{ inputs.tag_name }}",
             "releaseDate": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
-            "changelog": "https://github.com/${{ github.repository }}/blob/main/CHANGELOG.md"
+            "changelog": "https://github.com/${{ github.repository }}/blob/main/CHANGELOG.md",
+            "windowsUrl": "${DL}/HyperweaverAgent-Setup.exe",
+            "macosUrl": "${DL}/HyperweaverAgent-Setup.pkg",
+            "linuxUrl": "${DL}/hyperweaver-agent_${{ inputs.version }}_amd64.deb",
+            "checksumsUrl": "${DL}/SHA256SUMS.txt"
           }
           EOF
           gh release upload "${{ inputs.tag_name }}" update-info.json --clobber

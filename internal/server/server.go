@@ -110,6 +110,7 @@ func New(cfg *config.Config, keyStore *keys.Store, trayTokens *auth.TrayTokens, 
 	// Version / update / prerequisite surfaces (Agent API v1 System group).
 	mux.Handle("GET /version", requireKey(http.HandlerFunc(s.handleVersion)))
 	mux.Handle("GET /app/updates/check", requireKey(http.HandlerFunc(s.handleUpdateCheck)))
+	mux.Handle("POST /app/updates/apply", requireKey(http.HandlerFunc(s.handleUpdateApply)))
 	mux.Handle("GET /provisioning/status", requireKey(http.HandlerFunc(s.handleProvisioningStatus)))
 
 	// Swap information (Agent API v1 Swap Management group, read-only —
@@ -218,6 +219,7 @@ func New(cfg *config.Config, keyStore *keys.Store, trayTokens *auth.TrayTokens, 
 	// `provisioning` token — architecture §8, first slice of the
 	// provisioning engine). The literal "import" segment wins over {name} in
 	// ServeMux precedence.
+	mux.Handle("GET /provisioning/bridged-interfaces", requireKey(http.HandlerFunc(s.handleBridgedInterfaces)))
 	mux.Handle("GET /provisioning/provisioners", requireKey(http.HandlerFunc(s.handleListProvisioners)))
 	mux.Handle("POST /provisioning/provisioners/import", requireKey(http.HandlerFunc(s.handleImportProvisioner)))
 	mux.Handle("GET /provisioning/provisioners/{name}", requireKey(http.HandlerFunc(s.handleProvisionerDetails)))
@@ -231,6 +233,7 @@ func New(cfg *config.Config, keyStore *keys.Store, trayTokens *auth.TrayTokens, 
 	mux.Handle("GET /artifacts", requireKey(s.assetsGate(s.handleListArtifacts)))
 	mux.Handle("POST /artifacts/scan", requireKey(s.assetsGate(s.handleScanArtifacts)))
 	mux.Handle("POST /artifacts/download", requireKey(s.assetsGate(s.handleDownloadArtifact)))
+	mux.Handle("POST /artifacts/hcl-download", requireKey(s.assetsGate(s.handleHCLDownload)))
 	mux.Handle("POST /artifacts/upload", requireKey(s.assetsGate(s.handleUploadArtifact)))
 	mux.Handle("POST /artifacts/register", requireKey(s.assetsGate(s.handleRegisterArtifact)))
 	mux.Handle("DELETE /artifacts/{id}", requireKey(s.assetsGate(s.handleDeleteArtifact)))

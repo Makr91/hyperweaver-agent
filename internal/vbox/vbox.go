@@ -150,6 +150,27 @@ func ShowVMInfo(ctx context.Context, vboxManage, nameOrUUID string) (*Info, erro
 	return info, nil
 }
 
+// ListBridgedIfs returns the host's bridgeable interface names
+// (`VBoxManage list bridgedifs` Name: lines) — SHI's default-NIC detection,
+// feeding the UI's bridge-interface picker.
+func ListBridgedIfs(ctx context.Context, vboxManage string) ([]string, error) {
+	cmd := exec.CommandContext(ctx, vboxManage, "list", "bridgedifs")
+	cmd.SysProcAttr = procattr.NoConsole()
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("VBoxManage list bridgedifs: %w", err)
+	}
+	names := []string{}
+	for _, line := range strings.Split(string(out), "\n") {
+		if value, found := strings.CutPrefix(strings.TrimSpace(line), "Name:"); found {
+			if name := strings.TrimSpace(value); name != "" {
+				names = append(names, name)
+			}
+		}
+	}
+	return names, nil
+}
+
 // StartVM boots a machine (`startvm --type headless|gui`) — the direct path
 // for machines that exist only in VirtualBox (design: dual-path management).
 func StartVM(ctx context.Context, vboxManage, name string, gui bool) error {

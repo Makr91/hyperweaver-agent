@@ -272,6 +272,10 @@ machine names stay free-form (default: false).
 .It Cm shutdown_timeout
 Seconds a graceful stop waits for the guest to power off after the ACPI
 signal before forcing poweroff, 5-3600 (default: 120)
+.It Cm keep_running_on_exit
+Boolean keeping provisioned machines running when the agent exits (SHI's
+keepserversrunning). false force-powers-off every machine this agent created
+on the way out; discovered VMs are never touched (default: true).
 .El
 .Ss provisioning
 Provisioning engine (the provisioner package registry and the provisioning
@@ -296,6 +300,18 @@ runs from. Empty selects
 .Pa machines
 under
 .Cm data.dir .
+.It Cm keep_failed_machines_running
+Boolean leaving a machine running after a failed vagrant up for debugging
+(SHI's keepfailedserversrunning). false powers the half-provisioned VM off
+(default: true).
+.It Cm default_sync_method
+Sync method for machines whose spec sets none: "rsync" or "scp" (SHI's
+global preference; platform rules still apply — forced rsync on Windows,
+macOS auto-fallback to SCP on the ancient Apple rsync) (default: "rsync").
+.It Cm default_network_interface
+Host bridge interface injected into templates as DEFAULT_NETWORK_INTERFACE
+when the spec sets none; values come from GET /provisioning/bridged-interfaces
+(default: empty).
 .El
 .Ss assets
 Installer file cache (the artifacts capability token): hash-verified

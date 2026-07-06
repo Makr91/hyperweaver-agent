@@ -29,6 +29,8 @@ var adminWritePrefixes = []string{
 	"/system/groups",
 	"/system/roles",
 	"/database",
+	// Applying an agent update replaces the binary and exits the process.
+	"/app",
 }
 
 // Surfaces that are admin-only regardless of method: key management, agent

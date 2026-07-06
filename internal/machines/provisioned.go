@@ -11,6 +11,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/goccy/go-yaml"
 
@@ -20,6 +21,7 @@ import (
 	"github.com/Makr91/hyperweaver-agent/internal/safepath"
 	"github.com/Makr91/hyperweaver-agent/internal/tasks"
 	"github.com/Makr91/hyperweaver-agent/internal/vagrant"
+	"github.com/Makr91/hyperweaver-agent/internal/vbox"
 )
 
 // The provisioned-machine pipeline (architecture §8, D9/D10): machines
@@ -119,6 +121,16 @@ type ProvisionEnv struct {
 	Assets      *assets.Store
 	CACertPath  string
 	CAKeyPath   string
+	// KeepFailedRunning leaves a machine running after a failed vagrant up
+	// (SHI's keepfailedserversrunning); false powers the half-up VM off.
+	KeepFailedRunning bool
+	// DefaultSyncMethod fills specs without an explicit sync_method (SHI's
+	// global syncmethod preference); platform rules still apply on top.
+	DefaultSyncMethod string
+	// DefaultNetworkInterface reaches the template context as
+	// settings.default_network_interface / DEFAULT_NETWORK_INTERFACE when
+	// the spec sets none (SHI's bridge-interface fallback).
+	DefaultNetworkInterface string
 }
 
 // resolveInstallerFiles verifies every role file reference against the file
@@ -222,15 +234,22 @@ func (e *executors) prepareWorkdir(ctx context.Context, machine *Machine, spec *
 		return fmt.Errorf("provisioner %s/%s: %w", spec.Provisioner.Name, spec.Provisioner.Version, err)
 	}
 
-	method, reason := effectiveSyncMethod(ctx, spec.SyncMethod)
+	requested := spec.SyncMethod
+	if requested == "" {
+		requested = e.env.DefaultSyncMethod
+	}
+	method, reason := effectiveSyncMethod(ctx, requested)
 	note := "Sync method: " + method
 	if reason != "" {
 		note += " — " + reason
 	}
 	out.Write("stdout", note+"\n")
-	settings := make(map[string]any, len(spec.Settings)+1)
+	settings := make(map[string]any, len(spec.Settings)+2)
 	maps.Copy(settings, spec.Settings)
 	settings["sync_method"] = method
+	if _, present := settings["default_network_interface"]; !present && e.env.DefaultNetworkInterface != "" {
+		settings["default_network_interface"] = e.env.DefaultNetworkInterface
+	}
 
 	// Every referenced installer file must verify against the cache BEFORE
 	// anything renders — the roles the template sees carry the verified
@@ -340,6 +359,7 @@ func (e *executors) vagrantUp(ctx context.Context, task *tasks.Task, out *tasks.
 	e.taskProgress(task, 5, "running_vagrant_up")
 	out.Write("stdout", "Running vagrant up in "+*machine.Home+"\n")
 	if uerr := vagrant.Up(ctx, vagrantExe, *machine.Home, true, out.Write); uerr != nil {
+		e.handleFailedUp(machine, out)
 		return uerr
 	}
 
@@ -347,6 +367,32 @@ func (e *executors) vagrantUp(ctx context.Context, task *tasks.Task, out *tasks.
 	e.recordIdentity(machine, out)
 	e.taskProgress(task, 100, "completed")
 	return nil
+}
+
+// handleFailedUp applies SHI's keepfailedserversrunning rule after a failed
+// vagrant up: by default the half-provisioned VM stays running for
+// debugging; with the setting off it is powered off (the fresh UUID comes
+// from the working directory's vagrant state — the failed up may have just
+// created it).
+func (e *executors) handleFailedUp(machine *Machine, out *tasks.OutputWriter) {
+	if e.env.KeepFailedRunning {
+		out.Write("stderr", "vagrant up failed — machine left as-is for debugging (provisioning.keep_failed_machines_running)\n")
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	exe := VBoxManagePath(ctx)
+	if exe == "" {
+		return
+	}
+	target := machine.VBoxTarget()
+	if uuid := vagrantMachineUUID(*machine.Home); uuid != "" {
+		target = uuid
+	}
+	out.Write("stderr", "vagrant up failed — powering the machine off (provisioning.keep_failed_machines_running: false)\n")
+	if perr := vbox.ControlVM(ctx, exe, target, "poweroff"); perr != nil {
+		out.Write("stderr", "Power off after failed up: "+perr.Error()+"\n")
+	}
 }
 
 // recordIdentity ties the VM vagrant built to the registry row: the
@@ -391,6 +437,7 @@ func (e *executors) startProvisioned(ctx context.Context, task *tasks.Task, mach
 	e.taskProgress(task, 40, "running_vagrant_up")
 	out.Write("stdout", "Running vagrant up in "+*machine.Home+"\n")
 	if uerr := vagrant.Up(ctx, vagrantExe, *machine.Home, true, out.Write); uerr != nil {
+		e.handleFailedUp(machine, out)
 		return uerr
 	}
 
@@ -494,6 +541,35 @@ func WelcomeURL(home string) string {
 		}
 	}
 	return ""
+}
+
+// StopAllProvisioned force-powers-off every spec-carrying machine — SHI's
+// keepserversrunning:false on-quit behavior (direct commands, no task queue:
+// the agent is exiting). Machines merely discovered from VirtualBox are the
+// user's own and are never touched.
+func StopAllProvisioned(ctx context.Context, store *Store) {
+	exe := VBoxManagePath(ctx)
+	if exe == "" {
+		return
+	}
+	list, err := store.List(ctx, &ListFilter{})
+	if err != nil {
+		mlog().Error("stop-on-exit: list machines", "error", err)
+		return
+	}
+	for _, machine := range list {
+		if !machine.Provisioned() || machine.UUID == nil {
+			continue
+		}
+		info, ierr := vbox.ShowVMInfo(ctx, exe, machine.VBoxTarget())
+		if ierr != nil || MapVBoxState(info.State) != StatusRunning {
+			continue
+		}
+		mlog().Info("stop-on-exit: powering off machine", "machine", machine.Name)
+		if perr := vbox.ControlVM(ctx, exe, machine.VBoxTarget(), "poweroff"); perr != nil {
+			mlog().Error("stop-on-exit: poweroff failed", "machine", machine.Name, "error", perr)
+		}
+	}
 }
 
 // removeWorkdir deletes a provisioned machine's working directory — ONLY

@@ -185,6 +185,16 @@ func (c *Config) MachinesDir() (string, error) {
 	return filepath.Join(dir, "machines"), nil
 }
 
+// DownloadsDir returns where the update flow lands installers: downloads
+// under the data root (SHI's downloads directory).
+func (c *Config) DownloadsDir() (string, error) {
+	dir, err := c.DataDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, "downloads"), nil
+}
+
 // AssetsDir returns the installer file cache root: assets.dir when
 // configured, else file-cache under the data root (SHI's file-cache naming).
 func (c *Config) AssetsDir() (string, error) {

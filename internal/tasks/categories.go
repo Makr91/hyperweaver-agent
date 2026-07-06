@@ -25,6 +25,9 @@ var operationCategories = map[string]string{
 	// registry rows and cache tree.
 	"artifact_scan":     CategoryArtifact,
 	"artifact_download": CategoryArtifact,
+	"hcl_download":      CategoryArtifact,
+	// One agent update at a time — it ends with the process exiting.
+	"agent_update": CategorySystem,
 }
 
 // OperationCategory returns the concurrency category for an operation, or ""

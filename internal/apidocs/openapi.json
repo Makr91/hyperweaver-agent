@@ -25,7 +25,8 @@
     { "name": "System", "description": "Version, update checking, prerequisite detection" },
     { "name": "Task Management", "description": "The task queue: every machine operation runs as a prioritized, dependency-chained task with streamed output" },
     { "name": "Machine Management", "description": "VirtualBox machines — vagrant-backed or raw — discovered by reconciliation and operated through queued tasks" },
-    { "name": "Provisioning", "description": "Provisioner package registry (the provisioning capability token): packages in SHI's on-disk format — <name>/provisioner-collection.yml with <version>/provisioner.yml trees — listed, imported (folder, archive, or git clone; task-queued), and deleted only while no machine references them. One system for every package family; installer-bundled packages seed on startup without ever overwriting existing versions. Hosts.yml generation and machine creation land later in this phase." },
+    { "name": "Provisioning", "description": "Provisioner package registry (the provisioning capability token): packages in SHI's on-disk format — <name>/provisioner-collection.yml with <version>/provisioner.yml trees — listed, imported (folder, archive, or git clone; task-queued), and deleted only while no machine references them. One system for every package family; installer-bundled packages seed on startup without ever overwriting existing versions." },
+    { "name": "Artifacts", "description": "Installer file cache (the artifacts capability token, config-gated by assets.enabled — SHI's file cache with hash verification implemented in FULL, Mark's 2026-07-06 ruling): SHA-256-hashed installer/fixpack/hotfix files under <cache>/<role>/{installers,fixpacks,hotfixes}/, with hash EXPECTATIONS (bundled registry seed + the HCL catalog's authoritative hashes), on-demand scans, verified URL/HCL-portal downloads with live progress, streaming uploads, and local-path registration. Machine prepare REFUSES any referenced file that is absent, unhashed, or hash-mismatched; mounts are hard links or hash-verified copies." },
     { "name": "Swap Management", "description": "Read-only swap information (the swap capability token); add/remove are OmniOS semantics and not implemented on this agent" },
     { "name": "Host Monitoring", "description": "Host telemetry (the monitoring capability token): always-on realtime sampling via gopsutil; monitoring.storage_enabled adds stored time series in per-datatype database files. Illumos-only families (ZFS pools/datasets/ARC, zpool-iostat disk IO, netstat routes) have no analog on this host and are absent." },
     { "name": "Processes", "description": "Host process listing and control (the processes capability token). The zone concept does not exist here: the zone field is absent and ?zone= filters are ignored. Absent by platform: /{pid}/stack, /{pid}/limits (pstack/plimit are illumos tools) and trace/start (DTrace)." },
@@ -84,7 +85,7 @@
           "auth": { "type": "array", "items": { "type": "string" }, "example": ["apikey"] },
           "bootstrapAvailable": { "type": "boolean", "example": true },
           "console": { "type": "array", "items": { "type": "string" }, "example": [] },
-          "features": { "type": "array", "items": { "type": "string" }, "description": "Capability tokens (platform support ∧ config state): host-power is absent when host_power.enabled is false", "example": ["tasks", "machines", "machine-suspend", "machine-create", "swap", "monitoring", "processes", "provisioning", "host-power"] },
+          "features": { "type": "array", "items": { "type": "string" }, "description": "Capability tokens (platform support ∧ config state): host-power is absent when host_power.enabled is false, artifacts when assets.enabled is false", "example": ["tasks", "machines", "machine-suspend", "machine-create", "swap", "monitoring", "processes", "provisioning", "host-power", "artifacts"] },
           "uptime": { "type": "integer", "description": "Seconds since the agent started", "example": 86400 }
         }
       },
@@ -214,7 +215,7 @@
                 "enabled": { "type": "boolean" },
                 "files": {
                   "type": "object",
-                  "description": "Installer assignments (filenames/hashes; the assets subsystem populates the working copy's installers/ tree when it lands)",
+                  "description": "Installer assignments, resolved against the file cache at every prepare (assets.enabled): the named file must exist in the cache and pass SHA-256 verification or the start FAILS; hashes are auto-filled from the cache into the template vars, and a spec-supplied hash must match the cached one. Files mount into the working copy's installers/<role>/ tree as hard links or hash-verified copies.",
                   "properties": {
                     "installer": { "type": "string" },
                     "installer_hash": { "type": "string" },
@@ -320,6 +321,26 @@
           "valid": { "type": "boolean", "description": "false marks a family with no parseable versions (SHI's invalid placeholder) — still listed, still deletable" },
           "metadata": { "type": "object", "description": "provisioner-collection.yml, verbatim", "nullable": true },
           "versions": { "type": "array", "items": { "$ref": "#/components/schemas/ProvisionerVersion" }, "description": "Newest first" }
+        }
+      },
+      "Artifact": {
+        "type": "object",
+        "description": "One file-cache row. sha256 is what the file actually hashed to when last verified; expected_sha256 is the recorded expectation (bundled registry seed, caller-supplied, or the HCL catalog). exists:false rows are expectations awaiting their binary (SHI's model).",
+        "properties": {
+          "id": { "type": "integer" },
+          "role": { "type": "string", "example": "domino" },
+          "kind": { "type": "string", "enum": ["installer", "fixpack", "hotfix"] },
+          "filename": { "type": "string", "example": "Domino_14.5_Linux_English.tar" },
+          "path": { "type": "string", "description": "Cache location (empty on expectation-only rows)" },
+          "sha256": { "type": "string" },
+          "expected_sha256": { "type": "string" },
+          "size": { "type": "integer", "format": "int64" },
+          "version": { "type": "string" },
+          "exists": { "type": "boolean" },
+          "verified_at": { "type": "string", "format": "date-time", "nullable": true },
+          "source_url": { "type": "string" },
+          "created_at": { "type": "string", "format": "date-time" },
+          "updatedAt": { "type": "string", "format": "date-time" }
         }
       },
       "SecretsDocument": {
@@ -866,6 +887,21 @@
             "description": "Versioninfo fetch or parse failure",
             "content": { "application/json": { "schema": { "$ref": "#/components/schemas/WrappedError" } } }
           }
+        }
+      }
+    },
+    "/app/updates/apply": {
+      "post": {
+        "tags": ["System"],
+        "summary": "Download and apply an agent update",
+        "description": "Minimum role: admin. Queues an agent_update task (SHI's download-then-relaunch, Mark's ruling 2026-07-06): downloads this platform's installer from the release named by updates.versioninfo_url, verifies it against the release's SHA256SUMS.txt (MANDATORY — an unverifiable installer never launches), starts it (the .exe directly on Windows, open for the macOS .pkg, xdg-open for the Linux .deb — headless Linux keeps the download and reports the dpkg command), and exits the agent so the installer can replace it.",
+        "responses": {
+          "202": {
+            "description": "Update task queued",
+            "content": { "application/json": { "schema": { "type": "object", "properties": { "success": { "type": "boolean" }, "task_id": { "type": "string", "format": "uuid" }, "target_version": { "type": "string" }, "status": { "type": "string" }, "message": { "type": "string" } } } } }
+          },
+          "400": { "description": "Update checking not configured, or already up to date" },
+          "500": { "description": "Versioninfo fetch failure" }
         }
       }
     },
@@ -1671,6 +1707,179 @@
               }
             }
           }
+        }
+      }
+    },
+    "/artifacts": {
+      "get": {
+        "tags": ["Artifacts"],
+        "summary": "List the file cache",
+        "description": "Minimum role: viewer. Every cache row — present files and expectation-only entries. 503 when assets.enabled is false.",
+        "parameters": [
+          { "name": "role", "in": "query", "schema": { "type": "string" } },
+          { "name": "kind", "in": "query", "schema": { "type": "string", "enum": ["installer", "fixpack", "hotfix"] } },
+          { "name": "exists", "in": "query", "schema": { "type": "boolean" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "Cache rows",
+            "content": { "application/json": { "schema": { "type": "object", "properties": { "artifacts": { "type": "array", "items": { "$ref": "#/components/schemas/Artifact" } }, "total": { "type": "integer" } } } } }
+          },
+          "503": { "description": "Assets subsystem is disabled" }
+        }
+      }
+    },
+    "/artifacts/scan": {
+      "post": {
+        "tags": ["Artifacts"],
+        "summary": "Scan the cache",
+        "description": "Minimum role: operator. Queues an artifact_scan task: new files hashed and registered, vanished files marked missing (expectations survive), and with verify_checksums every present file re-hashed — the task FAILS when any file mismatches its expectation.",
+        "requestBody": {
+          "required": false,
+          "content": { "application/json": { "schema": { "type": "object", "properties": { "verify_checksums": { "type": "boolean", "default": false } } } } }
+        },
+        "responses": {
+          "202": { "description": "Scan task queued" },
+          "503": { "description": "Assets subsystem is disabled" }
+        }
+      }
+    },
+    "/artifacts/download": {
+      "post": {
+        "tags": ["Artifacts"],
+        "summary": "Download a file into the cache",
+        "description": "Minimum role: operator. Queues an artifact_download task: streamed with live progress ({downloaded_mb, total_mb, speed_mbps, eta_seconds} in progress_info), hashed DURING the stream, verified against expected_sha256 when given (mismatch discards the file — never promoted, no auto-retry). resource_name names a custom_resource_url secret whose Basic-auth pair authenticates the fetch.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["url", "role", "kind"],
+                "properties": {
+                  "url": { "type": "string" },
+                  "role": { "type": "string" },
+                  "kind": { "type": "string", "enum": ["installer", "fixpack", "hotfix"] },
+                  "filename": { "type": "string", "description": "Defaults from the URL path" },
+                  "expected_sha256": { "type": "string" },
+                  "resource_name": { "type": "string", "description": "custom_resource_url secret for HTTP Basic auth" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": { "description": "Download task queued" },
+          "400": { "description": "Invalid url/role/kind/filename/hash" },
+          "503": { "description": "Assets subsystem is disabled" }
+        }
+      }
+    },
+    "/artifacts/hcl-download": {
+      "post": {
+        "tags": ["Artifacts"],
+        "summary": "Download a file from the HCL portal",
+        "description": "Minimum role: operator. Queues an hcl_download task (SHI's HCLDownloader flow): exchanges the named hcl_download_portal_api_keys secret's refresh token (the ROTATED token is persisted back immediately — SHI's critical rule), looks the file up in the HCL catalog by EXACT name (the catalog's sha256 is authoritative and overwrites the expectation), streams the verified download into the cache. Failures carry contextual guidance (expired key vs un-accepted HCL license); no auto-retry.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["key_name", "filename", "role", "kind"],
+                "properties": {
+                  "key_name": { "type": "string", "description": "hcl_download_portal_api_keys secret name" },
+                  "filename": { "type": "string", "description": "EXACT HCL catalog file name", "example": "Domino_14.5_Linux_English.tar" },
+                  "role": { "type": "string" },
+                  "kind": { "type": "string", "enum": ["installer", "fixpack", "hotfix"] }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": { "description": "HCL download task queued" },
+          "400": { "description": "Invalid key_name/role/kind/filename" },
+          "503": { "description": "Assets subsystem is disabled" }
+        }
+      }
+    },
+    "/artifacts/upload": {
+      "post": {
+        "tags": ["Artifacts"],
+        "summary": "Upload a file into the cache",
+        "description": "Minimum role: operator. Streaming multipart/form-data: fields role + kind (+ optional filename) MUST precede the \"file\" part (single-pass stream). The upload is hashed on arrival; the response's verified flag reports the expectation check. Body capped by assets.max_upload_gb.",
+        "requestBody": {
+          "required": true,
+          "content": { "multipart/form-data": { "schema": { "type": "object", "required": ["role", "kind", "file"], "properties": { "role": { "type": "string" }, "kind": { "type": "string", "enum": ["installer", "fixpack", "hotfix"] }, "filename": { "type": "string" }, "file": { "type": "string", "format": "binary" } } } } }
+        },
+        "responses": {
+          "201": {
+            "description": "File uploaded and hashed",
+            "content": { "application/json": { "schema": { "type": "object", "properties": { "success": { "type": "boolean" }, "artifact": { "$ref": "#/components/schemas/Artifact" }, "verified": { "type": "boolean" }, "message": { "type": "string" } } } } }
+          },
+          "400": { "description": "Malformed multipart body or unusable role/kind/filename" },
+          "503": { "description": "Assets subsystem is disabled" }
+        }
+      }
+    },
+    "/artifacts/register": {
+      "post": {
+        "tags": ["Artifacts"],
+        "summary": "Register an agent-host file into the cache",
+        "description": "Minimum role: operator. SHI's add-file picker flow for Direct-mode installs: copies (move: true moves) the named agent-host file into the cache and hashes it.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["path", "role", "kind"],
+                "properties": {
+                  "path": { "type": "string", "description": "Agent-host file path" },
+                  "role": { "type": "string" },
+                  "kind": { "type": "string", "enum": ["installer", "fixpack", "hotfix"] },
+                  "filename": { "type": "string", "description": "Defaults from the path's base name" },
+                  "move": { "type": "boolean", "default": false }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": { "description": "File registered and hashed" },
+          "400": { "description": "Unusable path/role/kind/filename" },
+          "503": { "description": "Assets subsystem is disabled" }
+        }
+      }
+    },
+    "/artifacts/{id}": {
+      "delete": {
+        "tags": ["Artifacts"],
+        "summary": "Delete a cache row",
+        "description": "Minimum role: operator. delete_file=true also removes the cached file (only from its canonical cache location).",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } },
+          { "name": "delete_file", "in": "query", "schema": { "type": "boolean", "default": false } }
+        ],
+        "responses": {
+          "200": { "description": "Row deleted" },
+          "404": { "description": "Artifact not found" },
+          "503": { "description": "Assets subsystem is disabled" }
+        }
+      }
+    },
+    "/provisioning/bridged-interfaces": {
+      "get": {
+        "tags": ["Provisioning"],
+        "summary": "Host bridgeable interfaces",
+        "description": "Minimum role: viewer. VBoxManage list bridgedifs names — the bridge/default-NIC picker's choices; default echoes provisioning.default_network_interface.",
+        "responses": {
+          "200": {
+            "description": "Interface names",
+            "content": { "application/json": { "schema": { "type": "object", "properties": { "interfaces": { "type": "array", "items": { "type": "string" } }, "default": { "type": "string" }, "total": { "type": "integer" } } } } }
+          },
+          "503": { "description": "VirtualBox is not installed" }
         }
       }
     },

@@ -180,6 +180,10 @@ machines:
   # Seconds a graceful stop waits for the guest to power off after the ACPI
   # signal before forcing poweroff.
   shutdown_timeout: 120
+  # Keep provisioned machines running when the agent exits (SHI's
+  # keepserversrunning). false force-powers-off every machine this agent
+  # created on the way out; discovered VMs are never touched.
+  keep_running_on_exit: true
 
 provisioning:
   # Directory holding provisioner packages (SHI's on-disk format:
@@ -193,6 +197,18 @@ provisioning:
   # vagrant runs from. Working copies are VM-scale data — keep this off
   # roaming profiles. Empty = <data dir>/machines
   machines_dir: ''
+  # Leave a machine running after a failed vagrant up so it can be debugged
+  # (SHI's keepfailedserversrunning). false powers the half-provisioned VM
+  # off.
+  keep_failed_machines_running: true
+  # Sync method for machines whose spec sets none: rsync | scp (SHI's global
+  # preference; platform rules still apply — forced rsync on Windows, macOS
+  # auto-fallback to SCP on the ancient Apple rsync).
+  default_sync_method: rsync
+  # Host bridge interface injected into templates as
+  # DEFAULT_NETWORK_INTERFACE when the spec sets none. Values come from
+  # GET /provisioning/bridged-interfaces (VBoxManage list bridgedifs).
+  default_network_interface: ''
 
 assets:
   # Installer file cache (the artifacts capability token): hash-verified

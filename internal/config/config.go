@@ -242,6 +242,11 @@ type MachinesConfig struct {
 	// guest to power off after the ACPI signal before forcing poweroff
 	// (Node: zones.orchestration.timeouts.zone_shutdown).
 	ShutdownTimeout int `yaml:"shutdown_timeout" json:"shutdown_timeout"`
+	// KeepRunningOnExit keeps provisioned machines running when the agent
+	// exits (SHI's keepserversrunning, default true). false force-powers-off
+	// every spec-carrying machine at shutdown — machines discovered from
+	// VirtualBox are never touched.
+	KeepRunningOnExit bool `yaml:"keep_running_on_exit" json:"keep_running_on_exit"`
 }
 
 // ProvisioningConfig controls the provisioning engine (architecture §8):
@@ -254,6 +259,19 @@ type ProvisioningConfig struct {
 	// startup without ever overwriting existing versions. Empty selects
 	// provisioners under the data root.
 	ProvisionersDir string `yaml:"provisioners_dir" json:"provisioners_dir"`
+	// KeepFailedMachinesRunning leaves a machine running after a failed
+	// vagrant up (SHI's keepfailedserversrunning, default true — the VM
+	// stays up for debugging). false powers the half-provisioned VM off.
+	KeepFailedMachinesRunning bool `yaml:"keep_failed_machines_running" json:"keep_failed_machines_running"`
+	// DefaultSyncMethod is the sync method machines without an explicit
+	// spec.sync_method use (rsync | scp; SHI's global syncmethod preference).
+	// Platform rules still apply on top.
+	DefaultSyncMethod string `yaml:"default_sync_method" json:"default_sync_method"`
+	// DefaultNetworkInterface names the host bridge interface injected into
+	// the template context (DEFAULT_NETWORK_INTERFACE) when the spec sets
+	// none — SHI's defaultNetworkInterface fallback, fed by
+	// `VBoxManage list bridgedifs`.
+	DefaultNetworkInterface string `yaml:"default_network_interface" json:"default_network_interface"`
 	// MachinesDir holds the per-machine working directories (SHI's
 	// servers/<provisioner>/<id> layout, one directory per machine here):
 	// the materialized provisioner copy, the generated Hosts.yml, id-files,
@@ -365,10 +383,14 @@ func Default() *Config {
 			ServerIDStart:      1,
 			PrefixMachineNames: false,
 			ShutdownTimeout:    120,
+			KeepRunningOnExit:  true,
 		},
-		Provisioning: ProvisioningConfig{},
-		Assets:       AssetsConfig{Enabled: true, MaxUploadGB: 50},
-		Cleanup:      CleanupConfig{Interval: 300},
+		Provisioning: ProvisioningConfig{
+			KeepFailedMachinesRunning: true,
+			DefaultSyncMethod:         "rsync",
+		},
+		Assets:  AssetsConfig{Enabled: true, MaxUploadGB: 50},
+		Cleanup: CleanupConfig{Interval: 300},
 		Monitoring: MonitoringConfig{
 			StorageEnabled:     false,
 			CollectionInterval: 60,

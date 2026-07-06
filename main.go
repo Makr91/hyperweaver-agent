@@ -18,6 +18,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 
@@ -38,6 +39,7 @@ import (
 	"github.com/Makr91/hyperweaver-agent/internal/server"
 	"github.com/Makr91/hyperweaver-agent/internal/tasks"
 	"github.com/Makr91/hyperweaver-agent/internal/tray"
+	"github.com/Makr91/hyperweaver-agent/internal/updater"
 	"github.com/Makr91/hyperweaver-agent/internal/version"
 )
 
@@ -172,6 +174,26 @@ func run() error {
 		return err
 	}
 
+	// Agent-update flow (SHI's download-then-relaunch): once the executor
+	// has launched the verified installer, it fires this channel and the
+	// agent exits cleanly so the installer can replace the binary. Wired for
+	// both tray and headless modes below.
+	downloadsDir, err := cfg.DownloadsDir()
+	if err != nil {
+		slog.Error("resolve downloads dir", "error", err)
+		return err
+	}
+	updateExit := make(chan struct{})
+	var updateExitOnce sync.Once
+	updater.RegisterExecutors(taskQueue, &updater.ApplyEnv{
+		VersionInfoURL: cfg.Updates.VersionInfoURL,
+		CurrentVersion: version.Version,
+		DownloadsDir:   downloadsDir,
+		ExitAgent: func() {
+			updateExitOnce.Do(func() { close(updateExit) })
+		},
+	})
+
 	// Bind before anything is visible: a conflict means another instance owns
 	// the port. Desktop launches resolve that LedFx-style — hand the running
 	// instance an open action and exit, so a duplicate launch (or a protocol
@@ -215,6 +237,14 @@ func run() error {
 		monitor.Stop()
 		reconciler.Stop()
 		taskQueue.Stop()
+		// SHI's keepserversrunning: the default leaves VMs alone; turned off,
+		// every provisioned machine is force-powered-off on the way out
+		// (direct commands — the queue is already stopped).
+		if !cfg.Machines.KeepRunningOnExit {
+			stopCtx, stopCancel := context.WithTimeout(context.Background(), 60*time.Second)
+			machines.StopAllProvisioned(stopCtx, systems.machines)
+			stopCancel()
+		}
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		if serr := srv.Shutdown(ctx); serr != nil {
@@ -224,11 +254,11 @@ func run() error {
 	}
 
 	if *headless {
-		return runHeadless(serverErr, shutdown)
+		return runHeadless(serverErr, updateExit, shutdown)
 	}
 
-	// Quit the tray if the server dies or a signal arrives, so the process
-	// never lingers as a dead icon.
+	// Quit the tray if the server dies, a signal arrives, or an update's
+	// installer has launched, so the process never lingers as a dead icon.
 	fatal := make(chan error, 1)
 	go func() {
 		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -239,6 +269,8 @@ func run() error {
 				slog.Error("http server failed", "error", srvErr)
 				fatal <- srvErr
 			}
+		case <-updateExit:
+			slog.Info("update installer launched — exiting for it to take over")
 		case <-ctx.Done():
 			slog.Info("signal received, shutting down")
 		}
@@ -450,7 +482,7 @@ func setupTasks(cfg *config.Config, secretsStore *secrets.Store) (*agentSystems,
 		return nil, err
 	}
 	assetsStore := assets.NewStore(agentDB, assetsDir)
-	assets.RegisterExecutors(queue, assetsStore, secretsStore.ResourceAuth)
+	assets.RegisterExecutors(queue, assetsStore, secretsStore.ResourceAuth, secretsStore)
 	var pipelineAssets *assets.Store
 	if cfg.Assets.Enabled {
 		pipelineAssets = assetsStore
@@ -473,12 +505,15 @@ func setupTasks(cfg *config.Config, secretsStore *secrets.Store) (*agentSystems,
 	machines.RegisterExecutors(queue, machineStore, reconciler,
 		time.Duration(cfg.Machines.ShutdownTimeout)*time.Second,
 		&machines.ProvisionEnv{
-			Registry:    provisioners,
-			SecretsVars: secretsStore.TemplateVars,
-			MachinesDir: machinesDir,
-			Assets:      pipelineAssets,
-			CACertPath:  cfg.SSLCACertPath(),
-			CAKeyPath:   cfg.SSLCAKeyPath(),
+			Registry:                provisioners,
+			SecretsVars:             secretsStore.TemplateVars,
+			MachinesDir:             machinesDir,
+			Assets:                  pipelineAssets,
+			CACertPath:              cfg.SSLCACertPath(),
+			CAKeyPath:               cfg.SSLCAKeyPath(),
+			KeepFailedRunning:       cfg.Provisioning.KeepFailedMachinesRunning,
+			DefaultSyncMethod:       cfg.Provisioning.DefaultSyncMethod,
+			DefaultNetworkInterface: cfg.Provisioning.DefaultNetworkInterface,
 		})
 
 	// Host power operations run through the queue too (config-gated at the
@@ -498,7 +533,7 @@ func setupTasks(cfg *config.Config, secretsStore *secrets.Store) (*agentSystems,
 	}, nil
 }
 
-func runHeadless(serverErr chan error, shutdown func()) error {
+func runHeadless(serverErr chan error, updateExit chan struct{}, shutdown func()) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
@@ -509,6 +544,8 @@ func runHeadless(serverErr chan error, shutdown func()) error {
 			shutdown()
 			return srvErr
 		}
+	case <-updateExit:
+		slog.Info("update installer launched — exiting for it to take over")
 	case <-ctx.Done():
 		slog.Info("signal received, shutting down")
 	}

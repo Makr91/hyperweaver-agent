@@ -14,12 +14,18 @@ import (
 	"time"
 )
 
-// Info is the remote versioninfo document shape (Node-agent compatible).
+// Info is the remote versioninfo document shape (Node-agent compatible; the
+// platform URLs and checksumsUrl feed the apply flow — SHI's per-platform
+// installer links).
 type Info struct {
-	Version     string `json:"version"`
-	ReleaseURL  string `json:"releaseUrl"`
-	ReleaseDate string `json:"releaseDate"`
-	Changelog   string `json:"changelog"`
+	Version      string `json:"version"`
+	ReleaseURL   string `json:"releaseUrl"`
+	ReleaseDate  string `json:"releaseDate"`
+	Changelog    string `json:"changelog"`
+	WindowsURL   string `json:"windowsUrl"`
+	MacOSURL     string `json:"macosUrl"`
+	LinuxURL     string `json:"linuxUrl"`
+	ChecksumsURL string `json:"checksumsUrl"`
 }
 
 // Check fetches the versioninfo document and reports whether it advertises a

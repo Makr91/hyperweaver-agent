@@ -85,6 +85,12 @@ func (c *Config) validate() error {
 	if c.Assets.MaxUploadGB < 1 || c.Assets.MaxUploadGB > 1024 {
 		return fmt.Errorf("assets.max_upload_gb %d out of range 1-1024", c.Assets.MaxUploadGB)
 	}
+	switch c.Provisioning.DefaultSyncMethod {
+	case "rsync", "scp":
+	default:
+		return fmt.Errorf("provisioning.default_sync_method %q must be rsync or scp",
+			c.Provisioning.DefaultSyncMethod)
+	}
 	return c.Database.SQLiteOptions.validate()
 }
 

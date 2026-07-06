@@ -412,6 +412,11 @@ var settingsSchema = map[string]any{
 				"min":         5,
 				"max":         3600,
 			},
+			"keep_running_on_exit": map[string]any{
+				"type":        "boolean",
+				"description": "Keep provisioned machines running when the agent exits (SHI's keepserversrunning); false force-powers-off every machine this agent created on the way out",
+				"default":     true,
+			},
 		},
 	},
 	"provisioning": map[string]any{
@@ -426,6 +431,22 @@ var settingsSchema = map[string]any{
 			"machines_dir": map[string]any{
 				"type":        "string",
 				"description": "Root of the per-machine working directories — the materialized provisioner copy, generated Hosts.yml, id-files, installers, and ssls trees vagrant runs from (empty = <data dir>/machines)",
+				"default":     "",
+			},
+			"keep_failed_machines_running": map[string]any{
+				"type":        "boolean",
+				"description": "Leave a machine running after a failed vagrant up for debugging (SHI's keepfailedserversrunning); false powers the half-provisioned VM off",
+				"default":     true,
+			},
+			"default_sync_method": map[string]any{
+				"type":        "string",
+				"description": "Sync method for machines whose spec sets none (SHI's global preference); platform rules still apply on top",
+				"default":     "rsync",
+				"enum":        []string{"rsync", "scp"},
+			},
+			"default_network_interface": map[string]any{
+				"type":        "string",
+				"description": "Host bridge interface injected into templates as DEFAULT_NETWORK_INTERFACE when the spec sets none; values from GET /provisioning/bridged-interfaces",
 				"default":     "",
 			},
 		},

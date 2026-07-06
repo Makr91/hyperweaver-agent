@@ -7,8 +7,10 @@ import (
 	"runtime"
 	"time"
 
+	"github.com/Makr91/hyperweaver-agent/internal/auth"
 	"github.com/Makr91/hyperweaver-agent/internal/hostinfo"
 	"github.com/Makr91/hyperweaver-agent/internal/prereqs"
+	"github.com/Makr91/hyperweaver-agent/internal/tasks"
 	"github.com/Makr91/hyperweaver-agent/internal/updater"
 	"github.com/Makr91/hyperweaver-agent/internal/version"
 )
@@ -93,6 +95,56 @@ func (s *Server) handleUpdateCheck(w http.ResponseWriter, r *http.Request) {
 		"release_date":     nullable(info.ReleaseDate),
 		"changelog":        nullable(info.Changelog),
 	})
+}
+
+// handleUpdateApply queues an agent_update task (Mark's ruling 2026-07-06,
+// SHI's flow): download this platform's installer from the release, verify
+// it against SHA256SUMS.txt, launch it, and exit the agent so the installer
+// can take over.
+func (s *Server) handleUpdateApply(w http.ResponseWriter, r *http.Request) {
+	url := s.cfg.Updates.VersionInfoURL
+	if url == "" {
+		errorResponse(w, http.StatusBadRequest,
+			"Update checking not configured", "Set updates.versioninfo_url in configuration")
+		return
+	}
+	info, available, err := updater.Check(r.Context(), url, version.Version)
+	if err != nil {
+		slog.Error("update check failed", "error", err, "url", url)
+		errorResponse(w, http.StatusInternalServerError, "Failed to check for updates", err.Error())
+		return
+	}
+	if !available {
+		errorResponse(w, http.StatusBadRequest, "Already up to date",
+			"Running "+version.Version+", latest is "+info.Version)
+		return
+	}
+
+	task, err := s.tasks.Store().Create(r.Context(), &tasks.NewTask{
+		MachineName: "system",
+		Operation:   updater.OpApply,
+		Priority:    tasks.PriorityHigh,
+		CreatedBy:   auth.FromContext(r.Context()).Name,
+	})
+	if err != nil {
+		slog.Error("queue agent update", "error", err)
+		errorResponse(w, http.StatusInternalServerError, "Failed to queue update task", err.Error())
+		return
+	}
+	slog.Warn("agent update queued", "target_version", info.Version,
+		"by", auth.FromContext(r.Context()).Name)
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusAccepted)
+	if werr := json.NewEncoder(w).Encode(map[string]any{
+		"success":        true,
+		"task_id":        task.ID,
+		"target_version": info.Version,
+		"status":         tasks.StatusPending,
+		"message":        "Update task queued — the agent will exit once the installer launches",
+	}); werr != nil {
+		slog.Error("write update response", "error", werr)
+	}
 }
 
 // handleProvisioningStatus mirrors the Node agent's GET /provisioning/status:

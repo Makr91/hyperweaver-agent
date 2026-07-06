@@ -242,6 +242,45 @@ func validate(doc *Document) error {
 	return nil
 }
 
+// HCLToken returns the named HCL download-portal refresh token.
+func (s *Store) HCLToken(name string) (string, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, entry := range s.doc.HCLDownloadPortalAPIKeys {
+		if entry.Name == name {
+			return entry.Key, entry.Key != ""
+		}
+	}
+	return "", false
+}
+
+// UpdateHCLToken persists a rotated HCL refresh token in place — the portal
+// rotates the token on EVERY exchange, and losing the rotation breaks the
+// next run (SHI's critical rule: the rotated token is written back
+// immediately).
+func (s *Store) UpdateHCLToken(name, token string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	for i := range s.doc.HCLDownloadPortalAPIKeys {
+		if s.doc.HCLDownloadPortalAPIKeys[i].Name != name {
+			continue
+		}
+		updated := copyDocument(&s.doc)
+		updated.HCLDownloadPortalAPIKeys[i].Key = token
+		data, err := yaml.Marshal(&updated)
+		if err != nil {
+			return fmt.Errorf("serialize secrets: %w", err)
+		}
+		if werr := safepath.WriteFile(s.path, data, 0o600); werr != nil {
+			return fmt.Errorf("write secrets store: %w", werr)
+		}
+		s.doc = updated
+		return nil
+	}
+	return errors.New("no hcl_download_portal_api_keys entry named " + name)
+}
+
 // ResourceAuth returns the named custom_resource_url entry's Basic-auth
 // pair — the artifact downloader's credential lookup (SHI's
 // downloadFileWithCustomResource). ok is false when the entry is absent or

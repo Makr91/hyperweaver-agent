@@ -11,6 +11,7 @@ import (
 	"github.com/Makr91/hyperweaver-agent/internal/machines"
 	"github.com/Makr91/hyperweaver-agent/internal/provisioner"
 	"github.com/Makr91/hyperweaver-agent/internal/tasks"
+	"github.com/Makr91/hyperweaver-agent/internal/vbox"
 )
 
 // Provisioner registry endpoints (Agent API v1 provisioning surface —
@@ -179,6 +180,28 @@ func (s *Server) handleDeleteProvisionerVersion(w http.ResponseWriter, r *http.R
 	writeJSON(w, map[string]any{
 		"success": true,
 		"message": "Provisioner " + name + "/" + version.Version + " deleted successfully",
+	})
+}
+
+// handleBridgedInterfaces lists the host's bridgeable interface names
+// (VBoxManage list bridgedifs) — the UI's bridge/default-NIC picker and the
+// source for provisioning.default_network_interface values.
+func (s *Server) handleBridgedInterfaces(w http.ResponseWriter, r *http.Request) {
+	exe := machines.VBoxManagePath(r.Context())
+	if exe == "" {
+		taskError(w, http.StatusServiceUnavailable, "VirtualBox is not installed")
+		return
+	}
+	names, err := vbox.ListBridgedIfs(r.Context(), exe)
+	if err != nil {
+		slog.Error("list bridged interfaces", "error", err)
+		taskError(w, http.StatusInternalServerError, "Failed to list bridged interfaces")
+		return
+	}
+	writeJSON(w, map[string]any{
+		"interfaces": names,
+		"default":    s.cfg.Provisioning.DefaultNetworkInterface,
+		"total":      len(names),
 	})
 }
 
