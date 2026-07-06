@@ -9,7 +9,7 @@ require (
 	github.com/goccy/go-yaml v1.19.2
 	github.com/shirou/gopsutil/v4 v4.26.6
 	golang.org/x/crypto v0.53.0
-	golang.org/x/image v0.18.0
+	golang.org/x/image v0.43.0
 	golang.org/x/sys v0.46.0
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1
 	modernc.org/sqlite v1.53.0
