@@ -87,6 +87,38 @@ func parseGlobalStatus(raw string) []Machine {
 	return machines
 }
 
+// PluginInstalled reports whether a vagrant plugin is installed (SHI checks
+// vagrant-scp-sync before every start).
+func PluginInstalled(ctx context.Context, vagrantExe, plugin string) (bool, error) {
+	cmd := exec.CommandContext(ctx, vagrantExe, "plugin", "list", "--machine-readable")
+	cmd.SysProcAttr = procattr.NoConsole()
+	out, err := cmd.Output()
+	if err != nil {
+		return false, fmt.Errorf("vagrant plugin list: %w", err)
+	}
+	// Machine-readable rows: timestamp,,ui,info,vagrant-scp-sync (0.0.9%!(VAGRANT_COMMA) global)
+	// plus plugin-name rows on newer vagrant; match the name token in either.
+	for _, line := range strings.Split(string(out), "\n") {
+		fields := strings.Split(strings.TrimSpace(line), ",")
+		if len(fields) < 4 {
+			continue
+		}
+		data := strings.ReplaceAll(strings.Join(fields[3:], ","), vagrantComma, ",")
+		if fields[2] == "plugin-name" && strings.TrimSpace(data) == plugin {
+			return true, nil
+		}
+		if strings.HasPrefix(strings.TrimSpace(data), plugin+" (") {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// PluginInstall runs `vagrant plugin install <plugin>`, streaming output.
+func PluginInstall(ctx context.Context, vagrantExe, plugin string, stream StreamFunc) error {
+	return run(ctx, vagrantExe, "", []string{"plugin", "install", plugin}, stream)
+}
+
 // Up runs `vagrant up [--provision]` in dir, streaming output. The context
 // is the kill switch: cancelling it terminates the vagrant process (task
 // cancellation, D-F).

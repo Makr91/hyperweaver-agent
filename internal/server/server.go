@@ -27,6 +27,7 @@ import (
 	"github.com/Makr91/hyperweaver-agent/internal/machines"
 	"github.com/Makr91/hyperweaver-agent/internal/monitoring"
 	"github.com/Makr91/hyperweaver-agent/internal/provisioner"
+	"github.com/Makr91/hyperweaver-agent/internal/secrets"
 	"github.com/Makr91/hyperweaver-agent/internal/sslcert"
 	"github.com/Makr91/hyperweaver-agent/internal/tasks"
 	"github.com/Makr91/hyperweaver-agent/internal/version"
@@ -41,6 +42,7 @@ type Server struct {
 	tasks        *tasks.Queue
 	machines     *machines.Store
 	provisioners *provisioner.Registry
+	secrets      *secrets.Store
 	monitor      *monitoring.Service
 	dbs          []DBHandle
 	httpSrv      *http.Server
@@ -64,7 +66,7 @@ type Server struct {
 }
 
 // New builds the server and its routes.
-func New(cfg *config.Config, keyStore *keys.Store, trayTokens *auth.TrayTokens, taskQueue *tasks.Queue, machineStore *machines.Store, provisioners *provisioner.Registry, monitor *monitoring.Service, dbs []DBHandle, restartArgs []string, openUI func()) (*Server, error) {
+func New(cfg *config.Config, keyStore *keys.Store, trayTokens *auth.TrayTokens, taskQueue *tasks.Queue, machineStore *machines.Store, provisioners *provisioner.Registry, secretsStore *secrets.Store, monitor *monitoring.Service, dbs []DBHandle, restartArgs []string, openUI func()) (*Server, error) {
 	s := &Server{
 		cfg:          cfg,
 		keys:         keyStore,
@@ -72,6 +74,7 @@ func New(cfg *config.Config, keyStore *keys.Store, trayTokens *auth.TrayTokens, 
 		tasks:        taskQueue,
 		machines:     machineStore,
 		provisioners: provisioners,
+		secrets:      secretsStore,
 		monitor:      monitor,
 		dbs:          dbs,
 		startedAt:    time.Now(),
@@ -187,16 +190,20 @@ func New(cfg *config.Config, keyStore *keys.Store, trayTokens *auth.TrayTokens, 
 	// Literal segments (ids, bulk) win over {machineName} in ServeMux
 	// precedence.
 	mux.Handle("GET /machines", requireKey(http.HandlerFunc(s.handleListMachines)))
+	mux.Handle("POST /machines", requireKey(http.HandlerFunc(s.handleCreateMachine)))
 	mux.Handle("GET /machines/ids", requireKey(http.HandlerFunc(s.handleServerIDs)))
 	mux.Handle("GET /machines/ids/next", requireKey(http.HandlerFunc(s.handleNextServerID)))
 	mux.Handle("POST /machines/bulk/start", requireKey(http.HandlerFunc(s.handleBulkStart)))
 	mux.Handle("POST /machines/bulk/stop", requireKey(http.HandlerFunc(s.handleBulkStop)))
 	mux.Handle("GET /machines/{machineName}", requireKey(http.HandlerFunc(s.handleMachineDetails)))
+	mux.Handle("PUT /machines/{machineName}", requireKey(http.HandlerFunc(s.handleModifyMachine)))
 	mux.Handle("GET /machines/{machineName}/config", requireKey(http.HandlerFunc(s.handleMachineConfig)))
 	mux.Handle("POST /machines/{machineName}/start", requireKey(http.HandlerFunc(s.handleStartMachine)))
 	mux.Handle("POST /machines/{machineName}/stop", requireKey(http.HandlerFunc(s.handleStopMachine)))
 	mux.Handle("POST /machines/{machineName}/restart", requireKey(http.HandlerFunc(s.handleRestartMachine)))
 	mux.Handle("POST /machines/{machineName}/suspend", requireKey(http.HandlerFunc(s.handleSuspendMachine)))
+	mux.Handle("POST /machines/{machineName}/provision", requireKey(http.HandlerFunc(s.handleProvisionMachine)))
+	mux.Handle("POST /machines/{machineName}/sync", requireKey(http.HandlerFunc(s.handleSyncMachine)))
 	mux.Handle("DELETE /machines/{machineName}", requireKey(http.HandlerFunc(s.handleDeleteMachine)))
 	mux.Handle("GET /machines/{machineName}/notes", requireKey(http.HandlerFunc(s.handleGetMachineNotes)))
 	mux.Handle("PUT /machines/{machineName}/notes", requireKey(http.HandlerFunc(s.handleUpdateMachineNotes)))
@@ -213,6 +220,12 @@ func New(cfg *config.Config, keyStore *keys.Store, trayTokens *auth.TrayTokens, 
 	mux.Handle("DELETE /provisioning/provisioners/{name}", requireKey(http.HandlerFunc(s.handleDeleteProvisioner)))
 	mux.Handle("GET /provisioning/provisioners/{name}/versions/{version}", requireKey(http.HandlerFunc(s.handleProvisionerVersion)))
 	mux.Handle("DELETE /provisioning/provisioners/{name}/versions/{version}", requireKey(http.HandlerFunc(s.handleDeleteProvisionerVersion)))
+
+	// Global secrets store (architecture D-C, SHI's SecretsPage categories) —
+	// admin-only via the central role policy; separate from /settings so that
+	// surface keeps serving just the configuration document.
+	mux.Handle("GET /secrets", requireKey(http.HandlerFunc(s.handleGetSecrets)))
+	mux.Handle("PUT /secrets", requireKey(http.HandlerFunc(s.handleUpdateSecrets)))
 
 	// Settings surface (Agent API v1) — admin-only via the central role policy.
 	mux.Handle("GET /settings", requireKey(http.HandlerFunc(s.handleGetSettings)))

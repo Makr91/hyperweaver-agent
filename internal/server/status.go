@@ -37,12 +37,13 @@ type statusPayload struct {
 // processes shipped with the spec-matching pass (arch items 15/16): the
 // /monitoring/* endpoints serve realtime samples regardless of the storage
 // setting, so the token is unconditional. provisioning shipped with the
-// provisioner package registry (/provisioning/provisioners). Still to come:
-// machine-create with the create pipeline; artifacts/templates join the
-// config-gated set when their subsystems land.
+// provisioner package registry (/provisioning/provisioners); machine-create
+// shipped with the create pipeline (POST /machines → vagrant up through the
+// queue). Still to come: artifacts/templates join the config-gated set when
+// their subsystems land.
 var platformFeatures = []string{
-	"tasks", "machines", "machine-suspend", "swap", "monitoring", "processes",
-	"provisioning",
+	"tasks", "machines", "machine-suspend", "machine-create", "swap",
+	"monitoring", "processes", "provisioning",
 }
 
 // features derives the advertised token list: platform tokens plus the

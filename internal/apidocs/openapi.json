@@ -4,7 +4,7 @@
     "title": "Agent API",
     "version": "1.0.0",
     "x-app-version": "0.0.0",
-    "description": "Hyperweaver Agent API v1 — the shared host-agent contract (architecture D1), as implemented by hyperweaver-agent (VirtualBox/Vagrant, Go). Reference implementation: zoneweaver-agent (Bhyve/OmniOS, Node). Capabilities are advertised by the public GET /api/status (role, hypervisors, console, auth, features) and drive conditional UI rendering. This document describes only the endpoints this agent implements today and grows with it; machine creation (POST /machines) and the console group land with the provisioning engine. The implementing application version is `info.x-app-version`; `info.version` is the frozen contract line. Authorization is role-based (admin > operator > viewer) and enforced by a central method+path policy; each operation notes its minimum role.",
+    "description": "Hyperweaver Agent API v1 — the shared host-agent contract (architecture D1), as implemented by hyperweaver-agent (VirtualBox/Vagrant, Go). Reference implementation: zoneweaver-agent (Bhyve/OmniOS, Node). Capabilities are advertised by the public GET /api/status (role, hypervisors, console, auth, features) and drive conditional UI rendering. This document describes only the endpoints this agent implements today and grows with it; the console group lands with the console phase. The implementing application version is `info.x-app-version`; `info.version` is the frozen contract line. Authorization is role-based (admin > operator > viewer) and enforced by a central method+path policy; each operation notes its minimum role.",
     "license": {
       "name": "GPL-3.0",
       "url": "https://github.com/Makr91/hyperweaver-agent/blob/main/LICENSE.md"
@@ -32,7 +32,8 @@
     { "name": "System Host Management", "description": "Host power management (the host-power capability token, config-gated by host_power.enabled — every endpoint answers 503 and the token disappears from /api/status when disabled). Absent by platform: runlevels, single-user/multi-user transitions, fast reboot, reboot-required tracking (init semantics with no cross-platform analog)." },
     { "name": "Host Configuration", "description": "System hosts-file control on all three platforms (Windows System32\\drivers\\etc\\hosts, /etc/hosts elsewhere). /system/dns is absent by platform: resolv.conf is Unix-only and Windows/macOS manage DNS elsewhere." },
     { "name": "Database Management", "description": "SQLite statistics and maintenance across every open database file (tasks.sqlite, agent.sqlite, and the monitoring files when storage is enabled)" },
-    { "name": "Settings", "description": "Agent configuration over the API (admin only)" }
+    { "name": "Settings", "description": "Agent configuration over the API (admin only)" },
+    { "name": "Secrets", "description": "Global secrets store (admin only): SHI's six categories in secrets.yaml beside the config — kept OUT of /settings so that surface stays a pure configuration document. Values are plain text by design (it is the user's local machine; the generated Hosts.yml carries them as SECRETS_* template vars). Independently, Hosts.rb merges the working copy's secrets.yml/.secrets.yml at vagrant runtime — both mechanisms coexist." }
   ],
   "components": {
     "securitySchemes": {
@@ -83,7 +84,7 @@
           "auth": { "type": "array", "items": { "type": "string" }, "example": ["apikey"] },
           "bootstrapAvailable": { "type": "boolean", "example": true },
           "console": { "type": "array", "items": { "type": "string" }, "example": [] },
-          "features": { "type": "array", "items": { "type": "string" }, "description": "Capability tokens (platform support ∧ config state): host-power is absent when host_power.enabled is false", "example": ["tasks", "machines", "machine-suspend", "swap", "monitoring", "processes", "provisioning", "host-power"] },
+          "features": { "type": "array", "items": { "type": "string" }, "description": "Capability tokens (platform support ∧ config state): host-power is absent when host_power.enabled is false", "example": ["tasks", "machines", "machine-suspend", "machine-create", "swap", "monitoring", "processes", "provisioning", "host-power"] },
           "uptime": { "type": "integer", "description": "Seconds since the agent started", "example": 86400 }
         }
       },
@@ -272,6 +273,18 @@
           "valid": { "type": "boolean", "description": "false marks a family with no parseable versions (SHI's invalid placeholder) — still listed, still deletable" },
           "metadata": { "type": "object", "description": "provisioner-collection.yml, verbatim", "nullable": true },
           "versions": { "type": "array", "items": { "$ref": "#/components/schemas/ProvisionerVersion" }, "description": "Newest first" }
+        }
+      },
+      "SecretsDocument": {
+        "type": "object",
+        "description": "The whole secrets store — SHI's six category names, verbatim. Every entry name must match [a-zA-Z0-9_-]+. SECRETS_* template-var derivation: name→uppercase, hyphens→underscores; key categories become SECRETS_<NAME>, custom_resource_url becomes SECRETS_<NAME>_URL (+_USER/_PASS when useAuth), docker_hub becomes SECRETS_<NAME>_USER/_TOKEN, ssh_keys becomes SECRETS_<NAME>_SSH.",
+        "properties": {
+          "hcl_download_portal_api_keys": { "type": "array", "items": { "type": "object", "properties": { "name": { "type": "string" }, "key": { "type": "string" } } } },
+          "git_api_keys": { "type": "array", "items": { "type": "object", "properties": { "name": { "type": "string" }, "key": { "type": "string" } } }, "description": "Also referenced by provisioner git imports via token_name" },
+          "vagrant_atlas_token": { "type": "array", "items": { "type": "object", "properties": { "name": { "type": "string" }, "key": { "type": "string" } } } },
+          "custom_resource_url": { "type": "array", "items": { "type": "object", "properties": { "name": { "type": "string" }, "url": { "type": "string" }, "useAuth": { "type": "boolean" }, "user": { "type": "string" }, "pass": { "type": "string" } } } },
+          "docker_hub": { "type": "array", "items": { "type": "object", "properties": { "name": { "type": "string" }, "docker_hub_user": { "type": "string" }, "docker_hub_token": { "type": "string" } } } },
+          "ssh_keys": { "type": "array", "items": { "type": "object", "properties": { "name": { "type": "string" }, "key": { "type": "string", "description": "PEM private key" } } } }
         }
       },
       "MonitoringSampling": {
@@ -1479,7 +1492,8 @@
                   "source_type": { "type": "string", "enum": ["folder", "archive", "git"] },
                   "path": { "type": "string", "description": "Agent-host path (folder and archive sources)", "example": "C:\\Users\\me\\Downloads\\my_provisioner.tar.gz" },
                   "url": { "type": "string", "description": "http(s) git repository URL (git source)", "example": "https://github.com/STARTcloud/hcl_domino_standalone_provisioner.git" },
-                  "branch": { "type": "string", "description": "Optional branch (git source)", "example": "main" }
+                  "branch": { "type": "string", "description": "Optional branch (git source)", "example": "main" },
+                  "token_name": { "type": "string", "description": "Optional git_api_keys secret name for private repositories (git source); the token itself never enters task metadata" }
                 }
               }
             }
@@ -2801,6 +2815,54 @@
           },
           "500": {
             "description": "Cleanup failed",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/WrappedError" } } }
+          }
+        }
+      }
+    },
+    "/secrets": {
+      "get": {
+        "tags": ["Secrets"],
+        "summary": "The global secrets document",
+        "description": "Minimum role: admin. The whole store, plain — nothing masked (Mark's ruling: the user's local machine; the generated Hosts.yml carries these as SECRETS_* vars anyway).",
+        "responses": {
+          "200": {
+            "description": "The secrets document",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SecretsDocument" } } }
+          }
+        }
+      },
+      "put": {
+        "tags": ["Secrets"],
+        "summary": "Update the global secrets",
+        "description": "Minimum role: admin. Replaces the submitted categories whole (the same top-level shallow-merge shape as PUT /settings); omitted categories are untouched. Rejected whole on an unknown category or an invalid entry name — the store never half-applies. Persisted atomically to secrets.yaml (0600) beside the config.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SecretsDocument"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Secrets persisted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": { "type": "boolean", "example": true },
+                    "message": { "type": "string", "example": "Secrets updated successfully" }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Unknown category or invalid entry name",
             "content": { "application/json": { "schema": { "$ref": "#/components/schemas/WrappedError" } } }
           }
         }

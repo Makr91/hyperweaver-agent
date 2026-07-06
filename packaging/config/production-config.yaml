@@ -166,6 +166,11 @@ provisioning:
   # startup without ever overwriting existing versions.
   # Empty = <data.dir>/provisioners (/var/lib/hyperweaver-agent/provisioners).
   provisioners_dir: ''
+  # Root of the per-machine working directories: the materialized provisioner
+  # copy, the generated Hosts.yml, id-files, installers, and ssls trees
+  # vagrant runs from.
+  # Empty = <data.dir>/machines (/var/lib/hyperweaver-agent/machines).
+  machines_dir: ''
 
 cleanup:
   # Seconds between periodic cleanup runs (task retention).

@@ -218,6 +218,13 @@ func compareVersions(a, b string) int {
 	return len(as) - len(bs)
 }
 
+// RemoveTree force-deletes a directory tree (read-only git objects
+// included) — the machine-delete path uses it for working-directory
+// removal; callers have already established the path is theirs to delete.
+func RemoveTree(path string) error {
+	return removeAllForce(path)
+}
+
 // removeAllForce deletes a tree, clearing read-only file bits on a retry —
 // git-object files are read-only on Windows and fail a plain RemoveAll.
 func removeAllForce(path string) error {

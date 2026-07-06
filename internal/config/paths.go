@@ -81,6 +81,13 @@ func (c *Config) ProtocolSecretPath() string {
 	return filepath.Join(filepath.Dir(c.path), "protocol.secret")
 }
 
+// SecretsPath returns the global secrets store location: secrets.yaml
+// beside the loaded configuration file (architecture D-C — its own store so
+// GET /settings keeps serving just the configuration document).
+func (c *Config) SecretsPath() string {
+	return filepath.Join(filepath.Dir(c.path), "secrets.yaml")
+}
+
 // DataDir returns the agent's data root: data.dir when configured, else the
 // per-OS local app-data location — deliberately NOT the (Windows-roaming)
 // config directory, since machine working copies and databases must not ride
@@ -162,6 +169,20 @@ func (c *Config) ProvisionersDir() (string, error) {
 		return "", err
 	}
 	return filepath.Join(dir, "provisioners"), nil
+}
+
+// MachinesDir returns the root of the per-machine working directories:
+// provisioning.machines_dir when configured, else machines under the data
+// root.
+func (c *Config) MachinesDir() (string, error) {
+	if c.Provisioning.MachinesDir != "" {
+		return safepath.CleanAbs(c.Provisioning.MachinesDir)
+	}
+	dir, err := c.DataDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, "machines"), nil
 }
 
 // TaskLogDir returns where per-task output log files land, defaulting to

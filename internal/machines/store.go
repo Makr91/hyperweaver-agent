@@ -14,7 +14,9 @@ import (
 var ErrNotFound = errors.New("machine not found")
 
 // Migrations is the agent.sqlite schema (applied by db.Open via user_version
-// tracking). backing/home/uuid are this agent's dual-path fields.
+// tracking). backing/home/uuid are this agent's dual-path fields; spec
+// (migration 2) is the machine-create request document, kept apart from the
+// live configuration so discovery refreshes never clobber the user's intent.
 var Migrations = []string{
 	`CREATE TABLE machines (
 		id              INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -36,6 +38,7 @@ var Migrations = []string{
 	);
 	CREATE INDEX idx_machines_status ON machines (status);
 	CREATE INDEX idx_machines_uuid ON machines (uuid);`,
+	`ALTER TABLE machines ADD COLUMN spec TEXT;`,
 }
 
 // timeLayout is the stored timestamp format: fixed-width UTC so lexicographic
@@ -57,17 +60,17 @@ func NewStore(database *sql.DB) *Store {
 }
 
 const machineColumns = `id, name, host, status, backing, home, uuid, server_id,
-	is_orphaned, auto_discovered, last_seen, notes, tags, configuration,
+	is_orphaned, auto_discovered, last_seen, notes, tags, configuration, spec,
 	created_at, updated_at`
 
 // scanMachine reads one machine row from any row scanner.
 func scanMachine(row interface{ Scan(...any) error }) (*Machine, error) {
 	var m Machine
 	var createdAt, updatedAt string
-	var lastSeen, tags, configuration sql.NullString
+	var lastSeen, tags, configuration, spec sql.NullString
 	err := row.Scan(&m.ID, &m.Name, &m.Host, &m.Status, &m.Backing, &m.Home,
 		&m.UUID, &m.ServerID, &m.IsOrphaned, &m.AutoDiscovered, &lastSeen,
-		&m.Notes, &tags, &configuration, &createdAt, &updatedAt)
+		&m.Notes, &tags, &configuration, &spec, &createdAt, &updatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -89,6 +92,9 @@ func scanMachine(row interface{ Scan(...any) error }) (*Machine, error) {
 	}
 	if configuration.Valid {
 		m.Configuration = json.RawMessage(configuration.String)
+	}
+	if spec.Valid {
+		m.Spec = json.RawMessage(spec.String)
 	}
 	return &m, nil
 }
@@ -162,11 +168,13 @@ type Discovered struct {
 	Configuration json.RawMessage
 }
 
-// UpsertDiscovered records a machine seen on the system: new machines are
-// imported (auto_discovered), existing rows get their live fields refreshed
-// while user data (notes, tags, server_id) is preserved — the Node agent's
-// discover/preserveUserConfig semantics. Returns true when the machine was
-// newly discovered (discover's created-vs-updated counting).
+// UpsertDiscovered records a machine seen on the system. The row to refresh
+// is matched by UUID first, then by vagrant home, then by name — a
+// provisioned machine's VirtualBox name is Hosts.rb's own (never the
+// registry name), so the UUID and the working directory are what tie the VM
+// back to its row; matched rows keep their name and user data (notes, tags,
+// server_id, spec — the Node agent's preserveUserConfig semantics). Returns
+// true when the machine was newly discovered.
 func (s *Store) UpsertDiscovered(ctx context.Context, d *Discovered) (bool, error) {
 	now := formatTime(time.Now())
 	var configuration any
@@ -174,24 +182,42 @@ func (s *Store) UpsertDiscovered(ctx context.Context, d *Discovered) (bool, erro
 		configuration = string(d.Configuration)
 	}
 
-	res, err := s.db.ExecContext(ctx, `UPDATE machines
+	// One refresh statement per match key; the SET list never touches name.
+	refresh := `UPDATE machines
 		SET host = ?, status = ?, backing = ?, home = COALESCE(?, home),
 		    uuid = ?, is_orphaned = 0, last_seen = ?,
-		    configuration = COALESCE(?, configuration), updated_at = ?
-		WHERE name = ?`,
-		d.Host, d.Status, d.Backing, d.Home, d.UUID, now, configuration, now, d.Name)
-	if err != nil {
-		return false, err
+		    configuration = COALESCE(?, configuration), updated_at = ?`
+	args := []any{d.Host, d.Status, d.Backing, d.Home, d.UUID, now, configuration, now}
+
+	matches := []struct {
+		where string
+		key   any
+		skip  bool
+	}{
+		{where: " WHERE uuid = ?", key: d.UUID, skip: d.UUID == ""},
+		// A created-but-never-started row claims its VM on first sight: the
+		// working directory is the join key while the UUID is still unknown.
+		{where: " WHERE uuid IS NULL AND home = ?", key: d.Home, skip: d.Home == nil},
+		{where: " WHERE name = ?", key: d.Name, skip: false},
 	}
-	affected, err := res.RowsAffected()
-	if err != nil {
-		return false, err
-	}
-	if affected > 0 {
-		return false, nil
+	for _, match := range matches {
+		if match.skip {
+			continue
+		}
+		res, err := s.db.ExecContext(ctx, refresh+match.where, append(append([]any{}, args...), match.key)...)
+		if err != nil {
+			return false, err
+		}
+		affected, err := res.RowsAffected()
+		if err != nil {
+			return false, err
+		}
+		if affected > 0 {
+			return false, nil
+		}
 	}
 
-	_, err = s.db.ExecContext(ctx, `INSERT INTO machines
+	_, err := s.db.ExecContext(ctx, `INSERT INTO machines
 		(name, host, status, backing, home, uuid, is_orphaned, auto_discovered,
 		 last_seen, configuration, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, 0, 1, ?, ?, ?, ?)`,
@@ -200,6 +226,56 @@ func (s *Store) UpsertDiscovered(ctx context.Context, d *Discovered) (bool, erro
 		return false, err
 	}
 	return true, nil
+}
+
+// NewMachine is a machine-create request row (POST /machines): a registry
+// entry with the user's spec and working directory — no VM until first
+// start (SHI's clone model).
+type NewMachine struct {
+	Name     string
+	Host     string
+	Home     string
+	ServerID string
+	Spec     json.RawMessage
+}
+
+// Create inserts a provisioned-machine row in status configured, backing
+// vagrant.
+func (s *Store) Create(ctx context.Context, nm *NewMachine) (*Machine, error) {
+	now := formatTime(time.Now())
+	_, err := s.db.ExecContext(ctx, `INSERT INTO machines
+		(name, host, status, backing, home, server_id, is_orphaned,
+		 auto_discovered, spec, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, 0, 0, ?, ?, ?)`,
+		nm.Name, nm.Host, StatusConfigured, BackingVagrant, nm.Home, nm.ServerID,
+		string(nm.Spec), now, now)
+	if err != nil {
+		return nil, err
+	}
+	return s.Get(ctx, nm.Name)
+}
+
+// SetSpec replaces a machine's creation spec (PUT /machines/{name} — the
+// change materializes on the next start).
+func (s *Store) SetSpec(ctx context.Context, name string, spec json.RawMessage) error {
+	res, err := s.db.ExecContext(ctx, `UPDATE machines
+		SET spec = ?, updated_at = ? WHERE name = ?`,
+		string(spec), formatTime(time.Now()), name)
+	if err != nil {
+		return err
+	}
+	return requireRow(res)
+}
+
+// SetUUID records the VirtualBox UUID vagrant's first up produced.
+func (s *Store) SetUUID(ctx context.Context, name, uuid string) error {
+	res, err := s.db.ExecContext(ctx, `UPDATE machines
+		SET uuid = ?, updated_at = ? WHERE name = ?`,
+		uuid, formatTime(time.Now()), name)
+	if err != nil {
+		return err
+	}
+	return requireRow(res)
 }
 
 // MarkMissing flags every machine NOT in seenNames as orphaned — it exists

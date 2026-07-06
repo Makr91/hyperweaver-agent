@@ -33,6 +33,7 @@ import (
 	"github.com/Makr91/hyperweaver-agent/internal/openbrowser"
 	"github.com/Makr91/hyperweaver-agent/internal/protocol"
 	"github.com/Makr91/hyperweaver-agent/internal/provisioner"
+	"github.com/Makr91/hyperweaver-agent/internal/secrets"
 	"github.com/Makr91/hyperweaver-agent/internal/server"
 	"github.com/Makr91/hyperweaver-agent/internal/tasks"
 	"github.com/Makr91/hyperweaver-agent/internal/tray"
@@ -103,6 +104,15 @@ func run() error {
 		return err
 	}
 
+	// Global secrets store (architecture D-C): secrets.yaml beside the
+	// config, feeding SECRETS_* template vars and private-repo import
+	// tokens. Missing file = empty store.
+	secretsStore, err := secrets.Open(cfg.SecretsPath())
+	if err != nil {
+		slog.Error("secrets store setup failed", "error", err)
+		return err
+	}
+
 	// First-boot claim token: while the agent can still be bootstrapped (no
 	// keys yet), ensure the setup token exists and print it so a host admin
 	// can read it. It guards POST /api-keys/bootstrap. No-op once a key exists.
@@ -145,7 +155,7 @@ func run() error {
 		restartArgs = append(restartArgs, "--headless")
 	}
 
-	systems, err := setupTasks(cfg)
+	systems, err := setupTasks(cfg, secretsStore)
 	if err != nil {
 		slog.Error("task system setup failed", "error", err)
 		return err
@@ -155,7 +165,7 @@ func run() error {
 	reconciler := systems.reconciler
 	monitor := systems.monitor
 
-	srv, err := server.New(cfg, keyStore, trayTokens, taskQueue, systems.machines, systems.provisioners, monitor, systems.dbs, restartArgs, openUI)
+	srv, err := server.New(cfg, keyStore, trayTokens, taskQueue, systems.machines, systems.provisioners, secretsStore, monitor, systems.dbs, restartArgs, openUI)
 	if err != nil {
 		slog.Error("server setup failed", "error", err)
 		return err
@@ -278,12 +288,13 @@ type agentSystems struct {
 }
 
 // setupTasks opens the agent's databases and builds the task queue, the
-// machine subsystem, and the monitoring service on top of them:
+// machine subsystem, the provisioner registry, and the monitoring service
+// on top of them:
 // tasks.sqlite carries the queue, agent.sqlite the machine registry, and —
 // only when monitoring.storage_enabled — the per-datatype telemetry files
 // carry stored samples. Every executor is registered before the queue ever
 // starts. The returned closer releases every database handle.
-func setupTasks(cfg *config.Config) (*agentSystems, error) {
+func setupTasks(cfg *config.Config, secretsStore *secrets.Store) (*agentSystems, error) {
 	tasksPath, err := cfg.TasksDBPath()
 	if err != nil {
 		return nil, err
@@ -414,13 +425,6 @@ func setupTasks(cfg *config.Config) (*agentSystems, error) {
 		CleanupInterval: time.Duration(cfg.Cleanup.Interval) * time.Second,
 	})
 
-	machineStore := machines.NewStore(agentDB)
-	reconciler := machines.NewReconciler(machineStore, store,
-		cfg.Machines.AutoDiscovery,
-		time.Duration(cfg.Machines.DiscoveryInterval)*time.Second)
-	machines.RegisterExecutors(queue, machineStore, reconciler,
-		time.Duration(cfg.Machines.ShutdownTimeout)*time.Second)
-
 	// Provisioner package registry (architecture §8): the directory is the
 	// source of truth — scanned live, seeded after the port is owned.
 	provisionersDir, err := cfg.ProvisionersDir()
@@ -429,7 +433,27 @@ func setupTasks(cfg *config.Config) (*agentSystems, error) {
 		return nil, err
 	}
 	provisioners := provisioner.NewRegistry(provisionersDir)
-	provisioner.RegisterExecutors(queue, provisioners)
+	provisioner.RegisterExecutors(queue, provisioners, secretsStore.GitToken)
+
+	machinesDir, err := cfg.MachinesDir()
+	if err != nil {
+		closer()
+		return nil, err
+	}
+
+	machineStore := machines.NewStore(agentDB)
+	reconciler := machines.NewReconciler(machineStore, store,
+		cfg.Machines.AutoDiscovery,
+		time.Duration(cfg.Machines.DiscoveryInterval)*time.Second)
+	machines.RegisterExecutors(queue, machineStore, reconciler,
+		time.Duration(cfg.Machines.ShutdownTimeout)*time.Second,
+		&machines.ProvisionEnv{
+			Registry:    provisioners,
+			SecretsVars: secretsStore.TemplateVars,
+			MachinesDir: machinesDir,
+			CACertPath:  cfg.SSLCACertPath(),
+			CAKeyPath:   cfg.SSLCAKeyPath(),
+		})
 
 	// Host power operations run through the queue too (config-gated at the
 	// HTTP surface; registering the executors unconditionally is harmless —

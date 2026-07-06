@@ -249,6 +249,12 @@ type ProvisioningConfig struct {
 	// startup without ever overwriting existing versions. Empty selects
 	// provisioners under the data root.
 	ProvisionersDir string `yaml:"provisioners_dir" json:"provisioners_dir"`
+	// MachinesDir holds the per-machine working directories (SHI's
+	// servers/<provisioner>/<id> layout, one directory per machine here):
+	// the materialized provisioner copy, the generated Hosts.yml, id-files,
+	// installers, and ssls trees vagrant runs from. Empty selects machines
+	// under the data root.
+	MachinesDir string `yaml:"machines_dir" json:"machines_dir"`
 }
 
 // Config is the root of config.yaml.

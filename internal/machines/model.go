@@ -40,7 +40,11 @@ const (
 )
 
 // Machine is one registry row (the Agent API v1 Machine schema); backing and
-// home are this agent's dual-path fields.
+// home are this agent's dual-path fields. Configuration is the LIVE view
+// (VirtualBox's machinereadable map, refreshed by reconciliation); Spec is
+// the machine-create request document (settings/networks/roles/properties +
+// the provisioner reference) — the user's intent, never overwritten by
+// discovery.
 type Machine struct {
 	ID             int64           `json:"id"`
 	Name           string          `json:"name"`
@@ -56,8 +60,27 @@ type Machine struct {
 	Notes          *string         `json:"notes"`
 	Tags           json.RawMessage `json:"tags"`
 	Configuration  json.RawMessage `json:"configuration"`
+	Spec           json.RawMessage `json:"spec"`
 	CreatedAt      time.Time       `json:"created_at"`
 	UpdatedAt      time.Time       `json:"updatedAt"`
+}
+
+// VBoxTarget returns the identifier VBoxManage commands address this machine
+// by: the VirtualBox UUID once known, else the machine name. Provisioned
+// machines NEED the UUID — Hosts.rb names the VM itself, so the VirtualBox
+// name and the registry name differ.
+func (m *Machine) VBoxTarget() string {
+	if m.UUID != nil && *m.UUID != "" {
+		return *m.UUID
+	}
+	return m.Name
+}
+
+// Provisioned reports whether this machine is driven by the provisioning
+// pipeline: it carries a creation spec and a working directory — lifecycle
+// start goes through vagrant so the unchanged Hosts.rb does the real work.
+func (m *Machine) Provisioned() bool {
+	return len(m.Spec) > 0 && m.Home != nil && *m.Home != ""
 }
 
 // MapVBoxState translates a VirtualBox VMState into the machine status

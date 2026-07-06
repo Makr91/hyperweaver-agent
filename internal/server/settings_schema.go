@@ -410,12 +410,17 @@ var settingsSchema = map[string]any{
 		},
 	},
 	"provisioning": map[string]any{
-		"description":      "Provisioning engine configuration (provisioner package registry)",
+		"description":      "Provisioning engine configuration (provisioner package registry + machine working directories)",
 		"requires_restart": true,
 		"properties": map[string]any{
 			"provisioners_dir": map[string]any{
 				"type":        "string",
 				"description": "Directory holding provisioner packages (SHI's on-disk format); installer-bundled packages are extracted here on startup without ever overwriting existing versions (empty = <data dir>/provisioners)",
+				"default":     "",
+			},
+			"machines_dir": map[string]any{
+				"type":        "string",
+				"description": "Root of the per-machine working directories — the materialized provisioner copy, generated Hosts.yml, id-files, installers, and ssls trees vagrant runs from (empty = <data dir>/machines)",
 				"default":     "",
 			},
 		},

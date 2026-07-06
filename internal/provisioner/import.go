@@ -40,13 +40,19 @@ const rootSearchDepth = 3
 // (no leading dash) and shell-hostile input.
 var branchPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._/-]{0,254}$`)
 
+// tokenNamePattern is the secrets store's entry-name rule.
+var tokenNamePattern = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
+
 // ImportMetadata is the provisioner_import task's metadata document — the
-// import request, verbatim.
+// import request, verbatim. TokenName names a git_api_keys entry in the
+// global secrets store (private-repo imports); the token itself never lands
+// in task metadata.
 type ImportMetadata struct {
 	SourceType string `json:"source_type"`
 	Path       string `json:"path,omitempty"`
 	URL        string `json:"url,omitempty"`
 	Branch     string `json:"branch,omitempty"`
+	TokenName  string `json:"token_name,omitempty"`
 }
 
 // Validate checks an import request before it becomes a task.
@@ -64,6 +70,9 @@ func (m *ImportMetadata) Validate() error {
 		if m.Branch != "" && !branchPattern.MatchString(m.Branch) {
 			return errors.New("branch contains unsupported characters")
 		}
+		if m.TokenName != "" && !tokenNamePattern.MatchString(m.TokenName) {
+			return errors.New("token_name contains unsupported characters")
+		}
 	default:
 		return errors.New(`source_type must be "folder", "archive", or "git"`)
 	}
@@ -71,13 +80,17 @@ func (m *ImportMetadata) Validate() error {
 }
 
 // RegisterExecutors wires the provisioner operations into the task queue.
-func RegisterExecutors(queue *tasks.Queue, registry *Registry) {
-	e := &executors{registry: registry}
+// gitToken resolves a git_api_keys secret by name ("" when absent) — a
+// function, not the store, so this package stays uncoupled from the secrets
+// package.
+func RegisterExecutors(queue *tasks.Queue, registry *Registry, gitToken func(name string) string) {
+	e := &executors{registry: registry, gitToken: gitToken}
 	queue.Register(OpImport, tasks.Executor{Run: e.importPackage})
 }
 
 type executors struct {
 	registry *Registry
+	gitToken func(name string) string
 }
 
 // importPackage executes one provisioner_import task: resolve the source to
@@ -173,11 +186,33 @@ func (e *executors) cloneSource(ctx context.Context, meta *ImportMetadata, out *
 		return "", nil, err
 	}
 
+	// Private repositories: the named git_api_keys secret rides as URL
+	// userinfo, exactly SHI's clone shape (https://<token>@host/...). Local
+	// machine, plain by design (D-C); the narrated URL stays token-free.
+	cloneURL := meta.URL
+	if meta.TokenName != "" {
+		token := ""
+		if e.gitToken != nil {
+			token = e.gitToken(meta.TokenName)
+		}
+		if token == "" {
+			_ = removeAllForce(temp)
+			return "", nil, errors.New("no git API key named " + meta.TokenName + " in the secrets store")
+		}
+		parsed, perr := url.Parse(meta.URL)
+		if perr != nil {
+			_ = removeAllForce(temp)
+			return "", nil, perr
+		}
+		parsed.User = url.User(token)
+		cloneURL = parsed.String()
+	}
+
 	args := []string{"-c", "core.longpaths=true", "clone", "--depth", "1", "--recursive"}
 	if meta.Branch != "" {
 		args = append(args, "--branch", meta.Branch)
 	}
-	args = append(args, meta.URL, temp)
+	args = append(args, cloneURL, temp)
 
 	out.Write("stdout", "Cloning "+meta.URL+"\n")
 	if cerr := streamCommand(ctx, gitExe, args, out); cerr != nil {
@@ -374,8 +409,9 @@ func copyTree(src, dst string) error {
 }
 
 // copyFile copies one file with the given mode through the shared writer
-// (safepath.WriteFile — the agent's ONE file-write path). The import paths
-// have already established the destination does not exist.
+// (safepath.WriteFile — the agent's ONE file-write path). An existing
+// destination is replaced (the working-copy refresh relies on that); use
+// copyFileIfAbsent where existing files must survive.
 func copyFile(src, dst string, perm fs.FileMode) error {
 	if perm == 0 {
 		perm = 0o644

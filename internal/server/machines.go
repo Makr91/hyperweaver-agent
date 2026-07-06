@@ -31,7 +31,8 @@ func validMachineName(name string) bool {
 
 // liveMachineStatus asks VirtualBox for a machine's current state — the
 // pre-operation idempotency check ("not_found" when no VM exists, matching
-// the Node agent's getSystemZoneStatus contract).
+// the Node agent's getSystemZoneStatus contract). The UUID addresses the VM
+// once known — a provisioned machine's VirtualBox name is Hosts.rb's own.
 func liveMachineStatus(ctx context.Context, machine *machines.Machine) string {
 	exe := machines.VBoxManagePath(ctx)
 	if exe == "" {
@@ -39,7 +40,7 @@ func liveMachineStatus(ctx context.Context, machine *machines.Machine) string {
 	}
 	probeCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
-	info, err := vbox.ShowVMInfo(probeCtx, exe, machine.Name)
+	info, err := vbox.ShowVMInfo(probeCtx, exe, machine.VBoxTarget())
 	if err != nil {
 		return "not_found"
 	}
@@ -119,6 +120,11 @@ func (s *Server) handleMachineDetails(w http.ResponseWriter, r *http.Request) {
 
 	systemStatus := liveMachineStatus(r.Context(), machine)
 	if systemStatus == "not_found" {
+		// Created-but-never-started machines (configured, no UUID) have no
+		// VM by design; report their stored status.
+		if machine.UUID == nil {
+			systemStatus = machine.Status
+		}
 		if machine.UUID != nil && !machine.IsOrphaned {
 			if err := s.machines.SetOrphaned(r.Context(), machine.Name, true); err != nil {
 				slog.Error("mark machine orphaned", "machine", machine.Name, "error", err)
@@ -154,12 +160,23 @@ func (s *Server) handleMachineDetails(w http.ResponseWriter, r *http.Request) {
 		configuration = json.RawMessage("{}")
 	}
 
+	// The post-provision welcome page (SHI's web address), read live from
+	// the working copy's results.yml/.vagrant/done.txt — null until the
+	// first successful provision writes it.
+	var webAddress any
+	if fresh.Provisioned() {
+		if url := machines.WelcomeURL(*fresh.Home); url != "" {
+			webAddress = url
+		}
+	}
+
 	writeJSON(w, map[string]any{
 		"machine_info":       fresh,
 		"configuration":      configuration,
 		"active_vnc_session": nil,
 		"pending_tasks":      active,
 		"system_status":      systemStatus,
+		"web_address":        webAddress,
 	})
 }
 

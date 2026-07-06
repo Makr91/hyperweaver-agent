@@ -184,6 +184,11 @@ provisioning:
   # without ever overwriting existing versions.
   # Empty = <data dir>/provisioners
   provisioners_dir: ''
+  # Root of the per-machine working directories: the materialized provisioner
+  # copy, the generated Hosts.yml, id-files, installers, and ssls trees
+  # vagrant runs from. Working copies are VM-scale data — keep this off
+  # roaming profiles. Empty = <data dir>/machines
+  machines_dir: ''
 
 cleanup:
   # Seconds between periodic cleanup runs (task retention).

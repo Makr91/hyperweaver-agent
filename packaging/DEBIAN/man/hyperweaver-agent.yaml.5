@@ -284,6 +284,13 @@ without ever overwriting existing versions. Empty selects
 .Pa provisioners
 under
 .Cm data.dir .
+.It Cm machines_dir
+Root of the per-machine working directories: the materialized provisioner
+copy, the generated Hosts.yml, id-files, installers, and ssls trees vagrant
+runs from. Empty selects
+.Pa machines
+under
+.Cm data.dir .
 .El
 .Ss cleanup
 Periodic cleanup service.
@@ -342,7 +349,11 @@ Beside the configuration file the agent also keeps
 .Pa keys.json
 (hashed API keys, 0600),
 .Pa protocol.secret
-(per-boot hwa:// handoff secret, 0600), and
+(per-boot hwa:// handoff secret, 0600),
+.Pa secrets.yaml
+(the global secrets store, 0600 — plain text by design; served by the
+admin-only /secrets API and injected into generated Hosts.yml files as
+SECRETS_* variables), and
 .Pa backups/
 (configuration backups). Under the data directory
 .Pq Cm data.dir

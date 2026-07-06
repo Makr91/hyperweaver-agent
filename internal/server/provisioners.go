@@ -205,9 +205,8 @@ func (s *Server) refuseReferencedProvisioner(ctx context.Context, w http.Respons
 	return true
 }
 
-// provisionerReferences lists machines whose configuration references the
-// provisioner (the creation request's provisioner {name, version} block,
-// stored on the machine row).
+// provisionerReferences lists machines whose creation spec references the
+// provisioner (the spec's provisioner {name, version} block).
 func (s *Server) provisionerReferences(ctx context.Context, name, version string) ([]string, error) {
 	list, err := s.machines.List(ctx, &machines.ListFilter{})
 	if err != nil {
@@ -215,22 +214,17 @@ func (s *Server) provisionerReferences(ctx context.Context, name, version string
 	}
 	references := []string{}
 	for _, machine := range list {
-		if machine.Configuration == nil {
+		if len(machine.Spec) == 0 {
 			continue
 		}
-		var configuration struct {
-			Provisioner struct {
-				Name    string `json:"name"`
-				Version string `json:"version"`
-			} `json:"provisioner"`
-		}
-		if uerr := json.Unmarshal(machine.Configuration, &configuration); uerr != nil {
+		spec, perr := machines.ParseSpec(machine)
+		if perr != nil {
 			continue
 		}
-		if configuration.Provisioner.Name != name {
+		if spec.Provisioner.Name != name {
 			continue
 		}
-		if version != "" && configuration.Provisioner.Version != version {
+		if version != "" && spec.Provisioner.Version != version {
 			continue
 		}
 		references = append(references, machine.Name)
