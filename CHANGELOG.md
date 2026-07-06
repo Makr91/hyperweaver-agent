@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.1.2](https://github.com/Makr91/hyperweaver-agent/compare/v0.1.1...v0.1.2) (2026-07-06)
+
+
+### Bug Fixes
+
+* GET /stats via go-sysinfo with VirtualBox machine lists, hide console windows on child processes, api-docs server selector and authorize parity ([00af7f0](https://github.com/Makr91/hyperweaver-agent/commit/00af7f03ff95a3fb8d4729824bcfbd8dbed7879b))
+* machines + task queue (Agent API v1) — VBoxManage lifecycle, queued discovery, de-zoned wire, machine-suspend token, Node config parity ([5039056](https://github.com/Makr91/hyperweaver-agent/commit/503905620092404cd304b29d0f319e47bd326d78))
+* machines + task queue (Agent API v1) — VBoxManage lifecycle, queued discovery, de-zoned wire, machine-suspend token, Node config parity ([9d13618](https://github.com/Makr91/hyperweaver-agent/commit/9d1361809035d6e419382b184d058fd1f64f45e3))
+* restore file modes clobbered by the drvfs mount ([1c444b2](https://github.com/Makr91/hyperweaver-agent/commit/1c444b2b5441f1d0364f6486f85647399efde824))
+* settings API with backups and self-restart, remove all lint suppressions, add safepath validation for all file and exec paths ([17a3271](https://github.com/Makr91/hyperweaver-agent/commit/17a327185a57935e9c646461461d82edef9749dc))
+* TLS-everywhere with STARTcloud CA chain, install-time trust, force_secure, Node config parity, one-write-path safepath.WriteFile, restart-race fix, /stats cpus, read-only swap surface + swap token ([ef34649](https://github.com/Makr91/hyperweaver-agent/commit/ef34649fbae216834c9aa904c7f9b6155f459b70))
+* TLS-everywhere with STARTcloud CA chain, install-time trust, force_secure, Node config parity, one-write-path safepath.WriteFile, restart-race fix, /stats cpus, read-only swap surface + swap token, Releasing 0.10.9 UI ([0bfe757](https://github.com/Makr91/hyperweaver-agent/commit/0bfe75740bbbbd5b223dad13c52fbdc5880d49bc))
+
 ## [0.1.1](https://github.com/Makr91/hyperweaver-agent/compare/v0.1.0...v0.1.1) (2026-07-05)
 
 
