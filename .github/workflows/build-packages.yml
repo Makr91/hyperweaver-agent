@@ -153,9 +153,13 @@ jobs:
         # from Info.plist.
         run: |
           APP="dist/HyperweaverAgent.app"
-          mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
+          mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources/ssl-seed"
           cp bin/hyperweaver-agent "$APP/Contents/MacOS/hyperweaver-agent"
           sed "s/__VERSION__/${{ inputs.version }}/g" packaging/macos/Info.plist > "$APP/Contents/Info.plist"
+          # STARTcloud CA seed: the agent copies it into its config dir on
+          # first TLS start and signs its server certificate from it.
+          cp packaging/ssl/ca-certificate.crt "$APP/Contents/Resources/ssl-seed/ca.crt"
+          cp packaging/ssl/ca-certificate.key "$APP/Contents/Resources/ssl-seed/ca.key"
 
       - name: Sign app
         if: ${{ env.HAVE_MAC_SIGNING == 'true' }}
@@ -167,12 +171,21 @@ jobs:
           mac-certkey-pass: ${{ secrets.MAC_CERTKEY_PASS }}
 
       - name: Create installer package
+        # pkgbuild (not productbuild --component) because only pkgbuild
+        # carries install scripts — the postinstall trusts the STARTcloud CA
+        # in the System keychain. productbuild then wraps the component into
+        # a product archive, scripts preserved.
         run: |
-          productbuild \
-            --version ${{ inputs.version }} \
-            --identifier com.startcloud.hyperweaver-agent \
+          chmod +x packaging/macos/scripts/postinstall
+          pkgbuild \
             --component dist/HyperweaverAgent.app \
-            /Applications \
+            --install-location /Applications \
+            --scripts packaging/macos/scripts \
+            --identifier com.startcloud.hyperweaver-agent \
+            --version ${{ inputs.version }} \
+            dist/HyperweaverAgent-Component.pkg
+          productbuild \
+            --package dist/HyperweaverAgent-Component.pkg \
             dist/HyperweaverAgent-Setup-Unsigned.pkg
 
       - name: Sign installer
@@ -246,7 +259,7 @@ jobs:
           ARCH=amd64
           STAGE="dist/hyperweaver-agent_${VERSION}_${ARCH}"
           mkdir -p "$STAGE"/usr/bin \
-                   "$STAGE"/etc/hyperweaver-agent \
+                   "$STAGE"/etc/hyperweaver-agent/ssl \
                    "$STAGE"/etc/systemd/system \
                    "$STAGE"/usr/share/applications \
                    "$STAGE"/usr/share/icons/hicolor/192x192/apps \
@@ -255,6 +268,10 @@ jobs:
                    "$STAGE"/DEBIAN
           cp bin/hyperweaver-agent "$STAGE/usr/bin/"
           cp packaging/config/production-config.yaml "$STAGE/etc/hyperweaver-agent/config.yaml"
+          # STARTcloud CA (the ssl role's bundled ssls/ca pair): the agent
+          # signs its server certificate from it; postinst trusts the cert.
+          cp packaging/ssl/ca-certificate.crt "$STAGE/etc/hyperweaver-agent/ssl/ca.crt"
+          cp packaging/ssl/ca-certificate.key "$STAGE/etc/hyperweaver-agent/ssl/ca.key"
           cp packaging/DEBIAN/systemd/hyperweaver-agent.service "$STAGE/etc/systemd/system/"
           cp packaging/linux/hyperweaver-agent.desktop "$STAGE/usr/share/applications/"
           cp internal/tray/assets/icon.png "$STAGE/usr/share/icons/hicolor/192x192/apps/hyperweaver-agent.png"

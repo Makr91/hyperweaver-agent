@@ -25,6 +25,7 @@
     { "name": "System", "description": "Version, update checking, prerequisite detection" },
     { "name": "Task Management", "description": "The task queue: every machine operation runs as a prioritized, dependency-chained task with streamed output" },
     { "name": "Machine Management", "description": "VirtualBox machines — vagrant-backed or raw — discovered by reconciliation and operated through queued tasks" },
+    { "name": "Swap Management", "description": "Read-only swap information (the swap capability token); add/remove are OmniOS semantics and not implemented on this agent" },
     { "name": "Settings", "description": "Agent configuration over the API (admin only)" }
   ],
   "components": {
@@ -76,7 +77,7 @@
           "auth": { "type": "array", "items": { "type": "string" }, "example": ["apikey"] },
           "bootstrapAvailable": { "type": "boolean", "example": true },
           "console": { "type": "array", "items": { "type": "string" }, "example": [] },
-          "features": { "type": "array", "items": { "type": "string" }, "example": ["tasks", "machines", "machine-suspend"] },
+          "features": { "type": "array", "items": { "type": "string" }, "example": ["tasks", "machines", "machine-suspend", "swap"] },
           "uptime": { "type": "integer", "description": "Seconds since the agent started", "example": 86400 }
         }
       },
@@ -210,6 +211,27 @@
           "hostname": { "type": "string", "example": "desktop-01" },
           "eol": { "type": "string", "example": "\r\n" },
           "arch": { "type": "string", "description": "Node os.arch() vocabulary", "example": "x64" },
+          "cpus": {
+            "type": "array",
+            "description": "One entry per logical CPU, Node os.cpus() shape; times are cumulative milliseconds — consumers diff between polls for usage",
+            "items": {
+              "type": "object",
+              "properties": {
+                "model": { "type": "string", "example": "AMD Ryzen 9 5950X 16-Core Processor" },
+                "speed": { "type": "integer", "description": "MHz", "example": 3400 },
+                "times": {
+                  "type": "object",
+                  "properties": {
+                    "user": { "type": "integer", "format": "int64" },
+                    "nice": { "type": "integer", "format": "int64" },
+                    "sys": { "type": "integer", "format": "int64" },
+                    "idle": { "type": "integer", "format": "int64" },
+                    "irq": { "type": "integer", "format": "int64" }
+                  }
+                }
+              }
+            }
+          },
           "endianness": { "type": "string", "example": "LE" },
           "freemem": { "type": "integer", "format": "int64", "description": "Available physical memory in bytes", "example": 34359738368 },
           "loadavg": { "type": "array", "items": { "type": "number" }, "description": "1/5/15-minute load averages (zeros on Windows)", "example": [0.42, 0.31, 0.25] },
@@ -259,7 +281,7 @@
       "get": {
         "tags": ["System"],
         "summary": "Host statistics and machine lists",
-        "description": "Minimum role: viewer. OS-level host statistics plus the registered and running VirtualBox machine name lists. Machine-list failures degrade to empty arrays — a broken VBoxManage never fails the host stats.",
+        "description": "Minimum role: viewer — unless the agent is configured with `stats.public_access: true`, which serves this endpoint without an API key (the Node agent's conditional /stats registration). OS-level host statistics plus the registered and running VirtualBox machine name lists. Machine-list failures degrade to empty arrays — a broken VBoxManage never fails the host stats.",
         "responses": {
           "200": {
             "description": "Host statistics",
@@ -1303,6 +1325,92 @@
                     "skipped": { "type": "array", "items": { "type": "object", "properties": { "machine": { "type": "string" }, "reason": { "type": "string" } } } },
                     "task_ids": { "type": "array", "items": { "type": "string" } },
                     "message": { "type": "string" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/system/swap/summary": {
+      "get": {
+        "tags": ["Swap Management"],
+        "summary": "Swap configuration summary",
+        "description": "Minimum role: viewer. Aggregate swap figures, per-area breakdown, and utilization recommendations (Node-agent shape). Pool fields are present but empty — ZFS pools have no analog on this host. Read live from the OS; lastScanned is the request time.",
+        "responses": {
+          "200": {
+            "description": "Swap summary",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "host": { "type": "string" },
+                    "totalSwapGB": { "type": "string", "example": "8.00" },
+                    "usedSwapGB": { "type": "string", "example": "1.25" },
+                    "freeSwapGB": { "type": "string", "example": "6.75" },
+                    "overallUtilization": { "type": "number", "example": 15.63 },
+                    "swapAreaCount": { "type": "integer", "example": 1 },
+                    "swapAreas": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "path": { "type": "string", "example": "C:\\pagefile.sys" },
+                          "pool": { "type": "string", "nullable": true, "example": null },
+                          "sizeGB": { "type": "string" },
+                          "usedGB": { "type": "string" },
+                          "utilization": { "type": "number" }
+                        }
+                      }
+                    },
+                    "poolDistribution": { "type": "object" },
+                    "recommendations": { "type": "array", "items": { "type": "object" } },
+                    "lastScanned": { "type": "string", "format": "date-time" },
+                    "memoryStatsReference": { "nullable": true }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/system/swap/areas": {
+      "get": {
+        "tags": ["Swap Management"],
+        "summary": "List swap areas",
+        "description": "Minimum role: viewer. Row-per-area listing with the Node payload's pagination envelope, read live from the OS. The zvol pool filter has no meaning on this agent and is ignored.",
+        "parameters": [
+          { "name": "limit", "in": "query", "schema": { "type": "integer", "default": 100 } },
+          { "name": "offset", "in": "query", "schema": { "type": "integer", "default": 0 } }
+        ],
+        "responses": {
+          "200": {
+            "description": "Swap areas",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "swapAreas": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "host": { "type": "string" },
+                          "swapfile": { "type": "string" },
+                          "size_bytes": { "type": "integer", "format": "int64" },
+                          "used_bytes": { "type": "integer", "format": "int64" },
+                          "free_bytes": { "type": "integer", "format": "int64" },
+                          "utilization_pct": { "type": "number" },
+                          "scan_timestamp": { "type": "string", "format": "date-time" }
+                        }
+                      }
+                    },
+                    "totalCount": { "type": "integer" },
+                    "pagination": { "type": "object" }
                   }
                 }
               }

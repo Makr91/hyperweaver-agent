@@ -8,7 +8,14 @@ import (
 	"strings"
 
 	"github.com/Makr91/hyperweaver-agent/internal/keys"
+	"github.com/Makr91/hyperweaver-agent/internal/logging"
 )
+
+// alog is this package's category logger (the Node agent's auth logger:
+// logging.categories.auth overrides its level).
+func alog() *slog.Logger {
+	return logging.Category("auth")
+}
 
 // Role hierarchy for the direct-mode authorization model (Agent API v1).
 // Unknown roles compare as 0 and only pass checks requiring nothing.
@@ -112,7 +119,7 @@ func Middleware(store *keys.Store) func(http.Handler) http.Handler {
 
 			match, err := store.Verify(apiKey)
 			if err != nil {
-				slog.Error("api key validation failed", "error", err, "path", r.URL.Path)
+				alog().Error("api key validation failed", "error", err, "path", r.URL.Path)
 				WriteMsg(w, http.StatusInternalServerError, "API key validation failed")
 				return
 			}
@@ -123,7 +130,7 @@ func Middleware(store *keys.Store) func(http.Handler) http.Handler {
 
 			needed := RequiredRole(r.Method, r.URL.Path)
 			if roleLevels[match.Role] < roleLevels[needed] {
-				slog.Warn("api key role insufficient for request",
+				alog().Warn("api key role insufficient for request",
 					"entity_name", match.Name,
 					"role", match.Role,
 					"required_role", needed,

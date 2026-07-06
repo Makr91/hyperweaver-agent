@@ -9,6 +9,37 @@ server:
   # the agent reachable from other machines.
   bind_address: 127.0.0.1
   port: 9420
+  # Port for the HTTPS listener (bound only when ssl.enabled).
+  https_port: 9421
+
+ssl:
+  # Serve HTTPS on server.https_port. Certificate problems never stop the
+  # agent — HTTPS is skipped with an error in the log.
+  enabled: true
+  # With SSL enabled, the plain-HTTP port serves only redirects to HTTPS.
+  # Set false to keep the HTTP port serving the full app alongside HTTPS
+  # (for clients that cannot follow redirects).
+  force_secure: true
+  # Generate the server certificate at the paths below when none exists,
+  # signed by the CA below (which is itself generated when absent).
+  generate_ssl: true
+  key_path: /etc/hyperweaver-agent/ssl/server.key
+  cert_path: /etc/hyperweaver-agent/ssl/server.crt
+  # CA used to sign the generated server certificate. Provide your own CA
+  # pair here (wildcard-capable) and everything chains to it; absent files
+  # mean a local CA is generated first.
+  ca_cert_path: /etc/hyperweaver-agent/ssl/ca.crt
+  ca_key_path: /etc/hyperweaver-agent/ssl/ca.key
+
+cors:
+  # This is an API-key-authenticated backend in a many-to-many mesh: the API
+  # key — not the browser Origin — is the access boundary, so by default the
+  # agent answers any Origin. Set allow_all: false to fall back to the
+  # explicit whitelist and lock down direct browser access; proxied,
+  # API-key-authenticated calls are unaffected either way.
+  allow_all: true
+  # Origins allowed when allow_all is false (scheme://host:port).
+  whitelist: []
 
 ui:
   # Serve the bundled Hyperweaver UI at /ui/ (and / redirects there).
@@ -30,6 +61,13 @@ logging:
   file: /var/log/hyperweaver-agent/agent.log
   max_size_mb: 20
   max_backups: 5
+  # Compress rotated log files (gzip).
+  compression: true
+  # Per-category log levels overriding the global level, e.g.
+  #   categories:
+  #     tasks: debug
+  # Categories this agent emits: app, api_requests, auth, tasks, machines.
+  categories: {}
 
 api_keys:
   # Allow POST /api-keys/bootstrap to create the first API key.
@@ -53,11 +91,34 @@ api_docs:
   # Serve the interactive Agent API documentation (Swagger UI) at /api-docs.
   enabled: true
 
+stats:
+  # Serve GET /stats without an API key.
+  public_access: false
+
 data:
   # Root directory for agent data: the SQLite databases (tasks.sqlite,
   # agent.sqlite) today; machine directories, provisioners, and the file
   # cache in later releases. The packaged service owns /var/lib.
   dir: /var/lib/hyperweaver-agent
+
+database:
+  # SQLite tuning applied to both agent databases (tasks.sqlite,
+  # agent.sqlite).
+  sqlite_options:
+    # DELETE | TRUNCATE | PERSIST | MEMORY | WAL | OFF
+    journal_mode: WAL
+    # OFF | NORMAL | FULL | EXTRA
+    synchronous: NORMAL
+    cache_size_mb: 128
+    # DEFAULT | FILE | MEMORY
+    temp_store: MEMORY
+    # 0 disables memory-mapped I/O.
+    mmap_size_mb: 512
+    busy_timeout_ms: 30000
+    # WAL checkpoint threshold in pages; 0 disables automatic checkpoints.
+    wal_autocheckpoint: 1000
+    # Run PRAGMA optimize when opening each database.
+    optimize: true
 
 tasks:
   # Seconds between task-queue polls.
@@ -92,3 +153,10 @@ machines:
   discovery_interval: 300
   # Lowest auto-assigned server_id.
   server_id_start: 1
+  # Seconds a graceful stop waits for the guest to power off after the ACPI
+  # signal before forcing poweroff.
+  shutdown_timeout: 120
+
+cleanup:
+  # Seconds between periodic cleanup runs (task retention).
+  interval: 300

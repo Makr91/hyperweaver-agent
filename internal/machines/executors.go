@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log/slog"
 	"time"
 
 	"github.com/Makr91/hyperweaver-agent/internal/tasks"
@@ -31,9 +30,16 @@ type stopMetadata struct {
 // queue. Lifecycle is hypervisor commands ONLY — the Node agent's
 // ZoneManager model (zoneadm boot/shutdown/halt), spoken in VBoxManage
 // (Mark's ruling, 2026-07-05). Vagrant appears nowhere in lifecycle; it
-// returns with the provisioning phase, where it belongs.
-func RegisterExecutors(queue *tasks.Queue, store *Store, reconciler *Reconciler) {
-	e := &executors{queue: queue, store: store, reconciler: reconciler}
+// returns with the provisioning phase, where it belongs. shutdownTimeout is
+// the graceful-stop ACPI grace window (the Node agent's
+// zones.orchestration.timeouts.zone_shutdown).
+func RegisterExecutors(queue *tasks.Queue, store *Store, reconciler *Reconciler, shutdownTimeout time.Duration) {
+	e := &executors{
+		queue:           queue,
+		store:           store,
+		reconciler:      reconciler,
+		shutdownTimeout: shutdownTimeout,
+	}
 	queue.Register(OpStart, tasks.Executor{Run: e.start, OnCancel: e.cancelStart})
 	queue.Register(OpStop, tasks.Executor{Run: e.stop})
 	queue.Register(OpSuspend, tasks.Executor{Run: e.suspend})
@@ -42,9 +48,10 @@ func RegisterExecutors(queue *tasks.Queue, store *Store, reconciler *Reconciler)
 }
 
 type executors struct {
-	queue      *tasks.Queue
-	store      *Store
-	reconciler *Reconciler
+	queue           *tasks.Queue
+	store           *Store
+	reconciler      *Reconciler
+	shutdownTimeout time.Duration
 }
 
 // resolve loads the machine a task targets and the VBoxManage path.
@@ -69,16 +76,16 @@ func (e *executors) refreshStatus(name, vboxExe string) {
 	if errors.Is(err, vbox.ErrNotFound) {
 		if serr := e.store.SetOrphaned(ctx, name, true); serr != nil &&
 			!errors.Is(serr, ErrNotFound) {
-			slog.Error("record machine orphaned", "machine", name, "error", serr)
+			mlog().Error("record machine orphaned", "machine", name, "error", serr)
 		}
 		return
 	}
 	if err != nil {
-		slog.Warn("refresh machine status failed", "machine", name, "error", err)
+		mlog().Warn("refresh machine status failed", "machine", name, "error", err)
 		return
 	}
 	if serr := e.store.SetStatus(ctx, name, MapVBoxState(info.State)); serr != nil {
-		slog.Error("record machine status", "machine", name, "error", serr)
+		mlog().Error("record machine status", "machine", name, "error", serr)
 	}
 }
 
@@ -162,10 +169,11 @@ func (e *executors) stop(ctx context.Context, task *tasks.Task, out *tasks.Outpu
 }
 
 // waitForPowerOff polls until an ACPI-signalled machine leaves the running
-// state (the synchronous-shutdown semantics of `zoneadm shutdown`). False on
-// timeout — the caller falls back to a hard poweroff, like zoneadm halt.
+// state (the synchronous-shutdown semantics of `zoneadm shutdown`), bounded
+// by machines.shutdown_timeout. False on timeout — the caller falls back to
+// a hard poweroff, like zoneadm halt.
 func (e *executors) waitForPowerOff(ctx context.Context, vboxExe, name string, out *tasks.OutputWriter) bool {
-	deadline := time.Now().Add(2 * time.Minute)
+	deadline := time.Now().Add(e.shutdownTimeout)
 	for time.Now().Before(deadline) {
 		select {
 		case <-ctx.Done():

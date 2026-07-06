@@ -68,7 +68,11 @@ The agent serves the Hyperweaver web UI at:
 .Pp
 .Dl http://127.0.0.1:9420/ui/
 .Pp
-The root path redirects to the UI when it is enabled. The bundled
+With
+.Cm ssl.enabled
+the same surface is additionally served over HTTPS on
+.Cm server.https_port
+(default 9421). The root path redirects to the UI when it is enabled. The bundled
 documentation site, when present in the UI artifact, is served at
 .Pa /docs ,
 and the interactive Agent API documentation (Swagger UI) at

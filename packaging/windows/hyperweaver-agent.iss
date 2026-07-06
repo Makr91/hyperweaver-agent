@@ -40,6 +40,11 @@ Name: "startupicon"; Description: "Start {#AppName} when Windows starts"; GroupD
 
 [Files]
 Source: "..\..\bin\{#AppExeName}"; DestDir: "{app}"; Flags: ignoreversion
+; STARTcloud CA seed (the ssl role's bundled ssls/ca pair): the agent copies
+; it into <config dir>\ssl on first TLS start and signs its server
+; certificate from it.
+Source: "..\ssl\ca-certificate.crt"; DestDir: "{app}\ssl-seed"; DestName: "ca.crt"; Flags: ignoreversion
+Source: "..\ssl\ca-certificate.key"; DestDir: "{app}\ssl-seed"; DestName: "ca.key"; Flags: ignoreversion
 
 [Registry]
 ; hwa:// custom URL scheme (architecture item 5): browsers hand hwa://open to
@@ -56,4 +61,8 @@ Name: "{group}\{#AppName}"; Filename: "{app}\{#AppExeName}"
 Name: "{userstartup}\{#AppName}"; Filename: "{app}\{#AppExeName}"; Tasks: startupicon
 
 [Run]
+; Trust the STARTcloud CA machine-wide (the ssl role's Windows
+; certificate-store step) so browsers accept the CA-signed agent certificate
+; without warnings.
+Filename: "{sys}\certutil.exe"; Parameters: "-f -addstore Root ""{app}\ssl-seed\ca.crt"""; StatusMsg: "Installing STARTcloud CA certificate..."; Flags: runhidden
 Filename: "{app}\{#AppExeName}"; Description: "Launch {#AppName}"; Flags: nowait postinstall skipifsilent

@@ -17,6 +17,19 @@ chown -R hyperweaver-agent:hyperweaver-agent /var/lib/hyperweaver-agent
 chown -R hyperweaver-agent:hyperweaver-agent /var/log/hyperweaver-agent
 chown -R hyperweaver-agent:hyperweaver-agent /etc/hyperweaver-agent
 chmod 750 /etc/hyperweaver-agent
+if [ -d /etc/hyperweaver-agent/ssl ]; then
+    chmod 700 /etc/hyperweaver-agent/ssl
+    [ -f /etc/hyperweaver-agent/ssl/ca.key ] && chmod 600 /etc/hyperweaver-agent/ssl/ca.key
+fi
+
+# Trust the STARTcloud CA system-wide (the ssl role's trusted-certificates
+# step) so browsers accept the CA-signed agent certificate without warnings.
+if [ -f /etc/hyperweaver-agent/ssl/ca.crt ]; then
+    mkdir -p /usr/local/share/ca-certificates/hyperweaver
+    cp /etc/hyperweaver-agent/ssl/ca.crt /usr/local/share/ca-certificates/hyperweaver/ca-certificate.crt
+    chmod 644 /usr/local/share/ca-certificates/hyperweaver/ca-certificate.crt
+    update-ca-certificates || true
+fi
 
 # Reload systemd daemon
 systemctl daemon-reload || true

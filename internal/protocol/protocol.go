@@ -91,7 +91,7 @@ func WriteSecret(path string) error {
 	if _, rerr := rand.Read(raw); rerr != nil {
 		return rerr
 	}
-	return os.WriteFile(clean, []byte(hex.EncodeToString(raw)), 0o600)
+	return safepath.WriteFile(clean, []byte(hex.EncodeToString(raw)), 0o600)
 }
 
 // ReadSecret reads the running agent's current handoff secret. The error
@@ -121,10 +121,12 @@ func VerifySecret(path, supplied string) bool {
 }
 
 // Forward delivers an action to the agent already running at baseURL,
-// authenticated by the handoff secret. A transport-level failure (nothing
-// listening) is returned as-is; an HTTP rejection wraps ErrRejected so the
-// caller can tell "no agent" from "an agent said no".
-func Forward(ctx context.Context, baseURL, action, secret string) error {
+// authenticated by the handoff secret. client is the loopback self-client
+// (it trusts the running agent's own certificate when TLS is on). A
+// transport-level failure (nothing listening) is returned as-is; an HTTP
+// rejection wraps ErrRejected so the caller can tell "no agent" from "an
+// agent said no".
+func Forward(ctx context.Context, client *http.Client, baseURL, action, secret string) error {
 	reqCtx, cancel := context.WithTimeout(ctx, forwardTimeout)
 	defer cancel()
 
@@ -139,7 +141,7 @@ func Forward(ctx context.Context, baseURL, action, secret string) error {
 	}
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
 		return err
 	}

@@ -2,7 +2,6 @@ package config
 
 import (
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -45,26 +44,12 @@ func (c *Config) CreateBackup() (*Backup, error) {
 		return nil, err
 	}
 
-	// Stream-copy through file handles: the sink-visible arguments are the
-	// sanitized paths only, never file contents.
-	src, err := os.Open(filepath.Clean(c.path))
+	raw, err := os.ReadFile(filepath.Clean(c.path))
 	if err != nil {
 		return nil, fmt.Errorf("read config for backup: %w", err)
 	}
-	defer func() {
-		_ = src.Close()
-	}()
-
-	dst, err := os.OpenFile(filepath.Clean(target), os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
-	if err != nil {
-		return nil, fmt.Errorf("create backup: %w", err)
-	}
-	if _, cerr := io.Copy(dst, src); cerr != nil {
-		_ = dst.Close()
-		return nil, fmt.Errorf("write backup: %w", cerr)
-	}
-	if cerr := dst.Close(); cerr != nil {
-		return nil, fmt.Errorf("finalize backup: %w", cerr)
+	if werr := safepath.WriteFile(target, raw, 0o600); werr != nil {
+		return nil, fmt.Errorf("write backup: %w", werr)
 	}
 
 	return &Backup{
@@ -150,5 +135,5 @@ func (c *Config) RestoreBackup(filename string) error {
 	if _, berr := c.CreateBackup(); berr != nil {
 		return berr
 	}
-	return atomicWrite(c.path, raw)
+	return safepath.WriteFile(c.path, raw, 0o600)
 }

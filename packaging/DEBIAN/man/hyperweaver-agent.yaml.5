@@ -25,13 +25,72 @@ Headless service mode:
 .El
 .Sh CONFIGURATION SECTIONS
 .Ss server
-HTTP server configuration.
+HTTP/HTTPS server configuration.
 .Bl -tag -width "bind_address"
 .It Cm bind_address
 IP address to bind the web server to (default: "127.0.0.1"). Keep the
 loopback address unless the agent must be reachable from other machines.
 .It Cm port
-TCP port number for the web server (default: 9420)
+TCP port number for the HTTP server (default: 9420)
+.It Cm https_port
+TCP port number for the HTTPS listener, bound only when
+.Cm ssl.enabled
+(default: 9421)
+.El
+.Ss ssl
+HTTPS/TLS configuration. Certificate problems never stop the agent — HTTPS
+is skipped with an error in the log and HTTP keeps serving.
+.Bl -tag -width "generate_ssl"
+.It Cm enabled
+Boolean serving HTTPS on
+.Cm server.https_port
+(default: true). With SSL up, the plain-HTTP port serves only redirects to
+HTTPS unless
+.Cm force_secure
+is false.
+.It Cm force_secure
+Boolean making the plain-HTTP port serve only 308 redirects to HTTPS while
+the TLS listener is up (default: true). Set false to keep the HTTP port
+serving the full application alongside HTTPS, for clients that cannot
+follow redirects. When the TLS listener fails to start (certificate
+problems), the HTTP port serves the full application regardless.
+.It Cm generate_ssl
+Boolean generating the server certificate (RSA 2048, 365 days, CN=localhost,
+localhost/loopback/hostname SANs) at the paths below when none exists,
+signed by the CA at the CA paths — the CA itself is generated (RSA 4096,
+10 years, CA:TRUE) when absent (default: true)
+.It Cm key_path
+Server TLS private key location. Empty uses
+.Pa <config dir>/ssl/server.key ;
+the packaged service sets
+.Pa /etc/hyperweaver-agent/ssl/server.key .
+.It Cm cert_path
+Server TLS certificate location. Empty uses
+.Pa <config dir>/ssl/server.crt ;
+the packaged service sets
+.Pa /etc/hyperweaver-agent/ssl/server.crt .
+.It Cm ca_cert_path
+CA certificate that signs the generated server certificate. Provide your own
+CA pair (wildcard-capable) and everything chains to it; import this
+certificate into client trust stores for warning-free HTTPS. Empty uses
+.Pa <config dir>/ssl/ca.crt .
+.It Cm ca_key_path
+CA private key location (PKCS#1, PKCS#8, or EC). Empty uses
+.Pa <config dir>/ssl/ca.key .
+.El
+.Ss cors
+Cross-Origin Resource Sharing. The agent is an API-key-authenticated backend
+in a many-to-many mesh: the key, not the browser Origin, is the access
+boundary.
+.Bl -tag -width "allow_all"
+.It Cm allow_all
+Boolean answering any browser Origin (default: true). Set false to fall back
+to the whitelist and lock down direct browser access; proxied,
+API-key-authenticated calls are unaffected either way.
+.It Cm whitelist
+List of origins (scheme://host:port) allowed when
+.Cm allow_all
+is false (default: empty)
 .El
 .Ss ui
 Web UI serving.
@@ -68,6 +127,13 @@ the packaged service sets
 Maximum log file size in megabytes before rotation (default: 20)
 .It Cm max_backups
 Number of rotated log files to keep (default: 5)
+.It Cm compression
+Boolean gzip-compressing rotated log files (default: true)
+.It Cm categories
+Map of per-category log levels overriding the global level. Categories the
+agent emits: app, api_requests, auth, tasks, machines (default: empty — all
+categories follow
+.Cm level )
 .El
 .Ss api_keys
 API-key authentication (the Agent API v1 local tier).
@@ -103,6 +169,12 @@ Interactive API documentation.
 Boolean serving the Agent API documentation (Swagger UI) at /api-docs
 (default: true)
 .El
+.Ss stats
+Server statistics endpoint.
+.Bl -tag -width "public_access"
+.It Cm public_access
+Boolean serving GET /stats without an API key (default: false)
+.El
 .Ss data
 Data storage locations.
 .Bl -tag -width "dir"
@@ -119,6 +191,32 @@ on macOS,
 .Pa ~/.local/share/hyperweaver-agent
 on Linux); the packaged service sets
 .Pa /var/lib/hyperweaver-agent .
+.El
+.Ss database
+SQLite tuning applied to both agent databases
+.Pa ( tasks.sqlite ,
+.Pa agent.sqlite ) ,
+under the
+.Cm sqlite_options
+key.
+.Bl -tag -width "wal_autocheckpoint"
+.It Cm sqlite_options.journal_mode
+DELETE | TRUNCATE | PERSIST | MEMORY | WAL | OFF (default: WAL)
+.It Cm sqlite_options.synchronous
+OFF | NORMAL | FULL | EXTRA (default: NORMAL)
+.It Cm sqlite_options.cache_size_mb
+Page cache size in megabytes, 1-8192 (default: 128)
+.It Cm sqlite_options.temp_store
+DEFAULT | FILE | MEMORY (default: MEMORY)
+.It Cm sqlite_options.mmap_size_mb
+Memory-mapped I/O window in megabytes, 0-16384; 0 disables (default: 512)
+.It Cm sqlite_options.busy_timeout_ms
+Lock wait in milliseconds, 100-600000 (default: 30000)
+.It Cm sqlite_options.wal_autocheckpoint
+WAL checkpoint threshold in pages, 0-1000000; 0 disables automatic
+checkpoints (default: 1000)
+.It Cm sqlite_options.optimize
+Boolean running PRAGMA optimize when opening each database (default: true)
 .El
 .Ss tasks
 Task queue configuration.
@@ -166,6 +264,16 @@ shutdowns (default: true). The startup discovery task always runs.
 Seconds between periodic discover tasks, 10-86400 (default: 300)
 .It Cm server_id_start
 Lowest auto-assigned server_id, 1-99999999 (default: 1)
+.It Cm shutdown_timeout
+Seconds a graceful stop waits for the guest to power off after the ACPI
+signal before forcing poweroff, 5-3600 (default: 120)
+.El
+.Ss cleanup
+Periodic cleanup service.
+.Bl -tag -width "interval"
+.It Cm interval
+Seconds between cleanup runs — task retention runs on this cadence, 60-86400
+(default: 300)
 .El
 .Sh FILES
 .Bl -tag -width ".Pa /var/log/hyperweaver-agent/"

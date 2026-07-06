@@ -45,6 +45,33 @@ func Under(baseDir, name string) (string, error) {
 	return joined, nil
 }
 
+// WriteFile is THE way this agent writes a file — config's atomicWrite,
+// moved here so every content write in every package shares the one shape:
+// sanitize the path, write the bytes to a temp file beside the target
+// through a file handle (the sink only ever sees a Cleaned path), rename
+// into place so no reader ever observes a partial file. perm is the file
+// mode (most agent files are private state, 0600).
+func WriteFile(path string, data []byte, perm os.FileMode) error {
+	clean, err := CleanAbs(path)
+	if err != nil {
+		return err
+	}
+	tmp := clean + ".tmp"
+
+	f, err := os.OpenFile(filepath.Clean(tmp), os.O_WRONLY|os.O_CREATE|os.O_TRUNC, perm)
+	if err != nil {
+		return err
+	}
+	if _, werr := f.Write(data); werr != nil {
+		_ = f.Close()
+		return werr
+	}
+	if cerr := f.Close(); cerr != nil {
+		return cerr
+	}
+	return os.Rename(tmp, clean)
+}
+
 // ValidateExecutable sanitizes an executable path and verifies it points at
 // a real, regular, executable file — the gate every spawned binary passes
 // before reaching exec.

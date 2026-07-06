@@ -3,7 +3,6 @@ package tasks
 import (
 	"context"
 	"encoding/json"
-	"log/slog"
 	"os"
 	"strings"
 	"sync"
@@ -215,11 +214,11 @@ func (m *OutputManager) persist(taskID string, buffer []OutputEntry) {
 	}
 	raw, err := json.Marshal(buffer)
 	if err != nil {
-		slog.Error("serialize task output", "task_id", taskID, "error", err)
+		tlog().Error("serialize task output", "task_id", taskID, "error", err)
 		return
 	}
 	if serr := m.store.SetOutput(context.Background(), taskID, string(raw)); serr != nil {
-		slog.Error("flush task output to database", "task_id", taskID, "error", serr)
+		tlog().Error("flush task output to database", "task_id", taskID, "error", serr)
 	}
 }
 
@@ -228,16 +227,16 @@ func (m *OutputManager) persist(taskID string, buffer []OutputEntry) {
 func (m *OutputManager) writeLogFile(taskID string, buffer []OutputEntry) {
 	dir, err := safepath.CleanAbs(m.cfg.LogDirectory)
 	if err != nil {
-		slog.Error("task log directory invalid", "error", err)
+		tlog().Error("task log directory invalid", "error", err)
 		return
 	}
 	if merr := os.MkdirAll(dir, 0o700); merr != nil {
-		slog.Error("create task log directory", "dir", dir, "error", merr)
+		tlog().Error("create task log directory", "dir", dir, "error", merr)
 		return
 	}
 	path, err := safepath.Under(dir, taskID+".log")
 	if err != nil {
-		slog.Error("task log path invalid", "task_id", taskID, "error", err)
+		tlog().Error("task log path invalid", "task_id", taskID, "error", err)
 		return
 	}
 
@@ -253,8 +252,8 @@ func (m *OutputManager) writeLogFile(taskID string, buffer []OutputEntry) {
 		b.WriteString(" ")
 		b.WriteString(entry.Data)
 	}
-	if err := os.WriteFile(path, []byte(b.String()), 0o600); err != nil {
-		slog.Error("write task log file", "task_id", taskID, "error", err)
+	if err := safepath.WriteFile(path, []byte(b.String()), 0o600); err != nil {
+		tlog().Error("write task log file", "task_id", taskID, "error", err)
 	}
 }
 

@@ -107,8 +107,8 @@ func Open(path string) (*Store, error) {
 	return s, nil
 }
 
-// persist writes the store atomically (temp file + rename), 0600.
-// Callers must hold s.mu.
+// persist writes the store through safepath.WriteFile (the agent's one
+// write path), 0600. Callers must hold s.mu.
 func (s *Store) persist() error {
 	raw, err := json.MarshalIndent(s.data, "", "  ")
 	if err != nil {
@@ -117,11 +117,7 @@ func (s *Store) persist() error {
 	if err := os.MkdirAll(filepath.Dir(s.path), 0o700); err != nil {
 		return err
 	}
-	tmp := s.path + ".tmp"
-	if err := os.WriteFile(tmp, raw, 0o600); err != nil {
-		return err
-	}
-	if err := os.Rename(tmp, s.path); err != nil {
+	if err := safepath.WriteFile(s.path, raw, 0o600); err != nil {
 		return err
 	}
 	s.lastUsedFlush = time.Now()

@@ -38,7 +38,7 @@ func GetOrGenerateSetupToken(path string) string {
 		return ""
 	}
 	token := hex.EncodeToString(raw)
-	if werr := os.WriteFile(clean, []byte(token), 0o600); werr != nil {
+	if werr := safepath.WriteFile(clean, []byte(token), 0o600); werr != nil {
 		slog.Error("write setup token", "error", werr, "path", clean)
 		return ""
 	}

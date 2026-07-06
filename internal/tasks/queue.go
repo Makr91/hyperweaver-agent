@@ -8,7 +8,15 @@ import (
 	"math"
 	"sync"
 	"time"
+
+	"github.com/Makr91/hyperweaver-agent/internal/logging"
 )
+
+// tlog is this package's category logger (the Node agent's task logger:
+// logging.categories.tasks overrides its level).
+func tlog() *slog.Logger {
+	return logging.Category("tasks")
+}
 
 // NotCancellableError reports a cancel request against a task already in a
 // terminal state.
@@ -55,11 +63,10 @@ type QueueConfig struct {
 	// RetentionDays: finished tasks older than this are deleted by the
 	// periodic cleanup (the Node agent's host_monitoring.retention.tasks).
 	RetentionDays int
+	// CleanupInterval is how often the retention cleanup runs — the Node
+	// agent's CleanupService cadence (cleanup.interval).
+	CleanupInterval time.Duration
 }
-
-// cleanupInterval is how often the retention cleanup runs — the Node agent's
-// CleanupService cadence (cleanup.interval: 300).
-const cleanupInterval = 5 * time.Minute
 
 // runningEntry tracks one in-flight task.
 type runningEntry struct {
@@ -118,9 +125,9 @@ func (q *Queue) Output() *OutputManager {
 // Start recovers stale rows and launches the poll loop.
 func (q *Queue) Start() {
 	if stale, err := q.store.FailStaleRunning(context.Background()); err != nil {
-		slog.Error("task startup recovery failed", "error", err)
+		tlog().Error("task startup recovery failed", "error", err)
 	} else if stale > 0 {
-		slog.Warn("failed tasks left running by a previous agent process", "count", stale)
+		tlog().Warn("failed tasks left running by a previous agent process", "count", stale)
 	}
 
 	q.mu.Lock()
@@ -133,7 +140,7 @@ func (q *Queue) Start() {
 	q.loopDone = make(chan struct{})
 	q.mu.Unlock()
 
-	slog.Info("task processor started",
+	tlog().Info("task processor started",
 		"poll_interval", q.cfg.PollInterval, "max_concurrent", q.cfg.MaxConcurrent)
 	go q.loop()
 }
@@ -165,9 +172,9 @@ func (q *Queue) Stop() {
 	select {
 	case <-done:
 	case <-time.After(5 * time.Second):
-		slog.Warn("task executors still unwinding at shutdown")
+		tlog().Warn("task executors still unwinding at shutdown")
 	}
-	slog.Info("task processor stopped")
+	tlog().Info("task processor stopped")
 }
 
 // ProcessorRunning reports whether the poll loop is active (GET /tasks/stats).
@@ -252,8 +259,11 @@ func (q *Queue) loop() {
 	defer close(q.loopDone)
 	ticker := time.NewTicker(q.cfg.PollInterval)
 	defer ticker.Stop()
-	cleanup := time.NewTicker(cleanupInterval)
+	cleanup := time.NewTicker(q.cfg.CleanupInterval)
 	defer cleanup.Stop()
+	// The Node agent's CleanupService runs once at startup before its
+	// interval schedule.
+	q.cleanupOld()
 	for {
 		select {
 		case <-q.stopCh:
@@ -272,11 +282,11 @@ func (q *Queue) cleanupOld() {
 	cutoff := time.Now().AddDate(0, 0, -q.cfg.RetentionDays)
 	deleted, err := q.store.DeleteFinishedBefore(context.Background(), cutoff)
 	if err != nil {
-		slog.Error("task retention cleanup failed", "error", err)
+		tlog().Error("task retention cleanup failed", "error", err)
 		return
 	}
 	if deleted > 0 {
-		slog.Info("task retention cleanup", "deleted_count", deleted,
+		tlog().Info("task retention cleanup", "deleted_count", deleted,
 			"retention_days", q.cfg.RetentionDays)
 	}
 }
@@ -297,7 +307,7 @@ func (q *Queue) tick() {
 
 	parents, err := q.store.CancelDependents(ctx)
 	if err != nil {
-		slog.Error("cancel dependent tasks", "error", err)
+		tlog().Error("cancel dependent tasks", "error", err)
 		return
 	}
 	for _, parentID := range parents {
@@ -306,7 +316,7 @@ func (q *Queue) tick() {
 
 	task, err := q.store.NextPending(ctx)
 	if err != nil {
-		slog.Error("pick next task", "error", err)
+		tlog().Error("pick next task", "error", err)
 		return
 	}
 	if task == nil {
@@ -318,7 +328,7 @@ func (q *Queue) tick() {
 	if category != "" {
 		if holder, locked := q.categories[category]; locked {
 			q.mu.Unlock()
-			slog.Debug("task waiting for category lock",
+			tlog().Debug("task waiting for category lock",
 				"task_id", task.ID, "operation", task.Operation,
 				"category", category, "held_by", holder)
 			return
@@ -327,7 +337,7 @@ func (q *Queue) tick() {
 	q.mu.Unlock()
 
 	if err := q.store.MarkRunning(ctx, task.ID); err != nil {
-		slog.Error("mark task running", "task_id", task.ID, "error", err)
+		tlog().Error("mark task running", "task_id", task.ID, "error", err)
 		return
 	}
 
@@ -339,7 +349,7 @@ func (q *Queue) tick() {
 	}
 	q.mu.Unlock()
 
-	slog.Info("task started", "task_id", task.ID,
+	tlog().Info("task started", "task_id", task.ID,
 		"operation", task.Operation, "machine", task.MachineName)
 
 	q.inflight.Add(1)
@@ -404,7 +414,7 @@ func (q *Queue) executeAndHandle(ctx context.Context, task *Task, category strin
 	}
 
 	if err := q.store.Finish(finishCtx, task.ID, status, errorMessage, percent, info); err != nil {
-		slog.Error("record task outcome", "task_id", task.ID, "error", err)
+		tlog().Error("record task outcome", "task_id", task.ID, "error", err)
 	}
 	q.output.Finalize(task.ID)
 
@@ -421,13 +431,13 @@ func (q *Queue) executeAndHandle(ctx context.Context, task *Task, category strin
 
 	switch status {
 	case StatusFailed:
-		slog.Error("task failed", "task_id", task.ID,
+		tlog().Error("task failed", "task_id", task.ID,
 			"operation", task.Operation, "machine", task.MachineName, "error", runErr)
 	case StatusCancelled:
-		slog.Info("task cancelled", "task_id", task.ID,
+		tlog().Info("task cancelled", "task_id", task.ID,
 			"operation", task.Operation, "machine", task.MachineName)
 	default:
-		slog.Info("task completed", "task_id", task.ID,
+		tlog().Info("task completed", "task_id", task.ID,
 			"operation", task.Operation, "machine", task.MachineName)
 	}
 }
@@ -451,7 +461,7 @@ func (q *Queue) updateParentProgress(ctx context.Context, parentID string) {
 	}
 	counts, err := q.store.CountChildren(ctx, parentID)
 	if err != nil {
-		slog.Error("count parent task children", "task_id", parentID, "error", err)
+		tlog().Error("count parent task children", "task_id", parentID, "error", err)
 		return
 	}
 
@@ -480,17 +490,17 @@ func (q *Queue) updateParentProgress(ctx context.Context, parentID string) {
 		Status:         status,
 	})
 	if err != nil {
-		slog.Error("serialize parent progress", "task_id", parentID, "error", err)
+		tlog().Error("serialize parent progress", "task_id", parentID, "error", err)
 		return
 	}
 
 	if status == StatusRunning {
 		if uerr := q.store.UpdateProgress(ctx, parentID, percent, info); uerr != nil {
-			slog.Error("update parent task progress", "task_id", parentID, "error", uerr)
+			tlog().Error("update parent task progress", "task_id", parentID, "error", uerr)
 		}
 		return
 	}
 	if ferr := q.store.Finish(ctx, parentID, status, nil, percent, info); ferr != nil {
-		slog.Error("finish parent task", "task_id", parentID, "error", ferr)
+		tlog().Error("finish parent task", "task_id", parentID, "error", ferr)
 	}
 }

@@ -36,7 +36,7 @@ type statusPayload struct {
 // not, and no UI code ever branches on hypervisor values. Grows per phase:
 // machine-create + provisioning (C); artifacts/templates join the
 // config-gated set when their subsystems land.
-var platformFeatures = []string{"tasks", "machines", "machine-suspend"}
+var platformFeatures = []string{"tasks", "machines", "machine-suspend", "swap"}
 
 // archName maps Go architecture names to the Agent API contract values.
 func archName() string {

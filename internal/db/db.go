@@ -15,17 +15,87 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 
 	_ "modernc.org/sqlite" // registers the "sqlite" database/sql driver
 
 	"github.com/Makr91/hyperweaver-agent/internal/safepath"
 )
 
-// Open opens (creating if needed) the SQLite database at path and applies
-// migrations. Each migration is one SQL script; user_version records how many
-// have been applied, so a database created by an older build is upgraded by
-// running only the scripts it has not seen.
-func Open(ctx context.Context, path string, migrations []string) (*sql.DB, error) {
+// Options carries the configurable session pragmas (the Node agent's
+// database.sqlite_options, minus its Sequelize pool/retry blocks — this
+// agent runs one pooled connection per database, single-writer by
+// construction).
+type Options struct {
+	JournalMode       string
+	Synchronous       string
+	CacheSizeMB       int
+	TempStore         string
+	MmapSizeMB        int
+	BusyTimeoutMS     int
+	WALAutocheckpoint int
+	Optimize          bool
+}
+
+// The string-valued pragmas are selected as COMPLETE literal statements —
+// configuration input never becomes SQL text, not even by concatenation.
+// Config validation has already rejected anything outside these
+// vocabularies; an unknown value here is a programming error surfaced as an
+// open failure.
+
+func journalModePragma(mode string) (string, error) {
+	switch strings.ToUpper(mode) {
+	case "DELETE":
+		return "PRAGMA journal_mode=DELETE", nil
+	case "TRUNCATE":
+		return "PRAGMA journal_mode=TRUNCATE", nil
+	case "PERSIST":
+		return "PRAGMA journal_mode=PERSIST", nil
+	case "MEMORY":
+		return "PRAGMA journal_mode=MEMORY", nil
+	case "WAL":
+		return "PRAGMA journal_mode=WAL", nil
+	case "OFF":
+		return "PRAGMA journal_mode=OFF", nil
+	default:
+		return "", fmt.Errorf("unknown journal_mode %q", mode)
+	}
+}
+
+func synchronousPragma(mode string) (string, error) {
+	switch strings.ToUpper(mode) {
+	case "OFF":
+		return "PRAGMA synchronous=OFF", nil
+	case "NORMAL":
+		return "PRAGMA synchronous=NORMAL", nil
+	case "FULL":
+		return "PRAGMA synchronous=FULL", nil
+	case "EXTRA":
+		return "PRAGMA synchronous=EXTRA", nil
+	default:
+		return "", fmt.Errorf("unknown synchronous %q", mode)
+	}
+}
+
+func tempStorePragma(store string) (string, error) {
+	switch strings.ToUpper(store) {
+	case "DEFAULT":
+		return "PRAGMA temp_store=DEFAULT", nil
+	case "FILE":
+		return "PRAGMA temp_store=FILE", nil
+	case "MEMORY":
+		return "PRAGMA temp_store=MEMORY", nil
+	default:
+		return "", fmt.Errorf("unknown temp_store %q", store)
+	}
+}
+
+// Open opens (creating if needed) the SQLite database at path, applies the
+// configured session pragmas, and applies migrations. Each migration is one
+// SQL script; user_version records how many have been applied, so a database
+// created by an older build is upgraded by running only the scripts it has
+// not seen.
+func Open(ctx context.Context, path string, opts *Options, migrations []string) (*sql.DB, error) {
 	clean, err := safepath.CleanAbs(path)
 	if err != nil {
 		return nil, err
@@ -59,7 +129,7 @@ func Open(ctx context.Context, path string, migrations []string) (*sql.DB, error
 	// while eliminating SQLITE_BUSY between the agent's own goroutines.
 	database.SetMaxOpenConns(1)
 
-	if err := configure(ctx, database); err != nil {
+	if err := configure(ctx, database, opts); err != nil {
 		_ = database.Close()
 		return nil, fmt.Errorf("configure database %s: %w", clean, err)
 	}
@@ -70,21 +140,68 @@ func Open(ctx context.Context, path string, migrations []string) (*sql.DB, error
 	return database, nil
 }
 
-// configure applies the session pragmas: WAL journaling (readers never block
-// the writer), a busy timeout as a second line of defense, and enforced
-// foreign keys.
-func configure(ctx context.Context, database *sql.DB) error {
-	// journal_mode and busy_timeout return a result row — consume it.
+// configure applies the session pragmas from the configured sqlite_options
+// (the Node agent's config/Database.js pragma block) plus enforced foreign
+// keys. String pragma values select complete literal statements; numeric
+// pragma values are formatted with %d from validated integers (the same
+// pattern migrate uses for user_version) — configuration input never
+// becomes SQL text.
+func configure(ctx context.Context, database *sql.DB, opts *Options) error {
+	journalStmt, err := journalModePragma(opts.JournalMode)
+	if err != nil {
+		return err
+	}
+	synchronousStmt, err := synchronousPragma(opts.Synchronous)
+	if err != nil {
+		return err
+	}
+	tempStoreStmt, err := tempStorePragma(opts.TempStore)
+	if err != nil {
+		return err
+	}
+
+	// Pragmas that return a result row are queried and consumed; the rest
+	// are executed.
 	var mode string
-	if err := database.QueryRowContext(ctx, "PRAGMA journal_mode=WAL").Scan(&mode); err != nil {
+	if err := database.QueryRowContext(ctx, journalStmt).Scan(&mode); err != nil {
+		return err
+	}
+	if _, err := database.ExecContext(ctx, synchronousStmt); err != nil {
+		return err
+	}
+	// Negative cache_size is kibibytes (the Node agent's MB→negative-KB
+	// conversion).
+	if _, err := database.ExecContext(ctx,
+		fmt.Sprintf("PRAGMA cache_size = %d", -opts.CacheSizeMB*1024)); err != nil {
+		return err
+	}
+	if _, err := database.ExecContext(ctx, tempStoreStmt); err != nil {
+		return err
+	}
+	var mmap int64
+	if err := database.QueryRowContext(ctx,
+		fmt.Sprintf("PRAGMA mmap_size = %d", opts.MmapSizeMB*1024*1024)).Scan(&mmap); err != nil {
 		return err
 	}
 	var timeout int
-	if err := database.QueryRowContext(ctx, "PRAGMA busy_timeout=5000").Scan(&timeout); err != nil {
+	if err := database.QueryRowContext(ctx,
+		fmt.Sprintf("PRAGMA busy_timeout = %d", opts.BusyTimeoutMS)).Scan(&timeout); err != nil {
 		return err
 	}
-	_, err := database.ExecContext(ctx, "PRAGMA foreign_keys=ON")
-	return err
+	var checkpoint int
+	if err := database.QueryRowContext(ctx,
+		fmt.Sprintf("PRAGMA wal_autocheckpoint = %d", opts.WALAutocheckpoint)).Scan(&checkpoint); err != nil {
+		return err
+	}
+	if _, err := database.ExecContext(ctx, "PRAGMA foreign_keys=ON"); err != nil {
+		return err
+	}
+	if opts.Optimize {
+		if _, err := database.ExecContext(ctx, "PRAGMA optimize"); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // migrate applies the not-yet-applied tail of migrations inside transactions,

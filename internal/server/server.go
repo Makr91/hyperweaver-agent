@@ -5,14 +5,17 @@ package server
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"io/fs"
 	"log/slog"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"path"
+	"strconv"
 	"strings"
 	"time"
 
@@ -20,13 +23,15 @@ import (
 	"github.com/Makr91/hyperweaver-agent/internal/auth"
 	"github.com/Makr91/hyperweaver-agent/internal/config"
 	"github.com/Makr91/hyperweaver-agent/internal/keys"
+	"github.com/Makr91/hyperweaver-agent/internal/logging"
 	"github.com/Makr91/hyperweaver-agent/internal/machines"
+	"github.com/Makr91/hyperweaver-agent/internal/sslcert"
 	"github.com/Makr91/hyperweaver-agent/internal/tasks"
 	"github.com/Makr91/hyperweaver-agent/internal/version"
 	"github.com/Makr91/hyperweaver-agent/internal/webui"
 )
 
-// Server is the agent's HTTP server.
+// Server is the agent's HTTP (and optional HTTPS) server.
 type Server struct {
 	cfg        *config.Config
 	keys       *keys.Store
@@ -36,6 +41,12 @@ type Server struct {
 	httpSrv    *http.Server
 	listener   net.Listener
 	startedAt  time.Time
+
+	// httpsSrv/httpsListener exist only when ssl.enabled AND the certificate
+	// loaded — certificate problems leave the agent HTTP-only (Node-agent
+	// SSLManager semantics), never down.
+	httpsSrv      *http.Server
+	httpsListener net.Listener
 
 	// restartArgs are the arguments a restart-spawned successor process gets —
 	// built by main from parsed flag values (never raw os.Args).
@@ -87,10 +98,19 @@ func New(cfg *config.Config, keyStore *keys.Store, trayTokens *auth.TrayTokens, 
 	mux.Handle("GET /app/updates/check", requireKey(http.HandlerFunc(s.handleUpdateCheck)))
 	mux.Handle("GET /provisioning/status", requireKey(http.HandlerFunc(s.handleProvisioningStatus)))
 
-	// Host statistics (shared v1 stats shape). The Node agent optionally
-	// serves this publicly (stats.public_access, default false) — this agent
-	// keeps it keyed; add the knob only if a consumer ever needs it public.
-	mux.Handle("GET /stats", requireKey(http.HandlerFunc(s.handleStats)))
+	// Swap information (Agent API v1 Swap Management group, read-only —
+	// Mark's ruling: the Go agent serves the swap information zoneweaver
+	// serves; add/remove are OmniOS semantics and deliberately absent).
+	mux.Handle("GET /system/swap/summary", requireKey(http.HandlerFunc(s.handleSwapSummary)))
+	mux.Handle("GET /system/swap/areas", requireKey(http.HandlerFunc(s.handleSwapAreas)))
+
+	// Host statistics (shared v1 stats shape). stats.public_access serves it
+	// without a key (the Node agent's conditional /stats registration).
+	if cfg.Stats.PublicAccess {
+		mux.HandleFunc("GET /stats", s.handleStats)
+	} else {
+		mux.Handle("GET /stats", requireKey(http.HandlerFunc(s.handleStats)))
+	}
 
 	// Task queue (Agent API v1 Task Management group). Literal patterns
 	// (/tasks/stats, /tasks/completed) win over the {taskId} wildcards in
@@ -158,10 +178,18 @@ func New(cfg *config.Config, keyStore *keys.Store, trayTokens *auth.TrayTokens, 
 		mux.HandleFunc("GET /{$}", s.handleRootInfo)
 	}
 
+	handler := requestLog(recoverer(corsMiddleware(&cfg.CORS, mux)))
 	s.httpSrv = &http.Server{
 		Addr:              cfg.ListenAddr(),
-		Handler:           requestLog(recoverer(mux)),
+		Handler:           handler,
 		ReadHeaderTimeout: 10 * time.Second,
+	}
+	if cfg.SSL.Enabled {
+		s.httpsSrv = &http.Server{
+			Addr:              cfg.HTTPSListenAddr(),
+			Handler:           handler,
+			ReadHeaderTimeout: 10 * time.Second,
+		}
 	}
 	return s, nil
 }
@@ -248,23 +276,146 @@ func (s *Server) handleRootInfo(w http.ResponseWriter, _ *http.Request) {
 // Listen binds the configured address without serving yet. Split from Start
 // so main can detect a bind conflict — the single-instance signal — before
 // any tray icon is shown, and hand the action to the instance that owns the
-// port instead.
+// port instead. The HTTPS listener binds afterwards, non-fatally: only the
+// HTTP port participates in single-instance detection.
 func (s *Server) Listen() error {
 	listener, err := s.listen()
 	if err != nil {
 		return err
 	}
 	s.listener = listener
+	s.listenHTTPS()
 	return nil
 }
 
+// listenHTTPS binds the TLS listener when ssl.enabled — the Node agent's
+// setupHTTPSServer: certificates are generated on demand (ssl.generate_ssl),
+// and any certificate or bind problem logs an error and leaves the agent
+// HTTP-only rather than failing startup.
+func (s *Server) listenHTTPS() {
+	if s.httpsSrv == nil {
+		return
+	}
+	keyPath := s.cfg.SSLKeyPath()
+	certPath := s.cfg.SSLCertPath()
+
+	// Installer-shipped CA (the ssl role's bundled STARTcloud CA): copied
+	// into place before any generation decision.
+	if serr := sslcert.SeedCA(s.cfg.SSLCACertPath(), s.cfg.SSLCAKeyPath()); serr != nil {
+		slog.Warn("seeding installer CA failed; continuing", "error", serr)
+	}
+
+	if s.cfg.SSL.GenerateSSL {
+		generated, err := sslcert.EnsureCertificates(keyPath, certPath,
+			s.cfg.SSLCACertPath(), s.cfg.SSLCAKeyPath())
+		if err != nil {
+			slog.Error("SSL certificate generation failed; HTTPS not started",
+				"error", err, "key_path", keyPath, "cert_path", certPath)
+			s.httpsSrv = nil
+			return
+		}
+		if generated {
+			slog.Info("SSL certificates generated (CA-signed)",
+				"key_path", keyPath, "cert_path", certPath,
+				"ca_cert_path", s.cfg.SSLCACertPath())
+		}
+	}
+
+	cert, err := tls.LoadX509KeyPair(certPath, keyPath)
+	if err != nil {
+		slog.Error("SSL certificate error; HTTPS not started",
+			"error", err, "key_path", keyPath, "cert_path", certPath)
+		s.httpsSrv = nil
+		return
+	}
+
+	// Server-lifetime bind, not request-scoped — Background is correct here.
+	listenConfig := net.ListenConfig{}
+	listener, err := listenConfig.Listen(context.Background(), "tcp", s.cfg.HTTPSListenAddr())
+	if err != nil {
+		slog.Error("https bind failed; HTTPS not started",
+			"addr", s.cfg.HTTPSListenAddr(), "error", err)
+		s.httpsSrv = nil
+		return
+	}
+	s.httpsListener = tls.NewListener(listener, &tls.Config{
+		Certificates: []tls.Certificate{cert},
+		MinVersion:   tls.VersionTLS12,
+	})
+
+	// Mark's ruling (2026-07-05): ssl.enabled means ALL traffic rides TLS —
+	// once the TLS listener is up, the plain listener's only job is
+	// redirecting to the HTTPS counterpart (308 preserves method and body).
+	// ssl.force_secure: false is the escape valve for clients that cannot
+	// chase redirects — the HTTP port keeps serving the full app alongside
+	// HTTPS (the Node agent's dual-serve model). When HTTPS could not start
+	// (the early returns above), the plain listener keeps serving the full
+	// app regardless, so a certificate problem degrades to HTTP instead of
+	// taking the agent down.
+	if s.cfg.SSL.ForceSecure {
+		s.httpSrv.Handler = s.httpsRedirect()
+	} else {
+		slog.Info("ssl.force_secure is false: HTTP port keeps serving the full app alongside HTTPS",
+			"http_addr", s.httpSrv.Addr, "https_addr", s.httpsSrv.Addr)
+	}
+}
+
+// redirectHost returns the host the HTTPS redirect may target: the request's
+// Host header is matched against the agent's own identities and the MATCHED
+// COPY from the allowlist is returned — never the header value itself, so
+// the Location header cannot carry an attacker-supplied host (the open
+// redirect gosec's G710 flags).
+func (s *Server) redirectHost(requestHost string) string {
+	host := requestHost
+	if bare, _, err := net.SplitHostPort(host); err == nil {
+		host = bare
+	}
+	allowed := []string{"127.0.0.1", "localhost", "::1", "[::1]", s.cfg.Server.BindAddress}
+	if hostname, err := os.Hostname(); err == nil {
+		allowed = append(allowed, hostname)
+	}
+	for _, candidate := range allowed {
+		if candidate != "" && strings.EqualFold(host, candidate) {
+			return candidate
+		}
+	}
+	return "127.0.0.1"
+}
+
+// httpsRedirect sends every plain-HTTP request to its HTTPS counterpart.
+func (s *Server) httpsRedirect() http.Handler {
+	port := strconv.Itoa(s.cfg.Server.HTTPSPort)
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		target := url.URL{
+			Scheme:   "https",
+			Host:     net.JoinHostPort(s.redirectHost(r.Host), port),
+			Path:     r.URL.Path,
+			RawQuery: r.URL.RawQuery,
+		}
+		http.Redirect(w, r, target.String(), http.StatusPermanentRedirect)
+	})
+}
+
 // Start blocks serving HTTP until Shutdown is called or the listener fails.
+// The HTTPS server (when up) serves on its own goroutine; its failure never
+// takes the HTTP surface down.
 func (s *Server) Start() error {
 	if s.listener == nil {
 		if err := s.Listen(); err != nil {
 			return err
 		}
 	}
+
+	if s.httpsSrv != nil && s.httpsListener != nil {
+		slog.Info("https server listening", "addr", s.httpsSrv.Addr)
+		go func() {
+			serveErr := s.httpsSrv.Serve(s.httpsListener)
+			if serveErr != nil && !errors.Is(serveErr, http.ErrServerClosed) {
+				slog.Error("https server failed", "error", serveErr)
+			}
+		}()
+	}
+
 	slog.Info("http server listening", "addr", s.httpSrv.Addr, "ui_enabled", s.cfg.UI.Enabled)
 	err := s.httpSrv.Serve(s.listener)
 	if errors.Is(err, http.ErrServerClosed) {
@@ -298,17 +449,76 @@ func (s *Server) listen() (net.Listener, error) {
 	return nil, lastErr
 }
 
-// Shutdown gracefully drains connections.
+// Shutdown gracefully drains connections on both listeners.
 func (s *Server) Shutdown(ctx context.Context) error {
-	return s.httpSrv.Shutdown(ctx)
+	err := s.httpSrv.Shutdown(ctx)
+	if s.httpsSrv != nil {
+		if herr := s.httpsSrv.Shutdown(ctx); herr != nil {
+			err = errors.Join(err, herr)
+		}
+	}
+	return err
 }
 
-// requestLog logs each request at debug level.
+// corsMiddleware implements the Node agent's CORS policy (its index.js
+// corsOptions): an API-key-authenticated backend in a many-to-many mesh
+// gates on the key, not the browser Origin — allow_all (default true)
+// answers any Origin, allow_all: false falls back to the whitelist.
+// Disallowed origins are declined by omitting the CORS headers, never by
+// failing the request. Credentialed responses echo the Origin (a wildcard is
+// invalid with credentials).
+func corsMiddleware(cfg *config.CORSConfig, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		origin := r.Header.Get("Origin")
+		if origin == "" {
+			// Not a cross-origin browser request.
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		allowed := cfg.AllowAll
+		if !allowed {
+			for _, entry := range cfg.Whitelist {
+				if entry == origin {
+					allowed = true
+					break
+				}
+			}
+		}
+
+		headers := w.Header()
+		if allowed {
+			headers.Set("Access-Control-Allow-Origin", origin)
+			headers.Set("Access-Control-Allow-Credentials", "true")
+			headers.Add("Vary", "Origin")
+		} else {
+			logging.Category("api_requests").Warn("CORS: origin not allowed", "origin", origin)
+		}
+
+		// Preflight: answered here (204) — the mux has no OPTIONS routes.
+		if r.Method == http.MethodOptions && r.Header.Get("Access-Control-Request-Method") != "" {
+			if allowed {
+				headers.Set("Access-Control-Allow-Methods", "GET,HEAD,PUT,PATCH,POST,DELETE")
+				if requestHeaders := r.Header.Get("Access-Control-Request-Headers"); requestHeaders != "" {
+					headers.Set("Access-Control-Allow-Headers", requestHeaders)
+					headers.Add("Vary", "Access-Control-Request-Headers")
+				}
+			}
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+
+		next.ServeHTTP(w, r)
+	})
+}
+
+// requestLog logs each request at debug level under the api_requests
+// category (the Node agent's api-requests logger).
 func requestLog(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
 		next.ServeHTTP(w, r)
-		slog.Debug("http request",
+		logging.Category("api_requests").Debug("http request",
 			"method", r.Method,
 			"path", r.URL.Path,
 			"remote", r.RemoteAddr,

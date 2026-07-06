@@ -1,0 +1,17 @@
+#!/bin/bash
+# Hyperweaver Agent pkg postinstall: trust the STARTcloud CA system-wide
+# (the ssl role's trusted-certificates step, macOS edition) so browsers
+# accept the CA-signed agent certificate without warnings. The CA pair also
+# rides inside the app bundle (Contents/Resources/ssl-seed); the agent copies
+# it into its config dir on first TLS start and signs its server certificate
+# from it.
+#
+# Never fail the install over trust settings: recent macOS versions can
+# require interactive approval for trust changes — the certificate is still
+# imported and the user can approve it in Keychain Access.
+CA_CERT="/Applications/HyperweaverAgent.app/Contents/Resources/ssl-seed/ca.crt"
+if [ -f "$CA_CERT" ]; then
+    security add-trusted-cert -d -r trustRoot \
+        -k /Library/Keychains/System.keychain "$CA_CERT" || true
+fi
+exit 0

@@ -11,11 +11,18 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Makr91/hyperweaver-agent/internal/logging"
 	"github.com/Makr91/hyperweaver-agent/internal/prereqs"
 	"github.com/Makr91/hyperweaver-agent/internal/tasks"
 	"github.com/Makr91/hyperweaver-agent/internal/vagrant"
 	"github.com/Makr91/hyperweaver-agent/internal/vbox"
 )
+
+// mlog is this package's category logger (the Node agent's per-category
+// winston loggers: logging.categories.machines overrides its level).
+func mlog() *slog.Logger {
+	return logging.Category("machines")
+}
 
 // Reconciler keeps the registry truthful: the periodic sweep (SHI's 60-second
 // poll — this IS external-shutdown detection) lists VirtualBox's machines,
@@ -71,7 +78,7 @@ func (r *Reconciler) queueDiscover(ctx context.Context, createdBy string) {
 		Priority:    tasks.PriorityBackground,
 		CreatedBy:   createdBy,
 	}); err != nil {
-		slog.Error("queue discover task", "error", err)
+		mlog().Error("queue discover task", "error", err)
 	}
 }
 
@@ -90,9 +97,9 @@ func (r *Reconciler) Start() {
 	r.mu.Unlock()
 
 	if r.autoDiscovery {
-		slog.Info("periodic machine discovery started", "interval", r.interval)
+		mlog().Info("periodic machine discovery started", "interval", r.interval)
 	} else {
-		slog.Info("periodic machine discovery disabled (machines.auto_discovery=false); startup discovery still runs")
+		mlog().Info("periodic machine discovery disabled (machines.auto_discovery=false); startup discovery still runs")
 	}
 
 	go func() {
@@ -133,7 +140,7 @@ func (r *Reconciler) Stop() {
 	close(r.stopCh)
 	r.mu.Unlock()
 	<-r.done
-	slog.Info("periodic machine discovery stopped")
+	mlog().Info("periodic machine discovery stopped")
 }
 
 // VBoxManagePath returns the validated VBoxManage path from the prerequisite
@@ -173,14 +180,14 @@ func (r *Reconciler) RunOnce(ctx context.Context, out *tasks.OutputWriter) {
 		// No VirtualBox, no observations — leaving the registry as-is beats
 		// mass-orphaning machines over a broken installation.
 		narrate("stderr", "VirtualBox not installed — sweep skipped, registry left untouched")
-		slog.Debug("machine reconciliation skipped: VirtualBox not installed")
+		mlog().Debug("machine reconciliation skipped: VirtualBox not installed")
 		return
 	}
 
 	registered, err := vbox.ListRegistered(sweepCtx, exe, "vms")
 	if err != nil {
 		narrate("stderr", "VBoxManage list vms failed: "+err.Error())
-		slog.Warn("machine reconciliation: list vms failed", "error", err)
+		mlog().Warn("machine reconciliation: list vms failed", "error", err)
 		return
 	}
 	narrate("stdout", "VirtualBox reports "+strconv.Itoa(len(registered))+" registered machine(s)")
@@ -196,7 +203,7 @@ func (r *Reconciler) RunOnce(ctx context.Context, out *tasks.OutputWriter) {
 		if ierr != nil {
 			// Deleted between list and inspect — the next sweep settles it.
 			narrate("stderr", reg.Name+": showvminfo failed ("+ierr.Error()+")")
-			slog.Debug("machine reconciliation: showvminfo failed",
+			mlog().Debug("machine reconciliation: showvminfo failed",
 				"machine", reg.Name, "error", ierr)
 			continue
 		}
@@ -204,7 +211,7 @@ func (r *Reconciler) RunOnce(ctx context.Context, out *tasks.OutputWriter) {
 
 		configuration, merr := json.Marshal(info.Raw)
 		if merr != nil {
-			slog.Warn("machine reconciliation: serialize configuration",
+			mlog().Warn("machine reconciliation: serialize configuration",
 				"machine", reg.Name, "error", merr)
 			configuration = nil
 		}
@@ -233,7 +240,7 @@ func (r *Reconciler) RunOnce(ctx context.Context, out *tasks.OutputWriter) {
 		created, uerr := r.store.UpsertDiscovered(sweepCtx, &observation)
 		if uerr != nil {
 			narrate("stderr", reg.Name+": registry update failed ("+uerr.Error()+")")
-			slog.Error("machine reconciliation: upsert failed",
+			mlog().Error("machine reconciliation: upsert failed",
 				"machine", reg.Name, "error", uerr)
 			continue
 		}
@@ -248,10 +255,10 @@ func (r *Reconciler) RunOnce(ctx context.Context, out *tasks.OutputWriter) {
 	orphaned, err := r.store.MarkMissing(sweepCtx, seen)
 	if err != nil {
 		narrate("stderr", "orphan check failed: "+err.Error())
-		slog.Error("machine reconciliation: mark missing failed", "error", err)
+		mlog().Error("machine reconciliation: mark missing failed", "error", err)
 	} else if orphaned > 0 {
 		narrate("stderr", strconv.FormatInt(orphaned, 10)+" registry machine(s) no longer present in VirtualBox — marked orphaned")
-		slog.Warn("machines no longer present in VirtualBox marked orphaned", "count", orphaned)
+		mlog().Warn("machines no longer present in VirtualBox marked orphaned", "count", orphaned)
 	}
 
 	// The Node agent's discover completion line.
@@ -275,7 +282,7 @@ func (r *Reconciler) vagrantHomesByUUID(ctx context.Context) map[string]string {
 	// under old ids (SHI runs the same before every start).
 	machines, err := vagrant.GlobalStatus(ctx, exe, true)
 	if err != nil {
-		slog.Warn("machine reconciliation: vagrant global-status failed", "error", err)
+		mlog().Warn("machine reconciliation: vagrant global-status failed", "error", err)
 		return homes
 	}
 

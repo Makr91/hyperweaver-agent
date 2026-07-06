@@ -3,7 +3,6 @@ package config
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 
 	"github.com/goccy/go-yaml"
 
@@ -12,9 +11,10 @@ import (
 
 // Settings persistence (Node-agent semantics): PUT /settings shallow-merges
 // the submitted top-level sections onto the on-disk YAML and writes it back
-// atomically, after validating the result parses as a working configuration.
-// The running process keeps its loaded values — changes apply on restart
-// (the settings UI offers a Restart button for exactly that).
+// atomically (safepath.WriteFile — the agent's one write path), after
+// validating the result parses as a working configuration. The running
+// process keeps its loaded values — changes apply on restart (the settings
+// UI offers a Restart button for exactly that).
 
 // validateConfigBytes strict-parses candidate YAML as a full configuration.
 func validateConfigBytes(raw []byte) error {
@@ -23,30 +23,6 @@ func validateConfigBytes(raw []byte) error {
 		return err
 	}
 	return candidate.validate()
-}
-
-// atomicWrite writes data to path via a temp file + rename. The write goes
-// through a file handle so the sink-visible arguments are sanitized paths
-// only, never the (config-file-derived) contents.
-func atomicWrite(path string, data []byte) error {
-	clean, err := safepath.CleanAbs(path)
-	if err != nil {
-		return err
-	}
-	tmp := clean + ".tmp"
-
-	f, err := os.OpenFile(filepath.Clean(tmp), os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
-	if err != nil {
-		return err
-	}
-	if _, werr := f.Write(data); werr != nil {
-		_ = f.Close()
-		return werr
-	}
-	if cerr := f.Close(); cerr != nil {
-		return cerr
-	}
-	return os.Rename(filepath.Clean(tmp), filepath.Clean(clean))
 }
 
 // MergeAndSave merges the submitted top-level sections onto the on-disk
@@ -79,5 +55,5 @@ func (c *Config) MergeAndSave(updates map[string]any) error {
 	if _, err := c.CreateBackup(); err != nil {
 		return err
 	}
-	return atomicWrite(c.path, merged)
+	return safepath.WriteFile(c.path, merged, 0o600)
 }

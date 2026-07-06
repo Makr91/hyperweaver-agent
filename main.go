@@ -8,6 +8,7 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -24,6 +25,7 @@ import (
 	"github.com/Makr91/hyperweaver-agent/internal/config"
 	"github.com/Makr91/hyperweaver-agent/internal/db"
 	"github.com/Makr91/hyperweaver-agent/internal/keys"
+	"github.com/Makr91/hyperweaver-agent/internal/localclient"
 	"github.com/Makr91/hyperweaver-agent/internal/logging"
 	"github.com/Makr91/hyperweaver-agent/internal/machines"
 	"github.com/Makr91/hyperweaver-agent/internal/openbrowser"
@@ -81,7 +83,7 @@ func run() error {
 	// up and finish the action once the server is listening.
 	pendingProtocolOpen := false
 	if uri, ok := protocol.URIFromArgs(flag.Args()); ok {
-		delivered, perr := handleProtocolInvocation(cfg, uri)
+		delivered, perr := handleProtocolInvocation(cfg, selfClient(cfg), uri)
 		if perr != nil {
 			slog.Error("protocol invocation failed", "uri", uri, "error", perr)
 			return perr
@@ -123,7 +125,7 @@ func run() error {
 	// single-use token in the URL fragment signs the SPA in without a login
 	// screen.
 	openUI := func() {
-		waitForServer(cfg.BaseURL())
+		waitForServer(selfClient(cfg), cfg.BaseURL())
 		url := cfg.LocalURL()
 		if token, mintErr := trayTokens.Mint(); mintErr == nil {
 			url += "#tray=" + token
@@ -163,7 +165,7 @@ func run() error {
 			slog.Error("http server bind failed", "error", lerr)
 			return lerr
 		}
-		return handleBindConflict(cfg, lerr)
+		return handleBindConflict(cfg, selfClient(cfg), lerr)
 	}
 
 	// The queue and reconciler start only once this process owns the port —
@@ -262,12 +264,48 @@ func setupTasks(cfg *config.Config) (*tasks.Queue, *machines.Store, *machines.Re
 		return nil, nil, nil, nil, err
 	}
 
+	// database.sqlite_options applies to both agent databases.
+	sqliteOpts := cfg.Database.SQLiteOptions
+	dbOptions := db.Options{
+		JournalMode:       sqliteOpts.JournalMode,
+		Synchronous:       sqliteOpts.Synchronous,
+		CacheSizeMB:       sqliteOpts.CacheSizeMB,
+		TempStore:         sqliteOpts.TempStore,
+		MmapSizeMB:        sqliteOpts.MmapSizeMB,
+		BusyTimeoutMS:     sqliteOpts.BusyTimeoutMS,
+		WALAutocheckpoint: sqliteOpts.WALAutocheckpoint,
+		Optimize:          sqliteOpts.Optimize,
+	}
+
 	// Startup-scoped, not request-scoped — Background is correct here.
-	tasksDB, err := db.Open(context.Background(), tasksPath, tasks.Migrations)
+	// A restart-spawned successor retries while its predecessor releases the
+	// database file locks — same handshake the port bind uses; the databases
+	// open before the port, so without this a restart races the dying
+	// process's SQLite locks (observed as "disk I/O error (1546)").
+	openDB := func(path string, migrations []string) (*sql.DB, error) {
+		attempts := 1
+		if os.Getenv("HYPERWEAVER_RESTART") == "1" {
+			attempts = 20
+		}
+		var lastErr error
+		for i := 0; i < attempts; i++ {
+			database, oerr := db.Open(context.Background(), path, &dbOptions, migrations)
+			if oerr == nil {
+				return database, nil
+			}
+			lastErr = oerr
+			if attempts > 1 {
+				time.Sleep(500 * time.Millisecond)
+			}
+		}
+		return nil, lastErr
+	}
+
+	tasksDB, err := openDB(tasksPath, tasks.Migrations)
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}
-	agentDB, err := db.Open(context.Background(), agentPath, machines.Migrations)
+	agentDB, err := openDB(agentPath, machines.Migrations)
 	if err != nil {
 		_ = tasksDB.Close()
 		return nil, nil, nil, nil, err
@@ -291,16 +329,18 @@ func setupTasks(cfg *config.Config) (*tasks.Queue, *machines.Store, *machines.Re
 		LogDirectory:     taskLogDir,
 	})
 	queue := tasks.NewQueue(store, output, tasks.QueueConfig{
-		PollInterval:  time.Duration(cfg.Tasks.PollIntervalSeconds) * time.Second,
-		MaxConcurrent: cfg.Tasks.MaxConcurrent,
-		RetentionDays: cfg.Tasks.RetentionDays,
+		PollInterval:    time.Duration(cfg.Tasks.PollIntervalSeconds) * time.Second,
+		MaxConcurrent:   cfg.Tasks.MaxConcurrent,
+		RetentionDays:   cfg.Tasks.RetentionDays,
+		CleanupInterval: time.Duration(cfg.Cleanup.Interval) * time.Second,
 	})
 
 	machineStore := machines.NewStore(agentDB)
 	reconciler := machines.NewReconciler(machineStore, store,
 		cfg.Machines.AutoDiscovery,
 		time.Duration(cfg.Machines.DiscoveryInterval)*time.Second)
-	machines.RegisterExecutors(queue, machineStore, reconciler)
+	machines.RegisterExecutors(queue, machineStore, reconciler,
+		time.Duration(cfg.Machines.ShutdownTimeout)*time.Second)
 
 	return queue, machineStore, reconciler, closer, nil
 }
@@ -323,13 +363,23 @@ func runHeadless(serverErr chan error, shutdown func()) error {
 	return nil
 }
 
+// selfClient builds the loopback client for talking to this agent's own
+// origin — over TLS with certificate verification when ssl.enabled (it
+// trusts the agent's own certificate file; Mark's ruling 2026-07-05: SSL
+// enabled means ALL traffic rides TLS, internal probes included). Built at
+// each call site, not at boot: the first TLS boot generates the certificate
+// during Listen, after startup code has already run.
+func selfClient(cfg *config.Config) *http.Client {
+	return localclient.New(cfg.SSLCACertPath(), cfg.SSLCertPath())
+}
+
 // handleBindConflict resolves a failed port bind on a desktop launch: when
 // the port holder is another instance of this agent, hand it an open action
 // (authenticated by the shared per-user handoff secret) and exit cleanly —
 // launching the app twice reuses the running instance instead of showing a
 // dead tray icon. Anything else holding the port is a real error.
-func handleBindConflict(cfg *config.Config, bindErr error) error {
-	if !probeRunningAgent(cfg.BaseURL()) {
+func handleBindConflict(cfg *config.Config, selfClient *http.Client, bindErr error) error {
+	if !probeRunningAgent(selfClient, cfg.BaseURL()) {
 		slog.Error("http server bind failed", "error", bindErr)
 		return bindErr
 	}
@@ -340,7 +390,7 @@ func handleBindConflict(cfg *config.Config, bindErr error) error {
 		return fmt.Errorf("agent already running at %s, and its handoff secret is unreadable: %w",
 			cfg.BaseURL(), serr)
 	}
-	if ferr := protocol.Forward(context.Background(), cfg.BaseURL(), protocol.ActionOpen, secret); ferr != nil {
+	if ferr := protocol.Forward(context.Background(), selfClient, cfg.BaseURL(), protocol.ActionOpen, secret); ferr != nil {
 		return fmt.Errorf("agent already running at %s but refused the open handoff: %w",
 			cfg.BaseURL(), ferr)
 	}
@@ -350,7 +400,7 @@ func handleBindConflict(cfg *config.Config, bindErr error) error {
 // probeRunningAgent reports whether another instance of this agent answers
 // the public status probe at baseURL — distinguishing "our port, our agent"
 // from an unrelated service squatting on it.
-func probeRunningAgent(baseURL string) bool {
+func probeRunningAgent(selfClient *http.Client, baseURL string) bool {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
@@ -358,7 +408,7 @@ func probeRunningAgent(baseURL string) bool {
 	if err != nil {
 		return false
 	}
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := selfClient.Do(req)
 	if err != nil {
 		return false
 	}
@@ -382,7 +432,7 @@ func probeRunningAgent(baseURL string) bool {
 // with. True means the action was delivered to the running agent (this
 // process should exit); false means no agent answered and startup should
 // continue, completing the action once the server is up.
-func handleProtocolInvocation(cfg *config.Config, uri string) (bool, error) {
+func handleProtocolInvocation(cfg *config.Config, selfClient *http.Client, uri string) (bool, error) {
 	if _, err := protocol.ParseAction(uri); err != nil {
 		return false, err
 	}
@@ -399,7 +449,7 @@ func handleProtocolInvocation(cfg *config.Config, uri string) (bool, error) {
 		return false, fmt.Errorf("read protocol secret (agent running as another user?): %w", err)
 	}
 
-	ferr := protocol.Forward(context.Background(), cfg.BaseURL(), protocol.ActionOpen, secret)
+	ferr := protocol.Forward(context.Background(), selfClient, cfg.BaseURL(), protocol.ActionOpen, secret)
 	if ferr == nil {
 		slog.Info("protocol action delivered to the running agent")
 		return true, nil
@@ -418,8 +468,8 @@ func handleProtocolInvocation(cfg *config.Config, uri string) (bool, error) {
 // startup (tray clicks always find it up on the first probe). Opening the
 // browser anyway on timeout is deliberate: the user gets a page, or a
 // browser error a reload fixes, instead of silence.
-func waitForServer(baseURL string) {
-	client := &http.Client{Timeout: 500 * time.Millisecond}
+func waitForServer(selfClient *http.Client, baseURL string) {
+	client := &http.Client{Transport: selfClient.Transport, Timeout: 500 * time.Millisecond}
 	for attempt := 0; attempt < 10; attempt++ {
 		req, err := http.NewRequestWithContext(context.Background(),
 			http.MethodGet, baseURL+"/status", http.NoBody)

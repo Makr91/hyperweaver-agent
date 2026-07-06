@@ -30,14 +30,28 @@ type ServerConfig struct {
 // HTTPS is skipped with an error in the log and HTTP keeps serving).
 type SSLConfig struct {
 	Enabled bool `yaml:"enabled" json:"enabled"`
-	// GenerateSSL creates a self-signed certificate at the paths below when
+	// ForceSecure (default true) makes the plain-HTTP port serve ONLY 308
+	// redirects once the TLS listener is up — SSL enabled means ALL traffic
+	// rides TLS. false is the escape valve (a runtime serving-mode toggle,
+	// cors.allow_all's species): the HTTP port keeps serving the full app
+	// alongside HTTPS for clients that cannot chase redirects.
+	ForceSecure bool `yaml:"force_secure" json:"force_secure"`
+	// GenerateSSL creates the server certificate at the paths below when
 	// none exists (the Node agent's generateSSLCertificatesIfNeeded, done
-	// with crypto/x509 instead of shelling out to openssl).
+	// with crypto/x509 instead of shelling out to openssl). When an
+	// operator-provided CA pair exists at the CA paths, the generated server
+	// certificate is signed by that CA (Mark's model: ship a CA — wildcard
+	// capable — and everything chains to it); otherwise it is self-signed.
 	GenerateSSL bool `yaml:"generate_ssl" json:"generate_ssl"`
-	// KeyPath/CertPath locate the private key and certificate. Empty selects
-	// <config dir>/ssl/server.key and <config dir>/ssl/server.crt.
+	// KeyPath/CertPath locate the server private key and certificate. Empty
+	// selects <config dir>/ssl/server.key and <config dir>/ssl/server.crt.
 	KeyPath  string `yaml:"key_path"  json:"key_path"`
 	CertPath string `yaml:"cert_path" json:"cert_path"`
+	// CACertPath/CAKeyPath locate the operator-provided CA used to sign the
+	// generated server certificate. Empty selects <config dir>/ssl/ca.crt
+	// and <config dir>/ssl/ca.key. Absent files mean self-signed generation.
+	CACertPath string `yaml:"ca_cert_path" json:"ca_cert_path"`
+	CAKeyPath  string `yaml:"ca_key_path"  json:"ca_key_path"`
 }
 
 // CORSConfig controls Cross-Origin Resource Sharing (the Node agent's cors
@@ -236,15 +250,27 @@ server:
   https_port: 9421
 
 ssl:
-  # Serve HTTPS on server.https_port alongside HTTP. Certificate problems
-  # never stop the agent — HTTPS is skipped with an error in the log.
-  enabled: false
-  # Generate a self-signed certificate at the paths below when none exists.
+  # Serve HTTPS on server.https_port (on by default, like the Node agent).
+  # Certificate problems never stop the agent — HTTPS is skipped with an
+  # error in the log.
+  enabled: true
+  # With SSL enabled, the plain-HTTP port serves only redirects to HTTPS.
+  # Set false to keep the HTTP port serving the full app alongside HTTPS
+  # (for clients that cannot follow redirects).
+  force_secure: true
+  # Generate the server certificate at the paths below when none exists,
+  # signed by the CA below (which is itself generated when absent).
   generate_ssl: true
-  # Private key / certificate locations. Empty = <config dir>/ssl/server.key
-  # and <config dir>/ssl/server.crt
+  # Server private key / certificate locations. Empty =
+  # <config dir>/ssl/server.key and <config dir>/ssl/server.crt
   key_path: ''
   cert_path: ''
+  # CA used to sign the generated server certificate. Provide your own CA
+  # pair here (wildcard-capable) and everything chains to it; absent files
+  # mean a local CA is generated first. Empty = <config dir>/ssl/ca.crt and
+  # <config dir>/ssl/ca.key
+  ca_cert_path: ''
+  ca_key_path: ''
 
 cors:
   # This is an API-key-authenticated backend in a many-to-many mesh: the API
@@ -386,7 +412,7 @@ cleanup:
 func Default() *Config {
 	return &Config{
 		Server:  ServerConfig{BindAddress: "127.0.0.1", Port: 9420, HTTPSPort: 9421},
-		SSL:     SSLConfig{Enabled: false, GenerateSSL: true},
+		SSL:     SSLConfig{Enabled: true, ForceSecure: true, GenerateSSL: true},
 		CORS:    CORSConfig{AllowAll: true, Whitelist: []string{}},
 		UI:      UIConfig{Enabled: true},
 		Browser: BrowserConfig{},
@@ -517,7 +543,7 @@ func ensureDefaultFile(path string) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return fmt.Errorf("create config dir: %w", err)
 	}
-	if err := os.WriteFile(path, []byte(defaultConfigYAML), 0o600); err != nil {
+	if err := safepath.WriteFile(path, []byte(defaultConfigYAML), 0o600); err != nil {
 		return fmt.Errorf("write default config: %w", err)
 	}
 	return nil
@@ -659,12 +685,36 @@ func (c *Config) SSLCertPath() string {
 	return filepath.Join(filepath.Dir(c.path), "ssl", "server.crt")
 }
 
-// BaseURL returns the agent's locally reachable HTTP origin. A wildcard bind
-// address is rewritten to a loopback address the local machine can reach.
+// SSLCACertPath returns the CA certificate location: ssl.ca_cert_path when
+// configured, else ssl/ca.crt beside the loaded configuration file.
+func (c *Config) SSLCACertPath() string {
+	if c.SSL.CACertPath != "" {
+		return c.SSL.CACertPath
+	}
+	return filepath.Join(filepath.Dir(c.path), "ssl", "ca.crt")
+}
+
+// SSLCAKeyPath returns the CA private-key location: ssl.ca_key_path when
+// configured, else ssl/ca.key beside the loaded configuration file.
+func (c *Config) SSLCAKeyPath() string {
+	if c.SSL.CAKeyPath != "" {
+		return c.SSL.CAKeyPath
+	}
+	return filepath.Join(filepath.Dir(c.path), "ssl", "ca.key")
+}
+
+// BaseURL returns the agent's locally reachable origin. With ssl.enabled the
+// origin is the HTTPS one — Mark's ruling (2026-07-05): SSL enabled means ALL
+// traffic rides TLS (the plain listener only redirects), a deliberate
+// divergence from the Node agent's serve-both model. A wildcard bind address
+// is rewritten to a loopback address the local machine can reach.
 func (c *Config) BaseURL() string {
 	host := c.Server.BindAddress
 	if host == "" || host == "0.0.0.0" || host == "::" {
 		host = "127.0.0.1"
+	}
+	if c.SSL.Enabled {
+		return "https://" + net.JoinHostPort(host, strconv.Itoa(c.Server.HTTPSPort))
 	}
 	return "http://" + net.JoinHostPort(host, strconv.Itoa(c.Server.Port))
 }
