@@ -127,7 +127,8 @@ type LoggingConfig struct {
 	Compression bool `yaml:"compression" json:"compression"`
 	// Categories overrides the level per log category (the Node agent's
 	// logging.categories / per-category winston loggers). Categories this
-	// agent emits: app (the default), api_requests, auth, tasks, machines.
+	// agent emits: app (the default), api_requests, auth, tasks, machines,
+	// monitoring.
 	Categories map[string]string `yaml:"categories" json:"categories"`
 }
 
@@ -194,6 +195,34 @@ type TasksConfig struct {
 	Output        TaskOutputConfig `yaml:"output"         json:"output"`
 }
 
+// MonitoringConfig controls the host telemetry surface (/monitoring/*, the
+// `monitoring` capability token — the Node agent's host_monitoring block,
+// reshaped per Mark's 2026-07-05 ruling): the endpoints always serve REALTIME
+// samples; enabling storage adds a background collector writing time series
+// into per-datatype database files (monitoring-cpu.sqlite,
+// monitoring-memory.sqlite, monitoring-network.sqlite) so telemetry write
+// churn never contends with the main databases — the single-file IO
+// contention zoneweaver hits.
+type MonitoringConfig struct {
+	// StorageEnabled turns the background collector on. Off (default) means
+	// realtime-only: every request samples the OS live, history queries
+	// return just the current sample.
+	StorageEnabled bool `yaml:"storage_enabled" json:"storage_enabled"`
+	// CollectionInterval is seconds between collector samples.
+	CollectionInterval int `yaml:"collection_interval" json:"collection_interval"`
+	// RetentionDays: stored samples older than this are deleted by the
+	// periodic cleanup.
+	RetentionDays int `yaml:"retention_days" json:"retention_days"`
+}
+
+// HostPowerConfig gates the host power-management surface (/system/host/*,
+// the `host-power` capability token): remote shutdown/restart of the machine
+// the agent runs on — half the point of a headless datacenter host, an
+// obvious kill-switch candidate on a desktop.
+type HostPowerConfig struct {
+	Enabled bool `yaml:"enabled" json:"enabled"`
+}
+
 // MachinesConfig controls the machine registry (the Node agent's zones.*
 // discovery knobs).
 type MachinesConfig struct {
@@ -215,21 +244,23 @@ type MachinesConfig struct {
 
 // Config is the root of config.yaml.
 type Config struct {
-	Server   ServerConfig   `yaml:"server"   json:"server"`
-	SSL      SSLConfig      `yaml:"ssl"      json:"ssl"`
-	CORS     CORSConfig     `yaml:"cors"     json:"cors"`
-	UI       UIConfig       `yaml:"ui"       json:"ui"`
-	Browser  BrowserConfig  `yaml:"browser"  json:"browser"`
-	Logging  LoggingConfig  `yaml:"logging"  json:"logging"`
-	APIKeys  APIKeysConfig  `yaml:"api_keys" json:"api_keys"`
-	Updates  UpdatesConfig  `yaml:"updates"  json:"updates"`
-	APIDocs  APIDocsConfig  `yaml:"api_docs" json:"api_docs"`
-	Stats    StatsConfig    `yaml:"stats"    json:"stats"`
-	Data     DataConfig     `yaml:"data"     json:"data"`
-	Database DatabaseConfig `yaml:"database" json:"database"`
-	Tasks    TasksConfig    `yaml:"tasks"    json:"tasks"`
-	Machines MachinesConfig `yaml:"machines" json:"machines"`
-	Cleanup  CleanupConfig  `yaml:"cleanup"  json:"cleanup"`
+	Server     ServerConfig     `yaml:"server"     json:"server"`
+	SSL        SSLConfig        `yaml:"ssl"        json:"ssl"`
+	CORS       CORSConfig       `yaml:"cors"       json:"cors"`
+	UI         UIConfig         `yaml:"ui"         json:"ui"`
+	Browser    BrowserConfig    `yaml:"browser"    json:"browser"`
+	Logging    LoggingConfig    `yaml:"logging"    json:"logging"`
+	APIKeys    APIKeysConfig    `yaml:"api_keys"   json:"api_keys"`
+	Updates    UpdatesConfig    `yaml:"updates"    json:"updates"`
+	APIDocs    APIDocsConfig    `yaml:"api_docs"   json:"api_docs"`
+	Stats      StatsConfig      `yaml:"stats"      json:"stats"`
+	Data       DataConfig       `yaml:"data"       json:"data"`
+	Database   DatabaseConfig   `yaml:"database"   json:"database"`
+	Tasks      TasksConfig      `yaml:"tasks"      json:"tasks"`
+	Machines   MachinesConfig   `yaml:"machines"   json:"machines"`
+	Cleanup    CleanupConfig    `yaml:"cleanup"    json:"cleanup"`
+	Monitoring MonitoringConfig `yaml:"monitoring" json:"monitoring"`
+	HostPower  HostPowerConfig  `yaml:"host_power" json:"host_power"`
 
 	// path is where this configuration was loaded from; the setup token, key
 	// store, protocol-handoff secret, and config backups live beside it.
@@ -309,7 +340,8 @@ logging:
   # Per-category log levels overriding the global level, e.g.
   #   categories:
   #     tasks: debug
-  # Categories this agent emits: app, api_requests, auth, tasks, machines.
+  # Categories this agent emits: app, api_requests, auth, tasks, machines,
+  # monitoring.
   categories: {}
 
 api_keys:
@@ -406,6 +438,24 @@ machines:
 cleanup:
   # Seconds between periodic cleanup runs (task retention).
   interval: 300
+
+monitoring:
+  # The /monitoring/* endpoints always serve realtime samples. Enabling
+  # storage adds a background collector writing time series into
+  # per-datatype database files (monitoring-cpu.sqlite, monitoring-memory.sqlite,
+  # monitoring-network.sqlite) so history charts work.
+  storage_enabled: false
+  # Seconds between collector samples (when storage is enabled).
+  collection_interval: 60
+  # Stored samples older than this many days are deleted by the periodic
+  # cleanup.
+  retention_days: 7
+
+host_power:
+  # Serve the host power-management endpoints (/system/host/*): status,
+  # uptime, and admin-key-gated shutdown/restart/poweroff/halt of the machine
+  # this agent runs on. Set false to remove the surface entirely.
+  enabled: true
 `
 
 // Default returns the built-in configuration values.
@@ -469,6 +519,12 @@ func Default() *Config {
 			ShutdownTimeout:   120,
 		},
 		Cleanup: CleanupConfig{Interval: 300},
+		Monitoring: MonitoringConfig{
+			StorageEnabled:     false,
+			CollectionInterval: 60,
+			RetentionDays:      7,
+		},
+		HostPower: HostPowerConfig{Enabled: true},
 	}
 }
 
@@ -618,6 +674,12 @@ func (c *Config) validate() error {
 	}
 	if c.Cleanup.Interval < 60 || c.Cleanup.Interval > 86400 {
 		return fmt.Errorf("cleanup.interval %d out of range 60-86400", c.Cleanup.Interval)
+	}
+	if c.Monitoring.CollectionInterval < 5 || c.Monitoring.CollectionInterval > 3600 {
+		return fmt.Errorf("monitoring.collection_interval %d out of range 5-3600", c.Monitoring.CollectionInterval)
+	}
+	if c.Monitoring.RetentionDays < 1 || c.Monitoring.RetentionDays > 365 {
+		return fmt.Errorf("monitoring.retention_days %d out of range 1-365", c.Monitoring.RetentionDays)
 	}
 	return c.Database.SQLiteOptions.validate()
 }
@@ -814,6 +876,19 @@ func (c *Config) AgentDBPath() (string, error) {
 		return "", err
 	}
 	return filepath.Join(dir, "agent.sqlite"), nil
+}
+
+// MonitoringDBPath returns a telemetry database location under the data
+// root: monitoring-<kind>.sqlite (kind ∈ cpu, memory, network). One file per
+// data type, each with its own WAL, so telemetry write churn never contends
+// with the main databases or with the other telemetry families (Mark's
+// ruling, 2026-07-05 — the single-file IO contention zoneweaver hits).
+func (c *Config) MonitoringDBPath(kind string) (string, error) {
+	dir, err := c.DataDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, "monitoring-"+kind+".sqlite"), nil
 }
 
 // TaskLogDir returns where per-task output log files land, defaulting to

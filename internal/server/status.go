@@ -33,10 +33,27 @@ type statusPayload struct {
 // (the Node agent's PLATFORM_FEATURES model: no config kill-switch).
 // machine-suspend is an op-level token (agreed in hyperweaver-ai-sync.md):
 // the UI shows Suspend wherever it appears — VirtualBox suspends, bhyve does
-// not, and no UI code ever branches on hypervisor values. Grows per phase:
-// machine-create + provisioning (C); artifacts/templates join the
-// config-gated set when their subsystems land.
-var platformFeatures = []string{"tasks", "machines", "machine-suspend", "swap"}
+// not, and no UI code ever branches on hypervisor values. monitoring and
+// processes shipped with the spec-matching pass (arch items 15/16): the
+// /monitoring/* endpoints serve realtime samples regardless of the storage
+// setting, so the token is unconditional. Grows per phase: machine-create +
+// provisioning (C); artifacts/templates join the config-gated set when
+// their subsystems land.
+var platformFeatures = []string{
+	"tasks", "machines", "machine-suspend", "swap", "monitoring", "processes",
+}
+
+// features derives the advertised token list: platform tokens plus the
+// config-gated ones (Agent API v1 rule — a config-disabled surface is not
+// advertised, so token-gating clients never hit its 503s).
+func (s *Server) features() []string {
+	tokens := make([]string, 0, len(platformFeatures)+1)
+	tokens = append(tokens, platformFeatures...)
+	if s.cfg.HostPower.Enabled {
+		tokens = append(tokens, "host-power")
+	}
+	return tokens
+}
 
 // archName maps Go architecture names to the Agent API contract values.
 func archName() string {
@@ -74,7 +91,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, _ *http.Request) {
 		Auth:               []string{"apikey"},
 		BootstrapAvailable: bootstrapAvailable,
 		Console:            []string{},
-		Features:           platformFeatures,
+		Features:           s.features(),
 		Uptime:             int64(time.Since(s.startedAt).Seconds()),
 	}
 

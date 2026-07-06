@@ -25,6 +25,7 @@ import (
 	"github.com/Makr91/hyperweaver-agent/internal/keys"
 	"github.com/Makr91/hyperweaver-agent/internal/logging"
 	"github.com/Makr91/hyperweaver-agent/internal/machines"
+	"github.com/Makr91/hyperweaver-agent/internal/monitoring"
 	"github.com/Makr91/hyperweaver-agent/internal/sslcert"
 	"github.com/Makr91/hyperweaver-agent/internal/tasks"
 	"github.com/Makr91/hyperweaver-agent/internal/version"
@@ -38,6 +39,8 @@ type Server struct {
 	trayTokens *auth.TrayTokens
 	tasks      *tasks.Queue
 	machines   *machines.Store
+	monitor    *monitoring.Service
+	dbs        []DBHandle
 	httpSrv    *http.Server
 	listener   net.Listener
 	startedAt  time.Time
@@ -59,13 +62,15 @@ type Server struct {
 }
 
 // New builds the server and its routes.
-func New(cfg *config.Config, keyStore *keys.Store, trayTokens *auth.TrayTokens, taskQueue *tasks.Queue, machineStore *machines.Store, restartArgs []string, openUI func()) (*Server, error) {
+func New(cfg *config.Config, keyStore *keys.Store, trayTokens *auth.TrayTokens, taskQueue *tasks.Queue, machineStore *machines.Store, monitor *monitoring.Service, dbs []DBHandle, restartArgs []string, openUI func()) (*Server, error) {
 	s := &Server{
 		cfg:         cfg,
 		keys:        keyStore,
 		trayTokens:  trayTokens,
 		tasks:       taskQueue,
 		machines:    machineStore,
+		monitor:     monitor,
+		dbs:         dbs,
 		startedAt:   time.Now(),
 		restartArgs: restartArgs,
 		openUI:      openUI,
@@ -103,6 +108,59 @@ func New(cfg *config.Config, keyStore *keys.Store, trayTokens *auth.TrayTokens, 
 	// serves; add/remove are OmniOS semantics and deliberately absent).
 	mux.Handle("GET /system/swap/summary", requireKey(http.HandlerFunc(s.handleSwapSummary)))
 	mux.Handle("GET /system/swap/areas", requireKey(http.HandlerFunc(s.handleSwapAreas)))
+	mux.Handle("GET /monitoring/hosts/low-swap", requireKey(http.HandlerFunc(s.handleLowSwapHosts)))
+
+	// Host telemetry (Agent API v1 Host Monitoring group, the `monitoring`
+	// token — spec-matching pass, arch item 16): realtime always; stored
+	// history when monitoring.storage_enabled.
+	mux.Handle("GET /monitoring/system/cpu", requireKey(http.HandlerFunc(s.handleMonitoringCPU)))
+	mux.Handle("GET /monitoring/system/memory", requireKey(http.HandlerFunc(s.handleMonitoringMemory)))
+	mux.Handle("GET /monitoring/system/load", requireKey(http.HandlerFunc(s.handleMonitoringLoad)))
+	mux.Handle("GET /monitoring/host", requireKey(http.HandlerFunc(s.handleMonitoringHost)))
+	mux.Handle("GET /monitoring/summary", requireKey(http.HandlerFunc(s.handleMonitoringSummary)))
+	mux.Handle("GET /monitoring/status", requireKey(http.HandlerFunc(s.handleMonitoringStatus)))
+	mux.Handle("GET /monitoring/health", requireKey(http.HandlerFunc(s.handleMonitoringHealth)))
+	mux.Handle("POST /monitoring/collect", requireKey(http.HandlerFunc(s.handleMonitoringCollect)))
+	mux.Handle("GET /monitoring/network/interfaces", requireKey(http.HandlerFunc(s.handleMonitoringInterfaces)))
+	mux.Handle("GET /monitoring/network/usage", requireKey(http.HandlerFunc(s.handleMonitoringNetworkUsage)))
+	mux.Handle("GET /monitoring/network/ipaddresses", requireKey(http.HandlerFunc(s.handleMonitoringIPAddresses)))
+
+	// Host processes (Agent API v1 Processes group, the `processes` token —
+	// arch item 15). Literal segments (find, batch-kill, stats) win over the
+	// {pid} wildcards in ServeMux precedence. Deliberately absent: /{pid}/stack,
+	// /{pid}/limits (pstack/plimit are illumos tools), trace/start (DTrace).
+	mux.Handle("GET /system/processes", requireKey(http.HandlerFunc(s.handleListProcesses)))
+	mux.Handle("GET /system/processes/find", requireKey(http.HandlerFunc(s.handleFindProcesses)))
+	mux.Handle("GET /system/processes/stats", requireKey(http.HandlerFunc(s.handleProcessStats)))
+	mux.Handle("POST /system/processes/batch-kill", requireKey(http.HandlerFunc(s.handleBatchKillProcesses)))
+	mux.Handle("GET /system/processes/{pid}", requireKey(http.HandlerFunc(s.handleProcessDetails)))
+	mux.Handle("GET /system/processes/{pid}/files", requireKey(http.HandlerFunc(s.handleProcessFiles)))
+	mux.Handle("POST /system/processes/{pid}/signal", requireKey(http.HandlerFunc(s.handleProcessSignal)))
+	mux.Handle("POST /system/processes/{pid}/kill", requireKey(http.HandlerFunc(s.handleProcessKill)))
+
+	// Host power management (the `host-power` token, config-gated by
+	// host_power.enabled — mutations admin-only via the central policy;
+	// runlevel/single-user/fast-reboot are init semantics with no analog
+	// here and are deliberately absent).
+	mux.Handle("GET /system/host/status", requireKey(s.hostPowerGate(s.handleHostStatus)))
+	mux.Handle("GET /system/host/uptime", requireKey(s.hostPowerGate(s.handleHostUptime)))
+	mux.Handle("POST /system/host/shutdown", requireKey(s.hostPowerGate(s.handleHostShutdown)))
+	mux.Handle("POST /system/host/restart", requireKey(s.hostPowerGate(s.handleHostRestart)))
+	mux.Handle("POST /system/host/poweroff", requireKey(s.hostPowerGate(s.handleHostPoweroff)))
+	mux.Handle("POST /system/host/halt", requireKey(s.hostPowerGate(s.handleHostHalt)))
+
+	// System hosts file (Mark's ruling 2026-07-05: the agent controls
+	// /etc/hosts on all three platforms for VM name resolution). /system/dns
+	// is deliberately absent — resolv.conf is Unix-only.
+	mux.Handle("GET /system/hosts", requireKey(http.HandlerFunc(s.handleGetHostsFile)))
+	mux.Handle("PUT /system/hosts", requireKey(http.HandlerFunc(s.handleUpdateHostsFile)))
+
+	// Database management (Agent API v1 Database Management group), across
+	// every open database file. Mutations admin-only via the central policy.
+	mux.Handle("GET /database/stats", requireKey(http.HandlerFunc(s.handleDatabaseStats)))
+	mux.Handle("POST /database/vacuum", requireKey(http.HandlerFunc(s.handleDatabaseVacuum)))
+	mux.Handle("POST /database/analyze", requireKey(http.HandlerFunc(s.handleDatabaseAnalyze)))
+	mux.Handle("POST /database/cleanup", requireKey(http.HandlerFunc(s.handleDatabaseCleanup)))
 
 	// Host statistics (shared v1 stats shape). stats.public_access serves it
 	// without a key (the Node agent's conditional /stats registration).

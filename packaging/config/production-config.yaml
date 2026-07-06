@@ -66,7 +66,8 @@ logging:
   # Per-category log levels overriding the global level, e.g.
   #   categories:
   #     tasks: debug
-  # Categories this agent emits: app, api_requests, auth, tasks, machines.
+  # Categories this agent emits: app, api_requests, auth, tasks, machines,
+  # monitoring.
   categories: {}
 
 api_keys:
@@ -160,3 +161,22 @@ machines:
 cleanup:
   # Seconds between periodic cleanup runs (task retention).
   interval: 300
+
+monitoring:
+  # The /monitoring/* endpoints always serve realtime samples. Enabling
+  # storage adds a background collector writing time series into
+  # per-datatype database files (monitoring-cpu.sqlite, monitoring-memory.sqlite,
+  # monitoring-network.sqlite under data.dir) so history charts work.
+  storage_enabled: false
+  # Seconds between collector samples (when storage is enabled).
+  collection_interval: 60
+  # Stored samples older than this many days are deleted by the periodic
+  # cleanup.
+  retention_days: 7
+
+host_power:
+  # Serve the host power-management endpoints (/system/host/*): status,
+  # uptime, and admin-key-gated shutdown/restart/poweroff/halt of the machine
+  # this agent runs on — remote power control for headless hosts. Set false
+  # to remove the surface entirely.
+  enabled: true

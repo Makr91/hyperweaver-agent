@@ -24,10 +24,12 @@ import (
 	"github.com/Makr91/hyperweaver-agent/internal/auth"
 	"github.com/Makr91/hyperweaver-agent/internal/config"
 	"github.com/Makr91/hyperweaver-agent/internal/db"
+	"github.com/Makr91/hyperweaver-agent/internal/hostpower"
 	"github.com/Makr91/hyperweaver-agent/internal/keys"
 	"github.com/Makr91/hyperweaver-agent/internal/localclient"
 	"github.com/Makr91/hyperweaver-agent/internal/logging"
 	"github.com/Makr91/hyperweaver-agent/internal/machines"
+	"github.com/Makr91/hyperweaver-agent/internal/monitoring"
 	"github.com/Makr91/hyperweaver-agent/internal/openbrowser"
 	"github.com/Makr91/hyperweaver-agent/internal/protocol"
 	"github.com/Makr91/hyperweaver-agent/internal/server"
@@ -142,14 +144,17 @@ func run() error {
 		restartArgs = append(restartArgs, "--headless")
 	}
 
-	taskQueue, machineStore, reconciler, closeDBs, err := setupTasks(cfg)
+	systems, err := setupTasks(cfg)
 	if err != nil {
 		slog.Error("task system setup failed", "error", err)
 		return err
 	}
-	defer closeDBs()
+	defer systems.closeDBs()
+	taskQueue := systems.queue
+	reconciler := systems.reconciler
+	monitor := systems.monitor
 
-	srv, err := server.New(cfg, keyStore, trayTokens, taskQueue, machineStore, restartArgs, openUI)
+	srv, err := server.New(cfg, keyStore, trayTokens, taskQueue, systems.machines, monitor, systems.dbs, restartArgs, openUI)
 	if err != nil {
 		slog.Error("server setup failed", "error", err)
 		return err
@@ -168,11 +173,12 @@ func run() error {
 		return handleBindConflict(cfg, selfClient(cfg), lerr)
 	}
 
-	// The queue and reconciler start only once this process owns the port —
-	// a duplicate desktop launch (resolved above) must never process tasks
-	// or sweep the registry.
+	// The queue, reconciler, and monitoring collector start only once this
+	// process owns the port — a duplicate desktop launch (resolved above)
+	// must never process tasks, sweep the registry, or write telemetry.
 	taskQueue.Start()
 	reconciler.Start()
+	monitor.Start()
 
 	serverErr := make(chan error, 1)
 	go func() {
@@ -184,6 +190,7 @@ func run() error {
 	}
 
 	shutdown := func() {
+		monitor.Stop()
 		reconciler.Stop()
 		taskQueue.Stop()
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -245,23 +252,36 @@ func run() error {
 	}
 }
 
-// setupTasks opens the agent's databases and builds the task queue and the
-// machine subsystem on top of it: tasks.sqlite carries the queue,
-// agent.sqlite the machine registry; the lifecycle executors are registered
-// before the queue ever starts. The returned closer releases both database
-// handles.
-func setupTasks(cfg *config.Config) (*tasks.Queue, *machines.Store, *machines.Reconciler, func(), error) {
+// agentSystems bundles everything setupTasks builds over the databases —
+// the task queue, machine subsystem, monitoring service, the open database
+// handles (for the /database endpoints), and their closer.
+type agentSystems struct {
+	queue      *tasks.Queue
+	machines   *machines.Store
+	reconciler *machines.Reconciler
+	monitor    *monitoring.Service
+	dbs        []server.DBHandle
+	closeDBs   func()
+}
+
+// setupTasks opens the agent's databases and builds the task queue, the
+// machine subsystem, and the monitoring service on top of them:
+// tasks.sqlite carries the queue, agent.sqlite the machine registry, and —
+// only when monitoring.storage_enabled — the per-datatype telemetry files
+// carry stored samples. Every executor is registered before the queue ever
+// starts. The returned closer releases every database handle.
+func setupTasks(cfg *config.Config) (*agentSystems, error) {
 	tasksPath, err := cfg.TasksDBPath()
 	if err != nil {
-		return nil, nil, nil, nil, err
+		return nil, err
 	}
 	agentPath, err := cfg.AgentDBPath()
 	if err != nil {
-		return nil, nil, nil, nil, err
+		return nil, err
 	}
 	taskLogDir, err := cfg.TaskLogDir()
 	if err != nil {
-		return nil, nil, nil, nil, err
+		return nil, err
 	}
 
 	// database.sqlite_options applies to both agent databases.
@@ -303,21 +323,67 @@ func setupTasks(cfg *config.Config) (*tasks.Queue, *machines.Store, *machines.Re
 
 	tasksDB, err := openDB(tasksPath, tasks.Migrations)
 	if err != nil {
-		return nil, nil, nil, nil, err
+		return nil, err
 	}
 	agentDB, err := openDB(agentPath, machines.Migrations)
 	if err != nil {
 		_ = tasksDB.Close()
-		return nil, nil, nil, nil, err
+		return nil, err
+	}
+
+	// Every open handle lands here — the /database endpoints operate across
+	// them all, and the closer releases them in reverse-open order.
+	handles := []server.DBHandle{
+		{Name: "tasks.sqlite", Path: tasksPath, DB: tasksDB, Tables: []string{"tasks"}},
+		{Name: "agent.sqlite", Path: agentPath, DB: agentDB, Tables: []string{"machines"}},
 	}
 	closer := func() {
-		if cerr := tasksDB.Close(); cerr != nil {
-			slog.Error("close tasks database", "error", cerr)
-		}
-		if cerr := agentDB.Close(); cerr != nil {
-			slog.Error("close agent database", "error", cerr)
+		for i := len(handles) - 1; i >= 0; i-- {
+			if cerr := handles[i].DB.Close(); cerr != nil {
+				slog.Error("close database", "name", handles[i].Name, "error", cerr)
+			}
 		}
 	}
+
+	// Telemetry storage (monitoring.storage_enabled): one database file per
+	// data family so telemetry write churn never contends with the main
+	// databases — Mark's ruling, 2026-07-05.
+	var monitorStore *monitoring.Store
+	if cfg.Monitoring.StorageEnabled {
+		kinds := []struct {
+			kind       string
+			table      string
+			migrations []string
+		}{
+			{"cpu", "cpu_samples", monitoring.CPUMigrations},
+			{"memory", "memory_samples", monitoring.MemoryMigrations},
+			{"network", "network_samples", monitoring.NetworkMigrations},
+		}
+		opened := make([]*sql.DB, 0, len(kinds))
+		for _, k := range kinds {
+			path, perr := cfg.MonitoringDBPath(k.kind)
+			if perr != nil {
+				closer()
+				return nil, perr
+			}
+			database, oerr := openDB(path, k.migrations)
+			if oerr != nil {
+				closer()
+				return nil, oerr
+			}
+			opened = append(opened, database)
+			handles = append(handles, server.DBHandle{
+				Name:   "monitoring-" + k.kind + ".sqlite",
+				Path:   path,
+				DB:     database,
+				Tables: []string{k.table},
+			})
+		}
+		monitorStore = monitoring.NewStore(opened[0], opened[1], opened[2])
+	}
+	monitor := monitoring.NewService(monitoring.NewSampler(), monitorStore,
+		time.Duration(cfg.Monitoring.CollectionInterval)*time.Second,
+		cfg.Monitoring.RetentionDays)
 
 	store := tasks.NewStore(tasksDB)
 	output := tasks.NewOutputManager(store, tasks.OutputConfig{
@@ -342,7 +408,19 @@ func setupTasks(cfg *config.Config) (*tasks.Queue, *machines.Store, *machines.Re
 	machines.RegisterExecutors(queue, machineStore, reconciler,
 		time.Duration(cfg.Machines.ShutdownTimeout)*time.Second)
 
-	return queue, machineStore, reconciler, closer, nil
+	// Host power operations run through the queue too (config-gated at the
+	// HTTP surface; registering the executors unconditionally is harmless —
+	// no handler queues them while the surface is disabled).
+	hostpower.RegisterExecutors(queue, hostpower.LookupCommand)
+
+	return &agentSystems{
+		queue:      queue,
+		machines:   machineStore,
+		reconciler: reconciler,
+		monitor:    monitor,
+		dbs:        handles,
+		closeDBs:   closer,
+	}, nil
 }
 
 func runHeadless(serverErr chan error, shutdown func()) error {

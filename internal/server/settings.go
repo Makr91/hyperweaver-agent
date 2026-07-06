@@ -175,7 +175,7 @@ var settingsSchema = map[string]any{
 				"description": "Per-category log levels overriding the global level (map of category name to level)",
 				// A free-form map, not fixed fields: keys are category names,
 				// values are levels. The vocabularies the editor needs:
-				"keys":   []string{"app", "api_requests", "auth", "tasks", "machines"},
+				"keys":   []string{"app", "api_requests", "auth", "tasks", "machines", "monitoring"},
 				"values": []string{"error", "warn", "info", "debug"},
 			},
 		},
@@ -438,6 +438,42 @@ var settingsSchema = map[string]any{
 				"default":     300,
 				"min":         60,
 				"max":         86400,
+			},
+		},
+	},
+	"monitoring": map[string]any{
+		"description":      "Host telemetry configuration (/monitoring endpoints always serve realtime samples; storage adds history)",
+		"requires_restart": true,
+		"properties": map[string]any{
+			"storage_enabled": map[string]any{
+				"type":        "boolean",
+				"description": "Store telemetry time series in per-datatype database files (monitoring-cpu/-memory/-network.sqlite) for history charts; off = realtime samples only",
+				"default":     false,
+			},
+			"collection_interval": map[string]any{
+				"type":        "integer",
+				"description": "Seconds between collector samples (when storage is enabled)",
+				"default":     60,
+				"min":         5,
+				"max":         3600,
+			},
+			"retention_days": map[string]any{
+				"type":        "integer",
+				"description": "Stored samples older than this many days are deleted by the periodic cleanup",
+				"default":     7,
+				"min":         1,
+				"max":         365,
+			},
+		},
+	},
+	"host_power": map[string]any{
+		"description":      "Host power management (/system/host endpoints and the host-power capability token)",
+		"requires_restart": true,
+		"properties": map[string]any{
+			"enabled": map[string]any{
+				"type":        "boolean",
+				"description": "Serve the host power endpoints: status/uptime plus admin-only shutdown, restart, poweroff, and halt of the machine this agent runs on",
+				"default":     true,
 			},
 		},
 	},

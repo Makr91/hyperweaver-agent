@@ -26,6 +26,11 @@
     { "name": "Task Management", "description": "The task queue: every machine operation runs as a prioritized, dependency-chained task with streamed output" },
     { "name": "Machine Management", "description": "VirtualBox machines — vagrant-backed or raw — discovered by reconciliation and operated through queued tasks" },
     { "name": "Swap Management", "description": "Read-only swap information (the swap capability token); add/remove are OmniOS semantics and not implemented on this agent" },
+    { "name": "Host Monitoring", "description": "Host telemetry (the monitoring capability token): always-on realtime sampling via gopsutil; monitoring.storage_enabled adds stored time series in per-datatype database files. Illumos-only families (ZFS pools/datasets/ARC, zpool-iostat disk IO, netstat routes) have no analog on this host and are absent." },
+    { "name": "Processes", "description": "Host process listing and control (the processes capability token). The zone concept does not exist here: the zone field is absent and ?zone= filters are ignored. Absent by platform: /{pid}/stack, /{pid}/limits (pstack/plimit are illumos tools) and trace/start (DTrace)." },
+    { "name": "System Host Management", "description": "Host power management (the host-power capability token, config-gated by host_power.enabled — every endpoint answers 503 and the token disappears from /api/status when disabled). Absent by platform: runlevels, single-user/multi-user transitions, fast reboot, reboot-required tracking (init semantics with no cross-platform analog)." },
+    { "name": "Host Configuration", "description": "System hosts-file control on all three platforms (Windows System32\\drivers\\etc\\hosts, /etc/hosts elsewhere). /system/dns is absent by platform: resolv.conf is Unix-only and Windows/macOS manage DNS elsewhere." },
+    { "name": "Database Management", "description": "SQLite statistics and maintenance across every open database file (tasks.sqlite, agent.sqlite, and the monitoring files when storage is enabled)" },
     { "name": "Settings", "description": "Agent configuration over the API (admin only)" }
   ],
   "components": {
@@ -77,7 +82,7 @@
           "auth": { "type": "array", "items": { "type": "string" }, "example": ["apikey"] },
           "bootstrapAvailable": { "type": "boolean", "example": true },
           "console": { "type": "array", "items": { "type": "string" }, "example": [] },
-          "features": { "type": "array", "items": { "type": "string" }, "example": ["tasks", "machines", "machine-suspend", "swap"] },
+          "features": { "type": "array", "items": { "type": "string" }, "description": "Capability tokens (platform support ∧ config state): host-power is absent when host_power.enabled is false", "example": ["tasks", "machines", "machine-suspend", "swap", "monitoring", "processes", "host-power"] },
           "uptime": { "type": "integer", "description": "Seconds since the agent started", "example": 86400 }
         }
       },
@@ -243,6 +248,84 @@
           "version": { "type": "string", "description": "OS marketing name", "example": "Windows 10 Pro" },
           "allmachines": { "type": "array", "items": { "type": "string" }, "description": "All registered machine names (VBoxManage list vms)", "example": ["domino-01", "domino-02"] },
           "runningmachines": { "type": "array", "items": { "type": "string" }, "description": "Running machine names (VBoxManage list runningvms)", "example": ["domino-01"] }
+        }
+      },
+      "MonitoringSampling": {
+        "type": "object",
+        "description": "Time-series sampling metadata. This agent never downsamples (applied is always false); strategy names which mode answered — realtime (single live sample; storage disabled) or stored (database rows).",
+        "properties": {
+          "applied": { "type": "boolean", "example": false },
+          "strategy": { "type": "string", "enum": ["realtime", "stored"] },
+          "samplesReturned": { "type": "integer" }
+        }
+      },
+      "CPUSample": {
+        "type": "object",
+        "description": "One CPU telemetry observation (the shared CPUStats shape's platform-feasible subset — illumos-only counters are absent). Utilization percentages are deltas against the previous observation.",
+        "properties": {
+          "host": { "type": "string", "example": "desktop-01" },
+          "cpu_count": { "type": "integer", "example": 32 },
+          "cpu_utilization_pct": { "type": "number", "example": 12.4 },
+          "user_pct": { "type": "number", "example": 8.1 },
+          "system_pct": { "type": "number", "example": 3.9 },
+          "idle_pct": { "type": "number", "example": 87.6 },
+          "load_avg_1min": { "type": "number", "description": "Zeros on Windows — the platform has no load averages" },
+          "load_avg_5min": { "type": "number" },
+          "load_avg_15min": { "type": "number" },
+          "processes_running": { "type": "integer", "description": "Run-queue count where the platform reports one (Linux); zero elsewhere" },
+          "processes_blocked": { "type": "integer" },
+          "per_core_parsed": {
+            "type": "array",
+            "description": "Present only when include_cores=true",
+            "items": {
+              "type": "object",
+              "properties": {
+                "core": { "type": "integer" },
+                "utilization_pct": { "type": "number" },
+                "user_pct": { "type": "number" },
+                "system_pct": { "type": "number" },
+                "idle_pct": { "type": "number" }
+              }
+            }
+          },
+          "scan_timestamp": { "type": "string", "format": "date-time" }
+        }
+      },
+      "MemorySample": {
+        "type": "object",
+        "description": "One memory + swap telemetry observation (the shared MemoryStats shape's platform-feasible subset — ZFS ARC fields are absent).",
+        "properties": {
+          "host": { "type": "string" },
+          "total_memory_bytes": { "type": "integer", "format": "int64" },
+          "available_memory_bytes": { "type": "integer", "format": "int64" },
+          "used_memory_bytes": { "type": "integer", "format": "int64" },
+          "free_memory_bytes": { "type": "integer", "format": "int64" },
+          "memory_utilization_pct": { "type": "number" },
+          "swap_total_bytes": { "type": "integer", "format": "int64" },
+          "swap_used_bytes": { "type": "integer", "format": "int64" },
+          "swap_free_bytes": { "type": "integer", "format": "int64" },
+          "swap_utilization_pct": { "type": "number" },
+          "scan_timestamp": { "type": "string", "format": "date-time" }
+        }
+      },
+      "NetworkSample": {
+        "type": "object",
+        "description": "One interface's telemetry observation (the shared NetworkUsage shape's platform-feasible subset): cumulative OS counters plus rates computed from the previous observation.",
+        "properties": {
+          "host": { "type": "string" },
+          "link": { "type": "string", "example": "Ethernet" },
+          "ipackets": { "type": "integer", "format": "int64" },
+          "rbytes": { "type": "integer", "format": "int64" },
+          "ierrors": { "type": "integer", "format": "int64" },
+          "opackets": { "type": "integer", "format": "int64" },
+          "obytes": { "type": "integer", "format": "int64" },
+          "oerrors": { "type": "integer", "format": "int64" },
+          "rx_bps": { "type": "integer", "format": "int64" },
+          "tx_bps": { "type": "integer", "format": "int64" },
+          "rx_mbps": { "type": "number" },
+          "tx_mbps": { "type": "number" },
+          "time_delta_seconds": { "type": "number" },
+          "scan_timestamp": { "type": "string", "format": "date-time" }
         }
       }
     }
@@ -1415,6 +1498,1128 @@
                 }
               }
             }
+          }
+        }
+      }
+    },
+    "/monitoring/hosts/low-swap": {
+      "get": {
+        "tags": ["Swap Management"],
+        "summary": "Hosts above the swap-utilization threshold",
+        "description": "Minimum role: viewer. Single-host agent: this host appears in the list when its live swap utilization exceeds the threshold.",
+        "parameters": [
+          { "name": "threshold", "in": "query", "schema": { "type": "number", "default": 50 }, "description": "Utilization threshold percentage" }
+        ],
+        "responses": {
+          "200": {
+            "description": "Hosts with low swap space",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "hostsWithLowSwap": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "host": { "type": "string" },
+                          "swap_total_gb": { "type": "string" },
+                          "swap_used_gb": { "type": "string" },
+                          "swap_utilization_pct": { "type": "number" },
+                          "last_checked": { "type": "string", "format": "date-time" }
+                        }
+                      }
+                    },
+                    "totalCount": { "type": "integer" },
+                    "threshold": { "type": "number" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/monitoring/system/cpu": {
+      "get": {
+        "tags": ["Host Monitoring"],
+        "summary": "CPU statistics",
+        "description": "Minimum role: viewer. Realtime mode (storage disabled, the default): one live sample; since is effectively ignored. Storage mode: stored samples, newest first.",
+        "parameters": [
+          { "name": "limit", "in": "query", "schema": { "type": "integer", "default": 100 } },
+          { "name": "since", "in": "query", "schema": { "type": "string", "format": "date-time" }, "description": "Stored samples at or after this time (storage mode)" },
+          { "name": "include_cores", "in": "query", "schema": { "type": "boolean", "default": false }, "description": "Include the per_core_parsed array on every sample" }
+        ],
+        "responses": {
+          "200": {
+            "description": "CPU statistics",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "cpu": { "type": "array", "items": { "$ref": "#/components/schemas/CPUSample" } },
+                    "latest": { "$ref": "#/components/schemas/CPUSample" },
+                    "totalCount": { "type": "integer" },
+                    "returnedCount": { "type": "integer" },
+                    "sampling": { "$ref": "#/components/schemas/MonitoringSampling" },
+                    "queryTime": { "type": "string", "example": "12ms" }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Failed to get CPU statistics",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/WrappedError" } } }
+          }
+        }
+      }
+    },
+    "/monitoring/system/memory": {
+      "get": {
+        "tags": ["Host Monitoring"],
+        "summary": "Memory statistics",
+        "description": "Minimum role: viewer. Realtime mode: one live sample; storage mode: stored samples, newest first.",
+        "parameters": [
+          { "name": "limit", "in": "query", "schema": { "type": "integer", "default": 100 } },
+          { "name": "since", "in": "query", "schema": { "type": "string", "format": "date-time" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "Memory statistics",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "memory": { "type": "array", "items": { "$ref": "#/components/schemas/MemorySample" } },
+                    "latest": { "$ref": "#/components/schemas/MemorySample" },
+                    "totalCount": { "type": "integer" },
+                    "returnedCount": { "type": "integer" },
+                    "sampling": { "$ref": "#/components/schemas/MonitoringSampling" },
+                    "queryTime": { "type": "string" }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Failed to get memory statistics",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/WrappedError" } } }
+          }
+        }
+      }
+    },
+    "/monitoring/system/load": {
+      "get": {
+        "tags": ["Host Monitoring"],
+        "summary": "System load metrics",
+        "description": "Minimum role: viewer. Load averages and process activity reshaped for charting. Load averages are zeros on Windows; run-queue counts are Linux-only — absent counters stay zero, honestly.",
+        "parameters": [
+          { "name": "limit", "in": "query", "schema": { "type": "integer", "default": 100 } },
+          { "name": "since", "in": "query", "schema": { "type": "string", "format": "date-time" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "Load metrics",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "load": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "timestamp": { "type": "string", "format": "date-time" },
+                          "load_averages": {
+                            "type": "object",
+                            "properties": {
+                              "one_min": { "type": "number" },
+                              "five_min": { "type": "number" },
+                              "fifteen_min": { "type": "number" }
+                            }
+                          },
+                          "process_activity": {
+                            "type": "object",
+                            "properties": {
+                              "running": { "type": "integer" },
+                              "blocked": { "type": "integer" }
+                            }
+                          },
+                          "cpu_count": { "type": "integer" }
+                        }
+                      }
+                    },
+                    "totalCount": { "type": "integer" },
+                    "latest": { "type": "object", "nullable": true },
+                    "metadata": { "type": "object" }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Failed to get system load metrics",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/WrappedError" } } }
+          }
+        }
+      }
+    },
+    "/monitoring/host": {
+      "get": {
+        "tags": ["Host Monitoring"],
+        "summary": "Host information and monitoring state",
+        "description": "Minimum role: viewer.",
+        "responses": {
+          "200": {
+            "description": "Host information",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "host": { "type": "string" },
+                    "hostname": { "type": "string" },
+                    "platform": { "type": "string", "example": "win32" },
+                    "release": { "type": "string" },
+                    "arch": { "type": "string" },
+                    "uptime": { "type": "integer" },
+                    "os": { "type": "string", "example": "Windows 10 Pro" },
+                    "cpus": { "type": "integer" },
+                    "memory_bytes": { "type": "integer", "format": "int64" },
+                    "storage_enabled": { "type": "boolean" },
+                    "last_collection": { "type": "string", "format": "date-time", "nullable": true }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/monitoring/summary": {
+      "get": {
+        "tags": ["Host Monitoring"],
+        "summary": "Monitoring summary",
+        "description": "Minimum role: viewer. Record counts and latest sample times per telemetry table (empty in realtime mode — nothing is stored).",
+        "responses": {
+          "200": {
+            "description": "Monitoring summary",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "host": { "type": "string" },
+                    "summary": { "type": "object" },
+                    "recordCounts": { "type": "object" },
+                    "latestData": { "type": "object" },
+                    "lastCollected": { "type": "string", "format": "date-time", "nullable": true },
+                    "queryTime": { "type": "string" }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Failed to get monitoring summary",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/WrappedError" } } }
+          }
+        }
+      }
+    },
+    "/monitoring/status": {
+      "get": {
+        "tags": ["Host Monitoring"],
+        "summary": "Monitoring service status",
+        "description": "Minimum role: viewer.",
+        "responses": {
+          "200": {
+            "description": "Service status",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "isRunning": { "type": "boolean" },
+                    "isInitialized": { "type": "boolean" },
+                    "config": { "type": "object" },
+                    "stats": { "type": "object" },
+                    "note": { "type": "string" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/monitoring/health": {
+      "get": {
+        "tags": ["Host Monitoring"],
+        "summary": "Monitoring health check",
+        "description": "Minimum role: viewer. healthy | degraded (collector errors) | stopped (storage on, collector down). No fault-management rollup — fmadm is illumos-only.",
+        "responses": {
+          "200": {
+            "description": "Health information",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": { "type": "string", "enum": ["healthy", "degraded", "stopped"] },
+                    "lastUpdate": { "type": "string", "format": "date-time", "nullable": true },
+                    "uptime": { "type": "integer" },
+                    "version": { "type": "string" },
+                    "service": { "type": "object" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/monitoring/collect": {
+      "post": {
+        "tags": ["Host Monitoring"],
+        "summary": "Trigger immediate collection",
+        "description": "Minimum role: operator. One collection pass over every telemetry family this host has (cpu, memory, network); samples persist when storage is enabled. The type field is accepted for contract parity — there is no illumos storage family to exclude here.",
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "type": { "type": "string", "enum": ["network", "storage", "all"], "default": "all" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Collection triggered",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": { "type": "boolean" },
+                    "type": { "type": "string" },
+                    "results": { "type": "object", "additionalProperties": { "type": "string" } }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/monitoring/network/interfaces": {
+      "get": {
+        "tags": ["Host Monitoring"],
+        "summary": "Network interfaces",
+        "description": "Minimum role: viewer. Live configuration view (name, MTU, state, MAC, addresses). dladm-only fields (over, speed, vid, zone) have no analog and are absent.",
+        "parameters": [
+          { "name": "limit", "in": "query", "schema": { "type": "integer", "default": 100 } },
+          { "name": "offset", "in": "query", "schema": { "type": "integer", "default": 0 } },
+          { "name": "state", "in": "query", "schema": { "type": "string", "enum": ["up", "down"] } },
+          { "name": "link", "in": "query", "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "Network interfaces",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "interfaces": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "link": { "type": "string" },
+                          "class": { "type": "string", "example": "phys" },
+                          "mtu": { "type": "integer" },
+                          "state": { "type": "string" },
+                          "macaddress": { "type": "string" },
+                          "addresses": { "type": "array", "items": { "type": "string" } }
+                        }
+                      }
+                    },
+                    "totalCount": { "type": "integer" },
+                    "pagination": { "type": "object" }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Failed to get network interfaces",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/WrappedError" } } }
+          }
+        }
+      }
+    },
+    "/monitoring/network/usage": {
+      "get": {
+        "tags": ["Host Monitoring"],
+        "summary": "Network usage",
+        "description": "Minimum role: viewer. Per-interface counters with computed rates. Realtime mode: one live observation per interface; storage mode: stored samples, newest first.",
+        "parameters": [
+          { "name": "limit", "in": "query", "schema": { "type": "integer", "default": 100 } },
+          { "name": "since", "in": "query", "schema": { "type": "string", "format": "date-time" } },
+          { "name": "link", "in": "query", "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "Network usage",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "usage": { "type": "array", "items": { "$ref": "#/components/schemas/NetworkSample" } },
+                    "totalCount": { "type": "integer" },
+                    "returnedCount": { "type": "integer" },
+                    "sampling": { "$ref": "#/components/schemas/MonitoringSampling" },
+                    "metadata": {
+                      "type": "object",
+                      "properties": {
+                        "activeInterfacesCount": { "type": "integer" },
+                        "interfaceList": { "type": "array", "items": { "type": "string" } }
+                      }
+                    },
+                    "queryTime": { "type": "string" }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Failed to get network usage",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/WrappedError" } } }
+          }
+        }
+      }
+    },
+    "/monitoring/network/ipaddresses": {
+      "get": {
+        "tags": ["Host Monitoring"],
+        "summary": "IP address assignments",
+        "description": "Minimum role: viewer. Live view derived from the interface list (the reduced live shape — this agent has no ipadm address-object database).",
+        "parameters": [
+          { "name": "limit", "in": "query", "schema": { "type": "integer", "default": 100 } },
+          { "name": "offset", "in": "query", "schema": { "type": "integer", "default": 0 } },
+          { "name": "interface", "in": "query", "schema": { "type": "string" } },
+          { "name": "ip_version", "in": "query", "schema": { "type": "string", "enum": ["v4", "v6"] } }
+        ],
+        "responses": {
+          "200": {
+            "description": "IP addresses",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "addresses": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "addrobj": { "type": "string", "example": "Ethernet/v4" },
+                          "interface": { "type": "string" },
+                          "addr": { "type": "string", "example": "192.168.1.10/24" },
+                          "ip_version": { "type": "string", "enum": ["v4", "v6"] },
+                          "state": { "type": "string" },
+                          "source": { "type": "string", "example": "live" }
+                        }
+                      }
+                    },
+                    "returned": { "type": "integer" },
+                    "pagination": { "type": "object" }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Failed to get IP addresses",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/WrappedError" } } }
+          }
+        }
+      }
+    },
+    "/system/processes": {
+      "get": {
+        "tags": ["Processes"],
+        "summary": "List processes",
+        "description": "Minimum role: viewer. Bare array response. detailed=true adds CPU/memory statistics (process-lifetime CPU percentage — instant, no sampling wait).",
+        "parameters": [
+          { "name": "user", "in": "query", "schema": { "type": "string" }, "description": "Filter by username" },
+          { "name": "command", "in": "query", "schema": { "type": "string" }, "description": "Filter by command pattern (regex)" },
+          { "name": "detailed", "in": "query", "schema": { "type": "boolean", "default": false } },
+          { "name": "limit", "in": "query", "schema": { "type": "integer", "minimum": 1, "maximum": 1000, "default": 100 } }
+        ],
+        "responses": {
+          "200": {
+            "description": "Processes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "pid": { "type": "integer" },
+                      "ppid": { "type": "integer" },
+                      "username": { "type": "string" },
+                      "command": { "type": "string" },
+                      "cpu_percent": { "type": "number", "description": "detailed=true only" },
+                      "memory_percent": { "type": "number" },
+                      "vsz": { "type": "integer", "description": "Virtual size in KB" },
+                      "rss": { "type": "integer", "description": "Resident size in KB" },
+                      "state": { "type": "string" },
+                      "start_time": { "type": "string", "format": "date-time" },
+                      "cpu_time": { "type": "string", "example": "0:04:31" }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid command pattern",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/WrappedError" } } }
+          }
+        }
+      }
+    },
+    "/system/processes/find": {
+      "get": {
+        "tags": ["Processes"],
+        "summary": "Find processes by pattern",
+        "description": "Minimum role: viewer.",
+        "parameters": [
+          { "name": "pattern", "in": "query", "required": true, "schema": { "type": "string" }, "description": "Command pattern (regex)" },
+          { "name": "user", "in": "query", "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "Matching process IDs",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "pattern": { "type": "string" },
+                    "pids": { "type": "array", "items": { "type": "integer" } },
+                    "count": { "type": "integer" }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Missing or invalid pattern",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/WrappedError" } } }
+          }
+        }
+      }
+    },
+    "/system/processes/stats": {
+      "get": {
+        "tags": ["Processes"],
+        "summary": "Process statistics (top by CPU)",
+        "description": "Minimum role: viewer. Processes ranked by CPU usage (top 30) — one instant sample.",
+        "responses": {
+          "200": {
+            "description": "Process statistics",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "pid": { "type": "integer" },
+                      "username": { "type": "string" },
+                      "cpu_percent": { "type": "number" },
+                      "size": { "type": "string", "example": "1.2G" },
+                      "rss": { "type": "string", "example": "340.5M" },
+                      "command": { "type": "string" }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/system/processes/batch-kill": {
+      "post": {
+        "tags": ["Processes"],
+        "summary": "Signal multiple processes by pattern",
+        "description": "Minimum role: operator. The agent's own process is always refused. On Windows only TERM and KILL exist.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["pattern"],
+                "properties": {
+                  "pattern": { "type": "string" },
+                  "user": { "type": "string" },
+                  "signal": { "type": "string", "enum": ["TERM", "KILL", "HUP", "INT", "USR1", "USR2", "STOP", "CONT"], "default": "TERM" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Batch results",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": { "type": "boolean" },
+                    "pattern": { "type": "string" },
+                    "killed": { "type": "array", "items": { "type": "integer" } },
+                    "errors": { "type": "array", "items": { "type": "object" } },
+                    "message": { "type": "string" }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Missing pattern or unsupported signal",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/WrappedError" } } }
+          }
+        }
+      }
+    },
+    "/system/processes/{pid}": {
+      "get": {
+        "tags": ["Processes"],
+        "summary": "Process details",
+        "description": "Minimum role: viewer. Detailed statistics plus a sample of open files (empty on platforms where per-process file enumeration is unsupported).",
+        "parameters": [
+          { "name": "pid", "in": "path", "required": true, "schema": { "type": "integer" } }
+        ],
+        "responses": {
+          "200": { "description": "Process details" },
+          "400": { "description": "Invalid process ID" },
+          "404": { "description": "Process not found" }
+        }
+      }
+    },
+    "/system/processes/{pid}/files": {
+      "get": {
+        "tags": ["Processes"],
+        "summary": "Open files for a process",
+        "description": "Minimum role: viewer. Degrades to an empty list on platforms where gopsutil cannot enumerate per-process files (Windows).",
+        "parameters": [
+          { "name": "pid", "in": "path", "required": true, "schema": { "type": "integer" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "Open files",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "fd": { "type": "integer" },
+                      "description": { "type": "string" }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": { "description": "Process not found" }
+        }
+      }
+    },
+    "/system/processes/{pid}/signal": {
+      "post": {
+        "tags": ["Processes"],
+        "summary": "Send a signal to a process",
+        "description": "Minimum role: operator. On Windows only TERM and KILL exist (delivered via TerminateProcess); other signals answer 400 — never a silent no-op.",
+        "parameters": [
+          { "name": "pid", "in": "path", "required": true, "schema": { "type": "integer" } }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "signal": { "type": "string", "enum": ["TERM", "KILL", "HUP", "INT", "USR1", "USR2", "STOP", "CONT"], "default": "TERM" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "Signal sent" },
+          "400": { "description": "Invalid process ID or unsupported signal" },
+          "404": { "description": "Process not found" },
+          "500": { "description": "Failed to send signal" }
+        }
+      }
+    },
+    "/system/processes/{pid}/kill": {
+      "post": {
+        "tags": ["Processes"],
+        "summary": "Kill a process",
+        "description": "Minimum role: operator. Graceful terminate; force=true kills immediately.",
+        "parameters": [
+          { "name": "pid", "in": "path", "required": true, "schema": { "type": "integer" } }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": { "force": { "type": "boolean", "default": false } }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "Process killed" },
+          "400": { "description": "Invalid process ID" },
+          "404": { "description": "Process not found" },
+          "500": { "description": "Failed to kill process" }
+        }
+      }
+    },
+    "/system/host/status": {
+      "get": {
+        "tags": ["System Host Management"],
+        "summary": "Host system status",
+        "description": "Minimum role: viewer. Uptime, load averages, and memory. No runlevel or reboot-required tracking — init concepts absent on this platform trio. 503 when host_power.enabled is false.",
+        "responses": {
+          "200": {
+            "description": "System status",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "hostname": { "type": "string" },
+                    "uptime": {
+                      "type": "object",
+                      "properties": {
+                        "seconds": { "type": "integer" },
+                        "formatted": { "type": "string", "example": "3d 4h 12m" },
+                        "boot_time": { "type": "string", "format": "date-time" }
+                      }
+                    },
+                    "load_average": { "type": "array", "items": { "type": "number" } },
+                    "memory": {
+                      "type": "object",
+                      "properties": {
+                        "total": { "type": "integer", "format": "int64" },
+                        "free": { "type": "integer", "format": "int64" },
+                        "used": { "type": "integer", "format": "int64" }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "503": { "description": "Host power management is disabled in configuration" }
+        }
+      }
+    },
+    "/system/host/uptime": {
+      "get": {
+        "tags": ["System Host Management"],
+        "summary": "Host uptime",
+        "description": "Minimum role: viewer. 503 when host_power.enabled is false.",
+        "responses": {
+          "200": {
+            "description": "Uptime information",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "uptime_seconds": { "type": "integer" },
+                    "uptime_formatted": { "type": "string" },
+                    "boot_time": { "type": "string", "format": "date-time" },
+                    "load_averages": {
+                      "type": "object",
+                      "properties": {
+                        "1min": { "type": "number" },
+                        "5min": { "type": "number" },
+                        "15min": { "type": "number" }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "503": { "description": "Host power management is disabled in configuration" }
+        }
+      }
+    },
+    "/system/host/shutdown": {
+      "post": {
+        "tags": ["System Host Management"],
+        "summary": "Shut down the host",
+        "description": "Minimum role: admin. Queues a task running the platform shutdown command (Windows shutdown /s, Unix shutdown -h). confirm:true is required. The agent needs the OS privilege the command itself demands — a refusal fails the task honestly. 503 when host_power.enabled is false.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["confirm"],
+                "properties": {
+                  "confirm": { "type": "boolean" },
+                  "grace_period": { "type": "integer", "minimum": 0, "maximum": 7200, "default": 60, "description": "Seconds before the action fires (Unix rounds up to minutes)" },
+                  "message": { "type": "string", "maxLength": 200, "description": "Warning broadcast to logged-in users where the platform supports one" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Shutdown task created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": { "type": "boolean" },
+                    "message": { "type": "string" },
+                    "task_id": { "type": "string", "format": "uuid" },
+                    "status": { "type": "string", "example": "pending" },
+                    "created_at": { "type": "string", "format": "date-time" },
+                    "grace_period": { "type": "integer" }
+                  }
+                }
+              }
+            }
+          },
+          "400": { "description": "Missing confirmation or invalid parameters" },
+          "503": { "description": "Host power management is disabled in configuration" }
+        }
+      }
+    },
+    "/system/host/restart": {
+      "post": {
+        "tags": ["System Host Management"],
+        "summary": "Restart the host",
+        "description": "Minimum role: admin. Same body rules as shutdown. 503 when host_power.enabled is false.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["confirm"],
+                "properties": {
+                  "confirm": { "type": "boolean" },
+                  "grace_period": { "type": "integer", "minimum": 0, "maximum": 7200, "default": 60 },
+                  "message": { "type": "string", "maxLength": 200 }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": { "description": "Restart task created" },
+          "400": { "description": "Missing confirmation or invalid parameters" },
+          "503": { "description": "Host power management is disabled in configuration" }
+        }
+      }
+    },
+    "/system/host/poweroff": {
+      "post": {
+        "tags": ["System Host Management"],
+        "summary": "Power off the host",
+        "description": "Minimum role: admin. Manual intervention required to restart the machine. Same body rules as shutdown; Windows makes no shutdown/poweroff distinction. 503 when host_power.enabled is false.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["confirm"],
+                "properties": {
+                  "confirm": { "type": "boolean" },
+                  "grace_period": { "type": "integer", "minimum": 0, "maximum": 7200, "default": 60 },
+                  "message": { "type": "string", "maxLength": 200 }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": { "description": "Poweroff task created" },
+          "400": { "description": "Missing confirmation or invalid parameters" },
+          "503": { "description": "Host power management is disabled in configuration" }
+        }
+      }
+    },
+    "/system/host/halt": {
+      "post": {
+        "tags": ["System Host Management"],
+        "summary": "Immediately halt the host",
+        "description": "Minimum role: admin. No grace period, no graceful shutdown — the emergency stop. Requires BOTH confirm:true and emergency:true. 503 when host_power.enabled is false.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["confirm", "emergency"],
+                "properties": {
+                  "confirm": { "type": "boolean" },
+                  "emergency": { "type": "boolean" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": { "description": "Halt task created" },
+          "400": { "description": "Missing confirmation or emergency acknowledgement" },
+          "503": { "description": "Host power management is disabled in configuration" }
+        }
+      }
+    },
+    "/system/hosts": {
+      "get": {
+        "tags": ["Host Configuration"],
+        "summary": "Read the system hosts file",
+        "description": "Minimum role: viewer. Parses the platform hosts file (Windows System32\\drivers\\etc\\hosts, /etc/hosts elsewhere) into structured entries plus the raw content.",
+        "responses": {
+          "200": {
+            "description": "Hosts file",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "entries": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "ip": { "type": "string", "example": "127.0.0.1" },
+                          "hostnames": { "type": "array", "items": { "type": "string" }, "example": ["localhost"] }
+                        }
+                      }
+                    },
+                    "raw": { "type": "string" },
+                    "path": { "type": "string" }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Failed to read hosts file",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/WrappedError" } } }
+          }
+        }
+      },
+      "put": {
+        "tags": ["Host Configuration"],
+        "summary": "Replace the system hosts file",
+        "description": "Minimum role: operator. Provide structured entries or raw content (raw wins). A timestamped backup lands beside the file before the atomic replace. Writing needs the same OS privilege editing the file by hand would (Administrator on Windows, root on Unix) — a refusal fails honestly.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "entries": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "required": ["ip", "hostnames"],
+                      "properties": {
+                        "ip": { "type": "string" },
+                        "hostnames": { "type": "array", "items": { "type": "string" } }
+                      }
+                    }
+                  },
+                  "raw": { "type": "string", "description": "Raw file content (takes precedence over entries)" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Hosts file updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": { "type": "boolean" },
+                    "message": { "type": "string" },
+                    "timestamp": { "type": "string", "format": "date-time" },
+                    "path": { "type": "string" },
+                    "backup": { "type": "string" },
+                    "entries": { "type": "integer" }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid body or entry values",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/WrappedError" } } }
+          },
+          "500": {
+            "description": "Backup or write failure (typically missing OS privilege)",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/WrappedError" } } }
+          }
+        }
+      }
+    },
+    "/database/stats": {
+      "get": {
+        "tags": ["Database Management"],
+        "summary": "Database statistics",
+        "description": "Minimum role: viewer. File sizes (main/WAL/SHM), table row counts, and SQLite internals for EVERY open database file — this agent splits storage by write-contention domain instead of one file.",
+        "responses": {
+          "200": {
+            "description": "Database statistics",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "dialect": { "type": "string", "example": "sqlite" },
+                    "databases": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "name": { "type": "string", "example": "tasks.sqlite" },
+                          "storage_path": { "type": "string" },
+                          "files": { "type": "object" },
+                          "tables": { "type": "array", "items": { "type": "object" } },
+                          "total_tables": { "type": "integer" },
+                          "total_rows": { "type": "integer" },
+                          "internal": { "type": "object" }
+                        }
+                      }
+                    },
+                    "total_tables": { "type": "integer" },
+                    "total_rows": { "type": "integer" }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Failed to retrieve database statistics",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/WrappedError" } } }
+          }
+        }
+      }
+    },
+    "/database/vacuum": {
+      "post": {
+        "tags": ["Database Management"],
+        "summary": "Run VACUUM",
+        "description": "Minimum role: admin. Rebuilds every open database file to reclaim space; temporarily doubles disk usage per file.",
+        "responses": {
+          "200": {
+            "description": "VACUUM completed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": { "type": "boolean" },
+                    "message": { "type": "string" },
+                    "timestamp": { "type": "string", "format": "date-time" },
+                    "databases": { "type": "array", "items": { "type": "object" } },
+                    "size_before": { "type": "integer", "format": "int64" },
+                    "size_after": { "type": "integer", "format": "int64" },
+                    "space_reclaimed": { "type": "integer", "format": "int64" }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "VACUUM failed",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/WrappedError" } } }
+          }
+        }
+      }
+    },
+    "/database/analyze": {
+      "post": {
+        "tags": ["Database Management"],
+        "summary": "Run ANALYZE",
+        "description": "Minimum role: admin. Refreshes query-planner statistics on every open database file; lightweight and safe anytime.",
+        "responses": {
+          "200": { "description": "ANALYZE completed" },
+          "500": {
+            "description": "ANALYZE failed",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/WrappedError" } } }
+          }
+        }
+      }
+    },
+    "/database/cleanup": {
+      "post": {
+        "tags": ["Database Management"],
+        "summary": "Trigger manual cleanup",
+        "description": "Minimum role: admin. The same retention pass the periodic cleanup runs: finished tasks past tasks.retention_days plus stored telemetry past monitoring.retention_days.",
+        "responses": {
+          "200": {
+            "description": "Cleanup triggered",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": { "type": "boolean" },
+                    "message": { "type": "string" },
+                    "timestamp": { "type": "string", "format": "date-time" },
+                    "cleanup_status": { "type": "object" }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Cleanup failed",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/WrappedError" } } }
           }
         }
       }

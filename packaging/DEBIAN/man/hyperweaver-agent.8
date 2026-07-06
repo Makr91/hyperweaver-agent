@@ -152,3 +152,10 @@ local machine. Review
 .Cm server.bind_address
 before exposing it more widely, and keep the configuration directory's
 filesystem permissions restrictive.
+.Pp
+With
+.Cm host_power.enabled
+(the default) the agent exposes admin-key-gated endpoints that shut down,
+restart, power off, or halt the host machine itself — remote power control
+for headless installs. Set it to false on machines where the agent must
+never be able to power off its host.

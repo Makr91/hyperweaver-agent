@@ -131,8 +131,8 @@ Number of rotated log files to keep (default: 5)
 Boolean gzip-compressing rotated log files (default: true)
 .It Cm categories
 Map of per-category log levels overriding the global level. Categories the
-agent emits: app, api_requests, auth, tasks, machines (default: empty — all
-categories follow
+agent emits: app, api_requests, auth, tasks, machines, monitoring (default:
+empty — all categories follow
 .Cm level )
 .El
 .Ss api_keys
@@ -275,6 +275,38 @@ Periodic cleanup service.
 Seconds between cleanup runs — task retention runs on this cadence, 60-86400
 (default: 300)
 .El
+.Ss monitoring
+Host telemetry (the /monitoring endpoints and the monitoring capability
+token). The endpoints always serve realtime samples; storage adds history.
+.Bl -tag -width "collection_interval"
+.It Cm storage_enabled
+Boolean enabling the background collector that writes telemetry time series
+into per-datatype database files
+.Pa ( monitoring-cpu.sqlite ,
+.Pa monitoring-memory.sqlite ,
+.Pa monitoring-network.sqlite
+under
+.Cm data.dir )
+so history charts work. Off means realtime-only: every request samples the
+operating system live (default: false).
+.It Cm collection_interval
+Seconds between collector samples when storage is enabled, 5-3600
+(default: 60)
+.It Cm retention_days
+Stored samples older than this many days are deleted by the periodic
+cleanup, 1-365 (default: 7)
+.El
+.Ss host_power
+Host power management (the /system/host endpoints and the host-power
+capability token).
+.Bl -tag -width "enabled"
+.It Cm enabled
+Boolean serving the host power endpoints: status and uptime, plus
+admin-key-gated shutdown, restart, poweroff, and halt of the machine the
+agent runs on — remote power control for headless hosts. When false every
+endpoint answers 503 and the token disappears from GET /api/status
+(default: true).
+.El
 .Sh FILES
 .Bl -tag -width ".Pa /var/log/hyperweaver-agent/"
 .It Pa /etc/hyperweaver-agent/config.yaml
@@ -299,9 +331,16 @@ Beside the configuration file the agent also keeps
 .Pq Cm data.dir
 it keeps
 .Pa tasks.sqlite
-(the task queue and its output) and
+(the task queue and its output),
 .Pa agent.sqlite
-(core state), both 0600.
+(core state), and — when
+.Cm monitoring.storage_enabled
+is on —
+.Pa monitoring-cpu.sqlite ,
+.Pa monitoring-memory.sqlite ,
+and
+.Pa monitoring-network.sqlite
+(telemetry time series), all 0600.
 .Sh EXAMPLES
 The packaged default:
 .Bd -literal -offset indent

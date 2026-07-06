@@ -276,11 +276,18 @@ func (q *Queue) loop() {
 	}
 }
 
-// cleanupOld deletes finished tasks past the retention window (the Node
-// agent's cleanupOldTasks).
-func (q *Queue) cleanupOld() {
+// CleanupNow deletes finished tasks past the retention window and returns
+// how many were removed — the retention cleanup's work, shared by the
+// periodic tick and POST /database/cleanup.
+func (q *Queue) CleanupNow(ctx context.Context) (int64, error) {
 	cutoff := time.Now().AddDate(0, 0, -q.cfg.RetentionDays)
-	deleted, err := q.store.DeleteFinishedBefore(context.Background(), cutoff)
+	return q.store.DeleteFinishedBefore(ctx, cutoff)
+}
+
+// cleanupOld runs CleanupNow on the periodic tick (the Node agent's
+// cleanupOldTasks).
+func (q *Queue) cleanupOld() {
+	deleted, err := q.CleanupNow(context.Background())
 	if err != nil {
 		tlog().Error("task retention cleanup failed", "error", err)
 		return

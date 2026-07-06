@@ -1,0 +1,165 @@
+package server
+
+import (
+	"fmt"
+	"log/slog"
+	"net/http"
+	"os"
+	"path/filepath"
+	"runtime"
+	"strings"
+	"time"
+
+	"github.com/Makr91/hyperweaver-agent/internal/auth"
+	"github.com/Makr91/hyperweaver-agent/internal/safepath"
+)
+
+// Hosts-file endpoints (/system/hosts — the Node agent's Host Configuration
+// group): read and replace the system hosts file on all three platforms, so
+// the platform can point names at its virtual machines (Mark's ruling,
+// 2026-07-05: "take control of the /etc/hosts file on mac, windows and
+// linux"). A timestamped backup lands beside the file before every write.
+// The /system/dns counterpart is deliberately absent: resolv.conf is
+// Unix-only and Windows/macOS manage DNS elsewhere.
+
+// hostsFilePath returns the platform hosts file location.
+func hostsFilePath() string {
+	if runtime.GOOS == "windows" {
+		root := os.Getenv("SystemRoot")
+		if root == "" {
+			root = `C:\Windows`
+		}
+		return filepath.Join(root, "System32", "drivers", "etc", "hosts")
+	}
+	return "/etc/hosts"
+}
+
+// hostsEntry is one parsed hosts line.
+type hostsEntry struct {
+	IP        string   `json:"ip"`
+	Hostnames []string `json:"hostnames"`
+}
+
+// parseHostsFile extracts the address entries (comments and blanks are
+// carried only by the raw view).
+func parseHostsFile(raw string) []hostsEntry {
+	entries := []hostsEntry{}
+	for _, line := range strings.Split(raw, "\n") {
+		text := strings.TrimSpace(line)
+		if comment := strings.Index(text, "#"); comment >= 0 {
+			text = strings.TrimSpace(text[:comment])
+		}
+		if text == "" {
+			continue
+		}
+		fields := strings.Fields(text)
+		if len(fields) < 2 {
+			continue
+		}
+		entries = append(entries, hostsEntry{IP: fields[0], Hostnames: fields[1:]})
+	}
+	return entries
+}
+
+// handleGetHostsFile mirrors GET /system/hosts.
+func (s *Server) handleGetHostsFile(w http.ResponseWriter, _ *http.Request) {
+	path := hostsFilePath()
+	raw, err := os.ReadFile(filepath.Clean(path))
+	if err != nil {
+		errorResponse(w, http.StatusInternalServerError, "Failed to read hosts file", err.Error())
+		return
+	}
+	writeJSON(w, map[string]any{
+		"entries": parseHostsFile(string(raw)),
+		"raw":     string(raw),
+		"path":    path,
+	})
+}
+
+// hostsUpdateRequest is the PUT body: structured entries, or raw content
+// (raw wins).
+type hostsUpdateRequest struct {
+	Entries []hostsEntry `json:"entries"`
+	Raw     *string      `json:"raw"`
+}
+
+// renderHostsFile serializes structured entries into hosts-file text.
+func renderHostsFile(entries []hostsEntry) string {
+	var b strings.Builder
+	b.WriteString("# Managed by hyperweaver-agent (" +
+		time.Now().UTC().Format(time.RFC3339) + ")\n")
+	for _, entry := range entries {
+		b.WriteString(entry.IP)
+		b.WriteString("\t")
+		b.WriteString(strings.Join(entry.Hostnames, " "))
+		b.WriteString("\n")
+	}
+	return b.String()
+}
+
+// handleUpdateHostsFile mirrors PUT /system/hosts: timestamped backup beside
+// the file, then an atomic replace. Writing the file requires the same
+// privilege editing it by hand would (Administrator on Windows, root on
+// Unix) — a permission refusal fails honestly.
+func (s *Server) handleUpdateHostsFile(w http.ResponseWriter, r *http.Request) {
+	var body hostsUpdateRequest
+	if err := decodeBody(r, &body); err != nil {
+		errorResponse(w, http.StatusBadRequest, "Failed to write hosts file", "Invalid JSON body")
+		return
+	}
+
+	var content string
+	switch {
+	case body.Raw != nil:
+		content = *body.Raw
+	case body.Entries != nil:
+		for _, entry := range body.Entries {
+			if entry.IP == "" || len(entry.Hostnames) == 0 {
+				errorResponse(w, http.StatusBadRequest, "Failed to write hosts file",
+					"every entry needs an ip and at least one hostname")
+				return
+			}
+			for _, field := range append([]string{entry.IP}, entry.Hostnames...) {
+				if strings.ContainsAny(field, " \t\r\n#") {
+					errorResponse(w, http.StatusBadRequest, "Failed to write hosts file",
+						fmt.Sprintf("invalid value %q: whitespace and # are not allowed", field))
+					return
+				}
+			}
+		}
+		content = renderHostsFile(body.Entries)
+	default:
+		errorResponse(w, http.StatusBadRequest, "Failed to write hosts file",
+			"provide entries or raw")
+		return
+	}
+
+	path := hostsFilePath()
+	current, err := os.ReadFile(filepath.Clean(path))
+	if err != nil {
+		errorResponse(w, http.StatusInternalServerError, "Failed to write hosts file",
+			"read current file: "+err.Error())
+		return
+	}
+
+	backup := path + ".backup-" + time.Now().UTC().Format("20060102-150405")
+	if berr := safepath.WriteFile(backup, current, 0o644); berr != nil {
+		errorResponse(w, http.StatusInternalServerError, "Failed to write hosts file",
+			"create backup: "+berr.Error())
+		return
+	}
+	// The hosts file must stay world-readable — every resolver on the
+	// machine reads it (0644, unlike the agent's own 0600 state files).
+	if werr := safepath.WriteFile(path, []byte(content), 0o644); werr != nil {
+		errorResponse(w, http.StatusInternalServerError, "Failed to write hosts file", werr.Error())
+		return
+	}
+
+	slog.Info("hosts file updated", "path", path, "backup", filepath.Base(backup),
+		"by", auth.FromContext(r.Context()).Name)
+	successResponse(w, "Hosts file updated successfully", map[string]any{
+		"path":    path,
+		"backup":  filepath.Base(backup),
+		"entries": len(parseHostsFile(content)),
+	})
+}
