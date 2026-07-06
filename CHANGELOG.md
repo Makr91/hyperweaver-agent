@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.1.3](https://github.com/Makr91/hyperweaver-agent/compare/v0.1.2...v0.1.3) (2026-07-06)
+
+
+### Bug Fixes
+
+* embed SHI's initial-registry verbatim (~135 known HCL hashes; seeder parses SHI's format natively so updates are a cp), assets log category in vocabularies ([41d63c7](https://github.com/Makr91/hyperweaver-agent/commit/41d63c70ff8f011d91c47399c2369fcf7fbe7b35))
+* HCL portal downloader (token exchange with rotated refresh persisted to secrets, exact-name catalog lookup with authoritative sha256, verified streamed download), updater apply flow + SHI settings parity (from prior stretch), Artifacts/updater/bridged-interfaces OpenAPI coverage ([9e83a5b](https://github.com/Makr91/hyperweaver-agent/commit/9e83a5b1049294841ecf8cd82ece78eaf494963f))
+* installer file cache with full SHA-256 verification (artifacts table/endpoints/token, scan/download-with-progress/upload/register, expectation seeding, hard-link or verified-copy mounting, prepare-time refusal of unverified files), optional machine names with prefix_machine_names derivation (server_id--hostname.domain), safepath streaming writer ([ebd2e0b](https://github.com/Makr91/hyperweaver-agent/commit/ebd2e0b16c8d6f35018b2977c73fcaf871048e49))
+* machine clone (zoneweaver contract, SHI metadata-copy model), decomposed start pipeline (parent + prepare/plugin/vagrant-up children with per-step progress, cascade cancel), per-machine rsync/scp sync method with SHI platform rules, rsync prereq detection, UI pin 0.10.10 (arch item 2 loose ends) ([4bc4e13](https://github.com/Makr91/hyperweaver-agent/commit/4bc4e13ef0cffbc9029ca957c861f14c3cdc3f09))
+* provisioner package registry - SHI-format scan/import/delete, non-clobber seeding from packaged archives, /provisioning/provisioners API + provisioning token (arch item 2, piece 1) ([9366c40](https://github.com/Makr91/hyperweaver-agent/commit/9366c4005b2e8c71d72deda288c5e48a36a56695))
+* provisioning engine core - pongo2 Hosts.yml generator + secrets store (/secrets, SECRETS_* vars), working-dir materialization (SHI layout, id-files/ssls/installers, secrets.yml never clobbered), machine-create/modify/provision/sync through the task queue, dual-path start via vagrant up, UUID-keyed reconciliation (arch item 2, pieces 2-4) ([204c5a3](https://github.com/Makr91/hyperweaver-agent/commit/204c5a35db9f15f3cbac82bbc9cbf4d6eb331e8b))
+* Release 0.10.11 UI ([b454e07](https://github.com/Makr91/hyperweaver-agent/commit/b454e07f8d666a54c36d4d2ee7a9b7e00d360066))
+* settings API with backups and self-restart, remove all lint suppressions, add safepath validation for all file and exec paths ([2c46596](https://github.com/Makr91/hyperweaver-agent/commit/2c465969f6fb0233cc0f6a8f997c573388b7063b))
+* settings API with backups and self-restart, remove all lint suppressions, add safepath validation for all file and exec paths ([d86b9dd](https://github.com/Makr91/hyperweaver-agent/commit/d86b9dd80ed670d8a72324abb9468d6244b347b8))
+* settings API with backups and self-restart, remove all lint suppressions, add safepath validation for all file and exec paths ([16d3b2d](https://github.com/Makr91/hyperweaver-agent/commit/16d3b2dbda9d97ca4db8b99225ec353704446011))
+* ship the STARTcloud CA pair in packaging/ssl — gitignore exceptions so release builds can stage it into all three installers ([30783e7](https://github.com/Makr91/hyperweaver-agent/commit/30783e735a29494d66dccecefb708fa70e34b7ca))
+* split oversized files per arch §14 — config.go (defaults/validate/paths), machines.go (bulk/meta), settings.go (schema), queue.go (parent) — pure moves, zero behavior change ([f3ebc92](https://github.com/Makr91/hyperweaver-agent/commit/f3ebc927dcf2e8bae6aa58d3ca5bea89b602e0e9))
+
 ## [0.1.2](https://github.com/Makr91/hyperweaver-agent/compare/v0.1.1...v0.1.2) (2026-07-06)
 
 
