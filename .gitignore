@@ -35,6 +35,15 @@ ssl/
 *.p12
 *.pfx
 
+# EXCEPTION: the installer-seeded STARTcloud CA pair ships in the repo
+# deliberately (Mark's ruling, 2026-07-05) — release builds copy it into
+# every installer (Inno ssl-seed, deb /etc ssl staging, macOS Resources/
+# ssl-seed) so agents sign their server certificates against one trusted
+# chain. The directory must be re-included before files inside it can be.
+!packaging/ssl/
+!packaging/ssl/ca-certificate.crt
+!packaging/ssl/ca-certificate.key
+
 # Packaging outputs
 *.deb
 *.p5p
