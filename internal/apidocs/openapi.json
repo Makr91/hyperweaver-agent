@@ -232,6 +232,7 @@
           },
           "properties": { "type": "object", "description": "User entries for the package's configuration.basicFields, keyed by each field's exact name" },
           "advanced_properties": { "type": "object", "description": "User entries for the package's configuration.advancedFields" },
+          "sync_method": { "type": "string", "enum": ["rsync", "scp"], "description": "Per-machine file-sync preference (SHI's Rsync/SCP setting), default rsync. Platform rules apply at render time: forced rsync on Windows hosts; macOS auto-falls back to SCP when the system rsync is the ancient Apple 2.x build. The EFFECTIVE value reaches the template context as settings.sync_method / SYNC_METHOD; the stored spec keeps the preference." },
           "safe_id_path": { "type": "string", "description": "Agent-host path of a Domino safe-ID file, placed under id-files per the package's id_files metadata (safe_id_dir, keep_original_name)" },
           "start_after_create": { "type": "boolean", "description": "POST /machines only: queue the first start immediately" }
         }
@@ -802,7 +803,7 @@
       "get": {
         "tags": ["System"],
         "summary": "Application version and host environment",
-        "description": "Minimum role: viewer. Includes the detected provisioning prerequisites (Vagrant, VirtualBox, Git) and host information — SHI's footer data.",
+        "description": "Minimum role: viewer. Includes the detected provisioning prerequisites (Vagrant, VirtualBox, Git, rsync) and host information — SHI's footer data.",
         "responses": {
           "200": {
             "description": "Version information",
@@ -872,7 +873,7 @@
       "get": {
         "tags": ["System"],
         "summary": "Provisioning prerequisite availability",
-        "description": "Minimum role: viewer. A bare tool-name → installed map; this agent's tools are vagrant, virtualbox, and git (the Node agent lists its OmniOS set — same endpoint, platform-appropriate contents).",
+        "description": "Minimum role: viewer. A bare tool-name → installed map; this agent's tools are vagrant, virtualbox, git, and rsync (the Node agent lists its OmniOS set — same endpoint, platform-appropriate contents).",
         "responses": {
           "200": {
             "description": "Tool availability map",
@@ -881,7 +882,7 @@
                 "schema": {
                   "type": "object",
                   "additionalProperties": { "type": "boolean" },
-                  "example": { "vagrant": true, "virtualbox": true, "git": true }
+                  "example": { "vagrant": true, "virtualbox": true, "git": true, "rsync": false }
                 }
               }
             }
@@ -976,7 +977,7 @@
       "delete": {
         "tags": ["Task Management"],
         "summary": "Cancel a task",
-        "description": "Minimum role: operator. Pending tasks are cancelled immediately. Running tasks are cancellable too (this agent's D-F extension over the Node reference): the executor's child processes are killed, its per-operation cleanup runs, and the task lands in cancelled with its output preserved. Tasks pending on a cancelled task are cancelled by dependency propagation.",
+        "description": "Minimum role: operator. Pending tasks are cancelled immediately. Running tasks are cancellable too (this agent's D-F extension over the Node reference): the executor's child processes are killed, its per-operation cleanup runs, and the task lands in cancelled with its output preserved. Tasks pending on a cancelled task are cancelled by dependency propagation, and cancelling a parent orchestration anchor cascades to its whole chain — pending children flip, running children get their contexts killed.",
         "parameters": [
           { "name": "taskId", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } }
         ],
@@ -1317,7 +1318,7 @@
       "post": {
         "tags": ["Machine Management"],
         "summary": "Start a machine",
-        "description": "Minimum role: operator. Queues a start task: VBoxManage startvm --type headless — immediate power-on, no provisioning machinery. Idempotent: already-running machines answer already_running; an existing pending/running start task is reused.",
+        "description": "Minimum role: operator. Raw machines: one start task (VBoxManage startvm --type headless). Provisioner-managed machines: the decomposed start pipeline (zoneweaver's orchestration model) — the returned task_id is a start PARENT whose chained children machine_prepare → machine_plugin_check → machine_vagrant_up carry the work; the parent's progress_percent/progress_info aggregate them (coarse progress), each child reports its own {status} progress_info, and cancelling the parent cascades down the chain. Idempotent: already-running machines answer already_running; an existing pending/running start task is reused.",
         "parameters": [
           { "name": "machineName", "in": "path", "required": true, "schema": { "type": "string" } }
         ],
@@ -1436,6 +1437,72 @@
           },
           "400": { "description": "Machine is not provisioner-managed" },
           "404": { "description": "Machine not found" }
+        }
+      }
+    },
+    "/machines/{machineName}/clone": {
+      "post": {
+        "tags": ["Machine Management"],
+        "summary": "Clone a machine",
+        "description": "Minimum role: operator. Provisioner-managed machines only. zoneweaver's clone contract on SHI's clone model (design §4 ruling): a METADATA copy — fresh name, fresh auto-assigned server_id, NO VM until first start — so no snapshots and no task orchestration; the row is created synchronously (201, not zoneweaver's 202). settings.hostname is required (a clone must not reuse the source hostname); domain and everything else default from the source spec; overrides (memory, vcpus, …) merge into settings; consoleport never survives. Cloned networks lose mac/address/gateway/netmask/dns so source and clone can never collide (zoneweaver strips NIC identity the same way). start_after_create queues the start pipeline.",
+        "parameters": [
+          { "name": "machineName", "in": "path", "required": true, "schema": { "type": "string" }, "description": "The SOURCE machine" }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["name", "settings"],
+                "properties": {
+                  "name": { "type": "string", "description": "The clone's machine name (free user-chosen, design D-G)", "example": "domino-02" },
+                  "settings": {
+                    "type": "object",
+                    "required": ["hostname"],
+                    "description": "Settings entries replacing the source's (hostname required; server_id optional — omitted = auto-assigned)",
+                    "properties": {
+                      "hostname": { "type": "string" },
+                      "domain": { "type": "string", "description": "Defaults from the source spec" },
+                      "server_id": { "type": "string" }
+                    }
+                  },
+                  "overrides": {
+                    "type": "object",
+                    "description": "Resource overrides merged into settings (zoneweaver shape)",
+                    "properties": {
+                      "memory": { "type": "string", "example": "8G" },
+                      "vcpus": { "type": "integer", "example": 4 }
+                    }
+                  },
+                  "start_after_create": { "type": "boolean", "default": false }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Clone created (task_id present when start_after_create queued the start pipeline)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": { "type": "boolean" },
+                    "machine": { "$ref": "#/components/schemas/Machine" },
+                    "machine_name": { "type": "string" },
+                    "source_machine": { "type": "string" },
+                    "task_id": { "type": "string", "format": "uuid" },
+                    "message": { "type": "string" }
+                  }
+                }
+              }
+            }
+          },
+          "400": { "description": "Missing settings.hostname, invalid name, source not provisioner-managed, or the source's provisioner/safe-ID no longer resolves" },
+          "404": { "description": "Source machine not found" },
+          "409": { "description": "Clone name, server_id, or working directory already in use" }
         }
       }
     },

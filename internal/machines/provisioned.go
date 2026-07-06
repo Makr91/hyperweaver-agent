@@ -5,12 +5,16 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
+	"runtime"
+	"strconv"
 	"strings"
 
 	"github.com/goccy/go-yaml"
 
+	"github.com/Makr91/hyperweaver-agent/internal/prereqs"
 	"github.com/Makr91/hyperweaver-agent/internal/provisioner"
 	"github.com/Makr91/hyperweaver-agent/internal/safepath"
 	"github.com/Makr91/hyperweaver-agent/internal/tasks"
@@ -28,6 +32,48 @@ import (
 // syncback mechanism Hosts.rb's folders: blocks use).
 const scpSyncPlugin = "vagrant-scp-sync"
 
+// Sync methods — SHI's per-machine Rsync/SCP setting. The effective value is
+// injected into the template context (settings.sync_method / SYNC_METHOD),
+// which is where SHI consumes it too (its generators seed SYNC_METHOD).
+const (
+	SyncRsync = "rsync"
+	SyncSCP   = "scp"
+)
+
+// effectiveSyncMethod applies SHI's platform rules to the requested method:
+// forced rsync on Windows, and macOS auto-falls back to SCP when the system
+// rsync is the ancient Apple 2.x build (its broken chown handling is why SCP
+// support exists at all). The stored spec keeps the user's preference; only
+// the render sees the effective value. reason narrates a forced change ("").
+func effectiveSyncMethod(ctx context.Context, requested string) (method, reason string) {
+	if runtime.GOOS == "windows" {
+		return SyncRsync, "forced on Windows (SHI rule)"
+	}
+	if requested == "" {
+		requested = SyncRsync
+	}
+	if requested == SyncRsync && runtime.GOOS == "darwin" && ancientRsync(ctx) {
+		return SyncSCP, "system rsync is the ancient Apple build — auto-fallback to SCP (SHI rule)"
+	}
+	return requested, ""
+}
+
+// ancientRsync reports a system rsync older than major version 3 (or none at
+// all — SCP is then the only working path).
+func ancientRsync(ctx context.Context) bool {
+	for _, tool := range prereqs.Detect(ctx) {
+		if tool.Name != "rsync" {
+			continue
+		}
+		if !tool.Installed || tool.Version == "" {
+			return true
+		}
+		major, err := strconv.Atoi(strings.SplitN(tool.Version, ".", 2)[0])
+		return err == nil && major < 3
+	}
+	return true
+}
+
 // ProvisionerRef names the package version a machine builds from.
 type ProvisionerRef struct {
 	Name    string `json:"name"`
@@ -43,6 +89,7 @@ type Spec struct {
 	Roles              []provisioner.RoleInput `json:"roles"`
 	Properties         map[string]any          `json:"properties"`
 	AdvancedProperties map[string]any          `json:"advanced_properties"`
+	SyncMethod         string                  `json:"sync_method"`
 	SafeIDPath         string                  `json:"safe_id_path"`
 	StartAfterCreate   bool                    `json:"start_after_create"`
 }
@@ -71,18 +118,47 @@ type ProvisionEnv struct {
 	CAKeyPath   string
 }
 
+// taskProgress records a task's own progress (zoneweaver's
+// lib/TaskProgressHelper.updateTaskProgress: percent + {status} info, failures
+// logged and swallowed — progress never fails an operation). Bookkeeping uses
+// a background context so a cancelled task still records its last state.
+func (e *executors) taskProgress(task *tasks.Task, percent float64, status string) {
+	if task == nil {
+		return
+	}
+	info, err := json.Marshal(map[string]string{"status": status})
+	if err != nil {
+		return
+	}
+	if uerr := e.queue.Store().UpdateProgress(context.Background(), task.ID, percent, info); uerr != nil {
+		mlog().Debug("progress update failed", "task_id", task.ID, "error", uerr)
+	}
+}
+
 // prepareWorkdir renders Hosts.yml and refreshes the machine's working
-// directory — the pre-up half of SHI's start flow.
-func (e *executors) prepareWorkdir(machine *Machine, spec *Spec, out *tasks.OutputWriter) error {
+// directory — the pre-up half of SHI's start flow. The effective sync method
+// (platform rules applied) is injected into the render context; the stored
+// spec keeps the user's preference.
+func (e *executors) prepareWorkdir(ctx context.Context, machine *Machine, spec *Spec, out *tasks.OutputWriter) error {
 	version, err := e.env.Registry.GetVersion(spec.Provisioner.Name, spec.Provisioner.Version)
 	if err != nil {
 		return fmt.Errorf("provisioner %s/%s: %w", spec.Provisioner.Name, spec.Provisioner.Version, err)
 	}
 
+	method, reason := effectiveSyncMethod(ctx, spec.SyncMethod)
+	note := "Sync method: " + method
+	if reason != "" {
+		note += " — " + reason
+	}
+	out.Write("stdout", note+"\n")
+	settings := make(map[string]any, len(spec.Settings)+1)
+	maps.Copy(settings, spec.Settings)
+	settings["sync_method"] = method
+
 	out.Write("stdout", "Rendering Hosts.yml from "+spec.Provisioner.Name+"/"+spec.Provisioner.Version+"\n")
 	hostsYML, err := provisioner.RenderHostsFile(&provisioner.GenerateInput{
 		Version:            version,
-		Settings:           spec.Settings,
+		Settings:           settings,
 		Networks:           spec.Networks,
 		Roles:              spec.Roles,
 		UserProperties:     spec.Properties,
@@ -105,43 +181,88 @@ func (e *executors) prepareWorkdir(machine *Machine, spec *Spec, out *tasks.Outp
 	})
 }
 
-// startProvisioned is the provisioned start: prepare the working copy,
-// ensure the scp-sync plugin (a visible step, SHI behavior), vagrant up,
-// then record the UUID the VM landed under.
-func (e *executors) startProvisioned(ctx context.Context, machine *Machine, out *tasks.OutputWriter) error {
+// The provisioned start runs as zoneweaver's orchestration shape (its zone
+// creation pipeline: a parent anchor whose chained children ARE the coarse
+// progress): machine_prepare → machine_plugin_check → machine_vagrant_up,
+// each reporting its own {status} progress like zoneweaver's sub-task
+// executors. Bulk starts arrive as one plain start task instead and run the
+// same steps inline (zoneweaver's bulk controller skips orchestration too).
+
+// prepare executes machine_prepare: render Hosts.yml + refresh the working
+// copy.
+func (e *executors) prepare(ctx context.Context, task *tasks.Task, out *tasks.OutputWriter) error {
+	machine, err := e.provisionedMachine(ctx, task.MachineName)
+	if err != nil {
+		return err
+	}
+	e.taskProgress(task, 10, "rendering_hosts_yml")
 	spec, err := ParseSpec(machine)
 	if err != nil {
 		return err
 	}
+	if perr := e.prepareWorkdir(ctx, machine, spec, out); perr != nil {
+		return perr
+	}
+	e.taskProgress(task, 100, "completed")
+	return nil
+}
+
+// pluginCheck executes machine_plugin_check: ensure vagrant-scp-sync (a
+// visible step, SHI behavior).
+func (e *executors) pluginCheck(ctx context.Context, task *tasks.Task, out *tasks.OutputWriter) error {
 	vagrantExe := VagrantPath(ctx)
 	if vagrantExe == "" {
 		return errors.New("vagrant is not installed")
 	}
-
-	if perr := e.prepareWorkdir(machine, spec, out); perr != nil {
-		return perr
-	}
-
+	e.taskProgress(task, 10, "checking_plugin")
 	out.Write("stdout", "Checking "+scpSyncPlugin+" plugin\n")
 	installed, err := vagrant.PluginInstalled(ctx, vagrantExe, scpSyncPlugin)
 	if err != nil {
 		return err
 	}
 	if !installed {
+		e.taskProgress(task, 40, "installing_plugin")
 		out.Write("stdout", "Installing "+scpSyncPlugin+"\n")
 		if ierr := vagrant.PluginInstall(ctx, vagrantExe, scpSyncPlugin, out.Write); ierr != nil {
 			return ierr
 		}
 	}
+	e.taskProgress(task, 100, "completed")
+	return nil
+}
 
+// vagrantUp executes machine_vagrant_up: `vagrant up`, then record the VM
+// identity vagrant produced.
+func (e *executors) vagrantUp(ctx context.Context, task *tasks.Task, out *tasks.OutputWriter) error {
+	machine, err := e.provisionedMachine(ctx, task.MachineName)
+	if err != nil {
+		return err
+	}
+	if exe := VBoxManagePath(ctx); exe != "" {
+		defer e.refreshStatus(machine.Name, exe)
+	}
+	vagrantExe := VagrantPath(ctx)
+	if vagrantExe == "" {
+		return errors.New("vagrant is not installed")
+	}
+
+	e.taskProgress(task, 5, "running_vagrant_up")
 	out.Write("stdout", "Running vagrant up in "+*machine.Home+"\n")
 	if uerr := vagrant.Up(ctx, vagrantExe, *machine.Home, true, out.Write); uerr != nil {
 		return uerr
 	}
 
-	// The VM's identity from vagrant's own state — the VirtualBox name is
-	// Hosts.rb's, so the UUID is what ties the VM to this row (discovery
-	// matches on it from now on).
+	e.taskProgress(task, 90, "recording_identity")
+	e.recordIdentity(machine, out)
+	e.taskProgress(task, 100, "completed")
+	return nil
+}
+
+// recordIdentity ties the VM vagrant built to the registry row: the
+// VirtualBox name is Hosts.rb's own, so the UUID from the working
+// directory's vagrant state is the join key (discovery matches on it from
+// now on). The welcome page is narrated when the provision already wrote it.
+func (e *executors) recordIdentity(machine *Machine, out *tasks.OutputWriter) {
 	if uuid := vagrantMachineUUID(*machine.Home); uuid != "" {
 		if serr := e.store.SetUUID(context.Background(), machine.Name, uuid); serr != nil {
 			mlog().Error("record machine uuid", "machine", machine.Name, "error", serr)
@@ -152,7 +273,52 @@ func (e *executors) startProvisioned(ctx context.Context, machine *Machine, out 
 	if url := WelcomeURL(*machine.Home); url != "" {
 		out.Write("stdout", "Welcome page: "+url+"\n")
 	}
+}
+
+// startProvisioned runs the whole pipeline inline — the bulk-start path,
+// where each machine is one plain start task.
+func (e *executors) startProvisioned(ctx context.Context, task *tasks.Task, machine *Machine, out *tasks.OutputWriter) error {
+	spec, err := ParseSpec(machine)
+	if err != nil {
+		return err
+	}
+	vagrantExe := VagrantPath(ctx)
+	if vagrantExe == "" {
+		return errors.New("vagrant is not installed")
+	}
+
+	e.taskProgress(task, 5, "rendering_hosts_yml")
+	if perr := e.prepareWorkdir(ctx, machine, spec, out); perr != nil {
+		return perr
+	}
+
+	e.taskProgress(task, 30, "checking_plugin")
+	if perr := e.pluginCheck(ctx, nil, out); perr != nil {
+		return perr
+	}
+
+	e.taskProgress(task, 40, "running_vagrant_up")
+	out.Write("stdout", "Running vagrant up in "+*machine.Home+"\n")
+	if uerr := vagrant.Up(ctx, vagrantExe, *machine.Home, true, out.Write); uerr != nil {
+		return uerr
+	}
+
+	e.taskProgress(task, 90, "recording_identity")
+	e.recordIdentity(machine, out)
 	return nil
+}
+
+// provisionedMachine loads a machine and requires it to be
+// provisioner-managed.
+func (e *executors) provisionedMachine(ctx context.Context, name string) (*Machine, error) {
+	machine, err := e.store.Get(ctx, name)
+	if err != nil {
+		return nil, fmt.Errorf("machine %s: %w", name, err)
+	}
+	if !machine.Provisioned() {
+		return nil, errors.New("machine " + name + " is not provisioner-managed")
+	}
+	return machine, nil
 }
 
 // runVagrantOp is the shared shape of the provision and sync operations:
@@ -179,9 +345,11 @@ func (e *executors) runVagrantOp(ctx context.Context, task *tasks.Task, out *tas
 		if serr != nil {
 			return serr
 		}
-		if perr := e.prepareWorkdir(machine, spec, out); perr != nil {
+		e.taskProgress(task, 10, "rendering_hosts_yml")
+		if perr := e.prepareWorkdir(ctx, machine, spec, out); perr != nil {
 			return perr
 		}
+		e.taskProgress(task, 25, "running_vagrant_provision")
 	}
 
 	out.Write("stdout", "Running vagrant "+verb+" in "+*machine.Home+"\n")

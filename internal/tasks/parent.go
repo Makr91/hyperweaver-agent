@@ -61,11 +61,16 @@ func (q *Queue) Cancel(ctx context.Context, id string) (wasRunning bool, err err
 			}
 			q.mu.Unlock()
 			if !inFlight {
-				// Running in the database but not in this process — a stale
-				// row (crash leftover); close it out directly.
+				// Running in the database but not in this process: a parent
+				// anchor (never dispatched — child completions drive it) or a
+				// stale crash leftover; close it out directly. The anchor
+				// leaves running FIRST so child completions no longer
+				// recompute it, then the cascade takes its chain down —
+				// cancelling an orchestration cancels the whole pipeline.
 				if ferr := q.store.Finish(ctx, id, StatusCancelled, nil, -1, nil); ferr != nil {
 					return false, ferr
 				}
+				q.cancelChildren(ctx, id)
 				if task.ParentTaskID != nil {
 					q.updateParentProgress(ctx, *task.ParentTaskID)
 				}
@@ -75,6 +80,28 @@ func (q *Queue) Cancel(ctx context.Context, id string) (wasRunning bool, err err
 
 		default:
 			return false, &NotCancellableError{Status: task.Status}
+		}
+	}
+}
+
+// cancelChildren cancels every unfinished child of a cancelled parent:
+// pending children flip immediately, running ones get their contexts killed
+// (D-F). Failures are logged — the parent is already terminal either way.
+func (q *Queue) cancelChildren(ctx context.Context, parentID string) {
+	for _, status := range []string{StatusPending, StatusRunning} {
+		children, err := q.store.List(ctx, &ListFilter{
+			ParentTaskID: parentID,
+			Status:       status,
+			Limit:        1000,
+		})
+		if err != nil {
+			tlog().Error("list children for cascade cancel", "task_id", parentID, "error", err)
+			continue
+		}
+		for _, child := range children {
+			if _, cerr := q.Cancel(ctx, child.ID); cerr != nil {
+				tlog().Warn("cascade-cancel child task", "task_id", child.ID, "error", cerr)
+			}
 		}
 	}
 }

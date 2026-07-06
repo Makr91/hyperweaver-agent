@@ -90,7 +90,8 @@ func BuildContext(in *GenerateInput) map[string]any {
 
 	// 2. Per-role installer vars + boolean enable flags, both casings
 	// (SHI emits ::rolename::/::ROLENAME::).
-	for _, role := range in.Roles {
+	for i := range in.Roles {
+		role := &in.Roles[i]
 		upper := sanitizeVar(role.Name)
 		lower := strings.ToLower(upper)
 		ctx[lower] = role.Enabled
@@ -164,11 +165,11 @@ func RenderHostsFile(in *GenerateInput) ([]byte, error) {
 // for templates that iterate instead of testing flattened flags.
 func rolesContext(roles []RoleInput) []map[string]any {
 	out := make([]map[string]any, 0, len(roles))
-	for _, role := range roles {
+	for i := range roles {
 		out = append(out, map[string]any{
-			"name":    role.Name,
-			"enabled": role.Enabled,
-			"files":   role.Files,
+			"name":    roles[i].Name,
+			"enabled": roles[i].Enabled,
+			"files":   roles[i].Files,
 		})
 	}
 	return out

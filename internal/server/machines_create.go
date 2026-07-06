@@ -26,7 +26,7 @@ import (
 
 // serverIDPattern is the numeric server_id vocabulary (/machines/ids
 // constraints).
-var serverIDPattern = regexp.MustCompile(`^[0-9]{1,8}$`)
+var serverIDPattern = regexp.MustCompile(`^\d{1,8}$`)
 
 // createMachineRequest is the POST /machines body: the machine name plus
 // the creation spec, stored verbatim.
@@ -53,9 +53,9 @@ func (s *Server) validateSpec(w http.ResponseWriter, spec *machines.Spec) bool {
 		taskError(w, http.StatusInternalServerError, "Failed to resolve provisioner")
 		return false
 	}
-	for _, role := range spec.Roles {
-		if !provisioner.ValidName(role.Name) {
-			taskError(w, http.StatusBadRequest, "role name "+role.Name+" is not usable")
+	for i := range spec.Roles {
+		if !provisioner.ValidName(spec.Roles[i].Name) {
+			taskError(w, http.StatusBadRequest, "role name "+spec.Roles[i].Name+" is not usable")
 			return false
 		}
 	}
@@ -70,6 +70,12 @@ func (s *Server) validateSpec(w http.ResponseWriter, spec *machines.Spec) bool {
 			return false
 		}
 		spec.SafeIDPath = clean
+	}
+	switch spec.SyncMethod {
+	case "", machines.SyncRsync, machines.SyncSCP:
+	default:
+		taskError(w, http.StatusBadRequest, "sync_method must be rsync or scp")
+		return false
 	}
 	if spec.Settings == nil {
 		spec.Settings = map[string]any{}
@@ -129,8 +135,17 @@ func (s *Server) handleCreateMachine(w http.ResponseWriter, r *http.Request) {
 	if !s.validateSpec(w, &body.Spec) {
 		return
 	}
+	s.createMachineRow(w, r, body.Name, &body.Spec, body.StartAfterCreate, nil)
+}
 
-	serverID, err := s.resolveServerID(r.Context(), &body.Spec)
+// createMachineRow finishes a create or clone: assign the server_id, claim a
+// working directory, store the row (status configured — no VM until first
+// start), and optionally queue the first start pipeline. extra entries merge
+// into the 201 response (the clone's source_machine et al.).
+func (s *Server) createMachineRow(w http.ResponseWriter, r *http.Request, name string,
+	spec *machines.Spec, startAfter bool, extra map[string]any,
+) {
+	serverID, err := s.resolveServerID(r.Context(), spec)
 	if err != nil {
 		taskError(w, http.StatusBadRequest, err.Error())
 		return
@@ -142,7 +157,7 @@ func (s *Server) handleCreateMachine(w http.ResponseWriter, r *http.Request) {
 		taskError(w, http.StatusInternalServerError, "Failed to create machine")
 		return
 	}
-	home, err := safepath.Under(machinesRoot, provisioner.MachineDirName(body.Name))
+	home, err := safepath.Under(machinesRoot, provisioner.MachineDirName(name))
 	if err != nil {
 		taskError(w, http.StatusBadRequest, "Machine name does not sanitize to a usable directory")
 		return
@@ -157,7 +172,7 @@ func (s *Server) handleCreateMachine(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	spec, err := json.Marshal(body.Spec)
+	raw, err := json.Marshal(spec)
 	if err != nil {
 		slog.Error("serialize machine spec", "error", err)
 		taskError(w, http.StatusInternalServerError, "Failed to create machine")
@@ -168,14 +183,14 @@ func (s *Server) handleCreateMachine(w http.ResponseWriter, r *http.Request) {
 		hostname = "unknown"
 	}
 	machine, err := s.machines.Create(r.Context(), &machines.NewMachine{
-		Name:     body.Name,
+		Name:     name,
 		Host:     hostname,
 		Home:     home,
 		ServerID: serverID,
-		Spec:     spec,
+		Spec:     raw,
 	})
 	if err != nil {
-		slog.Error("create machine", "machine", body.Name, "error", err)
+		slog.Error("create machine", "machine", name, "error", err)
 		if strings.Contains(err.Error(), "UNIQUE") {
 			taskError(w, http.StatusConflict, "Machine name or server_id already in use")
 			return
@@ -183,9 +198,10 @@ func (s *Server) handleCreateMachine(w http.ResponseWriter, r *http.Request) {
 		taskError(w, http.StatusInternalServerError, "Failed to create machine")
 		return
 	}
+	createdBy := auth.FromContext(r.Context()).Name
 	slog.Info("machine created", "machine", machine.Name,
-		"provisioner", body.Provisioner.Name+"/"+body.Provisioner.Version,
-		"by", auth.FromContext(r.Context()).Name)
+		"provisioner", spec.Provisioner.Name+"/"+spec.Provisioner.Version,
+		"by", createdBy)
 
 	response := map[string]any{
 		"success":      true,
@@ -193,17 +209,15 @@ func (s *Server) handleCreateMachine(w http.ResponseWriter, r *http.Request) {
 		"machine_name": machine.Name,
 		"message":      "Machine created successfully",
 	}
-	if body.StartAfterCreate {
-		task, terr := s.tasks.Store().Create(r.Context(), &tasks.NewTask{
-			MachineName: machine.Name,
-			Operation:   machines.OpStart,
-			Priority:    tasks.PriorityMedium,
-			CreatedBy:   auth.FromContext(r.Context()).Name,
-		})
+	for key, value := range extra {
+		response[key] = value
+	}
+	if startAfter {
+		parent, terr := s.queueStartPipeline(r.Context(), machine.Name, createdBy)
 		if terr != nil {
 			slog.Error("queue first start", "machine", machine.Name, "error", terr)
 		} else {
-			response["task_id"] = task.ID
+			response["task_id"] = parent.ID
 			response["message"] = "Machine created; first start queued"
 		}
 	}
@@ -211,6 +225,103 @@ func (s *Server) handleCreateMachine(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusCreated)
 	if werr := json.NewEncoder(w).Encode(response); werr != nil {
 		slog.Error("write create response", "error", werr)
+	}
+}
+
+// handleCloneMachine clones a provisioner-managed machine — zoneweaver's
+// clone contract on SHI's clone model (design §4 ruling: a metadata copy,
+// fresh name and server_id, NO VM until first start — so no snapshots, no
+// task orchestration, a synchronous registry insert). settings.hostname is
+// required and domain defaults from the source (zoneweaver rule); overrides
+// carries memory/vcpus; consoleport never survives a clone; cloned networks
+// lose their MAC and addressing so source and clone can never collide
+// (zoneweaver strips NIC identity the same way).
+func (s *Server) handleCloneMachine(w http.ResponseWriter, r *http.Request) {
+	source := s.findMachine(w, r)
+	if source == nil {
+		return
+	}
+	if len(source.Spec) == 0 {
+		taskError(w, http.StatusBadRequest,
+			"Only provisioner-managed machines can be cloned — this machine has no creation spec")
+		return
+	}
+
+	var body struct {
+		Name             string         `json:"name"`
+		Settings         map[string]any `json:"settings"`
+		Overrides        map[string]any `json:"overrides"`
+		StartAfterCreate bool           `json:"start_after_create"`
+	}
+	if err := decodeBody(r, &body); err != nil {
+		taskError(w, http.StatusBadRequest, "Invalid JSON body")
+		return
+	}
+	if !validMachineName(body.Name) {
+		taskError(w, http.StatusBadRequest, "Invalid machine name")
+		return
+	}
+	if hostname, _ := body.Settings["hostname"].(string); hostname == "" {
+		taskError(w, http.StatusBadRequest,
+			"settings.hostname is required — a clone must not reuse the source hostname")
+		return
+	}
+	if _, err := s.machines.Get(r.Context(), body.Name); err == nil {
+		taskError(w, http.StatusConflict, "Machine already exists")
+		return
+	} else if !errors.Is(err, machines.ErrNotFound) {
+		slog.Error("check machine existence", "machine", body.Name, "error", err)
+		taskError(w, http.StatusInternalServerError, "Failed to clone machine")
+		return
+	}
+
+	spec, err := machines.ParseSpec(source)
+	if err != nil {
+		slog.Error("parse source machine spec", "machine", source.Name, "error", err)
+		taskError(w, http.StatusInternalServerError, "Failed to clone machine")
+		return
+	}
+	if spec.Settings == nil {
+		spec.Settings = map[string]any{}
+	}
+	// server_id is never inherited (fresh MAX+1) unless the caller names one.
+	delete(spec.Settings, "server_id")
+	// consoleport conflicts between source and clone (zoneweaver deletes it).
+	delete(spec.Settings, "consoleport")
+	for key, value := range body.Settings {
+		spec.Settings[key] = value
+	}
+	for key, value := range body.Overrides {
+		spec.Settings[key] = value
+	}
+	stripCloneNetworks(spec.Networks)
+	spec.StartAfterCreate = false
+
+	// Re-validate: the source's provisioner version or safe-ID file may be
+	// gone by now — better a 400 here than a failed first start.
+	if !s.validateSpec(w, spec) {
+		return
+	}
+	slog.Info("machine clone requested", "source", source.Name, "clone", body.Name,
+		"by", auth.FromContext(r.Context()).Name)
+	s.createMachineRow(w, r, body.Name, spec, body.StartAfterCreate, map[string]any{
+		"source_machine": source.Name,
+	})
+}
+
+// stripCloneNetworks removes identity and addressing from cloned network
+// entries — MACs regenerate and addressing re-derives on the clone's first
+// render, so source and clone never collide (zoneweaver's clone strips
+// physical/mac_addr off NICs and address/gateway/dns/netmask off networks).
+func stripCloneNetworks(networks []any) {
+	for _, entry := range networks {
+		network, ok := entry.(map[string]any)
+		if !ok {
+			continue
+		}
+		for _, key := range []string{"mac", "address", "gateway", "netmask", "dns"} {
+			delete(network, key)
+		}
 	}
 }
 

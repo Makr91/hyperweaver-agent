@@ -105,7 +105,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, _ *http.Request) {
 		// Advertise ["vnc"] only when a usable VBoxVNC module exists.
 		Console:  []string{},
 		Features: s.features(),
-		Uptime:             int64(time.Since(s.startedAt).Seconds()),
+		Uptime:   int64(time.Since(s.startedAt).Seconds()),
 	}
 
 	w.Header().Set("Content-Type", "application/json")

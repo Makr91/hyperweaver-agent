@@ -243,7 +243,10 @@ func operationResponse(w http.ResponseWriter, taskID any, machineName, operation
 	writeJSON(w, payload)
 }
 
-// handleStartMachine queues a start task.
+// handleStartMachine queues a start task. Provisioned machines get the
+// decomposed pipeline (zoneweaver's orchestration model): a start parent
+// anchor whose chained children — prepare, plugin check, vagrant up — the
+// aggregation rolls up into coarse progress. Raw machines stay one task.
 func (s *Server) handleStartMachine(w http.ResponseWriter, r *http.Request) {
 	machine := s.findMachine(w, r)
 	if machine == nil {
@@ -266,11 +269,24 @@ func (s *Server) handleStartMachine(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	createdBy := auth.FromContext(r.Context()).Name
+	if machine.Provisioned() {
+		parent, err := s.queueStartPipeline(r.Context(), machine.Name, createdBy)
+		if err != nil {
+			slog.Error("queue start pipeline", "machine", machine.Name, "error", err)
+			taskError(w, http.StatusInternalServerError, "Failed to queue start task")
+			return
+		}
+		operationResponse(w, parent.ID, machine.Name, machines.OpStart, tasks.StatusPending,
+			"Start pipeline queued (prepare → plugin check → vagrant up)")
+		return
+	}
+
 	task, err := s.tasks.Store().Create(r.Context(), &tasks.NewTask{
 		MachineName: machine.Name,
 		Operation:   machines.OpStart,
 		Priority:    tasks.PriorityMedium,
-		CreatedBy:   auth.FromContext(r.Context()).Name,
+		CreatedBy:   createdBy,
 	})
 	if err != nil {
 		slog.Error("queue start task", "machine", machine.Name, "error", err)
@@ -279,6 +295,48 @@ func (s *Server) handleStartMachine(w http.ResponseWriter, r *http.Request) {
 	}
 	operationResponse(w, task.ID, machine.Name, machines.OpStart, tasks.StatusPending,
 		"Start task queued successfully")
+}
+
+// queueStartPipeline creates the provisioned start's orchestration: a start
+// parent anchor plus its chained children (zoneweaver's
+// createZoneCreationSubTasks shape — every child carries parent_task_id and
+// depends_on its predecessor). Cancelling the parent cascades down the chain.
+func (s *Server) queueStartPipeline(ctx context.Context, machineName, createdBy string) (*tasks.Task, error) {
+	parent, err := s.tasks.Store().Create(ctx, &tasks.NewTask{
+		MachineName: machineName,
+		Operation:   machines.OpStart,
+		Priority:    tasks.PriorityMedium,
+		CreatedBy:   createdBy,
+		Parent:      true,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	previous := ""
+	for _, operation := range []string{machines.OpPrepare, machines.OpPluginCheck, machines.OpVagrantUp} {
+		nt := tasks.NewTask{
+			MachineName:  machineName,
+			Operation:    operation,
+			Priority:     tasks.PriorityMedium,
+			CreatedBy:    createdBy,
+			ParentTaskID: &parent.ID,
+		}
+		if previous != "" {
+			dependsOn := previous
+			nt.DependsOn = &dependsOn
+		}
+		child, cerr := s.tasks.Store().Create(ctx, &nt)
+		if cerr != nil {
+			// The cascade sweeps whatever children made it in.
+			if _, xerr := s.tasks.Cancel(ctx, parent.ID); xerr != nil {
+				slog.Warn("cancel half-built start pipeline", "task_id", parent.ID, "error", xerr)
+			}
+			return nil, cerr
+		}
+		previous = child.ID
+	}
+	return parent, nil
 }
 
 // cancelPendingStarts cancels pending start tasks before a stop (Node agent

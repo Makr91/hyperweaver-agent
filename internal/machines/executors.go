@@ -13,15 +13,21 @@ import (
 )
 
 // Machine lifecycle operations (task queue vocabulary, Node-agent parity).
+// The machine_* operations are the provisioned start pipeline's children
+// (zoneweaver's zone_create_* sub-task model): chained under a start parent
+// anchor whose aggregation IS the coarse progress.
 const (
-	OpStart     = "start"
-	OpStop      = "stop"
-	OpRestart   = "restart" // never dispatched: a restart is a stop→start chain
-	OpSuspend   = "suspend"
-	OpDelete    = "delete"
-	OpDiscover  = "discover"
-	OpProvision = "provision"
-	OpSync      = "sync"
+	OpStart       = "start"
+	OpStop        = "stop"
+	OpRestart     = "restart" // never dispatched: a restart is a stop→start chain
+	OpSuspend     = "suspend"
+	OpDelete      = "delete"
+	OpDiscover    = "discover"
+	OpProvision   = "provision"
+	OpSync        = "sync"
+	OpPrepare     = "machine_prepare"
+	OpPluginCheck = "machine_plugin_check"
+	OpVagrantUp   = "machine_vagrant_up"
 )
 
 // stopMetadata is the stop/delete task metadata document.
@@ -52,6 +58,9 @@ func RegisterExecutors(queue *tasks.Queue, store *Store, reconciler *Reconciler,
 	queue.Register(OpDiscover, tasks.Executor{Run: e.discover})
 	queue.Register(OpProvision, tasks.Executor{Run: e.provision})
 	queue.Register(OpSync, tasks.Executor{Run: e.sync})
+	queue.Register(OpPrepare, tasks.Executor{Run: e.prepare})
+	queue.Register(OpPluginCheck, tasks.Executor{Run: e.pluginCheck})
+	queue.Register(OpVagrantUp, tasks.Executor{Run: e.vagrantUp, OnCancel: e.cancelStart})
 }
 
 type executors struct {
@@ -135,7 +144,7 @@ func (e *executors) start(ctx context.Context, task *tasks.Task, out *tasks.Outp
 	defer e.refreshStatus(machine.Name, vboxExe)
 
 	if machine.Provisioned() {
-		return e.startProvisioned(ctx, machine, out)
+		return e.startProvisioned(ctx, task, machine, out)
 	}
 
 	out.Write("stdout", "Starting "+machine.Name+" (VBoxManage startvm --type headless)\n")

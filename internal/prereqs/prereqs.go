@@ -1,5 +1,7 @@
 // Package prereqs detects the external tools the provisioning engine drives
-// (Vagrant, VirtualBox, Git) — SHI parity: presence + version display.
+// (Vagrant, VirtualBox, Git, rsync) — SHI parity: presence + version display.
+// rsync's version also feeds the sync-method platform rule (macOS auto-falls
+// back to SCP when the system rsync is the ancient Apple 2.x build).
 package prereqs
 
 import (
@@ -55,6 +57,7 @@ func Detect(ctx context.Context) []Tool {
 		probePath(probeCtx, "vagrant", lookPath("vagrant"), "--version"),
 		probePath(probeCtx, "virtualbox", lookupVirtualBox(), "--version"),
 		probePath(probeCtx, "git", lookPath("git"), "--version"),
+		probePath(probeCtx, "rsync", lookPath("rsync"), "--version"),
 	}
 
 	cached = tools

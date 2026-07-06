@@ -226,12 +226,13 @@ func materializeInstallers(dir string, roles []RoleInput) error {
 	if err := os.MkdirAll(root, 0o750); err != nil {
 		return err
 	}
-	for _, role := range roles {
-		if !ValidName(role.Name) {
-			return fmt.Errorf("role name %q is unusable as a directory", role.Name)
+	for i := range roles {
+		name := roles[i].Name
+		if !ValidName(name) {
+			return fmt.Errorf("role name %q is unusable as a directory", name)
 		}
 		for _, sub := range installerSubdirs {
-			target, err := safepath.Under(root, filepath.Join(role.Name, sub))
+			target, err := safepath.Under(root, filepath.Join(name, sub))
 			if err != nil {
 				return err
 			}
