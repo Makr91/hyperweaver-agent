@@ -37,6 +37,7 @@ import (
 	"github.com/Makr91/hyperweaver-agent/internal/provisioner"
 	"github.com/Makr91/hyperweaver-agent/internal/secrets"
 	"github.com/Makr91/hyperweaver-agent/internal/server"
+	"github.com/Makr91/hyperweaver-agent/internal/sshrun"
 	"github.com/Makr91/hyperweaver-agent/internal/tasks"
 	"github.com/Makr91/hyperweaver-agent/internal/tray"
 	"github.com/Makr91/hyperweaver-agent/internal/updater"
@@ -384,8 +385,10 @@ func setupTasks(cfg *config.Config, secretsStore *secrets.Store) (*agentSystems,
 		return nil, err
 	}
 	// agent.sqlite carries every core-state family: the machine registry's
-	// migrations plus the artifact cache's, one ordered list.
+	// migrations plus the artifact cache's and the box-template registry's,
+	// one ordered list.
 	agentMigrations := append(append([]string{}, machines.Migrations...), assets.Migrations...)
+	agentMigrations = append(agentMigrations, machines.TemplateMigrations...)
 	agentDB, err := openDB(agentPath, agentMigrations)
 	if err != nil {
 		_ = tasksDB.Close()
@@ -497,6 +500,33 @@ func setupTasks(cfg *config.Config, secretsStore *secrets.Store) (*agentSystems,
 		closer()
 		return nil, err
 	}
+	templatesDir, err := cfg.TemplatesDir()
+	if err != nil {
+		closer()
+		return nil, err
+	}
+
+	// The agent's own provisioning SSH key (the base generates one at
+	// startup): the pipeline's auth fallback of LAST RESORT — used only when
+	// the document supplies neither a key path nor a password. Nothing
+	// auto-injects it into guests (the base-session correction: cloud-init
+	// sshkey comes only from the document's own cloud_init.sshkey). A
+	// generation failure only degrades the fallback.
+	provisionKeyPath := cfg.ProvisionKeyPath()
+	if _, kerr := sshrun.EnsureProvisionKey(provisionKeyPath); kerr != nil {
+		slog.Warn("provisioning SSH key setup failed; document credentials required", "error", kerr)
+	}
+
+	templateSources := make([]machines.TemplateSource, 0, len(cfg.TemplateSources.Sources))
+	for _, source := range cfg.TemplateSources.Sources {
+		templateSources = append(templateSources, machines.TemplateSource{
+			Name:      source.Name,
+			URL:       source.URL,
+			Enabled:   source.Enabled,
+			Default:   source.Default,
+			AuthToken: source.AuthToken,
+		})
+	}
 
 	machineStore := machines.NewStore(agentDB)
 	reconciler := machines.NewReconciler(machineStore, store,
@@ -511,9 +541,15 @@ func setupTasks(cfg *config.Config, secretsStore *secrets.Store) (*agentSystems,
 			Assets:                  pipelineAssets,
 			CACertPath:              cfg.SSLCACertPath(),
 			CAKeyPath:               cfg.SSLCAKeyPath(),
-			KeepFailedRunning:       cfg.Provisioning.KeepFailedMachinesRunning,
 			DefaultSyncMethod:       cfg.Provisioning.DefaultSyncMethod,
 			DefaultNetworkInterface: cfg.Provisioning.DefaultNetworkInterface,
+			TemplatesDir:            templatesDir,
+			TemplateSources:         templateSources,
+			ProvisionKeyPath:        provisionKeyPath,
+			SSHTimeout:              time.Duration(cfg.Provisioning.SSH.TimeoutSeconds) * time.Second,
+			SSHPollInterval:         time.Duration(cfg.Provisioning.SSH.PollIntervalSeconds) * time.Second,
+			AnsibleInstallTimeout:   time.Duration(cfg.Provisioning.AnsibleInstallTimeoutSeconds) * time.Second,
+			PlaybookTimeout:         time.Duration(cfg.Provisioning.PlaybookTimeoutSeconds) * time.Second,
 		})
 
 	// Host power operations run through the queue too (config-gated at the

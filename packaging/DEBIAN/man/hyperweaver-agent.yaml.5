@@ -295,23 +295,55 @@ under
 .Cm data.dir .
 .It Cm machines_dir
 Root of the per-machine working directories: the materialized provisioner
-copy, the generated Hosts.yml, id-files, installers, and ssls trees vagrant
-runs from. Empty selects
+copy, the rendered Hosts.yml, id-files, installers, ssls trees, and the
+machine's disk media. Empty selects
 .Pa machines
 under
 .Cm data.dir .
-.It Cm keep_failed_machines_running
-Boolean leaving a machine running after a failed vagrant up for debugging
-(SHI's keepfailedserversrunning). false powers the half-provisioned VM off
-(default: true).
 .It Cm default_sync_method
-Sync method for machines whose spec sets none: "rsync" or "scp" (SHI's
-global preference; platform rules still apply — forced rsync on Windows,
-macOS auto-fallback to SCP on the ancient Apple rsync) (default: "rsync").
+Sync method for machines whose spec sets none, landing as the rendered
+document's folders[].type: "rsync" or "scp" (platform rules still apply —
+forced rsync on Windows, macOS auto-fallback to SCP on the ancient Apple
+rsync; vagrant's embedded rsync is used when none is on PATH)
+(default: "rsync").
 .It Cm default_network_interface
 Host bridge interface injected into templates as DEFAULT_NETWORK_INTERFACE
 when the spec sets none; values come from GET /provisioning/bridged-interfaces
 (default: empty).
+.It Cm playbook_timeout_seconds
+Timeout for one in-guest ansible-playbook run, minimum 60 (default: 21600).
+.It Cm ansible_install_timeout_seconds
+Timeout for the in-guest ansible/collection installation steps, minimum 60
+(default: 300).
+.It Cm ssh.key_path
+The agent's own provisioning private key — the SSH-auth fallback when the
+machine's document supplies neither a key nor a password; generated
+(ed25519) at startup when absent. Empty selects
+.Pa ssh/provision_key
+beside the configuration file.
+.It Cm ssh.timeout_seconds
+Total wait for a guest's SSH to become available; the document's
+settings.setup_wait wins when larger. Minimum 10 (default: 300).
+.It Cm ssh.poll_interval_seconds
+Interval between SSH availability checks, minimum 1 (default: 10).
+.El
+.Ss template_sources
+Box-template registry: downloaded box disk images machines clone from
+(the create orchestration's storage step), and the
+Vagrant/BoxVault-compatible registries serving them.
+.Bl -tag -width "local_storage_path"
+.It Cm local_storage_path
+Template storage root, laid out
+.Pa <root>/<organization>/<box>/<version>/ .
+Empty selects
+.Pa templates
+under
+.Cm data.dir .
+.It Cm sources
+List of registries: name, url, enabled, default, auth_token. The entry
+named "Default Registry" (or flagged default) serves requests that name no
+source; auth_token authenticates private boxes and never enters task
+metadata (default: the STARTcloud BoxVault registry).
 .El
 .Ss assets
 Installer file cache (the artifacts capability token): hash-verified

@@ -91,6 +91,27 @@ func (c *Config) validate() error {
 		return fmt.Errorf("provisioning.default_sync_method %q must be rsync or scp",
 			c.Provisioning.DefaultSyncMethod)
 	}
+	if c.Provisioning.PlaybookTimeoutSeconds < 60 {
+		return fmt.Errorf("provisioning.playbook_timeout_seconds %d must be at least 60",
+			c.Provisioning.PlaybookTimeoutSeconds)
+	}
+	if c.Provisioning.AnsibleInstallTimeoutSeconds < 60 {
+		return fmt.Errorf("provisioning.ansible_install_timeout_seconds %d must be at least 60",
+			c.Provisioning.AnsibleInstallTimeoutSeconds)
+	}
+	if c.Provisioning.SSH.TimeoutSeconds < 10 {
+		return fmt.Errorf("provisioning.ssh.timeout_seconds %d must be at least 10",
+			c.Provisioning.SSH.TimeoutSeconds)
+	}
+	if c.Provisioning.SSH.PollIntervalSeconds < 1 {
+		return fmt.Errorf("provisioning.ssh.poll_interval_seconds %d must be at least 1",
+			c.Provisioning.SSH.PollIntervalSeconds)
+	}
+	for i := range c.TemplateSources.Sources {
+		if c.TemplateSources.Sources[i].Name == "" || c.TemplateSources.Sources[i].URL == "" {
+			return fmt.Errorf("template_sources.sources[%d] needs both name and url", i)
+		}
+	}
 	return c.Database.SQLiteOptions.validate()
 }
 

@@ -8,26 +8,22 @@ import (
 	"time"
 
 	"github.com/Makr91/hyperweaver-agent/internal/tasks"
-	"github.com/Makr91/hyperweaver-agent/internal/vagrant"
 	"github.com/Makr91/hyperweaver-agent/internal/vbox"
 )
 
-// Machine lifecycle operations (task queue vocabulary, Node-agent parity).
-// The machine_* operations are the provisioned start pipeline's children
-// (zoneweaver's zone_create_* sub-task model): chained under a start parent
-// anchor whose aggregation IS the coarse progress.
+// Machine lifecycle operations (task queue vocabulary). Lifecycle is native
+// VBoxManage for every machine (the zoneweaver model — the agent drives the
+// hypervisor and the guest itself; vagrant/Hosts.rb are never executed). The
+// machine_create_*/machine_* provisioning operations are the orchestration
+// children of the create and provision chains.
 const (
-	OpStart       = "start"
-	OpStop        = "stop"
-	OpRestart     = "restart" // never dispatched: a restart is a stop→start chain
-	OpSuspend     = "suspend"
-	OpDelete      = "delete"
-	OpDiscover    = "discover"
-	OpProvision   = "provision"
-	OpSync        = "sync"
-	OpPrepare     = "machine_prepare"
-	OpPluginCheck = "machine_plugin_check"
-	OpVagrantUp   = "machine_vagrant_up"
+	OpStart    = "start"
+	OpStop     = "stop"
+	OpRestart  = "restart" // never dispatched: a restart is a stop→start chain
+	OpSuspend  = "suspend"
+	OpDelete   = "delete"
+	OpDiscover = "discover"
+	OpPrepare  = "machine_prepare"
 )
 
 // stopMetadata is the stop/delete task metadata document.
@@ -35,14 +31,9 @@ type stopMetadata struct {
 	Force bool `json:"force"`
 }
 
-// RegisterExecutors wires the machine lifecycle operations into the task
-// queue. Lifecycle is dual-path (the provisioning phase's completion of
-// Mark's 2026-07-05 ruling): machines carrying a creation spec start
-// through vagrant — the pipeline in provisioned.go, where the unchanged
-// Hosts.rb does the real work — while raw machines and all power-down
-// actions speak VBoxManage directly. shutdownTimeout is the graceful-stop
-// ACPI grace window (the Node agent's
-// zones.orchestration.timeouts.zone_shutdown).
+// RegisterExecutors wires the machine operations into the task queue:
+// lifecycle, the create-orchestration children, the provision-pipeline
+// children, and the template download.
 func RegisterExecutors(queue *tasks.Queue, store *Store, reconciler *Reconciler, shutdownTimeout time.Duration, env *ProvisionEnv) {
 	e := &executors{
 		queue:           queue,
@@ -56,11 +47,21 @@ func RegisterExecutors(queue *tasks.Queue, store *Store, reconciler *Reconciler,
 	queue.Register(OpSuspend, tasks.Executor{Run: e.suspend})
 	queue.Register(OpDelete, tasks.Executor{Run: e.deleteMachine})
 	queue.Register(OpDiscover, tasks.Executor{Run: e.discover})
-	queue.Register(OpProvision, tasks.Executor{Run: e.provision})
-	queue.Register(OpSync, tasks.Executor{Run: e.sync})
-	queue.Register(OpPrepare, tasks.Executor{Run: e.prepare})
-	queue.Register(OpPluginCheck, tasks.Executor{Run: e.pluginCheck})
-	queue.Register(OpVagrantUp, tasks.Executor{Run: e.vagrantUp, OnCancel: e.cancelStart})
+
+	// Create-orchestration children (storage/config carry post-kill cleanup:
+	// a cancellation mid-clone or mid-configure must not leave debris).
+	queue.Register(OpPrepare, tasks.Executor{Run: e.prepareDocument})
+	queue.Register(OpCreateStorage, tasks.Executor{Run: e.createStorage, OnCancel: e.cancelCreateStorage})
+	queue.Register(OpCreateConfig, tasks.Executor{Run: e.createConfig, OnCancel: e.cancelCreateConfig})
+	queue.Register(OpCreateFinalize, tasks.Executor{Run: e.createFinalize})
+	queue.Register(OpTemplateDownload, tasks.Executor{Run: e.templateDownload})
+
+	// Provision-pipeline children.
+	queue.Register(OpWaitSSH, tasks.Executor{Run: e.waitSSH})
+	queue.Register(OpSyncParent, tasks.Executor{Run: e.parentAnchor})
+	queue.Register(OpSyncFolder, tasks.Executor{Run: e.syncFolder})
+	queue.Register(OpProvisionParent, tasks.Executor{Run: e.parentAnchor})
+	queue.Register(OpProvisionPlaybook, tasks.Executor{Run: e.provisionPlaybook})
 }
 
 type executors struct {
@@ -69,17 +70,6 @@ type executors struct {
 	reconciler      *Reconciler
 	shutdownTimeout time.Duration
 	env             *ProvisionEnv
-}
-
-// provision runs `vagrant provision` after re-rendering the working copy.
-func (e *executors) provision(ctx context.Context, task *tasks.Task, out *tasks.OutputWriter) error {
-	return e.runVagrantOp(ctx, task, out, "provision", vagrant.Provision)
-}
-
-// sync runs `vagrant rsync` (the literal subcommand — SHI's rsync-arg bug
-// stays dead).
-func (e *executors) sync(ctx context.Context, task *tasks.Task, out *tasks.OutputWriter) error {
-	return e.runVagrantOp(ctx, task, out, "rsync", vagrant.Rsync)
 }
 
 // resolve loads the machine a task targets and the VBoxManage path.
@@ -95,10 +85,8 @@ func (e *executors) resolve(ctx context.Context, task *tasks.Task) (*Machine, st
 	return machine, exe, nil
 }
 
-// refreshStatus records the machine's live state after an operation (SHI's
-// targeted showvminfo refresh). The row is reloaded first so the freshest
-// UUID addresses the VM — a provisioned machine's VirtualBox name is never
-// its registry name.
+// refreshStatus records the machine's live state after an operation. The row
+// is reloaded first so the freshest UUID addresses the VM.
 func (e *executors) refreshStatus(name, vboxExe string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -131,21 +119,15 @@ func (e *executors) refreshStatus(name, vboxExe string) {
 	}
 }
 
-// start boots a machine, dual-path: a provisioned machine (spec + working
-// directory) goes through the vagrant pipeline — render, materialize,
-// plugin check, `vagrant up` — so the unchanged Hosts.rb builds the VM and
-// runs the collections; a raw machine is an immediate `VBoxManage startvm
-// --type headless`.
+// start boots a machine: `VBoxManage startvm --type headless` — one native
+// path for every machine (the provision pipeline queues this same operation
+// as its boot child).
 func (e *executors) start(ctx context.Context, task *tasks.Task, out *tasks.OutputWriter) error {
 	machine, vboxExe, err := e.resolve(ctx, task)
 	if err != nil {
 		return err
 	}
 	defer e.refreshStatus(machine.Name, vboxExe)
-
-	if machine.Provisioned() {
-		return e.startProvisioned(ctx, task, machine, out)
-	}
 
 	out.Write("stdout", "Starting "+machine.Name+" (VBoxManage startvm --type headless)\n")
 	if serr := vbox.StartVM(ctx, vboxExe, machine.VBoxTarget(), false); serr != nil {
@@ -156,11 +138,9 @@ func (e *executors) start(ctx context.Context, task *tasks.Task, out *tasks.Outp
 	return nil
 }
 
-// cancelStart is the start operation's post-kill cleanup (D-F, SHI's
-// stop-during-up semantics): the killed vagrant/VBox child leaves a half-up
-// VM — force it off so it is not left running unattended. For provisioned
-// machines the working directory's vagrant state carries the fresh UUID the
-// killed up may have just created.
+// cancelStart is the start operation's post-kill cleanup (D-F): the killed
+// start leaves a half-up VM — force it off so it is not left running
+// unattended.
 func (e *executors) cancelStart(task *tasks.Task, out *tasks.OutputWriter) {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
@@ -172,16 +152,6 @@ func (e *executors) cancelStart(task *tasks.Task, out *tasks.OutputWriter) {
 	target := task.MachineName
 	if machine, err := e.store.Get(ctx, task.MachineName); err == nil {
 		target = machine.VBoxTarget()
-		if machine.Provisioned() {
-			if uuid := vagrantMachineUUID(*machine.Home); uuid != "" {
-				target = uuid
-				if machine.UUID == nil || *machine.UUID != uuid {
-					if serr := e.store.SetUUID(ctx, machine.Name, uuid); serr != nil {
-						mlog().Error("record machine uuid after cancel", "machine", machine.Name, "error", serr)
-					}
-				}
-			}
-		}
 	}
 	out.Write("stderr", "Start cancelled — forcing the machine off\n")
 	if err := vbox.ControlVM(ctx, exe, target, "poweroff"); err != nil {
@@ -191,10 +161,8 @@ func (e *executors) cancelStart(task *tasks.Task, out *tasks.OutputWriter) {
 	e.refreshStatus(task.MachineName, exe)
 }
 
-// stop halts a machine — the Node agent's executeStopTask (graceful
-// `zoneadm shutdown`, falling back to `zoneadm halt`) spoken in VBoxManage:
-// ACPI power button first, hard poweroff when the guest ignores it or when
-// the request forced.
+// stop halts a machine: ACPI power button first, hard poweroff when the
+// guest ignores it or when the request forced.
 func (e *executors) stop(ctx context.Context, task *tasks.Task, out *tasks.OutputWriter) error {
 	machine, vboxExe, err := e.resolve(ctx, task)
 	if err != nil {
@@ -234,9 +202,8 @@ func (e *executors) stop(ctx context.Context, task *tasks.Task, out *tasks.Outpu
 }
 
 // waitForPowerOff polls until an ACPI-signalled machine leaves the running
-// state (the synchronous-shutdown semantics of `zoneadm shutdown`), bounded
-// by machines.shutdown_timeout. False on timeout — the caller falls back to
-// a hard poweroff, like zoneadm halt.
+// state, bounded by machines.shutdown_timeout. False on timeout — the caller
+// falls back to a hard poweroff.
 func (e *executors) waitForPowerOff(ctx context.Context, vboxExe, target string, out *tasks.OutputWriter) bool {
 	deadline := time.Now().Add(e.shutdownTimeout)
 	for time.Now().Before(deadline) {
@@ -257,8 +224,7 @@ func (e *executors) waitForPowerOff(ctx context.Context, vboxExe, target string,
 	return false
 }
 
-// suspend saves a machine's state — `controlvm savestate` (no zone analog;
-// VirtualBox capability advertised by the machine-suspend token).
+// suspend saves a machine's state (`controlvm savestate`).
 func (e *executors) suspend(ctx context.Context, task *tasks.Task, out *tasks.OutputWriter) error {
 	machine, vboxExe, err := e.resolve(ctx, task)
 	if err != nil {
@@ -275,31 +241,15 @@ func (e *executors) suspend(ctx context.Context, task *tasks.Task, out *tasks.Ou
 	return nil
 }
 
-// deleteMachine destroys a machine — the Node agent's executeDeleteTask
-// shape, completed for the provisioning phase (design §4): provisioned
-// machines get `vagrant destroy -f` first (vagrant state cleaned by its
-// owner), then the VBoxManage sweep — power off if running, unregister with
-// media deletion — the working-directory removal, the registry row, and the
-// leftover pending tasks.
+// deleteMachine destroys a machine: power off if running, unregister with
+// media deletion, remove the working directory (containment-checked), the
+// registry row, and any leftover pending tasks.
 func (e *executors) deleteMachine(ctx context.Context, task *tasks.Task, out *tasks.OutputWriter) error {
 	machine, vboxExe, err := e.resolve(ctx, task)
 	if err != nil {
 		return err
 	}
 
-	if machine.Provisioned() {
-		if vagrantExe := VagrantPath(ctx); vagrantExe != "" {
-			out.Write("stdout", "Running vagrant destroy -f in "+*machine.Home+"\n")
-			if derr := vagrant.Destroy(ctx, vagrantExe, *machine.Home, out.Write); derr != nil {
-				out.Write("stderr", "vagrant destroy failed ("+derr.Error()+") — continuing with VBoxManage cleanup\n")
-			}
-		} else {
-			out.Write("stderr", "vagrant is not installed — continuing with VBoxManage cleanup\n")
-		}
-	}
-
-	// Power off if something is still running, then unregister with media
-	// deletion.
 	target := machine.VBoxTarget()
 	info, ierr := vbox.ShowVMInfo(ctx, vboxExe, target)
 	if ierr == nil {
@@ -324,8 +274,8 @@ func (e *executors) deleteMachine(ctx context.Context, task *tasks.Task, out *ta
 		return derr
 	}
 
-	// The Node agent's delete finisher: any remaining pending tasks for the
-	// machine are cancelled — they target something that no longer exists.
+	// Any remaining pending tasks for the machine are cancelled — they
+	// target something that no longer exists.
 	filter := tasks.ListFilter{
 		MachineName: machine.Name,
 		Status:      tasks.StatusPending,
@@ -345,11 +295,9 @@ func (e *executors) deleteMachine(ctx context.Context, task *tasks.Task, out *ta
 	return nil
 }
 
-// discover runs one reconciliation sweep as a queued task — the ONLY way a
-// sweep runs (Node-agent parity: startup, periodic, and user-triggered
-// discovery all share this operation and are all visible in the queue).
+// discover runs one reconciliation sweep as a queued task.
 func (e *executors) discover(ctx context.Context, _ *tasks.Task, out *tasks.OutputWriter) error {
-	out.Write("stdout", "Reconciling registry against VirtualBox and vagrant\n")
+	out.Write("stdout", "Reconciling registry against VirtualBox\n")
 	e.reconciler.RunOnce(ctx, out)
 	return nil
 }

@@ -249,9 +249,22 @@ type MachinesConfig struct {
 	KeepRunningOnExit bool `yaml:"keep_running_on_exit" json:"keep_running_on_exit"`
 }
 
-// ProvisioningConfig controls the provisioning engine (architecture §8):
-// the provisioner package registry today; Hosts.yml generation, working
-// copies, and machine creation as the phase completes.
+// ProvisioningSSHConfig controls the pipeline's SSH access to guests (the
+// base's provisioning.ssh block).
+type ProvisioningSSHConfig struct {
+	// KeyPath is the agent's own provisioning private key (generated at
+	// startup when absent — ed25519). Empty selects ssh/provision_key beside
+	// the configuration file.
+	KeyPath string `yaml:"key_path" json:"key_path"`
+	// TimeoutSeconds bounds the total wait for a guest's SSH to answer.
+	TimeoutSeconds int `yaml:"timeout_seconds" json:"timeout_seconds"`
+	// PollIntervalSeconds is the wait between SSH availability checks.
+	PollIntervalSeconds int `yaml:"poll_interval_seconds" json:"poll_interval_seconds"`
+}
+
+// ProvisioningConfig controls the provisioning engine (architecture §8, the
+// zoneweaver mechanism): the package registry, per-machine working
+// directories, and the SSH/ansible pipeline knobs.
 type ProvisioningConfig struct {
 	// ProvisionersDir holds provisioner packages in SHI's on-disk format
 	// (<name>/provisioner-collection.yml with <version>/provisioner.yml
@@ -259,10 +272,6 @@ type ProvisioningConfig struct {
 	// startup without ever overwriting existing versions. Empty selects
 	// provisioners under the data root.
 	ProvisionersDir string `yaml:"provisioners_dir" json:"provisioners_dir"`
-	// KeepFailedMachinesRunning leaves a machine running after a failed
-	// vagrant up (SHI's keepfailedserversrunning, default true — the VM
-	// stays up for debugging). false powers the half-provisioned VM off.
-	KeepFailedMachinesRunning bool `yaml:"keep_failed_machines_running" json:"keep_failed_machines_running"`
 	// DefaultSyncMethod is the sync method machines without an explicit
 	// spec.sync_method use (rsync | scp; SHI's global syncmethod preference).
 	// Platform rules still apply on top.
@@ -272,12 +281,43 @@ type ProvisioningConfig struct {
 	// none — SHI's defaultNetworkInterface fallback, fed by
 	// `VBoxManage list bridgedifs`.
 	DefaultNetworkInterface string `yaml:"default_network_interface" json:"default_network_interface"`
-	// MachinesDir holds the per-machine working directories (SHI's
-	// servers/<provisioner>/<id> layout, one directory per machine here):
-	// the materialized provisioner copy, the generated Hosts.yml, id-files,
-	// installers, and ssls trees vagrant runs from. Empty selects machines
-	// under the data root.
+	// MachinesDir holds the per-machine working directories: the
+	// materialized provisioner copy, the rendered Hosts.yml, id-files,
+	// installers, ssls trees, and the machine's media. Empty selects
+	// machines under the data root.
 	MachinesDir string `yaml:"machines_dir" json:"machines_dir"`
+	// PlaybookTimeoutSeconds bounds one ansible-playbook run in the guest.
+	PlaybookTimeoutSeconds int `yaml:"playbook_timeout_seconds" json:"playbook_timeout_seconds"`
+	// AnsibleInstallTimeoutSeconds bounds the in-guest ansible/collection
+	// installation steps.
+	AnsibleInstallTimeoutSeconds int `yaml:"ansible_install_timeout_seconds" json:"ansible_install_timeout_seconds"`
+	// SSH is the pipeline's guest-access configuration.
+	SSH ProvisioningSSHConfig `yaml:"ssh" json:"ssh"`
+}
+
+// TemplateSourceConfig is one configured box registry
+// (Vagrant/BoxVault-compatible download API).
+type TemplateSourceConfig struct {
+	Name    string `yaml:"name"    json:"name"`
+	URL     string `yaml:"url"     json:"url"`
+	Enabled bool   `yaml:"enabled" json:"enabled"`
+	Default bool   `yaml:"default" json:"default"`
+	// AuthToken authenticates private boxes (Bearer); a per-request
+	// auth token overrides it.
+	AuthToken string `yaml:"auth_token" json:"auth_token"`
+}
+
+// TemplateSourcesConfig controls the box-template registry (the base's
+// template_sources block): where downloaded box disk images live and which
+// registries serve them.
+type TemplateSourcesConfig struct {
+	// LocalStoragePath is the template storage root
+	// (<root>/<org>/<box>/<version>/). Empty selects templates under the
+	// data root.
+	LocalStoragePath string `yaml:"local_storage_path" json:"local_storage_path"`
+	// Sources are the configured registries; the entry named "Default
+	// Registry" (or flagged default) serves requests that name no source.
+	Sources []TemplateSourceConfig `yaml:"sources" json:"sources"`
 }
 
 // AssetsConfig controls the installer file cache (the `artifacts` capability
@@ -298,25 +338,26 @@ type AssetsConfig struct {
 
 // Config is the root of config.yaml.
 type Config struct {
-	Server       ServerConfig       `yaml:"server"       json:"server"`
-	SSL          SSLConfig          `yaml:"ssl"          json:"ssl"`
-	CORS         CORSConfig         `yaml:"cors"         json:"cors"`
-	UI           UIConfig           `yaml:"ui"           json:"ui"`
-	Browser      BrowserConfig      `yaml:"browser"      json:"browser"`
-	Logging      LoggingConfig      `yaml:"logging"      json:"logging"`
-	APIKeys      APIKeysConfig      `yaml:"api_keys"     json:"api_keys"`
-	Updates      UpdatesConfig      `yaml:"updates"      json:"updates"`
-	APIDocs      APIDocsConfig      `yaml:"api_docs"     json:"api_docs"`
-	Stats        StatsConfig        `yaml:"stats"        json:"stats"`
-	Data         DataConfig         `yaml:"data"         json:"data"`
-	Database     DatabaseConfig     `yaml:"database"     json:"database"`
-	Tasks        TasksConfig        `yaml:"tasks"        json:"tasks"`
-	Machines     MachinesConfig     `yaml:"machines"     json:"machines"`
-	Provisioning ProvisioningConfig `yaml:"provisioning" json:"provisioning"`
-	Assets       AssetsConfig       `yaml:"assets"       json:"assets"`
-	Cleanup      CleanupConfig      `yaml:"cleanup"      json:"cleanup"`
-	Monitoring   MonitoringConfig   `yaml:"monitoring"   json:"monitoring"`
-	HostPower    HostPowerConfig    `yaml:"host_power"   json:"host_power"`
+	Server          ServerConfig          `yaml:"server"           json:"server"`
+	SSL             SSLConfig             `yaml:"ssl"              json:"ssl"`
+	CORS            CORSConfig            `yaml:"cors"             json:"cors"`
+	UI              UIConfig              `yaml:"ui"               json:"ui"`
+	Browser         BrowserConfig         `yaml:"browser"          json:"browser"`
+	Logging         LoggingConfig         `yaml:"logging"          json:"logging"`
+	APIKeys         APIKeysConfig         `yaml:"api_keys"         json:"api_keys"`
+	Updates         UpdatesConfig         `yaml:"updates"          json:"updates"`
+	APIDocs         APIDocsConfig         `yaml:"api_docs"         json:"api_docs"`
+	Stats           StatsConfig           `yaml:"stats"            json:"stats"`
+	Data            DataConfig            `yaml:"data"             json:"data"`
+	Database        DatabaseConfig        `yaml:"database"         json:"database"`
+	Tasks           TasksConfig           `yaml:"tasks"            json:"tasks"`
+	Machines        MachinesConfig        `yaml:"machines"         json:"machines"`
+	Provisioning    ProvisioningConfig    `yaml:"provisioning"     json:"provisioning"`
+	TemplateSources TemplateSourcesConfig `yaml:"template_sources" json:"template_sources"`
+	Assets          AssetsConfig          `yaml:"assets"           json:"assets"`
+	Cleanup         CleanupConfig         `yaml:"cleanup"          json:"cleanup"`
+	Monitoring      MonitoringConfig      `yaml:"monitoring"       json:"monitoring"`
+	HostPower       HostPowerConfig       `yaml:"host_power"       json:"host_power"`
 
 	// path is where this configuration was loaded from; the setup token, key
 	// store, protocol-handoff secret, and config backups live beside it.
@@ -386,8 +427,21 @@ func Default() *Config {
 			KeepRunningOnExit:  true,
 		},
 		Provisioning: ProvisioningConfig{
-			KeepFailedMachinesRunning: true,
-			DefaultSyncMethod:         "rsync",
+			DefaultSyncMethod:            "rsync",
+			PlaybookTimeoutSeconds:       21600,
+			AnsibleInstallTimeoutSeconds: 300,
+			SSH: ProvisioningSSHConfig{
+				TimeoutSeconds:      300,
+				PollIntervalSeconds: 10,
+			},
+		},
+		TemplateSources: TemplateSourcesConfig{
+			Sources: []TemplateSourceConfig{{
+				Name:    "Default Registry",
+				URL:     "https://boxvault.startcloud.com",
+				Enabled: true,
+				Default: true,
+			}},
 		},
 		Assets:  AssetsConfig{Enabled: true, MaxUploadGB: 50},
 		Cleanup: CleanupConfig{Interval: 300},

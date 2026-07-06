@@ -420,7 +420,7 @@ var settingsSchema = map[string]any{
 		},
 	},
 	"provisioning": map[string]any{
-		"description":      "Provisioning engine configuration (provisioner package registry + machine working directories)",
+		"description":      "Provisioning engine configuration (package registry, machine working directories, and the SSH/ansible pipeline)",
 		"requires_restart": true,
 		"properties": map[string]any{
 			"provisioners_dir": map[string]any{
@@ -430,17 +430,12 @@ var settingsSchema = map[string]any{
 			},
 			"machines_dir": map[string]any{
 				"type":        "string",
-				"description": "Root of the per-machine working directories — the materialized provisioner copy, generated Hosts.yml, id-files, installers, and ssls trees vagrant runs from (empty = <data dir>/machines)",
+				"description": "Root of the per-machine working directories — the materialized provisioner copy, rendered Hosts.yml, id-files, installers, ssls trees, and the machine's media (empty = <data dir>/machines)",
 				"default":     "",
-			},
-			"keep_failed_machines_running": map[string]any{
-				"type":        "boolean",
-				"description": "Leave a machine running after a failed vagrant up for debugging (SHI's keepfailedserversrunning); false powers the half-provisioned VM off",
-				"default":     true,
 			},
 			"default_sync_method": map[string]any{
 				"type":        "string",
-				"description": "Sync method for machines whose spec sets none (SHI's global preference); platform rules still apply on top",
+				"description": "Sync method for machines whose spec sets none (folders[].type in the rendered document); platform rules still apply on top",
 				"default":     "rsync",
 				"enum":        []string{"rsync", "scp"},
 			},
@@ -448,6 +443,58 @@ var settingsSchema = map[string]any{
 				"type":        "string",
 				"description": "Host bridge interface injected into templates as DEFAULT_NETWORK_INTERFACE when the spec sets none; values from GET /provisioning/bridged-interfaces",
 				"default":     "",
+			},
+			"playbook_timeout_seconds": map[string]any{
+				"type":        "integer",
+				"description": "Timeout for a single in-guest ansible-playbook run",
+				"default":     21600,
+				"min":         60,
+			},
+			"ansible_install_timeout_seconds": map[string]any{
+				"type":        "integer",
+				"description": "Timeout for the in-guest ansible/collection installation steps",
+				"default":     300,
+				"min":         60,
+			},
+			"ssh": map[string]any{
+				"type":        "object",
+				"description": "Provisioning SSH access to guests",
+				"properties": map[string]any{
+					"key_path": map[string]any{
+						"type":        "string",
+						"description": "The agent's own provisioning private key — the auth fallback when the document supplies neither a key nor a password; generated (ed25519) when absent (empty = <config dir>/ssh/provision_key)",
+						"default":     "",
+					},
+					"timeout_seconds": map[string]any{
+						"type":        "integer",
+						"description": "Total wait for a guest's SSH to become available (the document's settings.setup_wait wins when larger)",
+						"default":     300,
+						"min":         10,
+					},
+					"poll_interval_seconds": map[string]any{
+						"type":        "integer",
+						"description": "Interval between SSH availability checks",
+						"default":     10,
+						"min":         1,
+					},
+				},
+			},
+		},
+	},
+	"template_sources": map[string]any{
+		"description":      "Box-template registry: downloaded box disk images machines clone from, and the registries serving them",
+		"requires_restart": true,
+		"properties": map[string]any{
+			"local_storage_path": map[string]any{
+				"type":        "string",
+				"description": "Template storage root, <root>/<organization>/<box>/<version>/ (empty = <data dir>/templates)",
+				"default":     "",
+			},
+			"sources": map[string]any{
+				"type":        "array",
+				"items":       "object",
+				"description": "Configured Vagrant/BoxVault-compatible registries: {name, url, enabled, default, auth_token}. The entry named \"Default Registry\" (or flagged default) serves requests that name no source; auth_token authenticates private boxes",
+				"default":     []map[string]any{{"name": "Default Registry", "url": "https://boxvault.startcloud.com", "enabled": true, "default": true, "auth_token": ""}},
 			},
 		},
 	},

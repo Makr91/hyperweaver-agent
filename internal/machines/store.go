@@ -169,55 +169,63 @@ type Discovered struct {
 }
 
 // UpsertDiscovered records a machine seen on the system. The row to refresh
-// is matched by UUID first, then by vagrant home, then by name — a
-// provisioned machine's VirtualBox name is Hosts.rb's own (never the
-// registry name), so the UUID and the working directory are what tie the VM
-// back to its row; matched rows keep their name and user data (notes, tags,
-// server_id, spec — the Node agent's preserveUserConfig semantics). Returns
-// true when the machine was newly discovered.
+// is matched by UUID first, then by vagrant home, then by name; matched rows
+// keep their name and user data (notes, tags, server_id, spec — the Node
+// agent's preserveUserConfig semantics), and the live configuration MERGES
+// around the stored document sections (settings/networks/disks/provisioner/
+// provisioner_state) — discovery refreshes reality, never the document.
+// Returns true when the machine was newly discovered.
 func (s *Store) UpsertDiscovered(ctx context.Context, d *Discovered) (bool, error) {
 	now := formatTime(time.Now())
-	var configuration any
-	if d.Configuration != nil {
-		configuration = string(d.Configuration)
-	}
-
-	// One refresh statement per match key; the SET list never touches name.
-	refresh := `UPDATE machines
-		SET host = ?, status = ?, backing = ?, home = COALESCE(?, home),
-		    uuid = ?, is_orphaned = 0, last_seen = ?,
-		    configuration = COALESCE(?, configuration), updated_at = ?`
-	args := []any{d.Host, d.Status, d.Backing, d.Home, d.UUID, now, configuration, now}
 
 	matches := []struct {
 		where string
 		key   any
 		skip  bool
 	}{
-		{where: " WHERE uuid = ?", key: d.UUID, skip: d.UUID == ""},
+		{where: `uuid = ?`, key: d.UUID, skip: d.UUID == ""},
 		// A created-but-never-started row claims its VM on first sight: the
 		// working directory is the join key while the UUID is still unknown.
 		// NOCASE: Windows paths compare case-insensitively.
-		{where: " WHERE uuid IS NULL AND home = ? COLLATE NOCASE", key: d.Home, skip: d.Home == nil},
-		{where: " WHERE name = ?", key: d.Name, skip: false},
+		{where: `uuid IS NULL AND home = ? COLLATE NOCASE`, key: d.Home, skip: d.Home == nil},
+		{where: `name = ?`, key: d.Name, skip: false},
 	}
 	for _, match := range matches {
 		if match.skip {
 			continue
 		}
-		res, err := s.db.ExecContext(ctx, refresh+match.where, append(append([]any{}, args...), match.key)...)
+		existing, err := scanMachine(s.db.QueryRowContext(ctx,
+			`SELECT `+machineColumns+` FROM machines WHERE `+match.where, match.key))
+		if errors.Is(err, sql.ErrNoRows) {
+			continue
+		}
 		if err != nil {
 			return false, err
 		}
-		affected, err := res.RowsAffected()
+
+		var configuration any
+		if d.Configuration != nil {
+			configuration = string(MergeLiveConfiguration(existing.Configuration, d.Configuration))
+		} else if existing.Configuration != nil {
+			configuration = string(existing.Configuration)
+		}
+		_, err = s.db.ExecContext(ctx, `UPDATE machines
+			SET host = ?, status = ?, backing = ?, home = COALESCE(?, home),
+			    uuid = ?, is_orphaned = 0, last_seen = ?,
+			    configuration = ?, updated_at = ?
+			WHERE id = ?`,
+			d.Host, d.Status, d.Backing, d.Home, d.UUID, now, configuration, now,
+			existing.ID)
 		if err != nil {
 			return false, err
 		}
-		if affected > 0 {
-			return false, nil
-		}
+		return false, nil
 	}
 
+	var configuration any
+	if d.Configuration != nil {
+		configuration = string(d.Configuration)
+	}
 	_, err := s.db.ExecContext(ctx, `INSERT INTO machines
 		(name, host, status, backing, home, uuid, is_orphaned, auto_discovered,
 		 last_seen, configuration, created_at, updated_at)
@@ -227,6 +235,17 @@ func (s *Store) UpsertDiscovered(ctx context.Context, d *Discovered) (bool, erro
 		return false, err
 	}
 	return true, nil
+}
+
+// SetConfiguration replaces a machine's configuration document.
+func (s *Store) SetConfiguration(ctx context.Context, name string, configuration json.RawMessage) error {
+	res, err := s.db.ExecContext(ctx, `UPDATE machines
+		SET configuration = ?, updated_at = ? WHERE name = ?`,
+		string(configuration), formatTime(time.Now()), name)
+	if err != nil {
+		return err
+	}
+	return requireRow(res)
 }
 
 // NewMachine is a machine-create request row (POST /machines): a registry

@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"os"
 	"regexp"
-	"strconv"
 	"strings"
 
 	"github.com/Makr91/hyperweaver-agent/internal/auth"
@@ -16,28 +15,36 @@ import (
 	"github.com/Makr91/hyperweaver-agent/internal/provisioner"
 	"github.com/Makr91/hyperweaver-agent/internal/safepath"
 	"github.com/Makr91/hyperweaver-agent/internal/tasks"
+	"github.com/Makr91/hyperweaver-agent/internal/vbox"
 )
 
-// Machine creation and provisioning operations (Agent API v1 machines
-// surface, completed by the provisioning engine — architecture §8): POST
-// /machines records the Hosts.yml-shaped spec (no VM until first start,
-// SHI's model), PUT /machines/{name} replaces it (materializes on the next
-// start), and provision/sync run the vagrant operations through the queue.
+// Machine creation — zoneweaver's createZone mechanism: POST /machines
+// validates, resolves the name (server_id prefix rule), 409s against the DB
+// AND the hypervisor, resolves the box against the template registry
+// (missing template auto-chains its download), then queues a create
+// ORCHESTRATION — a parent whose chained children build real infrastructure:
+// machine_prepare (render + materialize — the SHI registry layer in the
+// provisioning-content slot) → machine_create_storage →
+// machine_create_config → machine_create_finalize (+ optional start).
+// PUT /machines/{name} stores the provisioner document verbatim
+// (configuration.provisioner) — create DROPS any provisioner config in its
+// body beyond the package reference; provisioning config arrives via PUT or
+// the render.
 
-// serverIDPattern is the numeric server_id vocabulary (/machines/ids
-// constraints).
+// serverIDPattern is the numeric server_id vocabulary.
 var serverIDPattern = regexp.MustCompile(`^\d{1,8}$`)
 
-// createMachineRequest is the POST /machines body: the machine name plus
-// the creation spec, stored verbatim.
+// createMachineRequest is the POST /machines body: an optional explicit name
+// plus the creation spec (the package reference + the document inputs the
+// render consumes).
 type createMachineRequest struct {
 	Name string `json:"name"`
 	machines.Spec
 }
 
-// validateSpec checks the parts of a creation spec every write shares:
-// the provisioner version must exist, role names must be usable as
-// directories, and the safe-ID source (when named) must exist.
+// validateSpec checks the creation spec: the provisioner version must exist,
+// hostname and domain are required (the name derives from them), role names
+// must be usable, the safe-ID source must exist, sync_method must be valid.
 func (s *Server) validateSpec(w http.ResponseWriter, spec *machines.Spec) bool {
 	if spec.Provisioner.Name == "" || spec.Provisioner.Version == "" {
 		taskError(w, http.StatusBadRequest, "provisioner {name, version} is required")
@@ -51,6 +58,16 @@ func (s *Server) validateSpec(w http.ResponseWriter, spec *machines.Spec) bool {
 		}
 		slog.Error("resolve provisioner for machine spec", "error", err)
 		taskError(w, http.StatusInternalServerError, "Failed to resolve provisioner")
+		return false
+	}
+	if spec.Settings == nil {
+		spec.Settings = map[string]any{}
+	}
+	hostname, _ := spec.Settings["hostname"].(string)
+	domain, _ := spec.Settings["domain"].(string)
+	if hostname == "" || domain == "" {
+		taskError(w, http.StatusBadRequest,
+			"Missing required parameters: settings.hostname and settings.domain are required")
 		return false
 	}
 	for i := range spec.Roles {
@@ -77,79 +94,197 @@ func (s *Server) validateSpec(w http.ResponseWriter, spec *machines.Spec) bool {
 		taskError(w, http.StatusBadRequest, "sync_method must be rsync or scp")
 		return false
 	}
-	if spec.Settings == nil {
-		spec.Settings = map[string]any{}
-	}
 	return true
 }
 
-// resolveServerID normalizes the spec's server_id: the caller's value is
-// validated against the numeric vocabulary and zero-padded to at least 4
-// digits (zoneweaver's padStart(4) canonical form); absent means
-// auto-assigned MAX+1 (design D-G).
-func (s *Server) resolveServerID(ctx context.Context, spec *machines.Spec) (string, error) {
-	serverID := ""
-	switch v := spec.Settings["server_id"].(type) {
-	case string:
-		serverID = v
-	case float64:
-		// JSON numbers arrive as float64; whole values render digit-only,
-		// fractional ones fail the numeric pattern below — honestly.
-		serverID = strconv.FormatFloat(v, 'f', -1, 64)
-	}
-	if serverID == "" {
-		next, err := s.machines.NextServerID(ctx, s.cfg.Machines.ServerIDStart)
-		if err != nil {
-			return "", err
+// resolveMachineName settles the machine's name — the base's resolveZoneName:
+// base = hostname.(machine_domain || domain); with machines.prefix_machine_names
+// the server_id is REQUIRED (numeric, padded to 4, uniqueness-checked — never
+// auto-assigned; GET /machines/ids/next feeds the caller) and the final name
+// is <id>--<base>. An explicit name always wins (free-form, D-G).
+func (s *Server) resolveMachineName(ctx context.Context, explicit string, spec *machines.Spec) (name string, status int, problem string) {
+	if explicit != "" {
+		if !validMachineName(explicit) {
+			return "", http.StatusBadRequest, "Invalid machine name"
 		}
-		serverID = next
+		return explicit, 0, ""
+	}
+
+	hostname, _ := spec.Settings["hostname"].(string)
+	domain, _ := spec.Settings["domain"].(string)
+	if machineDomain, _ := spec.Settings["machine_domain"].(string); machineDomain != "" {
+		domain = machineDomain
+	}
+	base := hostname + "." + domain
+	if !validMachineName(base) {
+		return "", http.StatusBadRequest, "Derived machine name " + base + " is not usable — provide an explicit name"
+	}
+	if !s.cfg.Machines.PrefixMachineNames {
+		return base, 0, ""
+	}
+
+	serverID := machines.DocString(spec.Settings["server_id"], "")
+	if serverID == "" {
+		return "", http.StatusBadRequest,
+			"server_id required when prefix_machine_names is enabled — use GET /machines/ids/next"
 	}
 	if !serverIDPattern.MatchString(serverID) {
-		return "", errors.New("settings.server_id must be numeric (1-8 digits)")
+		return "", http.StatusBadRequest, "server_id must be numeric (1-8 digits)"
 	}
 	if len(serverID) < 4 {
 		serverID = strings.Repeat("0", 4-len(serverID)) + serverID
 	}
 	spec.Settings["server_id"] = serverID
-	return serverID, nil
-}
 
-// resolveMachineName settles the machine's name (zoneweaver's
-// resolveZoneName on top of design D-G): an explicit name always wins —
-// names are free-form, anything goes. Absent a name, it is DERIVED from the
-// spec: `<server_id>--<hostname>.<domain>` when machines.prefix_machine_names
-// is on (Mark's partition-id convention), plain `<hostname>.<domain>`
-// otherwise — so hostname (and usually domain) become required exactly when
-// the caller asks the agent to name the machine.
-func (s *Server) resolveMachineName(explicit, serverID string, spec *machines.Spec) (string, error) {
-	if explicit != "" {
-		if !validMachineName(explicit) {
-			return "", errors.New("invalid machine name")
+	used, err := s.machines.UsedServerIDs(ctx)
+	if err != nil {
+		slog.Error("list server ids", "error", err)
+		return "", http.StatusInternalServerError, "Failed to create machine"
+	}
+	for _, entry := range used {
+		if entry.ServerID == serverID {
+			return "", http.StatusConflict,
+				"Server ID " + serverID + " is already in use by " + entry.MachineName
 		}
-		return explicit, nil
 	}
-
-	hostname, _ := spec.Settings["hostname"].(string)
-	if hostname == "" {
-		return "", errors.New("name is required (or provide settings.hostname so the agent can derive one)")
-	}
-	base := hostname
-	if domain, _ := spec.Settings["domain"].(string); domain != "" {
-		base += "." + domain
-	}
-	if s.cfg.Machines.PrefixMachineNames {
-		base = serverID + "--" + base
-	}
-	if !validMachineName(base) {
-		return "", errors.New("derived machine name " + base + " is not usable — provide an explicit name")
-	}
-	return base, nil
+	return serverID + "--" + base, 0, ""
 }
 
-// handleCreateMachine mirrors the Node agent's creation shape for this
-// hypervisor: validate, assign the server_id, resolve the name (explicit or
-// derived), claim a working directory, store the row (status configured —
-// no VM until first start), and optionally chain the first start.
+// renderForResolution renders the package template once so the handler sees
+// the EFFECTIVE settings (template defaults applied) — the box tuple the
+// template registry resolves may come entirely from package defaults.
+func (s *Server) renderForResolution(ctx context.Context, spec *machines.Spec) (map[string]any, error) {
+	version, err := s.provisioners.GetVersion(spec.Provisioner.Name, spec.Provisioner.Version)
+	if err != nil {
+		return nil, err
+	}
+	rendered, err := provisioner.RenderHostsFile(&provisioner.GenerateInput{
+		Version:            version,
+		Settings:           machines.EffectiveSettings(ctx, spec, s.cfg.Provisioning.DefaultSyncMethod, s.cfg.Provisioning.DefaultNetworkInterface),
+		Networks:           spec.Networks,
+		Roles:              spec.Roles,
+		UserProperties:     spec.Properties,
+		AdvancedProperties: spec.AdvancedProperties,
+		SecretsVars:        s.secrets.TemplateVars(),
+	})
+	if err != nil {
+		return nil, err
+	}
+	return machines.ParseHostsDocument(rendered)
+}
+
+// queueCreateOrchestration creates the parent + chained children (the base's
+// createZoneCreationSubTasks + handleAutoDownload): template_download first
+// when the box is not local, then prepare → storage → config → finalize
+// (every child carries the spec verbatim), then the optional start child.
+func (s *Server) queueCreateOrchestration(ctx context.Context, name string, spec *machines.Spec,
+	document map[string]any, startAfter bool, createdBy string,
+) (parentID string, subTasks map[string]string, requiresDownload bool, err error) {
+	settings := machines.MachineConfig(document).Section("settings")
+	box := machines.DocString(settings["box"], "")
+	org, boxName, boxOK := strings.Cut(box, "/")
+	if !boxOK || org == "" || boxName == "" {
+		return "", nil, false, errors.New(`settings.box must be "organization/box-name" (set it in the spec or the package defaults)`)
+	}
+	boxVersion := machines.DocString(settings["box_version"], "latest")
+	boxArch := machines.DocString(settings["box_arch"], "amd64")
+
+	_, terr := s.machines.FindTemplate(ctx, org, boxName, boxVersion, boxArch)
+	switch {
+	case terr == nil:
+	case errors.Is(terr, machines.ErrTemplateNotFound):
+		requiresDownload = true
+		if boxVersion == "" || boxVersion == "latest" {
+			return "", nil, false, errors.New("template " + box + " is not local and box_version is not specific — set settings.box_version to download it")
+		}
+	default:
+		return "", nil, false, terr
+	}
+
+	specDoc, err := json.Marshal(map[string]any{"spec": spec})
+	if err != nil {
+		return "", nil, false, err
+	}
+	metadata := string(specDoc)
+
+	parent, err := s.tasks.Store().Create(ctx, &tasks.NewTask{
+		MachineName: name,
+		Operation:   machines.OpCreateOrchestration,
+		Priority:    tasks.PriorityMedium,
+		CreatedBy:   createdBy,
+		Metadata:    &metadata,
+		Parent:      true,
+	})
+	if err != nil {
+		return "", nil, false, err
+	}
+	cancelChain := func() {
+		if _, cerr := s.tasks.Cancel(ctx, parent.ID); cerr != nil {
+			slog.Warn("cancel half-built create orchestration", "task_id", parent.ID, "error", cerr)
+		}
+	}
+
+	subTasks = map[string]string{}
+	var previous *string
+	if requiresDownload {
+		source, serr := machines.FindTemplateSourceForURL(s.templateSources(),
+			machines.DocString(settings["box_url"], ""))
+		if serr != nil {
+			cancelChain()
+			return "", nil, false, serr
+		}
+		downloadMeta, merr := json.Marshal(&machines.TemplateDownloadMetadata{
+			SourceName:   source.Name,
+			Organization: org,
+			BoxName:      boxName,
+			Version:      boxVersion,
+			Provider:     machines.TemplateProvider,
+			Architecture: boxArch,
+		})
+		if merr != nil {
+			cancelChain()
+			return "", nil, false, merr
+		}
+		downloadStr := string(downloadMeta)
+		download, derr := s.createChainTask(ctx, "system", machines.OpTemplateDownload,
+			&downloadStr, nil, parent.ID, createdBy)
+		if derr != nil {
+			cancelChain()
+			return "", nil, false, derr
+		}
+		subTasks["template_download"] = download.ID
+		previous = &download.ID
+	}
+
+	for _, step := range []struct {
+		key       string
+		operation string
+	}{
+		{"prepare", machines.OpPrepare},
+		{"storage", machines.OpCreateStorage},
+		{"config", machines.OpCreateConfig},
+		{"finalize", machines.OpCreateFinalize},
+	} {
+		child, cerr := s.createChainTask(ctx, name, step.operation, &metadata, previous, parent.ID, createdBy)
+		if cerr != nil {
+			cancelChain()
+			return "", nil, false, cerr
+		}
+		subTasks[step.key] = child.ID
+		previous = &child.ID
+	}
+	if startAfter {
+		start, serr := s.createChainTask(ctx, name, machines.OpStart, nil, previous, parent.ID, createdBy)
+		if serr != nil {
+			cancelChain()
+			return "", nil, false, serr
+		}
+		subTasks["start"] = start.ID
+	}
+	return parent.ID, subTasks, requiresDownload, nil
+}
+
+// handleCreateMachine executes the create mechanism end to end.
 func (s *Server) handleCreateMachine(w http.ResponseWriter, r *http.Request) {
 	var body createMachineRequest
 	if err := decodeBody(r, &body); err != nil {
@@ -159,47 +294,28 @@ func (s *Server) handleCreateMachine(w http.ResponseWriter, r *http.Request) {
 	if !s.validateSpec(w, &body.Spec) {
 		return
 	}
-	serverID, err := s.resolveServerID(r.Context(), &body.Spec)
-	if err != nil {
-		taskError(w, http.StatusBadRequest, err.Error())
+	name, status, problem := s.resolveMachineName(r.Context(), body.Name, &body.Spec)
+	if problem != "" {
+		taskError(w, status, problem)
 		return
 	}
-	name, err := s.resolveMachineName(body.Name, serverID, &body.Spec)
-	if err != nil {
-		taskError(w, http.StatusBadRequest, err.Error())
-		return
-	}
+
+	// 409 against the DB and the hypervisor (the base checks both).
 	if _, gerr := s.machines.Get(r.Context(), name); gerr == nil {
-		taskError(w, http.StatusConflict, "Machine already exists")
+		taskError(w, http.StatusConflict, "Machine "+name+" already exists in database")
 		return
 	} else if !errors.Is(gerr, machines.ErrNotFound) {
 		slog.Error("check machine existence", "machine", name, "error", gerr)
 		taskError(w, http.StatusInternalServerError, "Failed to create machine")
 		return
 	}
-	s.createMachineRow(w, r, name, serverID, &body.Spec, body.StartAfterCreate, nil)
-}
-
-// createMachineRow finishes a create or clone: claim a working directory,
-// store the row (status configured — no VM until first start), and
-// optionally queue the first start pipeline. extra entries merge into the
-// 201 response (the clone's source_machine et al.).
-func (s *Server) createMachineRow(w http.ResponseWriter, r *http.Request, name, serverID string,
-	spec *machines.Spec, startAfter bool, extra map[string]any,
-) {
-	machinesRoot, err := s.cfg.MachinesDir()
-	if err != nil {
-		slog.Error("resolve machines dir", "error", err)
-		taskError(w, http.StatusInternalServerError, "Failed to create machine")
-		return
+	if exe := machines.VBoxManagePath(r.Context()); exe != "" {
+		if _, verr := vbox.ShowVMInfo(r.Context(), exe, name); verr == nil {
+			taskError(w, http.StatusConflict, "Machine "+name+" already exists on the system")
+			return
+		}
 	}
-	home, err := safepath.Under(machinesRoot, provisioner.MachineDirName(name))
-	if err != nil {
-		taskError(w, http.StatusBadRequest, "Machine name does not sanitize to a usable directory")
-		return
-	}
-	if taken, terr := s.homeTaken(r.Context(), home); terr != nil {
-		slog.Error("check machine home", "error", terr)
+	if taken, home, terr := s.workdirTaken(r.Context(), name); terr != nil {
 		taskError(w, http.StatusInternalServerError, "Failed to create machine")
 		return
 	} else if taken {
@@ -208,70 +324,99 @@ func (s *Server) createMachineRow(w http.ResponseWriter, r *http.Request, name, 
 		return
 	}
 
-	raw, err := json.Marshal(spec)
+	document, err := s.renderForResolution(r.Context(), &body.Spec)
 	if err != nil {
-		slog.Error("serialize machine spec", "error", err)
-		taskError(w, http.StatusInternalServerError, "Failed to create machine")
+		taskError(w, http.StatusBadRequest, "Template render failed: "+err.Error())
 		return
 	}
-	hostname, err := os.Hostname()
-	if err != nil {
-		hostname = "unknown"
-	}
-	machine, err := s.machines.Create(r.Context(), &machines.NewMachine{
-		Name:     name,
-		Host:     hostname,
-		Home:     home,
-		ServerID: serverID,
-		Spec:     raw,
-	})
-	if err != nil {
-		slog.Error("create machine", "machine", name, "error", err)
-		if strings.Contains(err.Error(), "UNIQUE") {
-			taskError(w, http.StatusConflict, "Machine name or server_id already in use")
-			return
-		}
-		taskError(w, http.StatusInternalServerError, "Failed to create machine")
-		return
-	}
-	createdBy := auth.FromContext(r.Context()).Name
-	slog.Info("machine created", "machine", machine.Name,
-		"provisioner", spec.Provisioner.Name+"/"+spec.Provisioner.Version,
-		"by", createdBy)
 
-	response := map[string]any{
-		"success":      true,
-		"machine":      machine,
-		"machine_name": machine.Name,
-		"message":      "Machine created successfully",
+	createdBy := auth.FromContext(r.Context()).Name
+	parentID, subTasks, requiresDownload, err := s.queueCreateOrchestration(
+		r.Context(), name, &body.Spec, document, body.StartAfterCreate, createdBy)
+	if err != nil {
+		taskError(w, http.StatusBadRequest, err.Error())
+		return
 	}
-	for key, value := range extra {
-		response[key] = value
+
+	slog.Info("machine creation queued", "machine", name,
+		"provisioner", body.Provisioner.Name+"/"+body.Provisioner.Version,
+		"requires_download", requiresDownload, "by", createdBy)
+	message := "Machine creation queued"
+	if requiresDownload {
+		message = "Template download and machine creation queued"
 	}
-	if startAfter {
-		parent, terr := s.queueStartPipeline(r.Context(), machine.Name, createdBy)
-		if terr != nil {
-			slog.Error("queue first start", "machine", machine.Name, "error", terr)
-		} else {
-			response["task_id"] = parent.ID
-			response["message"] = "Machine created; first start queued"
-		}
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusCreated)
-	if werr := json.NewEncoder(w).Encode(response); werr != nil {
-		slog.Error("write create response", "error", werr)
-	}
+	writeJSON(w, map[string]any{
+		"success":           true,
+		"parent_task_id":    parentID,
+		"machine_name":      name,
+		"operation":         machines.OpCreateOrchestration,
+		"status":            tasks.StatusPending,
+		"message":           message,
+		"requires_download": requiresDownload,
+		"sub_tasks":         subTasks,
+	})
 }
 
-// handleCloneMachine clones a provisioner-managed machine — zoneweaver's
-// clone contract on SHI's clone model (design §4 ruling: a metadata copy,
-// fresh name and server_id, NO VM until first start — so no snapshots, no
-// task orchestration, a synchronous registry insert). settings.hostname is
-// required and domain defaults from the source (zoneweaver rule); overrides
-// carries memory/vcpus; consoleport never survives a clone; cloned networks
-// lose their MAC and addressing so source and clone can never collide
-// (zoneweaver strips NIC identity the same way).
+// workdirTaken reports whether another machine row claims the working
+// directory the name sanitizes to.
+func (s *Server) workdirTaken(ctx context.Context, name string) (taken bool, home string, err error) {
+	machinesRoot, err := s.cfg.MachinesDir()
+	if err != nil {
+		return false, "", err
+	}
+	home, err = safepath.Under(machinesRoot, provisioner.MachineDirName(name))
+	if err != nil {
+		return false, "", err
+	}
+	list, err := s.machines.List(ctx, &machines.ListFilter{})
+	if err != nil {
+		return false, "", err
+	}
+	for _, machine := range list {
+		if machine.Home != nil && strings.EqualFold(*machine.Home, home) {
+			return true, home, nil
+		}
+	}
+	return false, home, nil
+}
+
+// handleSetProvisioner stores the provisioner document verbatim — the base's
+// PUT /machines/{name} {provisioner:{...}}: an immediate DB-only update; the
+// next /provision consumes it.
+func (s *Server) handleSetProvisioner(w http.ResponseWriter, r *http.Request) {
+	machine := s.findMachine(w, r)
+	if machine == nil {
+		return
+	}
+	var body struct {
+		Provisioner map[string]any `json:"provisioner"`
+	}
+	if err := decodeBody(r, &body); err != nil {
+		taskError(w, http.StatusBadRequest, "Invalid JSON body")
+		return
+	}
+	if len(body.Provisioner) == 0 {
+		taskError(w, http.StatusBadRequest, "provisioner {…} is required — the Hosts.yml host-entry document")
+		return
+	}
+	if err := s.machines.MergeConfigurationSections(r.Context(), machine.Name,
+		map[string]any{"provisioner": body.Provisioner}); err != nil {
+		slog.Error("store provisioner document", "machine", machine.Name, "error", err)
+		taskError(w, http.StatusInternalServerError, "Failed to store provisioner configuration")
+		return
+	}
+	slog.Info("provisioner configuration updated", "machine", machine.Name,
+		"by", auth.FromContext(r.Context()).Name)
+	writeJSON(w, map[string]any{
+		"success":      true,
+		"machine_name": machine.Name,
+		"message":      "Provisioner configuration updated",
+	})
+}
+
+// handleCloneMachine clones a spec-carrying machine: the source spec with the
+// caller's settings/overrides merged, network identity stripped, then the
+// SAME create orchestration (the clone builds real infrastructure too).
 func (s *Server) handleCloneMachine(w http.ResponseWriter, r *http.Request) {
 	source := s.findMachine(w, r)
 	if source == nil {
@@ -279,10 +424,9 @@ func (s *Server) handleCloneMachine(w http.ResponseWriter, r *http.Request) {
 	}
 	if len(source.Spec) == 0 {
 		taskError(w, http.StatusBadRequest,
-			"Only provisioner-managed machines can be cloned — this machine has no creation spec")
+			"Only machines created from a provisioner package can be cloned — this machine has no creation spec")
 		return
 	}
-
 	var body struct {
 		Name             string         `json:"name"`
 		Settings         map[string]any `json:"settings"`
@@ -308,9 +452,7 @@ func (s *Server) handleCloneMachine(w http.ResponseWriter, r *http.Request) {
 	if spec.Settings == nil {
 		spec.Settings = map[string]any{}
 	}
-	// server_id is never inherited (fresh MAX+1) unless the caller names one.
 	delete(spec.Settings, "server_id")
-	// consoleport conflicts between source and clone (zoneweaver deletes it).
 	delete(spec.Settings, "consoleport")
 	for key, value := range body.Settings {
 		spec.Settings[key] = value
@@ -321,40 +463,50 @@ func (s *Server) handleCloneMachine(w http.ResponseWriter, r *http.Request) {
 	stripCloneNetworks(spec.Networks)
 	spec.StartAfterCreate = false
 
-	// Re-validate: the source's provisioner version or safe-ID file may be
-	// gone by now — better a 400 here than a failed first start.
 	if !s.validateSpec(w, spec) {
 		return
 	}
-	serverID, err := s.resolveServerID(r.Context(), spec)
-	if err != nil {
-		taskError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	name, err := s.resolveMachineName(body.Name, serverID, spec)
-	if err != nil {
-		taskError(w, http.StatusBadRequest, err.Error())
+	name, status, problem := s.resolveMachineName(r.Context(), body.Name, spec)
+	if problem != "" {
+		taskError(w, status, problem)
 		return
 	}
 	if _, gerr := s.machines.Get(r.Context(), name); gerr == nil {
-		taskError(w, http.StatusConflict, "Machine already exists")
+		taskError(w, http.StatusConflict, "Machine "+name+" already exists in database")
 		return
 	} else if !errors.Is(gerr, machines.ErrNotFound) {
-		slog.Error("check machine existence", "machine", name, "error", gerr)
 		taskError(w, http.StatusInternalServerError, "Failed to clone machine")
 		return
 	}
-	slog.Info("machine clone requested", "source", source.Name, "clone", name,
-		"by", auth.FromContext(r.Context()).Name)
-	s.createMachineRow(w, r, name, serverID, spec, body.StartAfterCreate, map[string]any{
-		"source_machine": source.Name,
+
+	document, err := s.renderForResolution(r.Context(), spec)
+	if err != nil {
+		taskError(w, http.StatusBadRequest, "Template render failed: "+err.Error())
+		return
+	}
+	createdBy := auth.FromContext(r.Context()).Name
+	parentID, subTasks, requiresDownload, err := s.queueCreateOrchestration(
+		r.Context(), name, spec, document, body.StartAfterCreate, createdBy)
+	if err != nil {
+		taskError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	slog.Info("machine clone queued", "source", source.Name, "clone", name, "by", createdBy)
+	writeJSON(w, map[string]any{
+		"success":           true,
+		"parent_task_id":    parentID,
+		"machine_name":      name,
+		"source_machine":    source.Name,
+		"operation":         machines.OpCreateOrchestration,
+		"status":            tasks.StatusPending,
+		"message":           "Machine clone creation queued",
+		"requires_download": requiresDownload,
+		"sub_tasks":         subTasks,
 	})
 }
 
 // stripCloneNetworks removes identity and addressing from cloned network
-// entries — MACs regenerate and addressing re-derives on the clone's first
-// render, so source and clone never collide (zoneweaver's clone strips
-// physical/mac_addr off NICs and address/gateway/dns/netmask off networks).
+// entries so source and clone can never collide.
 func stripCloneNetworks(networks []any) {
 	for _, entry := range networks {
 		network, ok := entry.(map[string]any)
@@ -365,134 +517,4 @@ func stripCloneNetworks(networks []any) {
 			delete(network, key)
 		}
 	}
-}
-
-// homeTaken reports whether another machine row already claims the working
-// directory.
-func (s *Server) homeTaken(ctx context.Context, home string) (bool, error) {
-	list, err := s.machines.List(ctx, &machines.ListFilter{})
-	if err != nil {
-		return false, err
-	}
-	for _, machine := range list {
-		if machine.Home != nil && strings.EqualFold(*machine.Home, home) {
-			return true, nil
-		}
-	}
-	return false, nil
-}
-
-// handleModifyMachine replaces a provisioner-managed machine's spec (PUT
-// /machines/{name}); the change materializes on the next start —
-// requires_restart in the response says exactly that.
-func (s *Server) handleModifyMachine(w http.ResponseWriter, r *http.Request) {
-	machine := s.findMachine(w, r)
-	if machine == nil {
-		return
-	}
-	if len(machine.Spec) == 0 {
-		taskError(w, http.StatusBadRequest,
-			"Only provisioner-managed machines can be modified — this machine has no creation spec")
-		return
-	}
-
-	var spec machines.Spec
-	if err := decodeBody(r, &spec); err != nil {
-		taskError(w, http.StatusBadRequest, "Invalid JSON body")
-		return
-	}
-	if !s.validateSpec(w, &spec) {
-		return
-	}
-	// An omitted (or emptied) server_id keeps the machine's own — modify must
-	// never mint a fresh MAX+1 for an existing machine.
-	if machine.ServerID != nil {
-		switch v := spec.Settings["server_id"].(type) {
-		case nil:
-			spec.Settings["server_id"] = *machine.ServerID
-		case string:
-			if v == "" {
-				spec.Settings["server_id"] = *machine.ServerID
-			}
-		}
-	}
-	serverID, err := s.resolveServerID(r.Context(), &spec)
-	if err != nil {
-		taskError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-
-	raw, err := json.Marshal(spec)
-	if err != nil {
-		slog.Error("serialize machine spec", "error", err)
-		taskError(w, http.StatusInternalServerError, "Failed to modify machine")
-		return
-	}
-	if serr := s.machines.SetSpec(r.Context(), machine.Name, raw, serverID); serr != nil {
-		slog.Error("store machine spec", "machine", machine.Name, "error", serr)
-		if strings.Contains(serr.Error(), "UNIQUE") {
-			taskError(w, http.StatusConflict, "server_id already in use by another machine")
-			return
-		}
-		taskError(w, http.StatusInternalServerError, "Failed to modify machine")
-		return
-	}
-	slog.Info("machine spec updated", "machine", machine.Name,
-		"by", auth.FromContext(r.Context()).Name)
-
-	writeJSON(w, map[string]any{
-		"success":          true,
-		"machine_name":     machine.Name,
-		"requires_restart": true,
-		"message":          "Machine configuration updated — changes apply on the next start",
-	})
-}
-
-// handleProvisionMachine queues a provision task (vagrant provision after a
-// working-copy refresh).
-func (s *Server) handleProvisionMachine(w http.ResponseWriter, r *http.Request) {
-	s.queueVagrantOp(w, r, machines.OpProvision, "Provision")
-}
-
-// handleSyncMachine queues a sync task (vagrant rsync).
-func (s *Server) handleSyncMachine(w http.ResponseWriter, r *http.Request) {
-	s.queueVagrantOp(w, r, machines.OpSync, "Sync")
-}
-
-// queueVagrantOp is the shared provision/sync queueing flow: provisioned
-// machines only, deduplicated, MEDIUM priority.
-func (s *Server) queueVagrantOp(w http.ResponseWriter, r *http.Request, operation, label string) {
-	machine := s.findMachine(w, r)
-	if machine == nil {
-		return
-	}
-	if !machine.Provisioned() {
-		taskError(w, http.StatusBadRequest,
-			"Machine is not provisioner-managed — nothing to "+strings.ToLower(label))
-		return
-	}
-
-	if existing, err := s.dedupTask(r.Context(), machine.Name, operation); err != nil {
-		slog.Error("check existing task", "machine", machine.Name, "operation", operation, "error", err)
-		taskError(w, http.StatusInternalServerError, "Failed to queue "+strings.ToLower(label)+" task")
-		return
-	} else if existing != nil {
-		operationResponse(w, existing.ID, machine.Name, operation, existing.Status,
-			label+" task already queued")
-		return
-	}
-
-	task, err := s.tasks.Store().Create(r.Context(), &tasks.NewTask{
-		MachineName: machine.Name,
-		Operation:   operation,
-		Priority:    tasks.PriorityMedium,
-		CreatedBy:   auth.FromContext(r.Context()).Name,
-	})
-	if err != nil {
-		slog.Error("queue task", "machine", machine.Name, "operation", operation, "error", err)
-		taskError(w, http.StatusInternalServerError, "Failed to queue "+strings.ToLower(label)+" task")
-		return
-	}
-	operationResponse(w, task.ID, machine.Name, operation, tasks.StatusPending,
-		label+" task queued successfully")
 }

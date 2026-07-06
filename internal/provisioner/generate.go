@@ -1,24 +1,33 @@
 package provisioner
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
 
-	"github.com/flosch/pongo2/v6"
+	"github.com/nikolalohinski/gonja/v2"
+	"github.com/nikolalohinski/gonja/v2/exec"
+	"github.com/nikolalohinski/gonja/v2/loaders"
+
+	"github.com/Makr91/hyperweaver-agent/internal/safepath"
 )
 
 // Hosts.yml generation (architecture D9/D-B): the package's
-// templates/Hosts.template.yml is a Jinja2 template — pongo2 renders it with
-// a context assembled in SHI's CustomProvisioner precedence order,
-// generalized to every package (design §5). SHI's ::TOKEN:: haxe.Template
-// markers are gone: bundled templates were converted to Jinja2 at
-// template-authoring time, and custom packages declare Jinja2 in our format
-// docs (no compatibility shim — SHI-format packages need a one-time template
-// conversion to import).
+// templates/Hosts.template.yml is a TRUE Jinja2 template — gonja (the
+// Jinja2-faithful Go engine; Mark's dialect ruling 2026-07-06: real Jinja2
+// on both agents, no Django-dialect wart) renders it with a context
+// assembled in SHI's CustomProvisioner precedence order, generalized to
+// every package (design §5). Undefined variables render as EMPTY STRING
+// (gonja's default, StrictUndefined false — the published contract). SHI's
+// ::TOKEN:: haxe.Template markers are gone: bundled templates were converted
+// to Jinja2 at template-authoring time, and custom packages declare Jinja2
+// in our format docs (no compatibility shim — SHI-format packages need a
+// one-time template conversion to import).
 
 // hostsTemplateName is the template file every package version carries.
 const hostsTemplateName = "Hosts.template.yml"
@@ -131,9 +140,9 @@ func BuildContext(in *GenerateInput) map[string]any {
 }
 
 // RenderHostsFile renders the package's Hosts.template.yml with the
-// assembled context and returns the Hosts.yml bytes. The template set is
-// rooted at the package's templates directory, so includes stay inside the
-// package.
+// assembled context and returns the Hosts.yml bytes. Template resolution is
+// rooted at the package's templates directory (packageLoader), so includes
+// can never escape the package.
 func RenderHostsFile(in *GenerateInput) ([]byte, error) {
 	if in.Version == nil {
 		return nil, errors.New("no provisioner version to render from")
@@ -145,21 +154,58 @@ func RenderHostsFile(in *GenerateInput) ([]byte, error) {
 			in.Version.Name, in.Version.Version, hostsTemplateName, err)
 	}
 
-	loader, err := pongo2.NewLocalFileSystemLoader(templatesDir)
-	if err != nil {
-		return nil, fmt.Errorf("open template dir: %w", err)
-	}
-	set := pongo2.NewSet("provisioner", loader)
-	template, err := set.FromFile(hostsTemplateName)
+	template, err := exec.NewTemplate(hostsTemplateName,
+		gonja.DefaultConfig, &packageLoader{root: templatesDir}, gonja.DefaultEnvironment)
 	if err != nil {
 		return nil, fmt.Errorf("parse %s: %w", hostsTemplateName, err)
 	}
-
-	rendered, err := template.ExecuteBytes(pongo2.Context(BuildContext(in)))
+	rendered, err := template.ExecuteToBytes(exec.NewContext(BuildContext(in)))
 	if err != nil {
 		return nil, fmt.Errorf("render %s: %w", hostsTemplateName, err)
 	}
 	return rendered, nil
+}
+
+// packageLoader is the gonja template loader rooted at one package's
+// templates/ directory: every resolution — the root template and every
+// {% include %}/{% import %} it reaches — goes through safepath containment,
+// so a template can never read outside its package (gonja's own filesystem
+// loader is unrestricted; this one is THE loader the renderer uses).
+type packageLoader struct {
+	root string
+}
+
+// Resolve maps a template reference to its contained on-disk path. Absolute
+// inputs (gonja hands back previously-resolved paths) are re-checked against
+// the root; anything escaping it is refused.
+func (l *packageLoader) Resolve(path string) (string, error) {
+	if filepath.IsAbs(path) {
+		rel, err := filepath.Rel(l.root, path)
+		if err != nil {
+			return "", fmt.Errorf("template path %q is outside the package: %w", path, err)
+		}
+		path = rel
+	}
+	return safepath.Under(l.root, path)
+}
+
+// Read opens a resolved template's content.
+func (l *packageLoader) Read(path string) (io.Reader, error) {
+	resolved, err := l.Resolve(path)
+	if err != nil {
+		return nil, err
+	}
+	raw, err := os.ReadFile(filepath.Clean(resolved))
+	if err != nil {
+		return nil, err
+	}
+	return bytes.NewReader(raw), nil
+}
+
+// Inherit keeps children on the SAME root — nested includes stay inside the
+// package's templates/ directory no matter how deep the chain goes.
+func (l *packageLoader) Inherit(_ string) (loaders.Loader, error) {
+	return l, nil
 }
 
 // rolesContext exposes the role selections structured (name/enabled/files)
@@ -216,8 +262,8 @@ func configurationFields(metadata map[string]any) []map[string]any {
 // legacyMarkerPattern spots SHI's ::TOKEN:: haxe.Template markers — dead
 // syntax (Mark's D-B ruling: Jinja2 everywhere, no compatibility shim), so
 // their presence in RENDERED output means the package's template was never
-// converted. pongo2 passes them through as literal text, which would land as
-// garbage in Hosts.yml.
+// converted. The engine passes them through as literal text, which would
+// land as garbage in Hosts.yml.
 var legacyMarkerPattern = regexp.MustCompile(`::[A-Za-z_][A-Za-z0-9_]*::`)
 
 // LegacyMarkers returns the ::TOKEN:: markers surviving in rendered output

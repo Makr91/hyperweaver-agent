@@ -175,21 +175,47 @@ provisioning:
   # Empty = <data.dir>/provisioners (/var/lib/hyperweaver-agent/provisioners).
   provisioners_dir: ''
   # Root of the per-machine working directories: the materialized provisioner
-  # copy, the generated Hosts.yml, id-files, installers, and ssls trees
-  # vagrant runs from.
+  # copy, the rendered Hosts.yml, id-files, installers, ssls trees, and the
+  # machine's disk media.
   # Empty = <data.dir>/machines (/var/lib/hyperweaver-agent/machines).
   machines_dir: ''
-  # Leave a machine running after a failed vagrant up so it can be debugged
-  # (SHI's keepfailedserversrunning). false powers the half-provisioned VM
-  # off.
-  keep_failed_machines_running: true
-  # Sync method for machines whose spec sets none: rsync | scp (SHI's global
-  # preference; platform rules still apply).
+  # Sync method for machines whose spec sets none — it lands as the rendered
+  # document's folders[].type: rsync | scp (platform rules still apply).
   default_sync_method: rsync
   # Host bridge interface injected into templates as
   # DEFAULT_NETWORK_INTERFACE when the spec sets none. Values come from
   # GET /provisioning/bridged-interfaces (VBoxManage list bridgedifs).
   default_network_interface: ''
+  # Timeout for one in-guest ansible-playbook run.
+  playbook_timeout_seconds: 21600
+  # Timeout for the in-guest ansible/collection installation steps.
+  ansible_install_timeout_seconds: 300
+  ssh:
+    # The agent's own provisioning private key — the SSH-auth fallback when
+    # the machine's document supplies neither a key nor a password; generated
+    # (ed25519) at startup when absent.
+    # Empty = <config dir>/ssh/provision_key.
+    key_path: ''
+    # Total wait for a guest's SSH to become available (the document's
+    # settings.setup_wait wins when larger).
+    timeout_seconds: 300
+    # Interval between SSH availability checks.
+    poll_interval_seconds: 10
+
+template_sources:
+  # Box-template registry: downloaded box disk images machines clone from.
+  # Template storage root (<root>/<organization>/<box>/<version>/).
+  # Empty = <data.dir>/templates (/var/lib/hyperweaver-agent/templates).
+  local_storage_path: ''
+  # Vagrant/BoxVault-compatible registries. The entry named "Default
+  # Registry" (or flagged default) serves requests that name no source;
+  # auth_token authenticates private boxes (it never enters task metadata).
+  sources:
+    - name: Default Registry
+      url: https://boxvault.startcloud.com
+      enabled: true
+      default: true
+      auth_token: ''
 
 assets:
   # Installer file cache (the artifacts capability token): hash-verified

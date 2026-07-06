@@ -200,7 +200,7 @@ func New(cfg *config.Config, keyStore *keys.Store, trayTokens *auth.TrayTokens, 
 	mux.Handle("POST /machines/bulk/start", requireKey(http.HandlerFunc(s.handleBulkStart)))
 	mux.Handle("POST /machines/bulk/stop", requireKey(http.HandlerFunc(s.handleBulkStop)))
 	mux.Handle("GET /machines/{machineName}", requireKey(http.HandlerFunc(s.handleMachineDetails)))
-	mux.Handle("PUT /machines/{machineName}", requireKey(http.HandlerFunc(s.handleModifyMachine)))
+	mux.Handle("PUT /machines/{machineName}", requireKey(http.HandlerFunc(s.handleSetProvisioner)))
 	mux.Handle("GET /machines/{machineName}/config", requireKey(http.HandlerFunc(s.handleMachineConfig)))
 	mux.Handle("POST /machines/{machineName}/start", requireKey(http.HandlerFunc(s.handleStartMachine)))
 	mux.Handle("POST /machines/{machineName}/stop", requireKey(http.HandlerFunc(s.handleStopMachine)))
@@ -208,8 +208,15 @@ func New(cfg *config.Config, keyStore *keys.Store, trayTokens *auth.TrayTokens, 
 	mux.Handle("POST /machines/{machineName}/suspend", requireKey(http.HandlerFunc(s.handleSuspendMachine)))
 	mux.Handle("POST /machines/{machineName}/clone", requireKey(http.HandlerFunc(s.handleCloneMachine)))
 	mux.Handle("POST /machines/{machineName}/provision", requireKey(http.HandlerFunc(s.handleProvisionMachine)))
+	mux.Handle("GET /machines/{machineName}/provision/status", requireKey(http.HandlerFunc(s.handleProvisionStatus)))
+	mux.Handle("POST /machines/{machineName}/run-provisioners", requireKey(http.HandlerFunc(s.handleRunProvisioners)))
 	mux.Handle("POST /machines/{machineName}/sync", requireKey(http.HandlerFunc(s.handleSyncMachine)))
 	mux.Handle("DELETE /machines/{machineName}", requireKey(http.HandlerFunc(s.handleDeleteMachine)))
+
+	// Box-template registry (zoneweaver's template model on this hypervisor:
+	// downloaded boxes as clonable disk images).
+	mux.Handle("GET /templates", requireKey(http.HandlerFunc(s.handleListTemplates)))
+	mux.Handle("POST /templates/pull", requireKey(http.HandlerFunc(s.handlePullTemplate)))
 	mux.Handle("GET /machines/{machineName}/notes", requireKey(http.HandlerFunc(s.handleGetMachineNotes)))
 	mux.Handle("PUT /machines/{machineName}/notes", requireKey(http.HandlerFunc(s.handleUpdateMachineNotes)))
 	mux.Handle("GET /machines/{machineName}/tags", requireKey(http.HandlerFunc(s.handleGetMachineTags)))

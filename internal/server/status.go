@@ -38,12 +38,20 @@ type statusPayload struct {
 // /monitoring/* endpoints serve realtime samples regardless of the storage
 // setting, so the token is unconditional. provisioning shipped with the
 // provisioner package registry (/provisioning/provisioners); machine-create
-// shipped with the create pipeline (POST /machines → vagrant up through the
-// queue). Still to come: artifacts/templates join the config-gated set when
-// their subsystems land.
+// shipped with the create orchestration (POST /machines → native VBoxManage build through the
+// queue; the zoneweaver mechanism, no vagrant). provisioner-registry and secrets are the finer tokens of Mark's
+// gating ruling (2026-07-06): zoneweaver's provisioning/machine-create are
+// equally TRUE but name different wire shapes, so the SHI-format registry
+// surface (/provisioning/provisioners*) and the global secrets store
+// (/secrets) advertise their own tokens — zoneweaver gains each when its
+// parity lands, and the UI's Installer Files gate is artifacts ∧
+// provisioner-registry. templates shipped with the box-template registry
+// (the create orchestration's storage source) — always on here; zoneweaver
+// config-gates its counterpart on template_sources.enabled.
 var platformFeatures = []string{
 	"tasks", "machines", "machine-suspend", "machine-create", "swap",
-	"monitoring", "processes", "provisioning",
+	"monitoring", "processes", "provisioning", "provisioner-registry",
+	"secrets", "templates",
 }
 
 // features derives the advertised token list: platform tokens plus the

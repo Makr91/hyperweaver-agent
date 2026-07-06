@@ -394,6 +394,31 @@ func (s *Store) UpdateProgress(ctx context.Context, id string, percent float64, 
 	return err
 }
 
+// UpdateMetadata replaces a task's metadata document — zoneweaver's
+// inter-child handoff: the storage child records _execution_output in its own
+// metadata and the config child reads it through depends_on.
+func (s *Store) UpdateMetadata(ctx context.Context, id, metadata string) error {
+	res, err := s.db.ExecContext(ctx, `UPDATE tasks
+		SET metadata = ?, updated_at = ? WHERE id = ?`,
+		metadata, formatTime(time.Now()), id)
+	if err != nil {
+		return err
+	}
+	return requireTaskRow(res)
+}
+
+// requireTaskRow errors when an update matched nothing.
+func requireTaskRow(res sql.Result) error {
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 // CancelPending cancels a still-pending task (the DELETE /tasks/{id} fast
 // path). False when the task was no longer pending by the time of the update.
 func (s *Store) CancelPending(ctx context.Context, id string) (bool, error) {

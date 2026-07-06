@@ -208,6 +208,30 @@ func (c *Config) AssetsDir() (string, error) {
 	return filepath.Join(dir, "file-cache"), nil
 }
 
+// TemplatesDir returns the box-template storage root:
+// template_sources.local_storage_path when configured, else templates under
+// the data root.
+func (c *Config) TemplatesDir() (string, error) {
+	if c.TemplateSources.LocalStoragePath != "" {
+		return safepath.CleanAbs(c.TemplateSources.LocalStoragePath)
+	}
+	dir, err := c.DataDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, "templates"), nil
+}
+
+// ProvisionKeyPath returns the agent's provisioning SSH key location:
+// provisioning.ssh.key_path when configured, else ssh/provision_key beside
+// the loaded configuration file.
+func (c *Config) ProvisionKeyPath() string {
+	if c.Provisioning.SSH.KeyPath != "" {
+		return c.Provisioning.SSH.KeyPath
+	}
+	return filepath.Join(filepath.Dir(c.path), "ssh", "provision_key")
+}
+
 // TaskLogDir returns where per-task output log files land, defaulting to
 // logs/tasks beside the agent log.
 func (c *Config) TaskLogDir() (string, error) {

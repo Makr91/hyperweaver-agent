@@ -5,16 +5,13 @@ import (
 	"encoding/json"
 	"log/slog"
 	"os"
-	"path/filepath"
 	"strconv"
-	"strings"
 	"sync"
 	"time"
 
 	"github.com/Makr91/hyperweaver-agent/internal/logging"
 	"github.com/Makr91/hyperweaver-agent/internal/prereqs"
 	"github.com/Makr91/hyperweaver-agent/internal/tasks"
-	"github.com/Makr91/hyperweaver-agent/internal/vagrant"
 	"github.com/Makr91/hyperweaver-agent/internal/vbox"
 )
 
@@ -27,8 +24,10 @@ func mlog() *slog.Logger {
 // Reconciler keeps the registry truthful: the periodic sweep (SHI's 60-second
 // poll — this IS external-shutdown detection) lists VirtualBox's machines,
 // refreshes every row's live state, imports machines built outside the agent,
-// and flags registry rows whose VM disappeared. VirtualBox is authoritative
-// over vagrant's cache and over the registry (SHI's getRealStatus rule).
+// and flags registry rows whose VM disappeared. VirtualBox is the ONE
+// authority (SHI's getRealStatus rule) — the agent never executes vagrant
+// (Mark's provisioning-engine ruling); rows that carry vagrant provenance
+// from before the cut keep it, read from the store only.
 //
 // The sweep runs THROUGH the task queue, exactly like the Node agent's
 // TaskProcessor: an unconditional startup `discover` task 5 seconds after
@@ -149,11 +148,6 @@ func VBoxManagePath(ctx context.Context) string {
 	return toolPath(ctx, "virtualbox")
 }
 
-// VagrantPath returns the validated vagrant path, or "" when not installed.
-func VagrantPath(ctx context.Context) string {
-	return toolPath(ctx, "vagrant")
-}
-
 func toolPath(ctx context.Context, name string) string {
 	for _, tool := range prereqs.Detect(ctx) {
 		if tool.Name == name && tool.Installed {
@@ -192,9 +186,6 @@ func (r *Reconciler) RunOnce(ctx context.Context, out *tasks.OutputWriter) {
 	}
 	narrate("stdout", "VirtualBox reports "+strconv.Itoa(len(registered))+" registered machine(s)")
 
-	vagrantHomes := r.vagrantHomesByUUID(sweepCtx)
-	narrate("stdout", "vagrant global-status maps "+strconv.Itoa(len(vagrantHomes))+" VM(s) to vagrant projects")
-
 	discovered := 0
 	updated := 0
 	seen := make([]string, 0, len(registered))
@@ -224,13 +215,11 @@ func (r *Reconciler) RunOnce(ctx context.Context, out *tasks.OutputWriter) {
 			UUID:          reg.UUID,
 			Configuration: configuration,
 		}
-		if home, isVagrant := vagrantHomes[strings.ToLower(reg.UUID)]; isVagrant {
-			observation.Backing = BackingVagrant
-			observation.Home = &home
-		} else if existing, gerr := r.store.Get(sweepCtx, reg.Name); gerr == nil &&
+		if existing, gerr := r.store.Get(sweepCtx, reg.Name); gerr == nil &&
 			existing.Backing == BackingVagrant && existing.Home != nil {
-			// vagrant global-status can lag or be pruned; a machine once
-			// known as vagrant-backed keeps its backing and home.
+			// A row that carries vagrant provenance (recorded before the
+			// vagrant cut, or by an agent-created machine's home) keeps its
+			// backing and home — read from the store, never from vagrant.
 			observation.Backing = BackingVagrant
 			observation.Home = existing.Home
 		}
@@ -264,54 +253,4 @@ func (r *Reconciler) RunOnce(ctx context.Context, out *tasks.OutputWriter) {
 	// The Node agent's discover completion line.
 	narrate("stdout", "Discovery completed: "+strconv.Itoa(discovered)+" new machines discovered, "+
 		strconv.Itoa(updated)+" updated, "+strconv.FormatInt(orphaned, 10)+" machines orphaned")
-}
-
-// vagrantHomesByUUID maps VirtualBox UUIDs to the vagrant project directory
-// that owns them. vagrant global-status yields the homes; each home's
-// .vagrant/machines/<name>/virtualbox/id file names the VM it created —
-// the association SHI derives from its own directory layout, generalized to
-// any vagrant project on the host.
-func (r *Reconciler) vagrantHomesByUUID(ctx context.Context) map[string]string {
-	homes := map[string]string{}
-	exe := VagrantPath(ctx)
-	if exe == "" {
-		return homes
-	}
-
-	// --prune drops stale cache entries so deleted VMs are not resurrected
-	// under old ids (SHI runs the same before every start).
-	machines, err := vagrant.GlobalStatus(ctx, exe, true)
-	if err != nil {
-		mlog().Warn("machine reconciliation: vagrant global-status failed", "error", err)
-		return homes
-	}
-
-	for _, m := range machines {
-		if m.Home == "" {
-			continue
-		}
-		// Normalized to the OS path shape so the store's home-match join
-		// compares like with like (vagrant reports forward slashes at times).
-		m.Home = filepath.Clean(filepath.FromSlash(m.Home))
-		machinesDir := filepath.Join(m.Home, ".vagrant", "machines")
-		entries, rerr := os.ReadDir(machinesDir)
-		if rerr != nil {
-			continue
-		}
-		for _, entry := range entries {
-			if !entry.IsDir() {
-				continue
-			}
-			idPath := filepath.Join(machinesDir, entry.Name(), "virtualbox", "id")
-			raw, rerr := os.ReadFile(filepath.Clean(idPath))
-			if rerr != nil {
-				continue
-			}
-			uuid := strings.ToLower(strings.TrimSpace(string(raw)))
-			if uuid != "" {
-				homes[uuid] = m.Home
-			}
-		}
-	}
-	return homes
 }

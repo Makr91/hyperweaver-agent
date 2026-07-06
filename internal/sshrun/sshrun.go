@@ -1,0 +1,214 @@
+// Package sshrun is zoneweaver's lib/SSHManager.js ported to Go (Mark's
+// ruling: the Go agent recreates zoneweaver's mechanisms exactly): SSH
+// connect/exec/wait against provisioned machines, rsync file sync, and the
+// agent's own provisioning keypair. Key-based auth is preferred; relative key
+// paths resolve against the machine's provisioning base path; the fallback is
+// the agent-generated provisioning key.
+package sshrun
+
+import (
+	"context"
+	"crypto/sha256"
+	"encoding/base64"
+	"fmt"
+	"log/slog"
+	"net"
+	"os"
+	"path/filepath"
+	"strconv"
+	"time"
+
+	"golang.org/x/crypto/ssh"
+
+	"github.com/Makr91/hyperweaver-agent/internal/logging"
+)
+
+// plog is this package's category logger (logging.categories.provision).
+func plog() *slog.Logger {
+	return logging.Category("provision")
+}
+
+// Credentials mirrors the task-metadata credential shape ({username,
+// password, ssh_key_path}).
+type Credentials struct {
+	Username   string `json:"username"`
+	Password   string `json:"password,omitempty"`
+	SSHKeyPath string `json:"ssh_key_path,omitempty"`
+}
+
+// StreamFunc receives live remote output (stream = "stdout" | "stderr").
+type StreamFunc func(stream, data string)
+
+// resolveKeyPath resolves a possibly-relative key path against the
+// provisioning base path (SSHManager's rule).
+func resolveKeyPath(keyPath, basePath string) string {
+	if keyPath == "" || filepath.IsAbs(keyPath) || basePath == "" {
+		return keyPath
+	}
+	return filepath.Join(basePath, keyPath)
+}
+
+// authMethods builds the connection auth in SSHManager's preference order:
+// explicit key → password → the default provisioning key.
+func authMethods(credentials Credentials, basePath, defaultKeyPath string) ([]ssh.AuthMethod, error) {
+	if credentials.SSHKeyPath != "" {
+		key, err := loadKey(resolveKeyPath(credentials.SSHKeyPath, basePath))
+		if err != nil {
+			return nil, err
+		}
+		return []ssh.AuthMethod{ssh.PublicKeys(key)}, nil
+	}
+	if credentials.Password != "" {
+		return []ssh.AuthMethod{ssh.Password(credentials.Password)}, nil
+	}
+	key, err := loadKey(defaultKeyPath)
+	if err != nil {
+		return nil, fmt.Errorf("no credentials and no default provisioning key: %w", err)
+	}
+	return []ssh.AuthMethod{ssh.PublicKeys(key)}, nil
+}
+
+func loadKey(path string) (ssh.Signer, error) {
+	raw, err := os.ReadFile(filepath.Clean(path))
+	if err != nil {
+		return nil, fmt.Errorf("read SSH key %s: %w", path, err)
+	}
+	signer, err := ssh.ParsePrivateKey(raw)
+	if err != nil {
+		return nil, fmt.Errorf("parse SSH key %s: %w", path, err)
+	}
+	return signer, nil
+}
+
+// acceptAndLogHostKey accepts any host key and records its fingerprint —
+// provisioned machines are freshly built with no prior trust anchor
+// (StrictHostKeyChecking=no in the base); the fingerprint lands in the log
+// for the audit trail.
+func acceptAndLogHostKey(hostname string, _ net.Addr, key ssh.PublicKey) error {
+	digest := sha256.Sum256(key.Marshal())
+	plog().Debug("accepting machine host key",
+		"host", hostname, "fingerprint", "SHA256:"+base64.StdEncoding.EncodeToString(digest[:]))
+	return nil
+}
+
+// clientConfig builds the ssh client configuration.
+func clientConfig(credentials Credentials, basePath, defaultKeyPath string) (*ssh.ClientConfig, error) {
+	username := credentials.Username
+	if username == "" {
+		username = "root"
+	}
+	auth, err := authMethods(credentials, basePath, defaultKeyPath)
+	if err != nil {
+		return nil, err
+	}
+	return &ssh.ClientConfig{
+		User:            username,
+		Auth:            auth,
+		HostKeyCallback: acceptAndLogHostKey,
+		Timeout:         15 * time.Second,
+	}, nil
+}
+
+// Run executes one command on the machine, streaming its output. The context
+// bounds the whole call (task cancellation kills the session).
+func Run(ctx context.Context, ip string, port int, credentials Credentials,
+	command, basePath, defaultKeyPath string, timeout time.Duration, stream StreamFunc,
+) error {
+	config, err := clientConfig(credentials, basePath, defaultKeyPath)
+	if err != nil {
+		return err
+	}
+	runCtx := ctx
+	if timeout > 0 {
+		var cancel context.CancelFunc
+		runCtx, cancel = context.WithTimeout(ctx, timeout)
+		defer cancel()
+	}
+
+	dialer := net.Dialer{Timeout: config.Timeout}
+	conn, err := dialer.DialContext(runCtx, "tcp", net.JoinHostPort(ip, strconv.Itoa(port)))
+	if err != nil {
+		return fmt.Errorf("dial %s:%d: %w", ip, port, err)
+	}
+	sshConn, channels, requests, err := ssh.NewClientConn(conn, ip, config)
+	if err != nil {
+		_ = conn.Close()
+		return fmt.Errorf("ssh handshake %s: %w", ip, err)
+	}
+	client := ssh.NewClient(sshConn, channels, requests)
+	defer func() {
+		_ = client.Close()
+	}()
+
+	session, err := client.NewSession()
+	if err != nil {
+		return fmt.Errorf("ssh session: %w", err)
+	}
+	defer func() {
+		_ = session.Close()
+	}()
+
+	if stream != nil {
+		session.Stdout = streamWriter{stream: "stdout", cb: stream}
+		session.Stderr = streamWriter{stream: "stderr", cb: stream}
+	}
+
+	// The context is the kill switch: closing the session unblocks Wait.
+	done := make(chan error, 1)
+	go func() {
+		done <- session.Run(command)
+	}()
+	select {
+	case <-runCtx.Done():
+		_ = session.Close()
+		<-done
+		return runCtx.Err()
+	case err := <-done:
+		return err
+	}
+}
+
+// streamWriter adapts a StreamFunc to io.Writer.
+type streamWriter struct {
+	stream string
+	cb     StreamFunc
+}
+
+func (w streamWriter) Write(p []byte) (int, error) {
+	w.cb(w.stream, string(p))
+	return len(p), nil
+}
+
+// WaitForSSH polls until the machine answers `echo ready` over SSH
+// (waitForSSH verbatim: bounded total timeout, fixed poll interval, elapsed
+// time reported).
+func WaitForSSH(ctx context.Context, ip string, port int, credentials Credentials,
+	basePath, defaultKeyPath string, timeout, interval time.Duration, stream StreamFunc,
+) (time.Duration, error) {
+	start := time.Now()
+	deadline := start.Add(timeout)
+	for {
+		if ctx.Err() != nil {
+			return time.Since(start), ctx.Err()
+		}
+		if time.Now().After(deadline) {
+			return time.Since(start), fmt.Errorf("SSH not available after %ds", int(timeout.Seconds()))
+		}
+		err := Run(ctx, ip, port, credentials, "echo ready", basePath, defaultKeyPath,
+			10*time.Second, nil)
+		if err == nil {
+			elapsed := time.Since(start)
+			if stream != nil {
+				stream("stdout", fmt.Sprintf("SSH available on %s:%d after %ds\n",
+					ip, port, int(elapsed.Seconds())))
+			}
+			return elapsed, nil
+		}
+		plog().Debug("SSH poll failed", "ip", ip, "error", err)
+		select {
+		case <-ctx.Done():
+			return time.Since(start), ctx.Err()
+		case <-time.After(interval):
+		}
+	}
+}
