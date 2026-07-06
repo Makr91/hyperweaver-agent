@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/Makr91/hyperweaver-agent/internal/apidocs"
+	"github.com/Makr91/hyperweaver-agent/internal/assets"
 	"github.com/Makr91/hyperweaver-agent/internal/auth"
 	"github.com/Makr91/hyperweaver-agent/internal/config"
 	"github.com/Makr91/hyperweaver-agent/internal/keys"
@@ -43,6 +44,7 @@ type Server struct {
 	machines     *machines.Store
 	provisioners *provisioner.Registry
 	secrets      *secrets.Store
+	assets       *assets.Store
 	monitor      *monitoring.Service
 	dbs          []DBHandle
 	httpSrv      *http.Server
@@ -66,7 +68,7 @@ type Server struct {
 }
 
 // New builds the server and its routes.
-func New(cfg *config.Config, keyStore *keys.Store, trayTokens *auth.TrayTokens, taskQueue *tasks.Queue, machineStore *machines.Store, provisioners *provisioner.Registry, secretsStore *secrets.Store, monitor *monitoring.Service, dbs []DBHandle, restartArgs []string, openUI func()) (*Server, error) {
+func New(cfg *config.Config, keyStore *keys.Store, trayTokens *auth.TrayTokens, taskQueue *tasks.Queue, machineStore *machines.Store, provisioners *provisioner.Registry, secretsStore *secrets.Store, assetsStore *assets.Store, monitor *monitoring.Service, dbs []DBHandle, restartArgs []string, openUI func()) (*Server, error) {
 	s := &Server{
 		cfg:          cfg,
 		keys:         keyStore,
@@ -75,6 +77,7 @@ func New(cfg *config.Config, keyStore *keys.Store, trayTokens *auth.TrayTokens, 
 		machines:     machineStore,
 		provisioners: provisioners,
 		secrets:      secretsStore,
+		assets:       assetsStore,
 		monitor:      monitor,
 		dbs:          dbs,
 		startedAt:    time.Now(),
@@ -221,6 +224,16 @@ func New(cfg *config.Config, keyStore *keys.Store, trayTokens *auth.TrayTokens, 
 	mux.Handle("DELETE /provisioning/provisioners/{name}", requireKey(http.HandlerFunc(s.handleDeleteProvisioner)))
 	mux.Handle("GET /provisioning/provisioners/{name}/versions/{version}", requireKey(http.HandlerFunc(s.handleProvisionerVersion)))
 	mux.Handle("DELETE /provisioning/provisioners/{name}/versions/{version}", requireKey(http.HandlerFunc(s.handleDeleteProvisionerVersion)))
+
+	// Installer file cache (the `artifacts` token, config-gated by
+	// assets.enabled — Mark's ruling 2026-07-06: hash verification in full).
+	// Literal segments win over {id} in ServeMux precedence.
+	mux.Handle("GET /artifacts", requireKey(s.assetsGate(s.handleListArtifacts)))
+	mux.Handle("POST /artifacts/scan", requireKey(s.assetsGate(s.handleScanArtifacts)))
+	mux.Handle("POST /artifacts/download", requireKey(s.assetsGate(s.handleDownloadArtifact)))
+	mux.Handle("POST /artifacts/upload", requireKey(s.assetsGate(s.handleUploadArtifact)))
+	mux.Handle("POST /artifacts/register", requireKey(s.assetsGate(s.handleRegisterArtifact)))
+	mux.Handle("DELETE /artifacts/{id}", requireKey(s.assetsGate(s.handleDeleteArtifact)))
 
 	// Global secrets store (architecture D-C, SHI's SecretsPage categories) —
 	// admin-only via the central role policy; separate from /settings so that

@@ -185,6 +185,19 @@ func (c *Config) MachinesDir() (string, error) {
 	return filepath.Join(dir, "machines"), nil
 }
 
+// AssetsDir returns the installer file cache root: assets.dir when
+// configured, else file-cache under the data root (SHI's file-cache naming).
+func (c *Config) AssetsDir() (string, error) {
+	if c.Assets.Dir != "" {
+		return safepath.CleanAbs(c.Assets.Dir)
+	}
+	dir, err := c.DataDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, "file-cache"), nil
+}
+
 // TaskLogDir returns where per-task output log files land, defaulting to
 // logs/tasks beside the agent log.
 func (c *Config) TaskLogDir() (string, error) {

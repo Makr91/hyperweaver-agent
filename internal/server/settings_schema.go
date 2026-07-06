@@ -400,6 +400,11 @@ var settingsSchema = map[string]any{
 				"min":         1,
 				"max":         99999999,
 			},
+			"prefix_machine_names": map[string]any{
+				"type":        "boolean",
+				"description": "Derive created machines' names as <server_id>--<hostname>.<domain> when no explicit name is given; explicit names always win (machine names stay free-form)",
+				"default":     false,
+			},
 			"shutdown_timeout": map[string]any{
 				"type":        "integer",
 				"description": "Seconds a graceful stop waits for the guest to power off after the ACPI signal before forcing poweroff",
@@ -422,6 +427,29 @@ var settingsSchema = map[string]any{
 				"type":        "string",
 				"description": "Root of the per-machine working directories — the materialized provisioner copy, generated Hosts.yml, id-files, installers, and ssls trees vagrant runs from (empty = <data dir>/machines)",
 				"default":     "",
+			},
+		},
+	},
+	"assets": map[string]any{
+		"description":      "Installer file cache (the artifacts capability token): hash-verified installer/fixpack/hotfix files machines mount at start",
+		"requires_restart": true,
+		"properties": map[string]any{
+			"enabled": map[string]any{
+				"type":        "boolean",
+				"description": "Serve the /artifacts surface and enforce cache verification at machine prepare; disabled skips mounting and verification with a loud warning",
+				"default":     true,
+			},
+			"dir": map[string]any{
+				"type":        "string",
+				"description": "Cache root, <dir>/<role>/{installers,fixpacks,hotfixes}/<file> (empty = <data dir>/file-cache)",
+				"default":     "",
+			},
+			"max_upload_gb": map[string]any{
+				"type":        "integer",
+				"description": "Upload size cap in GiB",
+				"default":     50,
+				"min":         1,
+				"max":         1024,
 			},
 		},
 	},

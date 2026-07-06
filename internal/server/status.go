@@ -50,10 +50,13 @@ var platformFeatures = []string{
 // config-gated ones (Agent API v1 rule — a config-disabled surface is not
 // advertised, so token-gating clients never hit its 503s).
 func (s *Server) features() []string {
-	tokens := make([]string, 0, len(platformFeatures)+1)
+	tokens := make([]string, 0, len(platformFeatures)+2)
 	tokens = append(tokens, platformFeatures...)
 	if s.cfg.HostPower.Enabled {
 		tokens = append(tokens, "host-power")
+	}
+	if s.cfg.Assets.Enabled {
+		tokens = append(tokens, "artifacts")
 	}
 	return tokens
 }

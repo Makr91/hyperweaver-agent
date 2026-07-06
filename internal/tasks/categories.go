@@ -21,6 +21,10 @@ var operationCategories = map[string]string{
 	// One import at a time: imports copy large trees into the shared
 	// provisioner registry directory.
 	"provisioner_import": CategorySystem,
+	// One cache mutation at a time: scans and downloads write the same
+	// registry rows and cache tree.
+	"artifact_scan":     CategoryArtifact,
+	"artifact_download": CategoryArtifact,
 }
 
 // OperationCategory returns the concurrency category for an operation, or ""

@@ -84,8 +84,9 @@ func (s *Server) validateSpec(w http.ResponseWriter, spec *machines.Spec) bool {
 }
 
 // resolveServerID normalizes the spec's server_id: the caller's value is
-// validated against the numeric vocabulary; absent means auto-assigned
-// MAX+1 (design D-G).
+// validated against the numeric vocabulary and zero-padded to at least 4
+// digits (zoneweaver's padStart(4) canonical form); absent means
+// auto-assigned MAX+1 (design D-G).
 func (s *Server) resolveServerID(ctx context.Context, spec *machines.Spec) (string, error) {
 	serverID := ""
 	switch v := spec.Settings["server_id"].(type) {
@@ -106,51 +107,86 @@ func (s *Server) resolveServerID(ctx context.Context, spec *machines.Spec) (stri
 	if !serverIDPattern.MatchString(serverID) {
 		return "", errors.New("settings.server_id must be numeric (1-8 digits)")
 	}
+	if len(serverID) < 4 {
+		serverID = strings.Repeat("0", 4-len(serverID)) + serverID
+	}
 	spec.Settings["server_id"] = serverID
 	return serverID, nil
 }
 
+// resolveMachineName settles the machine's name (zoneweaver's
+// resolveZoneName on top of design D-G): an explicit name always wins —
+// names are free-form, anything goes. Absent a name, it is DERIVED from the
+// spec: `<server_id>--<hostname>.<domain>` when machines.prefix_machine_names
+// is on (Mark's partition-id convention), plain `<hostname>.<domain>`
+// otherwise — so hostname (and usually domain) become required exactly when
+// the caller asks the agent to name the machine.
+func (s *Server) resolveMachineName(explicit, serverID string, spec *machines.Spec) (string, error) {
+	if explicit != "" {
+		if !validMachineName(explicit) {
+			return "", errors.New("invalid machine name")
+		}
+		return explicit, nil
+	}
+
+	hostname, _ := spec.Settings["hostname"].(string)
+	if hostname == "" {
+		return "", errors.New("name is required (or provide settings.hostname so the agent can derive one)")
+	}
+	base := hostname
+	if domain, _ := spec.Settings["domain"].(string); domain != "" {
+		base += "." + domain
+	}
+	if s.cfg.Machines.PrefixMachineNames {
+		base = serverID + "--" + base
+	}
+	if !validMachineName(base) {
+		return "", errors.New("derived machine name " + base + " is not usable — provide an explicit name")
+	}
+	return base, nil
+}
+
 // handleCreateMachine mirrors the Node agent's creation shape for this
-// hypervisor: validate, assign the server_id, claim a working directory,
-// store the row (status configured — no VM until first start), and
-// optionally chain the first start.
+// hypervisor: validate, assign the server_id, resolve the name (explicit or
+// derived), claim a working directory, store the row (status configured —
+// no VM until first start), and optionally chain the first start.
 func (s *Server) handleCreateMachine(w http.ResponseWriter, r *http.Request) {
 	var body createMachineRequest
 	if err := decodeBody(r, &body); err != nil {
 		taskError(w, http.StatusBadRequest, "Invalid JSON body")
 		return
 	}
-	if !validMachineName(body.Name) {
-		taskError(w, http.StatusBadRequest, "Invalid machine name")
-		return
-	}
-	if _, err := s.machines.Get(r.Context(), body.Name); err == nil {
-		taskError(w, http.StatusConflict, "Machine already exists")
-		return
-	} else if !errors.Is(err, machines.ErrNotFound) {
-		slog.Error("check machine existence", "machine", body.Name, "error", err)
-		taskError(w, http.StatusInternalServerError, "Failed to create machine")
-		return
-	}
 	if !s.validateSpec(w, &body.Spec) {
 		return
 	}
-	s.createMachineRow(w, r, body.Name, &body.Spec, body.StartAfterCreate, nil)
-}
-
-// createMachineRow finishes a create or clone: assign the server_id, claim a
-// working directory, store the row (status configured — no VM until first
-// start), and optionally queue the first start pipeline. extra entries merge
-// into the 201 response (the clone's source_machine et al.).
-func (s *Server) createMachineRow(w http.ResponseWriter, r *http.Request, name string,
-	spec *machines.Spec, startAfter bool, extra map[string]any,
-) {
-	serverID, err := s.resolveServerID(r.Context(), spec)
+	serverID, err := s.resolveServerID(r.Context(), &body.Spec)
 	if err != nil {
 		taskError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	name, err := s.resolveMachineName(body.Name, serverID, &body.Spec)
+	if err != nil {
+		taskError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if _, gerr := s.machines.Get(r.Context(), name); gerr == nil {
+		taskError(w, http.StatusConflict, "Machine already exists")
+		return
+	} else if !errors.Is(gerr, machines.ErrNotFound) {
+		slog.Error("check machine existence", "machine", name, "error", gerr)
+		taskError(w, http.StatusInternalServerError, "Failed to create machine")
+		return
+	}
+	s.createMachineRow(w, r, name, serverID, &body.Spec, body.StartAfterCreate, nil)
+}
 
+// createMachineRow finishes a create or clone: claim a working directory,
+// store the row (status configured — no VM until first start), and
+// optionally queue the first start pipeline. extra entries merge into the
+// 201 response (the clone's source_machine et al.).
+func (s *Server) createMachineRow(w http.ResponseWriter, r *http.Request, name, serverID string,
+	spec *machines.Spec, startAfter bool, extra map[string]any,
+) {
 	machinesRoot, err := s.cfg.MachinesDir()
 	if err != nil {
 		slog.Error("resolve machines dir", "error", err)
@@ -257,21 +293,9 @@ func (s *Server) handleCloneMachine(w http.ResponseWriter, r *http.Request) {
 		taskError(w, http.StatusBadRequest, "Invalid JSON body")
 		return
 	}
-	if !validMachineName(body.Name) {
-		taskError(w, http.StatusBadRequest, "Invalid machine name")
-		return
-	}
 	if hostname, _ := body.Settings["hostname"].(string); hostname == "" {
 		taskError(w, http.StatusBadRequest,
 			"settings.hostname is required — a clone must not reuse the source hostname")
-		return
-	}
-	if _, err := s.machines.Get(r.Context(), body.Name); err == nil {
-		taskError(w, http.StatusConflict, "Machine already exists")
-		return
-	} else if !errors.Is(err, machines.ErrNotFound) {
-		slog.Error("check machine existence", "machine", body.Name, "error", err)
-		taskError(w, http.StatusInternalServerError, "Failed to clone machine")
 		return
 	}
 
@@ -302,9 +326,27 @@ func (s *Server) handleCloneMachine(w http.ResponseWriter, r *http.Request) {
 	if !s.validateSpec(w, spec) {
 		return
 	}
-	slog.Info("machine clone requested", "source", source.Name, "clone", body.Name,
+	serverID, err := s.resolveServerID(r.Context(), spec)
+	if err != nil {
+		taskError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	name, err := s.resolveMachineName(body.Name, serverID, spec)
+	if err != nil {
+		taskError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if _, gerr := s.machines.Get(r.Context(), name); gerr == nil {
+		taskError(w, http.StatusConflict, "Machine already exists")
+		return
+	} else if !errors.Is(gerr, machines.ErrNotFound) {
+		slog.Error("check machine existence", "machine", name, "error", gerr)
+		taskError(w, http.StatusInternalServerError, "Failed to clone machine")
+		return
+	}
+	slog.Info("machine clone requested", "source", source.Name, "clone", name,
 		"by", auth.FromContext(r.Context()).Name)
-	s.createMachineRow(w, r, body.Name, spec, body.StartAfterCreate, map[string]any{
+	s.createMachineRow(w, r, name, serverID, spec, body.StartAfterCreate, map[string]any{
 		"source_machine": source.Name,
 	})
 }

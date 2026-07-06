@@ -21,6 +21,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/Makr91/hyperweaver-agent/internal/assets"
 	"github.com/Makr91/hyperweaver-agent/internal/auth"
 	"github.com/Makr91/hyperweaver-agent/internal/config"
 	"github.com/Makr91/hyperweaver-agent/internal/db"
@@ -165,7 +166,7 @@ func run() error {
 	reconciler := systems.reconciler
 	monitor := systems.monitor
 
-	srv, err := server.New(cfg, keyStore, trayTokens, taskQueue, systems.machines, systems.provisioners, secretsStore, monitor, systems.dbs, restartArgs, openUI)
+	srv, err := server.New(cfg, keyStore, trayTokens, taskQueue, systems.machines, systems.provisioners, secretsStore, systems.assets, monitor, systems.dbs, restartArgs, openUI)
 	if err != nil {
 		slog.Error("server setup failed", "error", err)
 		return err
@@ -281,6 +282,7 @@ type agentSystems struct {
 	queue        *tasks.Queue
 	machines     *machines.Store
 	provisioners *provisioner.Registry
+	assets       *assets.Store
 	reconciler   *machines.Reconciler
 	monitor      *monitoring.Service
 	dbs          []server.DBHandle
@@ -349,7 +351,10 @@ func setupTasks(cfg *config.Config, secretsStore *secrets.Store) (*agentSystems,
 	if err != nil {
 		return nil, err
 	}
-	agentDB, err := openDB(agentPath, machines.Migrations)
+	// agent.sqlite carries every core-state family: the machine registry's
+	// migrations plus the artifact cache's, one ordered list.
+	agentMigrations := append(append([]string{}, machines.Migrations...), assets.Migrations...)
+	agentDB, err := openDB(agentPath, agentMigrations)
 	if err != nil {
 		_ = tasksDB.Close()
 		return nil, err
@@ -359,7 +364,7 @@ func setupTasks(cfg *config.Config, secretsStore *secrets.Store) (*agentSystems,
 	// them all, and the closer releases them in reverse-open order.
 	handles := []server.DBHandle{
 		{Name: "tasks.sqlite", Path: tasksPath, DB: tasksDB, Tables: []string{"tasks"}},
-		{Name: "agent.sqlite", Path: agentPath, DB: agentDB, Tables: []string{"machines"}},
+		{Name: "agent.sqlite", Path: agentPath, DB: agentDB, Tables: []string{"machines", "artifacts"}},
 	}
 	closer := func() {
 		for i := len(handles) - 1; i >= 0; i-- {
@@ -435,6 +440,26 @@ func setupTasks(cfg *config.Config, secretsStore *secrets.Store) (*agentSystems,
 	provisioners := provisioner.NewRegistry(provisionersDir)
 	provisioner.RegisterExecutors(queue, provisioners, secretsStore.GitToken)
 
+	// Installer file cache (assets.enabled): registered rows verify every
+	// file machines mount (Mark's ruling — hash verification in full). The
+	// store always exists (the /database endpoints see the table); a nil
+	// handle in ProvisionEnv is what "disabled" means to the pipeline.
+	assetsDir, err := cfg.AssetsDir()
+	if err != nil {
+		closer()
+		return nil, err
+	}
+	assetsStore := assets.NewStore(agentDB, assetsDir)
+	assets.RegisterExecutors(queue, assetsStore, secretsStore.ResourceAuth)
+	var pipelineAssets *assets.Store
+	if cfg.Assets.Enabled {
+		pipelineAssets = assetsStore
+		if serr := assets.SeedExpectations(context.Background(), assetsStore); serr != nil {
+			closer()
+			return nil, serr
+		}
+	}
+
 	machinesDir, err := cfg.MachinesDir()
 	if err != nil {
 		closer()
@@ -451,6 +476,7 @@ func setupTasks(cfg *config.Config, secretsStore *secrets.Store) (*agentSystems,
 			Registry:    provisioners,
 			SecretsVars: secretsStore.TemplateVars,
 			MachinesDir: machinesDir,
+			Assets:      pipelineAssets,
 			CACertPath:  cfg.SSLCACertPath(),
 			CAKeyPath:   cfg.SSLCAKeyPath(),
 		})
@@ -464,6 +490,7 @@ func setupTasks(cfg *config.Config, secretsStore *secrets.Store) (*agentSystems,
 		queue:        queue,
 		machines:     machineStore,
 		provisioners: provisioners,
+		assets:       assetsStore,
 		reconciler:   reconciler,
 		monitor:      monitor,
 		dbs:          handles,

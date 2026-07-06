@@ -46,6 +46,29 @@ jobs:
           mkdir -p internal/webui/dist
           curl -fsSL "https://github.com/MarkProminic/hyperweaver-ui/releases/download/v${UI_VERSION}/hyperweaver-ui-${UI_VERSION}.tar.gz" | tar -xz -C internal/webui/dist
 
+      - name: Stage provisioner seed archives
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Seed contract (arch item 2, Mark's ruling: provisioners travel as
+          # tars, pulled as git artifacts): each provisioner repo's latest
+          # release carries a registry-shaped .tar.gz — built with
+          #   git archive --prefix="<name>/<version>/"
+          # — that the agent extracts on startup, never overwriting existing
+          # versions (a missing collection manifest is synthesized by the
+          # seeder). Missing assets are tolerated: dev/fork builds proceed
+          # seedless.
+          mkdir -p packaging/provisioners-seed
+          for repo in STARTcloud/hcl_domino_standalone_provisioner STARTcloud/hcl_domino_additional_provisioner; do
+            if gh release download --repo "$repo" --pattern '*.tar.gz' --dir packaging/provisioners-seed; then
+              echo "Staged seed archive(s) from $repo"
+            else
+              echo "WARNING: no seed archive from $repo — building without it"
+            fi
+          done
+          ls -la packaging/provisioners-seed
+
       - name: Embed Windows resources (icon, version info)
         shell: bash
         run: |
@@ -137,6 +160,22 @@ jobs:
           mkdir -p internal/webui/dist
           curl -fsSL "https://github.com/MarkProminic/hyperweaver-ui/releases/download/v${UI_VERSION}/hyperweaver-ui-${UI_VERSION}.tar.gz" | tar -xz -C internal/webui/dist
 
+      - name: Stage provisioner seed archives
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Same seed contract as the Windows job: registry-shaped .tar.gz
+          # release assets from the provisioner repos; missing assets tolerated.
+          mkdir -p packaging/provisioners-seed
+          for repo in STARTcloud/hcl_domino_standalone_provisioner STARTcloud/hcl_domino_additional_provisioner; do
+            if gh release download --repo "$repo" --pattern '*.tar.gz' --dir packaging/provisioners-seed; then
+              echo "Staged seed archive(s) from $repo"
+            else
+              echo "WARNING: no seed archive from $repo — building without it"
+            fi
+          done
+          ls -la packaging/provisioners-seed
+
       - name: Build universal binary
         run: |
           mkdir -p bin dist
@@ -160,6 +199,12 @@ jobs:
           # first TLS start and signs its server certificate from it.
           cp packaging/ssl/ca-certificate.crt "$APP/Contents/Resources/ssl-seed/ca.crt"
           cp packaging/ssl/ca-certificate.key "$APP/Contents/Resources/ssl-seed/ca.key"
+          # Provisioner seed archives (when staged): extracted by the agent on
+          # startup into the user-writable provisioners directory.
+          if compgen -G "packaging/provisioners-seed/*" > /dev/null; then
+            mkdir -p "$APP/Contents/Resources/provisioners-seed"
+            cp packaging/provisioners-seed/* "$APP/Contents/Resources/provisioners-seed/"
+          fi
 
       - name: Sign app
         if: ${{ env.HAVE_MAC_SIGNING == 'true' }}
@@ -246,6 +291,22 @@ jobs:
           mkdir -p internal/webui/dist
           curl -fsSL "https://github.com/MarkProminic/hyperweaver-ui/releases/download/v${UI_VERSION}/hyperweaver-ui-${UI_VERSION}.tar.gz" | tar -xz -C internal/webui/dist
 
+      - name: Stage provisioner seed archives
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Same seed contract as the Windows job: registry-shaped .tar.gz
+          # release assets from the provisioner repos; missing assets tolerated.
+          mkdir -p packaging/provisioners-seed
+          for repo in STARTcloud/hcl_domino_standalone_provisioner STARTcloud/hcl_domino_additional_provisioner; do
+            if gh release download --repo "$repo" --pattern '*.tar.gz' --dir packaging/provisioners-seed; then
+              echo "Staged seed archive(s) from $repo"
+            else
+              echo "WARNING: no seed archive from $repo — building without it"
+            fi
+          done
+          ls -la packaging/provisioners-seed
+
       - name: Build
         run: |
           mkdir -p bin dist
@@ -277,6 +338,12 @@ jobs:
           cp internal/tray/assets/icon.png "$STAGE/usr/share/icons/hicolor/192x192/apps/hyperweaver-agent.png"
           gzip -9 -c packaging/DEBIAN/man/hyperweaver-agent.8 > "$STAGE/usr/share/man/man8/hyperweaver-agent.8.gz"
           gzip -9 -c packaging/DEBIAN/man/hyperweaver-agent.yaml.5 > "$STAGE/usr/share/man/man5/hyperweaver-agent.yaml.5.gz"
+          # Provisioner seed archives (when staged): the agent's Linux seed
+          # location — extracted on startup, never overwriting existing versions.
+          if compgen -G "packaging/provisioners-seed/*" > /dev/null; then
+            mkdir -p "$STAGE/usr/share/hyperweaver-agent/provisioners-seed"
+            cp packaging/provisioners-seed/* "$STAGE/usr/share/hyperweaver-agent/provisioners-seed/"
+          fi
           cp packaging/DEBIAN/postinst packaging/DEBIAN/prerm packaging/DEBIAN/postrm "$STAGE/DEBIAN/"
 
           cat > "$STAGE/DEBIAN/control" << EOF

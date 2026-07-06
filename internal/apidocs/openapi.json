@@ -1084,7 +1084,7 @@
             "application/json": {
               "schema": {
                 "allOf": [
-                  { "type": "object", "required": ["name"], "properties": { "name": { "type": "string", "description": "Free user-chosen machine name (design D-G)", "example": "domino-01" } } },
+                  { "type": "object", "properties": { "name": { "type": "string", "description": "Free user-chosen machine name (design D-G) — anything goes. OMIT it and the agent derives the name from the spec: <server_id>--<hostname>.<domain> when machines.prefix_machine_names is on (the partition-id convention, zoneweaver's prefix_zone_names), plain <hostname>.<domain> otherwise (settings.hostname required in that case).", "example": "domino-01" } } },
                   { "$ref": "#/components/schemas/MachineSpec" }
                 ]
               }
@@ -1454,9 +1454,9 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": ["name", "settings"],
+                "required": ["settings"],
                 "properties": {
-                  "name": { "type": "string", "description": "The clone's machine name (free user-chosen, design D-G)", "example": "domino-02" },
+                  "name": { "type": "string", "description": "The clone's machine name (free user-chosen, design D-G). Omit to derive it like create does: <server_id>--<hostname>.<domain> under machines.prefix_machine_names, else <hostname>.<domain>.", "example": "domino-02" },
                   "settings": {
                     "type": "object",
                     "required": ["hostname"],

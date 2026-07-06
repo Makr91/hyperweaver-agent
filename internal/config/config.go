@@ -233,6 +233,11 @@ type MachinesConfig struct {
 	// ServerIDStart is the lowest auto-assigned server_id (Node:
 	// zones.server_id_start).
 	ServerIDStart int `yaml:"server_id_start" json:"server_id_start"`
+	// PrefixMachineNames derives created machines' names as
+	// <server_id>--<hostname>.<domain> when no explicit name is given
+	// (zoneweaver's prefix_zone_names — Mark's partition-id convention).
+	// Explicit names always win: machine names stay free-form (design D-G).
+	PrefixMachineNames bool `yaml:"prefix_machine_names" json:"prefix_machine_names"`
 	// ShutdownTimeout is how many seconds a graceful stop waits for the
 	// guest to power off after the ACPI signal before forcing poweroff
 	// (Node: zones.orchestration.timeouts.zone_shutdown).
@@ -257,6 +262,22 @@ type ProvisioningConfig struct {
 	MachinesDir string `yaml:"machines_dir" json:"machines_dir"`
 }
 
+// AssetsConfig controls the installer file cache (the `artifacts` capability
+// token — SHI's file cache with hash verification, implemented in full per
+// Mark's 2026-07-06 ruling).
+type AssetsConfig struct {
+	// Enabled serves the /artifacts surface and enforces cache verification
+	// at machine prepare time. Disabled, installer references pass through
+	// un-mounted with a loud warning.
+	Enabled bool `yaml:"enabled" json:"enabled"`
+	// Dir is the cache root (SHI layout:
+	// <dir>/<role>/{installers,fixpacks,hotfixes}/<file>). Empty selects
+	// file-cache under the data root.
+	Dir string `yaml:"dir" json:"dir"`
+	// MaxUploadGB caps one artifact upload's size.
+	MaxUploadGB int `yaml:"max_upload_gb" json:"max_upload_gb"`
+}
+
 // Config is the root of config.yaml.
 type Config struct {
 	Server       ServerConfig       `yaml:"server"       json:"server"`
@@ -274,6 +295,7 @@ type Config struct {
 	Tasks        TasksConfig        `yaml:"tasks"        json:"tasks"`
 	Machines     MachinesConfig     `yaml:"machines"     json:"machines"`
 	Provisioning ProvisioningConfig `yaml:"provisioning" json:"provisioning"`
+	Assets       AssetsConfig       `yaml:"assets"       json:"assets"`
 	Cleanup      CleanupConfig      `yaml:"cleanup"      json:"cleanup"`
 	Monitoring   MonitoringConfig   `yaml:"monitoring"   json:"monitoring"`
 	HostPower    HostPowerConfig    `yaml:"host_power"   json:"host_power"`
@@ -338,12 +360,14 @@ func Default() *Config {
 			},
 		},
 		Machines: MachinesConfig{
-			AutoDiscovery:     true,
-			DiscoveryInterval: 300,
-			ServerIDStart:     1,
-			ShutdownTimeout:   120,
+			AutoDiscovery:      true,
+			DiscoveryInterval:  300,
+			ServerIDStart:      1,
+			PrefixMachineNames: false,
+			ShutdownTimeout:    120,
 		},
 		Provisioning: ProvisioningConfig{},
+		Assets:       AssetsConfig{Enabled: true, MaxUploadGB: 50},
 		Cleanup:      CleanupConfig{Interval: 300},
 		Monitoring: MonitoringConfig{
 			StorageEnabled:     false,

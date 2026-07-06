@@ -8,6 +8,7 @@ package safepath
 import (
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -70,6 +71,36 @@ func WriteFile(path string, data []byte, perm os.FileMode) error {
 		return cerr
 	}
 	return os.Rename(tmp, clean)
+}
+
+// WriteFileFrom is WriteFile's streaming variant — same guarantees
+// (sanitized path, temp file beside the target, rename into place), for
+// content too large to buffer (installer files, downloads). Returns the
+// byte count written.
+func WriteFileFrom(path string, r io.Reader, perm os.FileMode) (int64, error) {
+	clean, err := CleanAbs(path)
+	if err != nil {
+		return 0, err
+	}
+	tmp := clean + ".tmp"
+
+	f, err := os.OpenFile(filepath.Clean(tmp), os.O_WRONLY|os.O_CREATE|os.O_TRUNC, perm)
+	if err != nil {
+		return 0, err
+	}
+	n, err := io.Copy(f, r)
+	if cerr := f.Close(); err == nil {
+		err = cerr
+	}
+	if err != nil {
+		_ = os.Remove(tmp)
+		return n, err
+	}
+	if rerr := os.Rename(tmp, clean); rerr != nil {
+		_ = os.Remove(tmp)
+		return n, rerr
+	}
+	return n, nil
 }
 
 // ValidateExecutable sanitizes an executable path and verifies it points at

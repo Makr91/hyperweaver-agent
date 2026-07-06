@@ -33,6 +33,7 @@ type DBHandle struct {
 var tableCountQueries = map[string]string{
 	"tasks":           "SELECT COUNT(*) FROM tasks",
 	"machines":        "SELECT COUNT(*) FROM machines",
+	"artifacts":       "SELECT COUNT(*) FROM artifacts",
 	"cpu_samples":     "SELECT COUNT(*) FROM cpu_samples",
 	"memory_samples":  "SELECT COUNT(*) FROM memory_samples",
 	"network_samples": "SELECT COUNT(*) FROM network_samples",

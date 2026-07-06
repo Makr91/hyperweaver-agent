@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/flosch/pongo2/v6"
@@ -210,6 +211,25 @@ func configurationFields(metadata map[string]any) []map[string]any {
 		}
 	}
 	return fields
+}
+
+// legacyMarkerPattern spots SHI's ::TOKEN:: haxe.Template markers — dead
+// syntax (Mark's D-B ruling: Jinja2 everywhere, no compatibility shim), so
+// their presence in RENDERED output means the package's template was never
+// converted. pongo2 passes them through as literal text, which would land as
+// garbage in Hosts.yml.
+var legacyMarkerPattern = regexp.MustCompile(`::[A-Za-z_][A-Za-z0-9_]*::`)
+
+// LegacyMarkers returns the ::TOKEN:: markers surviving in rendered output
+// (nil when clean) so callers can warn that the template needs its one-time
+// Jinja2 conversion.
+func LegacyMarkers(rendered []byte) []string {
+	found := legacyMarkerPattern.FindAll(rendered, 5)
+	markers := make([]string, 0, len(found))
+	for _, marker := range found {
+		markers = append(markers, string(marker))
+	}
+	return markers
 }
 
 // sanitizeVar uppercases a name into template-variable form: hyphens and

@@ -14,6 +14,7 @@ import (
 
 	"github.com/goccy/go-yaml"
 
+	"github.com/Makr91/hyperweaver-agent/internal/assets"
 	"github.com/Makr91/hyperweaver-agent/internal/prereqs"
 	"github.com/Makr91/hyperweaver-agent/internal/provisioner"
 	"github.com/Makr91/hyperweaver-agent/internal/safepath"
@@ -108,14 +109,90 @@ func ParseSpec(machine *Machine) (*Spec, error) {
 
 // ProvisionEnv wires the provisioning pipeline's dependencies into the
 // executors: the package registry, the secrets-derived template vars, the
-// machines root (workdir containment), and the agent CA pair seeding each
-// working copy's ssls tree.
+// machines root (workdir containment), the file cache (nil when
+// assets.enabled is off), and the agent CA pair seeding each working copy's
+// ssls tree.
 type ProvisionEnv struct {
 	Registry    *provisioner.Registry
 	SecretsVars func() map[string]string
 	MachinesDir string
+	Assets      *assets.Store
 	CACertPath  string
 	CAKeyPath   string
+}
+
+// resolveInstallerFiles verifies every role file reference against the file
+// cache (Mark's ruling 2026-07-06: hash verification is the point — a file
+// that is absent, unhashed, or mismatching NEVER reaches a machine) and
+// returns the verified mounts plus a hash-enriched copy of the roles for the
+// template context. With the assets subsystem disabled, references pass
+// through un-mounted with a loud warning.
+func (e *executors) resolveInstallerFiles(ctx context.Context, spec *Spec, out *tasks.OutputWriter) ([]provisioner.InstallerFile, []provisioner.RoleInput, error) {
+	roles := make([]provisioner.RoleInput, len(spec.Roles))
+	copy(roles, spec.Roles)
+
+	if e.env.Assets == nil {
+		for i := range roles {
+			if roles[i].Files != (provisioner.RoleFiles{}) {
+				out.Write("stderr", "WARNING: assets.enabled is false — installer files are NOT mounted or hash-verified\n")
+				break
+			}
+		}
+		return nil, roles, nil
+	}
+
+	mounts := []provisioner.InstallerFile{}
+	for i := range roles {
+		role := &roles[i]
+		references := []struct {
+			kind    string
+			name    *string
+			hash    *string
+			version *string
+		}{
+			{assets.KindInstaller, &role.Files.Installer, &role.Files.InstallerHash, &role.Files.InstallerVersion},
+			{assets.KindFixpack, &role.Files.Fixpack, &role.Files.FixpackHash, &role.Files.FixpackVersion},
+			{assets.KindHotfix, &role.Files.Hotfix, &role.Files.HotfixHash, &role.Files.HotfixVersion},
+		}
+		for _, ref := range references {
+			if *ref.name == "" {
+				continue
+			}
+			artifact, err := e.env.Assets.Find(ctx, role.Name, ref.kind, *ref.name)
+			if errors.Is(err, assets.ErrNotFound) {
+				return nil, nil, fmt.Errorf("%s %q for role %s is not in the file cache — upload, register, or download it first",
+					ref.kind, *ref.name, role.Name)
+			}
+			if err != nil {
+				return nil, nil, err
+			}
+			if !artifact.Exists {
+				return nil, nil, fmt.Errorf("%s %q for role %s is an expectation only — the file itself is not in the cache",
+					ref.kind, *ref.name, role.Name)
+			}
+			if !artifact.Verified() {
+				return nil, nil, fmt.Errorf("%s %q for role %s FAILS hash verification: file %s, expected %s",
+					ref.kind, *ref.name, role.Name, artifact.SHA256, artifact.ExpectedSHA256)
+			}
+			if *ref.hash != "" && !strings.EqualFold(*ref.hash, artifact.SHA256) {
+				return nil, nil, fmt.Errorf("%s %q for role %s: the spec expects hash %s but the cached file is %s",
+					ref.kind, *ref.name, role.Name, *ref.hash, artifact.SHA256)
+			}
+			*ref.hash = artifact.SHA256
+			if *ref.version == "" {
+				*ref.version = artifact.Version
+			}
+			mounts = append(mounts, provisioner.InstallerFile{
+				SourcePath: artifact.Path,
+				Role:       role.Name,
+				Subdir:     assets.WorkdirSubdir(ref.kind),
+				Filename:   *ref.name,
+				SHA256:     artifact.SHA256,
+			})
+			out.Write("stdout", "Verified "+ref.kind+" "+*ref.name+" ("+artifact.SHA256+")\n")
+		}
+	}
+	return mounts, roles, nil
 }
 
 // taskProgress records a task's own progress (zoneweaver's
@@ -155,12 +232,20 @@ func (e *executors) prepareWorkdir(ctx context.Context, machine *Machine, spec *
 	maps.Copy(settings, spec.Settings)
 	settings["sync_method"] = method
 
+	// Every referenced installer file must verify against the cache BEFORE
+	// anything renders — the roles the template sees carry the verified
+	// hashes.
+	mounts, roles, err := e.resolveInstallerFiles(ctx, spec, out)
+	if err != nil {
+		return err
+	}
+
 	out.Write("stdout", "Rendering Hosts.yml from "+spec.Provisioner.Name+"/"+spec.Provisioner.Version+"\n")
 	hostsYML, err := provisioner.RenderHostsFile(&provisioner.GenerateInput{
 		Version:            version,
 		Settings:           settings,
 		Networks:           spec.Networks,
-		Roles:              spec.Roles,
+		Roles:              roles,
 		UserProperties:     spec.Properties,
 		AdvancedProperties: spec.AdvancedProperties,
 		SecretsVars:        e.env.SecretsVars(),
@@ -168,13 +253,19 @@ func (e *executors) prepareWorkdir(ctx context.Context, machine *Machine, spec *
 	if err != nil {
 		return err
 	}
+	if markers := provisioner.LegacyMarkers(hostsYML); len(markers) > 0 {
+		out.Write("stderr", "WARNING: rendered Hosts.yml still contains haxe.Template markers ("+
+			strings.Join(markers, ", ")+") — this package's template was never converted to Jinja2 "+
+			"(the one-time conversion Mark's D-B ruling requires); the guest will receive them as literal text\n")
+	}
 
 	out.Write("stdout", "Materializing working directory "+*machine.Home+"\n")
 	return provisioner.Materialize(&provisioner.MaterializeInput{
 		MachineDir: *machine.Home,
 		Version:    version,
 		HostsYML:   hostsYML,
-		Roles:      spec.Roles,
+		Roles:      roles,
+		Installers: mounts,
 		SafeIDPath: spec.SafeIDPath,
 		CACertPath: e.env.CACertPath,
 		CAKeyPath:  e.env.CAKeyPath,

@@ -264,6 +264,11 @@ shutdowns (default: true). The startup discovery task always runs.
 Seconds between periodic discover tasks, 10-86400 (default: 300)
 .It Cm server_id_start
 Lowest auto-assigned server_id, 1-99999999 (default: 1)
+.It Cm prefix_machine_names
+Boolean deriving created machines' names as
+<server_id>--<hostname>.<domain> when the create/clone request carries no
+explicit name (the partition-id convention). An explicit name always wins —
+machine names stay free-form (default: false).
 .It Cm shutdown_timeout
 Seconds a graceful stop waits for the guest to power off after the ACPI
 signal before forcing poweroff, 5-3600 (default: 120)
@@ -291,6 +296,25 @@ runs from. Empty selects
 .Pa machines
 under
 .Cm data.dir .
+.El
+.Ss assets
+Installer file cache (the artifacts capability token): hash-verified
+installer/fixpack/hotfix files that machines mount at start. A file that is
+absent, unhashed, or failing SHA-256 verification never reaches a machine.
+.Bl -tag -width "max_upload_gb"
+.It Cm enabled
+Boolean serving the /artifacts surface and enforcing cache verification at
+machine prepare time; disabled skips mounting and verification entirely,
+with a loud warning in the task output (default: true).
+.It Cm dir
+Cache root, laid out
+.Pa <dir>/<role>/{installers,fixpacks,hotfixes}/<file> .
+Empty selects
+.Pa file-cache
+under
+.Cm data.dir .
+.It Cm max_upload_gb
+Upload size cap in GiB, 1-1024 (default: 50)
 .El
 .Ss cleanup
 Periodic cleanup service.

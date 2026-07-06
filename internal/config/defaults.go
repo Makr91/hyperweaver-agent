@@ -173,6 +173,10 @@ machines:
   discovery_interval: 300
   # Lowest auto-assigned server_id.
   server_id_start: 1
+  # When machine-create/clone requests carry no explicit name, derive it as
+  # <server_id>--<hostname>.<domain> (the partition-id convention). Explicit
+  # names always win — machine names stay free-form.
+  prefix_machine_names: false
   # Seconds a graceful stop waits for the guest to power off after the ACPI
   # signal before forcing poweroff.
   shutdown_timeout: 120
@@ -189,6 +193,19 @@ provisioning:
   # vagrant runs from. Working copies are VM-scale data — keep this off
   # roaming profiles. Empty = <data dir>/machines
   machines_dir: ''
+
+assets:
+  # Installer file cache (the artifacts capability token): hash-verified
+  # installer/fixpack/hotfix files that machines mount at start. A file that
+  # is absent, unhashed, or failing verification never reaches a machine.
+  # Disabling removes the /artifacts surface and skips mounting/verification
+  # entirely (a loud warning at machine prepare).
+  enabled: true
+  # Cache root (layout: <dir>/<role>/{installers,fixpacks,hotfixes}/<file>).
+  # Empty = <data dir>/file-cache
+  dir: ''
+  # Upload size cap in GiB.
+  max_upload_gb: 50
 
 cleanup:
   # Seconds between periodic cleanup runs (task retention).

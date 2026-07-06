@@ -242,6 +242,24 @@ func validate(doc *Document) error {
 	return nil
 }
 
+// ResourceAuth returns the named custom_resource_url entry's Basic-auth
+// pair — the artifact downloader's credential lookup (SHI's
+// downloadFileWithCustomResource). ok is false when the entry is absent or
+// carries no auth.
+func (s *Store) ResourceAuth(name string) (user, pass string, ok bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, entry := range s.doc.CustomResourceURL {
+		if entry.Name == name {
+			if !entry.UseAuth {
+				return "", "", false
+			}
+			return entry.User, entry.Pass, true
+		}
+	}
+	return "", "", false
+}
+
 // GitToken returns the named git API key ("" when absent) — the private-repo
 // credential for provisioner git imports.
 func (s *Store) GitToken(name string) string {

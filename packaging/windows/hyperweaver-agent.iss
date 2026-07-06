@@ -45,6 +45,11 @@ Source: "..\..\bin\{#AppExeName}"; DestDir: "{app}"; Flags: ignoreversion
 ; certificate from it.
 Source: "..\ssl\ca-certificate.crt"; DestDir: "{app}\ssl-seed"; DestName: "ca.crt"; Flags: ignoreversion
 Source: "..\ssl\ca-certificate.key"; DestDir: "{app}\ssl-seed"; DestName: "ca.key"; Flags: ignoreversion
+; Provisioner seed archives (staged by CI from the provisioner repos'
+; release artifacts; absent in dev builds — skipifsourcedoesntexist): the
+; agent extracts them into the user-writable provisioners directory on
+; startup, never overwriting existing versions.
+Source: "..\provisioners-seed\*"; DestDir: "{app}\provisioners-seed"; Flags: ignoreversion skipifsourcedoesntexist
 
 [Registry]
 ; hwa:// custom URL scheme (architecture item 5): browsers hand hwa://open to

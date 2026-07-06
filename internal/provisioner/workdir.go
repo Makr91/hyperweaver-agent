@@ -1,8 +1,11 @@
 package provisioner
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -40,6 +43,20 @@ var installerSubdirs = []string{"archives", "fixpack", "hotfix", "core"}
 // ssls subtrees — the ssl role's expected working-copy tree, pre-seeded.
 var sslSubdirs = []string{"ca", "crt", "key", "csr", "jks", "kyr", "pfx", "combined"}
 
+// InstallerFile is one cache-verified file to mount into the working copy's
+// installers/<role>/<subdir>/ tree (Mark's ruling 2026-07-06: only files
+// whose SHA-256 checked out reach a machine).
+type InstallerFile struct {
+	// SourcePath is the verified cache location.
+	SourcePath string
+	// Role/Subdir/Filename place the mount (installers/<role>/<subdir>/<file>).
+	Role     string
+	Subdir   string
+	Filename string
+	// SHA256 is the verified hash a copied mount must reproduce.
+	SHA256 string
+}
+
 // MaterializeInput is everything one working-directory materialization
 // consumes.
 type MaterializeInput struct {
@@ -52,6 +69,9 @@ type MaterializeInput struct {
 	HostsYML []byte
 	// Roles receive installers/<role>/ mount skeletons.
 	Roles []RoleInput
+	// Installers are the cache-verified files to mount (resolved and
+	// hash-checked by the caller against the file cache).
+	Installers []InstallerFile
 	// SafeIDPath optionally names an agent-host Domino safe-ID file to place
 	// under id-files per the package's conventions.
 	SafeIDPath string
@@ -111,7 +131,66 @@ func Materialize(in *MaterializeInput) error {
 	if ierr := materializeInstallers(dir, in.Roles); ierr != nil {
 		return ierr
 	}
+	if ierr := mountInstallerFiles(dir, in.Installers); ierr != nil {
+		return ierr
+	}
 	return materializeSSLs(dir, in.CACertPath, in.CAKeyPath)
+}
+
+// mountInstallerFiles places the cache-verified files into
+// installers/<role>/<subdir>/. Same-volume mounts hard-link (SHI's
+// hard-link/copy behavior — instant, no duplicate space); cross-volume falls
+// back to a hash-verified streaming copy. An existing hard link to the same
+// cache file is left in place.
+func mountInstallerFiles(dir string, files []InstallerFile) error {
+	for i := range files {
+		file := &files[i]
+		target, err := safepath.Under(dir,
+			filepath.Join("installers", file.Role, file.Subdir, file.Filename))
+		if err != nil {
+			return err
+		}
+		if merr := os.MkdirAll(filepath.Dir(target), 0o750); merr != nil {
+			return merr
+		}
+
+		sourceInfo, err := os.Stat(file.SourcePath)
+		if err != nil {
+			return fmt.Errorf("cached file %s: %w", file.SourcePath, err)
+		}
+		if targetInfo, serr := os.Stat(target); serr == nil {
+			if os.SameFile(sourceInfo, targetInfo) {
+				continue // already hard-linked to the verified cache file
+			}
+			if rerr := os.Remove(target); rerr != nil {
+				return rerr
+			}
+		}
+
+		if lerr := os.Link(file.SourcePath, target); lerr == nil {
+			continue
+		}
+		// Cross-volume (or a filesystem without hard links): stream a copy
+		// and verify the copy reproduces the verified hash.
+		src, oerr := os.Open(filepath.Clean(file.SourcePath))
+		if oerr != nil {
+			return oerr
+		}
+		hasher := sha256.New()
+		_, werr := safepath.WriteFileFrom(target, io.TeeReader(src, hasher), 0o600)
+		if cerr := src.Close(); werr == nil {
+			werr = cerr
+		}
+		if werr != nil {
+			return fmt.Errorf("mount %s: %w", file.Filename, werr)
+		}
+		if got := hex.EncodeToString(hasher.Sum(nil)); !strings.EqualFold(got, file.SHA256) {
+			_ = os.Remove(target)
+			return fmt.Errorf("mount %s: copy hashed %s, expected %s — discarded",
+				file.Filename, got, file.SHA256)
+		}
+	}
+	return nil
 }
 
 // syncPackage copies the package version tree into the working directory,

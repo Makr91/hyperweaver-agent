@@ -82,6 +82,9 @@ func (c *Config) validate() error {
 	if c.Monitoring.RetentionDays < 1 || c.Monitoring.RetentionDays > 365 {
 		return fmt.Errorf("monitoring.retention_days %d out of range 1-365", c.Monitoring.RetentionDays)
 	}
+	if c.Assets.MaxUploadGB < 1 || c.Assets.MaxUploadGB > 1024 {
+		return fmt.Errorf("assets.max_upload_gb %d out of range 1-1024", c.Assets.MaxUploadGB)
+	}
 	return c.Database.SQLiteOptions.validate()
 }
 

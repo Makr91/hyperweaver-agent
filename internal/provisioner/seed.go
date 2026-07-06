@@ -75,6 +75,11 @@ func Seed(provisionersDir string) error {
 		}
 	}
 
+	// Registry-shaped archives carry only the version trees (git artifacts:
+	// `git archive --prefix="<name>/<version>/"`) — give manifest-less
+	// families their collection manifest so the registry scan sees them.
+	synthesizeMissingManifests(provisionersDir)
+
 	names := make([]string, 0, len(archives))
 	for _, archive := range archives {
 		names = append(names, filepath.Base(archive))
@@ -82,4 +87,45 @@ func Seed(provisionersDir string) error {
 	plog().Info("provisioner seeding complete",
 		"archives", strings.Join(names, ", "), "registry", provisionersDir)
 	return nil
+}
+
+// synthesizeMissingManifests sweeps the registry for families holding valid
+// version trees but no collection manifest and synthesizes one from the
+// first valid version's provisioner.yml. Existing manifests are never
+// touched.
+func synthesizeMissingManifests(provisionersDir string) {
+	families, err := os.ReadDir(provisionersDir)
+	if err != nil {
+		return
+	}
+	for _, family := range families {
+		if !family.IsDir() || !ValidName(family.Name()) {
+			continue
+		}
+		familyDir := filepath.Join(provisionersDir, family.Name())
+		if _, serr := os.Stat(filepath.Join(familyDir, collectionManifest)); serr == nil {
+			continue
+		}
+		versions, verr := os.ReadDir(familyDir)
+		if verr != nil {
+			continue
+		}
+		for _, version := range versions {
+			if !version.IsDir() || !ValidName(version.Name()) {
+				continue
+			}
+			doc, merr := readManifest(filepath.Join(familyDir, version.Name(), versionManifest))
+			if merr != nil {
+				continue
+			}
+			if werr := synthesizeCollectionManifest(familyDir, family.Name(),
+				metaString(doc, "description")); werr != nil {
+				plog().Warn("synthesize collection manifest failed",
+					"family", family.Name(), "error", werr)
+			} else {
+				plog().Info("synthesized collection manifest", "family", family.Name())
+			}
+			break
+		}
+	}
 }

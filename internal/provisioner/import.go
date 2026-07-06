@@ -311,11 +311,8 @@ func (e *executors) importVersion(root string, out *tasks.OutputWriter) error {
 		return merr
 	}
 
-	manifestPath := filepath.Join(familyDir, collectionManifest)
-	if _, serr := os.Stat(manifestPath); errors.Is(serr, fs.ErrNotExist) {
-		synthesized := "name: " + name + "\ndescription: " +
-			strconv.Quote(metaString(manifest, "description")) + "\n"
-		if werr := safepath.WriteFile(manifestPath, []byte(synthesized), 0o644); werr != nil {
+	if _, serr := os.Stat(filepath.Join(familyDir, collectionManifest)); errors.Is(serr, fs.ErrNotExist) {
+		if werr := synthesizeCollectionManifest(familyDir, name, metaString(manifest, "description")); werr != nil {
 			return werr
 		}
 		out.Write("stdout", "Created collection manifest for new family "+name+"\n")
@@ -421,6 +418,19 @@ func copyFile(src, dst string, perm fs.FileMode) error {
 		return err
 	}
 	return safepath.WriteFile(dst, data, perm)
+}
+
+// synthesizeCollectionManifest writes a minimal family manifest when none
+// exists — bare-version imports (the flattened repos: the root IS the
+// version tree) and registry-shaped seed archives both arrive without one.
+// An existing manifest is never touched.
+func synthesizeCollectionManifest(familyDir, name, description string) error {
+	manifestPath := filepath.Join(familyDir, collectionManifest)
+	if _, err := os.Stat(manifestPath); err == nil {
+		return nil
+	}
+	synthesized := "name: " + name + "\ndescription: " + strconv.Quote(description) + "\n"
+	return safepath.WriteFile(manifestPath, []byte(synthesized), 0o644)
 }
 
 // copyFileIfAbsent copies src to dst unless dst already exists.
