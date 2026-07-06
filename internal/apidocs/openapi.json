@@ -186,8 +186,54 @@
           "notes": { "type": "string", "nullable": true },
           "tags": { "type": "array", "nullable": true, "items": { "type": "string" } },
           "configuration": { "type": "object", "nullable": true, "description": "Live machine configuration (VBoxManage showvminfo --machinereadable key/value map on this agent)" },
+          "spec": { "$ref": "#/components/schemas/MachineSpec", "nullable": true, "description": "The creation document (provisioner-managed machines only) — the user's intent, never overwritten by discovery" },
           "created_at": { "type": "string", "format": "date-time" },
           "updatedAt": { "type": "string", "format": "date-time" }
+        }
+      },
+      "MachineSpec": {
+        "type": "object",
+        "description": "The machine-create document (the Hosts.yml-shaped structure, design §4): stored verbatim on the machine row, rendered through the provisioner package's Jinja2 templates/Hosts.template.yml on every start. Template context precedence: settings (also flattened UPPERCASE) → per-role <ROLE>_INSTALLER/_INSTALLER_HASH/_INSTALLER_VERSION/_FIXPACK*/_HOTFIX* vars + boolean role flags (both casings) → package configuration.basicFields/advancedFields defaults → properties/advanced_properties (exact field names) → SECRETS_* vars. Structured settings/networks/roles ride alongside.",
+        "properties": {
+          "provisioner": {
+            "type": "object",
+            "required": ["name", "version"],
+            "properties": {
+              "name": { "type": "string", "example": "hcl_domino_standalone_provisioner" },
+              "version": { "type": "string", "example": "0.1.24" }
+            }
+          },
+          "settings": { "type": "object", "description": "Hosts.yml settings vocabulary (hostname, domain, server_id, vcpus, memory, box, …). server_id auto-assigns (MAX+1) when omitted; numeric 1-8 digits when given." },
+          "networks": { "type": "array", "items": { "type": "object" } },
+          "roles": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": { "type": "string", "example": "domino" },
+                "enabled": { "type": "boolean" },
+                "files": {
+                  "type": "object",
+                  "description": "Installer assignments (filenames/hashes; the assets subsystem populates the working copy's installers/ tree when it lands)",
+                  "properties": {
+                    "installer": { "type": "string" },
+                    "installer_hash": { "type": "string" },
+                    "installer_version": { "type": "string" },
+                    "fixpack": { "type": "string" },
+                    "fixpack_hash": { "type": "string" },
+                    "fixpack_version": { "type": "string" },
+                    "hotfix": { "type": "string" },
+                    "hotfix_hash": { "type": "string" },
+                    "hotfix_version": { "type": "string" }
+                  }
+                }
+              }
+            }
+          },
+          "properties": { "type": "object", "description": "User entries for the package's configuration.basicFields, keyed by each field's exact name" },
+          "advanced_properties": { "type": "object", "description": "User entries for the package's configuration.advancedFields" },
+          "safe_id_path": { "type": "string", "description": "Agent-host path of a Domino safe-ID file, placed under id-files per the package's id_files metadata (safe_id_dir, keep_original_name)" },
+          "start_after_create": { "type": "boolean", "description": "POST /machines only: queue the first start immediately" }
         }
       },
       "QueuedOperation": {
