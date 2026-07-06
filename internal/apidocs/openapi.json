@@ -1073,6 +1073,45 @@
       }
     },
     "/machines": {
+      "post": {
+        "tags": ["Machine Management"],
+        "summary": "Create a machine",
+        "description": "Minimum role: operator (the machine-create capability token). Records the machine: the spec is stored verbatim, the server_id assigned (auto MAX+1 when omitted), and a working directory claimed under the machines root — NO VM exists until the first start (SHI's model). The first start renders Hosts.yml through the provisioner's Jinja2 template, materializes the working copy (id-files, installers skeletons, ssls pre-seeded with the CA + default-signed pair; secrets.yml/.secrets.yml/results.yml/.vagrant always preserved), auto-installs the vagrant-scp-sync plugin as a visible step, and runs vagrant up — the unchanged Hosts.rb builds the VirtualBox configuration and runs the Ansible collections. The VM's UUID is recorded post-up; discovery matches on it from then on.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "allOf": [
+                  { "type": "object", "required": ["name"], "properties": { "name": { "type": "string", "description": "Free user-chosen machine name (design D-G)", "example": "domino-01" } } },
+                  { "$ref": "#/components/schemas/MachineSpec" }
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Machine created (task_id present when start_after_create queued the first start)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": { "type": "boolean" },
+                    "machine": { "$ref": "#/components/schemas/Machine" },
+                    "machine_name": { "type": "string" },
+                    "task_id": { "type": "string", "format": "uuid" },
+                    "message": { "type": "string" }
+                  }
+                }
+              }
+            }
+          },
+          "400": { "description": "Invalid name, spec, provisioner reference, server_id, or safe_id_path" },
+          "409": { "description": "Machine name, server_id, or working directory already in use" }
+        }
+      },
       "get": {
         "tags": ["Machine Management"],
         "summary": "List machines",
@@ -1172,7 +1211,8 @@
                     "configuration": { "type": "object" },
                     "active_vnc_session": { "nullable": true },
                     "pending_tasks": { "type": "array", "items": { "$ref": "#/components/schemas/Task" } },
-                    "system_status": { "type": "string", "description": "Live VirtualBox state, or not_found", "example": "running" }
+                    "system_status": { "type": "string", "description": "Live VirtualBox state; the stored status for created-but-never-started machines", "example": "running" },
+                    "web_address": { "type": "string", "nullable": true, "description": "Post-provision welcome URL (results.yml/.vagrant/done.txt from the working copy) — null until the first successful provision" }
                   }
                 }
               }
@@ -1181,10 +1221,42 @@
           "404": { "description": "Machine not found" }
         }
       },
+      "put": {
+        "tags": ["Machine Management"],
+        "summary": "Modify a machine",
+        "description": "Minimum role: operator. Replaces a provisioner-managed machine's creation spec (the same MachineSpec document; validated like create). The change materializes on the NEXT start — the response's requires_restart says exactly that. Raw (spec-less) machines answer 400.",
+        "parameters": [
+          { "name": "machineName", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/MachineSpec" } } }
+        },
+        "responses": {
+          "200": {
+            "description": "Spec replaced",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": { "type": "boolean" },
+                    "machine_name": { "type": "string" },
+                    "requires_restart": { "type": "boolean", "example": true },
+                    "message": { "type": "string" }
+                  }
+                }
+              }
+            }
+          },
+          "400": { "description": "Invalid spec, or the machine is not provisioner-managed" },
+          "404": { "description": "Machine not found" }
+        }
+      },
       "delete": {
         "tags": ["Machine Management"],
         "summary": "Delete a machine",
-        "description": "Minimum role: operator. Running machines need force=true, which chains a CRITICAL stop before the CRITICAL delete. The machine is powered off if still running, unregistered from VirtualBox with media deletion, its registry row removed, and its leftover pending tasks cancelled.",
+        "description": "Minimum role: operator. Running machines need force=true, which chains a CRITICAL stop before the CRITICAL delete. Provisioner-managed machines get vagrant destroy -f first and their working directory removed (only when it sits under the machines root — a discovered vagrant project's home is never touched). The machine is powered off if still running, unregistered from VirtualBox with media deletion, its registry row removed, and its leftover pending tasks cancelled.",
         "parameters": [
           { "name": "machineName", "in": "path", "required": true, "schema": { "type": "string" } },
           { "name": "force", "in": "query", "schema": { "type": "boolean", "default": false } }
@@ -1327,6 +1399,42 @@
             "content": { "application/json": { "schema": { "$ref": "#/components/schemas/QueuedOperation" } } }
           },
           "400": { "description": "Machine is not running" },
+          "404": { "description": "Machine not found" }
+        }
+      }
+    },
+    "/machines/{machineName}/provision": {
+      "post": {
+        "tags": ["Machine Management"],
+        "summary": "Re-provision a machine",
+        "description": "Minimum role: operator. Provisioner-managed machines only: re-renders Hosts.yml, refreshes the working copy (preserved files untouched), and runs vagrant provision — the collections' always-playbook semantics decide what actually re-runs in the guest.",
+        "parameters": [
+          { "name": "machineName", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "Provision task queued",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/QueuedOperation" } } }
+          },
+          "400": { "description": "Machine is not provisioner-managed" },
+          "404": { "description": "Machine not found" }
+        }
+      }
+    },
+    "/machines/{machineName}/sync": {
+      "post": {
+        "tags": ["Machine Management"],
+        "summary": "Sync files to a machine",
+        "description": "Minimum role: operator. Provisioner-managed machines only: runs vagrant rsync over the working copy's synced folders.",
+        "parameters": [
+          { "name": "machineName", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "Sync task queued",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/QueuedOperation" } } }
+          },
+          "400": { "description": "Machine is not provisioner-managed" },
           "404": { "description": "Machine not found" }
         }
       }

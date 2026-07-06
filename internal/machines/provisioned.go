@@ -247,7 +247,7 @@ func (e *executors) removeWorkdir(machine *Machine, out *tasks.OutputWriter) {
 	}
 	home := *machine.Home
 	contained, err := safepath.Under(e.env.MachinesDir, filepath.Base(home))
-	if err != nil || contained != home {
+	if err != nil || !strings.EqualFold(contained, home) {
 		out.Write("stderr", "Working directory "+home+" is outside the machines root — left in place\n")
 		return
 	}

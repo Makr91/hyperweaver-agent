@@ -93,8 +93,18 @@ func (s *Server) handleStatus(w http.ResponseWriter, _ *http.Request) {
 		// accepts API keys ('apikey', never 'local' — different login form).
 		Auth:               []string{"apikey"},
 		BootstrapAvailable: bootstrapAvailable,
-		Console:            []string{},
-		Features:           s.features(),
+		// Console stays empty until the console phase ships. VNC-capability
+		// detection when it does (Mark's recipe, 2026-07-06): parse
+		// `VBoxManage list extpacks` — each pack block's "VRDE Module:" line
+		// names its remote-display backend (VBoxVNC = VNC extpack, VBoxVRDP =
+		// Oracle RDP) and must pair with "Usable: true". The mere presence of
+		// a pack proves nothing: Mark's Oracle pack 7.2.12 reports an EMPTY
+		// VRDE Module. `VBoxManage list systemproperties` → "Default VRDE ext
+		// pack" says which module VMs use (set: VBoxManage setproperty
+		// vrdeextpack VNC); per-VM it's `modifyvm --vrde on` + VNC properties.
+		// Advertise ["vnc"] only when a usable VBoxVNC module exists.
+		Console:  []string{},
+		Features: s.features(),
 		Uptime:             int64(time.Since(s.startedAt).Seconds()),
 	}
 

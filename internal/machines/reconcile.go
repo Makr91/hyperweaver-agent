@@ -290,6 +290,9 @@ func (r *Reconciler) vagrantHomesByUUID(ctx context.Context) map[string]string {
 		if m.Home == "" {
 			continue
 		}
+		// Normalized to the OS path shape so the store's home-match join
+		// compares like with like (vagrant reports forward slashes at times).
+		m.Home = filepath.Clean(filepath.FromSlash(m.Home))
 		machinesDir := filepath.Join(m.Home, ".vagrant", "machines")
 		entries, rerr := os.ReadDir(machinesDir)
 		if rerr != nil {

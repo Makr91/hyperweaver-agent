@@ -197,7 +197,8 @@ func (s *Store) UpsertDiscovered(ctx context.Context, d *Discovered) (bool, erro
 		{where: " WHERE uuid = ?", key: d.UUID, skip: d.UUID == ""},
 		// A created-but-never-started row claims its VM on first sight: the
 		// working directory is the join key while the UUID is still unknown.
-		{where: " WHERE uuid IS NULL AND home = ?", key: d.Home, skip: d.Home == nil},
+		// NOCASE: Windows paths compare case-insensitively.
+		{where: " WHERE uuid IS NULL AND home = ? COLLATE NOCASE", key: d.Home, skip: d.Home == nil},
 		{where: " WHERE name = ?", key: d.Name, skip: false},
 	}
 	for _, match := range matches {

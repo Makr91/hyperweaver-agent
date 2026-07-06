@@ -190,7 +190,7 @@ func (s *Server) handleMachineConfig(w http.ResponseWriter, r *http.Request) {
 
 	exe := machines.VBoxManagePath(r.Context())
 	if exe != "" {
-		if info, err := vbox.ShowVMInfo(r.Context(), exe, machine.Name); err == nil {
+		if info, err := vbox.ShowVMInfo(r.Context(), exe, machine.VBoxTarget()); err == nil {
 			writeJSON(w, map[string]any{
 				"machine_name":  machine.Name,
 				"configuration": info.Raw,
