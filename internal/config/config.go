@@ -125,7 +125,7 @@ type LoggingConfig struct {
 	// Categories overrides the level per log category (the Node agent's
 	// logging.categories / per-category winston loggers). Categories this
 	// agent emits: app (the default), api_requests, auth, tasks, machines,
-	// monitoring, provisioning.
+	// monitoring, provisioning, assets.
 	Categories map[string]string `yaml:"categories" json:"categories"`
 }
 

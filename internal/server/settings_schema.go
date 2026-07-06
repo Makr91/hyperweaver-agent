@@ -156,7 +156,7 @@ var settingsSchema = map[string]any{
 				"description": "Per-category log levels overriding the global level (map of category name to level)",
 				// A free-form map, not fixed fields: keys are category names,
 				// values are levels. The vocabularies the editor needs:
-				"keys":   []string{"app", "api_requests", "auth", "tasks", "machines", "monitoring", "provisioning"},
+				"keys":   []string{"app", "api_requests", "auth", "tasks", "machines", "monitoring", "provisioning", "assets"},
 				"values": []string{"error", "warn", "info", "debug"},
 			},
 		},

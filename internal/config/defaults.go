@@ -83,7 +83,7 @@ logging:
   #   categories:
   #     tasks: debug
   # Categories this agent emits: app, api_requests, auth, tasks, machines,
-  # monitoring, provisioning.
+  # monitoring, provisioning, assets.
   categories: {}
 
 api_keys:

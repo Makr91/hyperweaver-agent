@@ -7,43 +7,79 @@ import (
 	"fmt"
 )
 
-// initial-registry.json is the bundled hash-expectation set (SHI's
-// initial-registry model: filenames + SHA-256 hashes + versions, NO
-// binaries) — rows seed with exists:false and verify user-supplied files.
-// Ships empty until Mark populates the known HCL hashes; the HCL downloader
-// also records the live catalog's authoritative hashes as expectations.
+// initial-registry.json is SHI's bundled hash-expectation registry, embedded
+// VERBATIM — updates are a copy from
+// Super.Human.Installer/Assets/config/initial-registry.json (Mark's rule:
+// it is data; cp it, never transcribe it). Shape:
+//
+//	{ "<role>": { "installers"|"hotfixes"|"fixpacks": [
+//	    {"fileName", "sha256", "version": {"fullVersion", ...}, ...} ] } }
+//
+// Every entry seeds an expectation row (exists:false — no binaries) that
+// verifies the user's own files.
 //
 //go:embed initial-registry.json
 var initialRegistryJSON []byte
 
-// expectation is one bundled registry entry.
-type expectation struct {
-	Role     string `json:"role"`
-	Kind     string `json:"kind"`
-	Filename string `json:"filename"`
+// shiRegistryEntry is one file entry in SHI's registry format (extra fields
+// like id/description are ignored).
+type shiRegistryEntry struct {
+	FileName string `json:"fileName"`
 	SHA256   string `json:"sha256"`
-	Version  string `json:"version"`
+	Version  struct {
+		FullVersion string `json:"fullVersion"`
+	} `json:"version"`
+}
+
+// kindByGroup maps SHI's plural group names to the cache kinds.
+var kindByGroup = map[string]string{
+	"installers": KindInstaller,
+	"fixpacks":   KindFixpack,
+	"hotfixes":   KindHotfix,
 }
 
 // SeedExpectations loads the bundled expectations into the registry —
 // insert-if-absent, so user-observed reality is never overwritten (SHI's
-// initializeWithDefaults semantics).
+// initializeWithDefaults semantics). Malformed seed data is logged and
+// skipped, never fatal: expectations are advisory until a file references
+// them.
 func SeedExpectations(ctx context.Context, store *Store) error {
-	var entries []expectation
-	if err := json.Unmarshal(initialRegistryJSON, &entries); err != nil {
-		return fmt.Errorf("parse bundled initial-registry.json: %w", err)
+	var registry map[string]map[string][]shiRegistryEntry
+	if err := json.Unmarshal(initialRegistryJSON, &registry); err != nil {
+		alog().Error("bundled initial-registry.json is not SHI registry format — no expectations seeded",
+			"error", err)
+		return nil
 	}
-	for _, entry := range entries {
-		if !ValidRole(entry.Role) || !ValidKind(entry.Kind) || !ValidFilename(entry.Filename) {
-			alog().Warn("skipping unusable initial-registry entry",
-				"role", entry.Role, "kind", entry.Kind, "filename", entry.Filename)
+
+	seeded := 0
+	for role, groups := range registry {
+		if !ValidRole(role) {
+			alog().Warn("skipping unusable initial-registry role", "role", role)
 			continue
 		}
-		if err := store.SeedExpectation(ctx, entry.Role, entry.Kind, entry.Filename,
-			entry.SHA256, entry.Version); err != nil {
-			return fmt.Errorf("seed expectation %s/%s/%s: %w",
-				entry.Role, entry.Kind, entry.Filename, err)
+		for group, entries := range groups {
+			kind, known := kindByGroup[group]
+			if !known {
+				alog().Warn("skipping unknown initial-registry group", "role", role, "group", group)
+				continue
+			}
+			for _, entry := range entries {
+				if !ValidFilename(entry.FileName) || entry.SHA256 == "" {
+					alog().Warn("skipping unusable initial-registry entry",
+						"role", role, "group", group, "filename", entry.FileName)
+					continue
+				}
+				if err := store.SeedExpectation(ctx, role, kind, entry.FileName,
+					entry.SHA256, entry.Version.FullVersion); err != nil {
+					return fmt.Errorf("seed expectation %s/%s/%s: %w",
+						role, kind, entry.FileName, err)
+				}
+				seeded++
+			}
 		}
+	}
+	if seeded > 0 {
+		alog().Info("hash expectations seeded from the bundled registry", "entries", seeded)
 	}
 	return nil
 }
