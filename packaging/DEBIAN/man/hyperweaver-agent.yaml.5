@@ -131,8 +131,8 @@ Number of rotated log files to keep (default: 5)
 Boolean gzip-compressing rotated log files (default: true)
 .It Cm categories
 Map of per-category log levels overriding the global level. Categories the
-agent emits: app, api_requests, auth, tasks, machines, monitoring (default:
-empty — all categories follow
+agent emits: app, api_requests, auth, tasks, machines, monitoring,
+provisioning (default: empty — all categories follow
 .Cm level )
 .El
 .Ss api_keys
@@ -268,6 +268,23 @@ Lowest auto-assigned server_id, 1-99999999 (default: 1)
 Seconds a graceful stop waits for the guest to power off after the ACPI
 signal before forcing poweroff, 5-3600 (default: 120)
 .El
+.Ss provisioning
+Provisioning engine (the provisioner package registry and the provisioning
+capability token).
+.Bl -tag -width "provisioners_dir"
+.It Cm provisioners_dir
+Directory holding provisioner packages in SHI's on-disk format
+.Pa ( <name>/provisioner-collection.yml
+with
+.Pa <version>/provisioner.yml
+trees beneath). Installer-bundled package archives (staged in
+.Pa /usr/share/hyperweaver-agent/provisioners-seed
+on Debian, beside the executable elsewhere) are extracted here on startup
+without ever overwriting existing versions. Empty selects
+.Pa provisioners
+under
+.Cm data.dir .
+.El
 .Ss cleanup
 Periodic cleanup service.
 .Bl -tag -width "interval"
@@ -340,7 +357,10 @@ is on —
 .Pa monitoring-memory.sqlite ,
 and
 .Pa monitoring-network.sqlite
-(telemetry time series), all 0600.
+(telemetry time series), all 0600, plus the
+.Pa provisioners/
+package registry
+.Pq Cm provisioning.provisioners_dir .
 .Sh EXAMPLES
 The packaged default:
 .Bd -literal -offset indent

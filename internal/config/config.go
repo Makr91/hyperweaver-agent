@@ -125,7 +125,7 @@ type LoggingConfig struct {
 	// Categories overrides the level per log category (the Node agent's
 	// logging.categories / per-category winston loggers). Categories this
 	// agent emits: app (the default), api_requests, auth, tasks, machines,
-	// monitoring.
+	// monitoring, provisioning.
 	Categories map[string]string `yaml:"categories" json:"categories"`
 }
 
@@ -239,25 +239,38 @@ type MachinesConfig struct {
 	ShutdownTimeout int `yaml:"shutdown_timeout" json:"shutdown_timeout"`
 }
 
+// ProvisioningConfig controls the provisioning engine (architecture §8):
+// the provisioner package registry today; Hosts.yml generation, working
+// copies, and machine creation as the phase completes.
+type ProvisioningConfig struct {
+	// ProvisionersDir holds provisioner packages in SHI's on-disk format
+	// (<name>/provisioner-collection.yml with <version>/provisioner.yml
+	// trees beneath). Installer-bundled packages are extracted here on
+	// startup without ever overwriting existing versions. Empty selects
+	// provisioners under the data root.
+	ProvisionersDir string `yaml:"provisioners_dir" json:"provisioners_dir"`
+}
+
 // Config is the root of config.yaml.
 type Config struct {
-	Server     ServerConfig     `yaml:"server"     json:"server"`
-	SSL        SSLConfig        `yaml:"ssl"        json:"ssl"`
-	CORS       CORSConfig       `yaml:"cors"       json:"cors"`
-	UI         UIConfig         `yaml:"ui"         json:"ui"`
-	Browser    BrowserConfig    `yaml:"browser"    json:"browser"`
-	Logging    LoggingConfig    `yaml:"logging"    json:"logging"`
-	APIKeys    APIKeysConfig    `yaml:"api_keys"   json:"api_keys"`
-	Updates    UpdatesConfig    `yaml:"updates"    json:"updates"`
-	APIDocs    APIDocsConfig    `yaml:"api_docs"   json:"api_docs"`
-	Stats      StatsConfig      `yaml:"stats"      json:"stats"`
-	Data       DataConfig       `yaml:"data"       json:"data"`
-	Database   DatabaseConfig   `yaml:"database"   json:"database"`
-	Tasks      TasksConfig      `yaml:"tasks"      json:"tasks"`
-	Machines   MachinesConfig   `yaml:"machines"   json:"machines"`
-	Cleanup    CleanupConfig    `yaml:"cleanup"    json:"cleanup"`
-	Monitoring MonitoringConfig `yaml:"monitoring" json:"monitoring"`
-	HostPower  HostPowerConfig  `yaml:"host_power" json:"host_power"`
+	Server       ServerConfig       `yaml:"server"       json:"server"`
+	SSL          SSLConfig          `yaml:"ssl"          json:"ssl"`
+	CORS         CORSConfig         `yaml:"cors"         json:"cors"`
+	UI           UIConfig           `yaml:"ui"           json:"ui"`
+	Browser      BrowserConfig      `yaml:"browser"      json:"browser"`
+	Logging      LoggingConfig      `yaml:"logging"      json:"logging"`
+	APIKeys      APIKeysConfig      `yaml:"api_keys"     json:"api_keys"`
+	Updates      UpdatesConfig      `yaml:"updates"      json:"updates"`
+	APIDocs      APIDocsConfig      `yaml:"api_docs"     json:"api_docs"`
+	Stats        StatsConfig        `yaml:"stats"        json:"stats"`
+	Data         DataConfig         `yaml:"data"         json:"data"`
+	Database     DatabaseConfig     `yaml:"database"     json:"database"`
+	Tasks        TasksConfig        `yaml:"tasks"        json:"tasks"`
+	Machines     MachinesConfig     `yaml:"machines"     json:"machines"`
+	Provisioning ProvisioningConfig `yaml:"provisioning" json:"provisioning"`
+	Cleanup      CleanupConfig      `yaml:"cleanup"      json:"cleanup"`
+	Monitoring   MonitoringConfig   `yaml:"monitoring"   json:"monitoring"`
+	HostPower    HostPowerConfig    `yaml:"host_power"   json:"host_power"`
 
 	// path is where this configuration was loaded from; the setup token, key
 	// store, protocol-handoff secret, and config backups live beside it.
@@ -324,7 +337,8 @@ func Default() *Config {
 			ServerIDStart:     1,
 			ShutdownTimeout:   120,
 		},
-		Cleanup: CleanupConfig{Interval: 300},
+		Provisioning: ProvisioningConfig{},
+		Cleanup:      CleanupConfig{Interval: 300},
 		Monitoring: MonitoringConfig{
 			StorageEnabled:     false,
 			CollectionInterval: 60,

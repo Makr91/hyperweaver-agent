@@ -156,7 +156,7 @@ var settingsSchema = map[string]any{
 				"description": "Per-category log levels overriding the global level (map of category name to level)",
 				// A free-form map, not fixed fields: keys are category names,
 				// values are levels. The vocabularies the editor needs:
-				"keys":   []string{"app", "api_requests", "auth", "tasks", "machines", "monitoring"},
+				"keys":   []string{"app", "api_requests", "auth", "tasks", "machines", "monitoring", "provisioning"},
 				"values": []string{"error", "warn", "info", "debug"},
 			},
 		},
@@ -406,6 +406,17 @@ var settingsSchema = map[string]any{
 				"default":     120,
 				"min":         5,
 				"max":         3600,
+			},
+		},
+	},
+	"provisioning": map[string]any{
+		"description":      "Provisioning engine configuration (provisioner package registry)",
+		"requires_restart": true,
+		"properties": map[string]any{
+			"provisioners_dir": map[string]any{
+				"type":        "string",
+				"description": "Directory holding provisioner packages (SHI's on-disk format); installer-bundled packages are extracted here on startup without ever overwriting existing versions (empty = <data dir>/provisioners)",
+				"default":     "",
 			},
 		},
 	},

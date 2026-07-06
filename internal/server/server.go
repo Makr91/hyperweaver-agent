@@ -26,6 +26,7 @@ import (
 	"github.com/Makr91/hyperweaver-agent/internal/logging"
 	"github.com/Makr91/hyperweaver-agent/internal/machines"
 	"github.com/Makr91/hyperweaver-agent/internal/monitoring"
+	"github.com/Makr91/hyperweaver-agent/internal/provisioner"
 	"github.com/Makr91/hyperweaver-agent/internal/sslcert"
 	"github.com/Makr91/hyperweaver-agent/internal/tasks"
 	"github.com/Makr91/hyperweaver-agent/internal/version"
@@ -34,16 +35,17 @@ import (
 
 // Server is the agent's HTTP (and optional HTTPS) server.
 type Server struct {
-	cfg        *config.Config
-	keys       *keys.Store
-	trayTokens *auth.TrayTokens
-	tasks      *tasks.Queue
-	machines   *machines.Store
-	monitor    *monitoring.Service
-	dbs        []DBHandle
-	httpSrv    *http.Server
-	listener   net.Listener
-	startedAt  time.Time
+	cfg          *config.Config
+	keys         *keys.Store
+	trayTokens   *auth.TrayTokens
+	tasks        *tasks.Queue
+	machines     *machines.Store
+	provisioners *provisioner.Registry
+	monitor      *monitoring.Service
+	dbs          []DBHandle
+	httpSrv      *http.Server
+	listener     net.Listener
+	startedAt    time.Time
 
 	// httpsSrv/httpsListener exist only when ssl.enabled AND the certificate
 	// loaded — certificate problems leave the agent HTTP-only (Node-agent
@@ -62,18 +64,19 @@ type Server struct {
 }
 
 // New builds the server and its routes.
-func New(cfg *config.Config, keyStore *keys.Store, trayTokens *auth.TrayTokens, taskQueue *tasks.Queue, machineStore *machines.Store, monitor *monitoring.Service, dbs []DBHandle, restartArgs []string, openUI func()) (*Server, error) {
+func New(cfg *config.Config, keyStore *keys.Store, trayTokens *auth.TrayTokens, taskQueue *tasks.Queue, machineStore *machines.Store, provisioners *provisioner.Registry, monitor *monitoring.Service, dbs []DBHandle, restartArgs []string, openUI func()) (*Server, error) {
 	s := &Server{
-		cfg:         cfg,
-		keys:        keyStore,
-		trayTokens:  trayTokens,
-		tasks:       taskQueue,
-		machines:    machineStore,
-		monitor:     monitor,
-		dbs:         dbs,
-		startedAt:   time.Now(),
-		restartArgs: restartArgs,
-		openUI:      openUI,
+		cfg:          cfg,
+		keys:         keyStore,
+		trayTokens:   trayTokens,
+		tasks:        taskQueue,
+		machines:     machineStore,
+		provisioners: provisioners,
+		monitor:      monitor,
+		dbs:          dbs,
+		startedAt:    time.Now(),
+		restartArgs:  restartArgs,
+		openUI:       openUI,
 	}
 
 	mux := http.NewServeMux()
@@ -199,6 +202,17 @@ func New(cfg *config.Config, keyStore *keys.Store, trayTokens *auth.TrayTokens, 
 	mux.Handle("PUT /machines/{machineName}/notes", requireKey(http.HandlerFunc(s.handleUpdateMachineNotes)))
 	mux.Handle("GET /machines/{machineName}/tags", requireKey(http.HandlerFunc(s.handleGetMachineTags)))
 	mux.Handle("PUT /machines/{machineName}/tags", requireKey(http.HandlerFunc(s.handleUpdateMachineTags)))
+
+	// Provisioner package registry (Agent API v1 provisioning surface, the
+	// `provisioning` token — architecture §8, first slice of the
+	// provisioning engine). The literal "import" segment wins over {name} in
+	// ServeMux precedence.
+	mux.Handle("GET /provisioning/provisioners", requireKey(http.HandlerFunc(s.handleListProvisioners)))
+	mux.Handle("POST /provisioning/provisioners/import", requireKey(http.HandlerFunc(s.handleImportProvisioner)))
+	mux.Handle("GET /provisioning/provisioners/{name}", requireKey(http.HandlerFunc(s.handleProvisionerDetails)))
+	mux.Handle("DELETE /provisioning/provisioners/{name}", requireKey(http.HandlerFunc(s.handleDeleteProvisioner)))
+	mux.Handle("GET /provisioning/provisioners/{name}/versions/{version}", requireKey(http.HandlerFunc(s.handleProvisionerVersion)))
+	mux.Handle("DELETE /provisioning/provisioners/{name}/versions/{version}", requireKey(http.HandlerFunc(s.handleDeleteProvisionerVersion)))
 
 	// Settings surface (Agent API v1) — admin-only via the central role policy.
 	mux.Handle("GET /settings", requireKey(http.HandlerFunc(s.handleGetSettings)))

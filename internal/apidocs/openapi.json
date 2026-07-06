@@ -25,6 +25,7 @@
     { "name": "System", "description": "Version, update checking, prerequisite detection" },
     { "name": "Task Management", "description": "The task queue: every machine operation runs as a prioritized, dependency-chained task with streamed output" },
     { "name": "Machine Management", "description": "VirtualBox machines — vagrant-backed or raw — discovered by reconciliation and operated through queued tasks" },
+    { "name": "Provisioning", "description": "Provisioner package registry (the provisioning capability token): packages in SHI's on-disk format — <name>/provisioner-collection.yml with <version>/provisioner.yml trees — listed, imported (folder, archive, or git clone; task-queued), and deleted only while no machine references them. One system for every package family; installer-bundled packages seed on startup without ever overwriting existing versions. Hosts.yml generation and machine creation land later in this phase." },
     { "name": "Swap Management", "description": "Read-only swap information (the swap capability token); add/remove are OmniOS semantics and not implemented on this agent" },
     { "name": "Host Monitoring", "description": "Host telemetry (the monitoring capability token): always-on realtime sampling via gopsutil; monitoring.storage_enabled adds stored time series in per-datatype database files. Illumos-only families (ZFS pools/datasets/ARC, zpool-iostat disk IO, netstat routes) have no analog on this host and are absent." },
     { "name": "Processes", "description": "Host process listing and control (the processes capability token). The zone concept does not exist here: the zone field is absent and ?zone= filters are ignored. Absent by platform: /{pid}/stack, /{pid}/limits (pstack/plimit are illumos tools) and trace/start (DTrace)." },
@@ -82,7 +83,7 @@
           "auth": { "type": "array", "items": { "type": "string" }, "example": ["apikey"] },
           "bootstrapAvailable": { "type": "boolean", "example": true },
           "console": { "type": "array", "items": { "type": "string" }, "example": [] },
-          "features": { "type": "array", "items": { "type": "string" }, "description": "Capability tokens (platform support ∧ config state): host-power is absent when host_power.enabled is false", "example": ["tasks", "machines", "machine-suspend", "swap", "monitoring", "processes", "host-power"] },
+          "features": { "type": "array", "items": { "type": "string" }, "description": "Capability tokens (platform support ∧ config state): host-power is absent when host_power.enabled is false", "example": ["tasks", "machines", "machine-suspend", "swap", "monitoring", "processes", "provisioning", "host-power"] },
           "uptime": { "type": "integer", "description": "Seconds since the agent started", "example": 86400 }
         }
       },
@@ -248,6 +249,29 @@
           "version": { "type": "string", "description": "OS marketing name", "example": "Windows 10 Pro" },
           "allmachines": { "type": "array", "items": { "type": "string" }, "description": "All registered machine names (VBoxManage list vms)", "example": ["domino-01", "domino-02"] },
           "runningmachines": { "type": "array", "items": { "type": "string" }, "description": "Running machine names (VBoxManage list runningvms)", "example": ["domino-01"] }
+        }
+      },
+      "ProvisionerVersion": {
+        "type": "object",
+        "description": "One provisioner package version. metadata is the full provisioner.yml — metadata.roles and configuration.basicFields/advancedFields drive the machine-create forms exactly as in SHI's custom-provisioner stack.",
+        "properties": {
+          "version": { "type": "string", "description": "The manifest's version field (falls back to the directory name)", "example": "0.1.24" },
+          "dir": { "type": "string", "description": "Version directory name — the URL segment", "example": "0.1.24" },
+          "name": { "type": "string", "example": "hcl_domino_standalone_provisioner" },
+          "description": { "type": "string" },
+          "root": { "type": "string", "description": "Absolute path of the version directory on the agent host" },
+          "metadata": { "type": "object", "description": "provisioner.yml, verbatim" }
+        }
+      },
+      "ProvisionerCollection": {
+        "type": "object",
+        "description": "One provisioner family. name is the registry directory name — the stable identity URLs address.",
+        "properties": {
+          "name": { "type": "string", "example": "hcl_domino_standalone_provisioner" },
+          "description": { "type": "string", "example": "HCL Domino standalone server provisioner" },
+          "valid": { "type": "boolean", "description": "false marks a family with no parseable versions (SHI's invalid placeholder) — still listed, still deletable" },
+          "metadata": { "type": "object", "description": "provisioner-collection.yml, verbatim", "nullable": true },
+          "versions": { "type": "array", "items": { "$ref": "#/components/schemas/ProvisionerVersion" }, "description": "Newest first" }
         }
       },
       "MonitoringSampling": {
@@ -1408,6 +1432,164 @@
                     "skipped": { "type": "array", "items": { "type": "object", "properties": { "machine": { "type": "string" }, "reason": { "type": "string" } } } },
                     "task_ids": { "type": "array", "items": { "type": "string" } },
                     "message": { "type": "string" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/provisioning/provisioners": {
+      "get": {
+        "tags": ["Provisioning"],
+        "summary": "List provisioner packages",
+        "description": "Minimum role: viewer. Every package family in the registry with its versions (newest first). The filesystem is the source of truth — packages dropped in by installers or by hand appear without registration.",
+        "responses": {
+          "200": {
+            "description": "Provisioner families",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "provisioners": { "type": "array", "items": { "$ref": "#/components/schemas/ProvisionerCollection" } },
+                    "total": { "type": "integer" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/provisioning/provisioners/import": {
+      "post": {
+        "tags": ["Provisioning"],
+        "summary": "Import a provisioner package",
+        "description": "Minimum role: operator. Queues a provisioner_import task (machine_name \"system\", category-locked: one import at a time). Sources: folder (a directory on the agent host holding provisioner-collection.yml, or provisioner.yml for a bare version), archive (.tar.gz/.tgz/.zip on the agent host), or git (http(s) URL, cloned --depth 1 --recursive so nested submodules arrive; optional branch). The package root is searched up to 3 directory levels deep. Existing versions are never touched — re-importing is idempotent; update = import a newer version beside the old.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["source_type"],
+                "properties": {
+                  "source_type": { "type": "string", "enum": ["folder", "archive", "git"] },
+                  "path": { "type": "string", "description": "Agent-host path (folder and archive sources)", "example": "C:\\Users\\me\\Downloads\\my_provisioner.tar.gz" },
+                  "url": { "type": "string", "description": "http(s) git repository URL (git source)", "example": "https://github.com/STARTcloud/hcl_domino_standalone_provisioner.git" },
+                  "branch": { "type": "string", "description": "Optional branch (git source)", "example": "main" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Import task queued",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": { "type": "boolean", "example": true },
+                    "task_id": { "type": "string", "format": "uuid" },
+                    "source_type": { "type": "string" },
+                    "status": { "type": "string", "example": "pending" },
+                    "message": { "type": "string", "example": "Provisioner import task queued successfully" }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid body, source_type, path, url, or branch",
+            "content": { "application/json": { "schema": { "type": "object", "properties": { "error": { "type": "string" } } } } }
+          }
+        }
+      }
+    },
+    "/provisioning/provisioners/{name}": {
+      "get": {
+        "tags": ["Provisioning"],
+        "summary": "Provisioner family details",
+        "description": "Minimum role: viewer. The family with its full version metadata.",
+        "parameters": [
+          { "name": "name", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "The family",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ProvisionerCollection" } } }
+          },
+          "404": { "description": "Provisioner not found" }
+        }
+      },
+      "delete": {
+        "tags": ["Provisioning"],
+        "summary": "Delete a provisioner family",
+        "description": "Minimum role: operator. Removes the family and every version — refused (409) while any machine references any of its versions. No package is special-cased by name.",
+        "parameters": [
+          { "name": "name", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": { "description": "Family deleted" },
+          "404": { "description": "Provisioner not found" },
+          "409": {
+            "description": "Referenced by existing machines",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": { "type": "string" },
+                    "machines": { "type": "array", "items": { "type": "string" } }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/provisioning/provisioners/{name}/versions/{version}": {
+      "get": {
+        "tags": ["Provisioning"],
+        "summary": "Provisioner version details",
+        "description": "Minimum role: viewer. One version's full manifest — the document the machine-create forms render from. version matches the manifest version or the directory name.",
+        "parameters": [
+          { "name": "name", "in": "path", "required": true, "schema": { "type": "string" } },
+          { "name": "version", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "The version",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ProvisionerVersion" } } }
+          },
+          "404": { "description": "Provisioner or version not found" }
+        }
+      },
+      "delete": {
+        "tags": ["Provisioning"],
+        "summary": "Delete a provisioner version",
+        "description": "Minimum role: operator. Removes one version, leaving its siblings — refused (409) while any machine references it (versions in use are never touched).",
+        "parameters": [
+          { "name": "name", "in": "path", "required": true, "schema": { "type": "string" } },
+          { "name": "version", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": { "description": "Version deleted" },
+          "404": { "description": "Provisioner or version not found" },
+          "409": {
+            "description": "Referenced by existing machines",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": { "type": "string" },
+                    "machines": { "type": "array", "items": { "type": "string" } }
                   }
                 }
               }

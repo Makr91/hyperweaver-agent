@@ -83,7 +83,7 @@ logging:
   #   categories:
   #     tasks: debug
   # Categories this agent emits: app, api_requests, auth, tasks, machines,
-  # monitoring.
+  # monitoring, provisioning.
   categories: {}
 
 api_keys:
@@ -176,6 +176,14 @@ machines:
   # Seconds a graceful stop waits for the guest to power off after the ACPI
   # signal before forcing poweroff.
   shutdown_timeout: 120
+
+provisioning:
+  # Directory holding provisioner packages (SHI's on-disk format:
+  # <name>/provisioner-collection.yml with <version>/provisioner.yml trees
+  # beneath). Installer-bundled packages are extracted here on startup
+  # without ever overwriting existing versions.
+  # Empty = <data dir>/provisioners
+  provisioners_dir: ''
 
 cleanup:
   # Seconds between periodic cleanup runs (task retention).

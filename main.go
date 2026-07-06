@@ -32,6 +32,7 @@ import (
 	"github.com/Makr91/hyperweaver-agent/internal/monitoring"
 	"github.com/Makr91/hyperweaver-agent/internal/openbrowser"
 	"github.com/Makr91/hyperweaver-agent/internal/protocol"
+	"github.com/Makr91/hyperweaver-agent/internal/provisioner"
 	"github.com/Makr91/hyperweaver-agent/internal/server"
 	"github.com/Makr91/hyperweaver-agent/internal/tasks"
 	"github.com/Makr91/hyperweaver-agent/internal/tray"
@@ -154,7 +155,7 @@ func run() error {
 	reconciler := systems.reconciler
 	monitor := systems.monitor
 
-	srv, err := server.New(cfg, keyStore, trayTokens, taskQueue, systems.machines, monitor, systems.dbs, restartArgs, openUI)
+	srv, err := server.New(cfg, keyStore, trayTokens, taskQueue, systems.machines, systems.provisioners, monitor, systems.dbs, restartArgs, openUI)
 	if err != nil {
 		slog.Error("server setup failed", "error", err)
 		return err
@@ -179,6 +180,16 @@ func run() error {
 	taskQueue.Start()
 	reconciler.Start()
 	monitor.Start()
+
+	// Installer-bundled provisioner packages extract on startup — never
+	// clobbering existing versions, so every boot is safe — and likewise
+	// only once this process owns the port. Background: large bundles must
+	// not delay the tray/UI, and the registry scans the directory live.
+	go func() {
+		if serr := provisioner.Seed(systems.provisioners.Dir()); serr != nil {
+			slog.Error("provisioner seeding failed", "error", serr)
+		}
+	}()
 
 	serverErr := make(chan error, 1)
 	go func() {
@@ -253,15 +264,17 @@ func run() error {
 }
 
 // agentSystems bundles everything setupTasks builds over the databases —
-// the task queue, machine subsystem, monitoring service, the open database
-// handles (for the /database endpoints), and their closer.
+// the task queue, machine subsystem, provisioner registry, monitoring
+// service, the open database handles (for the /database endpoints), and
+// their closer.
 type agentSystems struct {
-	queue      *tasks.Queue
-	machines   *machines.Store
-	reconciler *machines.Reconciler
-	monitor    *monitoring.Service
-	dbs        []server.DBHandle
-	closeDBs   func()
+	queue        *tasks.Queue
+	machines     *machines.Store
+	provisioners *provisioner.Registry
+	reconciler   *machines.Reconciler
+	monitor      *monitoring.Service
+	dbs          []server.DBHandle
+	closeDBs     func()
 }
 
 // setupTasks opens the agent's databases and builds the task queue, the
@@ -408,18 +421,29 @@ func setupTasks(cfg *config.Config) (*agentSystems, error) {
 	machines.RegisterExecutors(queue, machineStore, reconciler,
 		time.Duration(cfg.Machines.ShutdownTimeout)*time.Second)
 
+	// Provisioner package registry (architecture §8): the directory is the
+	// source of truth — scanned live, seeded after the port is owned.
+	provisionersDir, err := cfg.ProvisionersDir()
+	if err != nil {
+		closer()
+		return nil, err
+	}
+	provisioners := provisioner.NewRegistry(provisionersDir)
+	provisioner.RegisterExecutors(queue, provisioners)
+
 	// Host power operations run through the queue too (config-gated at the
 	// HTTP surface; registering the executors unconditionally is harmless —
 	// no handler queues them while the surface is disabled).
 	hostpower.RegisterExecutors(queue, hostpower.LookupCommand)
 
 	return &agentSystems{
-		queue:      queue,
-		machines:   machineStore,
-		reconciler: reconciler,
-		monitor:    monitor,
-		dbs:        handles,
-		closeDBs:   closer,
+		queue:        queue,
+		machines:     machineStore,
+		provisioners: provisioners,
+		reconciler:   reconciler,
+		monitor:      monitor,
+		dbs:          handles,
+		closeDBs:     closer,
 	}, nil
 }
 

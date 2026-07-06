@@ -17,7 +17,11 @@ const (
 // coming phases register (machines in Phase B, provisioners/assets in C,
 // templates in D) are mapped here as they land; an unmapped operation runs
 // without a category lock.
-var operationCategories = map[string]string{}
+var operationCategories = map[string]string{
+	// One import at a time: imports copy large trees into the shared
+	// provisioner registry directory.
+	"provisioner_import": CategorySystem,
+}
 
 // OperationCategory returns the concurrency category for an operation, or ""
 // when it has none.

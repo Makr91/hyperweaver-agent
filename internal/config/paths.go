@@ -150,6 +150,20 @@ func (c *Config) MonitoringDBPath(kind string) (string, error) {
 	return filepath.Join(dir, "monitoring-"+kind+".sqlite"), nil
 }
 
+// ProvisionersDir returns the provisioner package registry root:
+// provisioning.provisioners_dir when configured, else provisioners under the
+// data root.
+func (c *Config) ProvisionersDir() (string, error) {
+	if c.Provisioning.ProvisionersDir != "" {
+		return safepath.CleanAbs(c.Provisioning.ProvisionersDir)
+	}
+	dir, err := c.DataDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, "provisioners"), nil
+}
+
 // TaskLogDir returns where per-task output log files land, defaulting to
 // logs/tasks beside the agent log.
 func (c *Config) TaskLogDir() (string, error) {
