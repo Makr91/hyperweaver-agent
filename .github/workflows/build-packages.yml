@@ -53,14 +53,15 @@ jobs:
         run: |
           # Seed contract (arch item 2, Mark's ruling: provisioners travel as
           # tars, pulled as git artifacts): each provisioner repo's latest
-          # release carries a registry-shaped .tar.gz — built with
-          #   git archive --prefix="<name>/<version>/"
-          # — that the agent extracts on startup, never overwriting existing
-          # versions (a missing collection manifest is synthesized by the
-          # seeder). Missing assets are tolerated: dev/fork builds proceed
-          # seedless.
+          # release carries a registry-shaped .tar.gz laid out as
+          # <name>/<version>/... — built by the repo's release CI from a
+          # submodules-recursive checkout (NOT git archive, which omits
+          # submodules) — that the agent extracts on startup, never
+          # overwriting existing versions (a missing collection manifest is
+          # synthesized by the seeder). Missing assets are tolerated:
+          # dev/fork builds proceed seedless.
           mkdir -p packaging/provisioners-seed
-          for repo in STARTcloud/hcl_domino_standalone_provisioner STARTcloud/hcl_domino_additional_provisioner; do
+          for repo in STARTcloud/startcloud_generic_provisioner STARTcloud/hcl_domino_standalone_provisioner STARTcloud/hcl_domino_additional_provisioner; do
             # Dual-asset releases (Provisioner AI, 2026-07-06): a versioned
             # tar.gz plus a version-less stable one — fetch ONLY the
             # version-less asset so the seed never carries duplicates.
@@ -171,7 +172,7 @@ jobs:
           # Same seed contract as the Windows job: registry-shaped .tar.gz
           # release assets from the provisioner repos; missing assets tolerated.
           mkdir -p packaging/provisioners-seed
-          for repo in STARTcloud/hcl_domino_standalone_provisioner STARTcloud/hcl_domino_additional_provisioner; do
+          for repo in STARTcloud/startcloud_generic_provisioner STARTcloud/hcl_domino_standalone_provisioner STARTcloud/hcl_domino_additional_provisioner; do
             # Dual-asset releases (Provisioner AI, 2026-07-06): a versioned
             # tar.gz plus a version-less stable one — fetch ONLY the
             # version-less asset so the seed never carries duplicates.
@@ -306,7 +307,7 @@ jobs:
           # Same seed contract as the Windows job: registry-shaped .tar.gz
           # release assets from the provisioner repos; missing assets tolerated.
           mkdir -p packaging/provisioners-seed
-          for repo in STARTcloud/hcl_domino_standalone_provisioner STARTcloud/hcl_domino_additional_provisioner; do
+          for repo in STARTcloud/startcloud_generic_provisioner STARTcloud/hcl_domino_standalone_provisioner STARTcloud/hcl_domino_additional_provisioner; do
             # Dual-asset releases (Provisioner AI, 2026-07-06): a versioned
             # tar.gz plus a version-less stable one — fetch ONLY the
             # version-less asset so the seed never carries duplicates.

@@ -13,10 +13,13 @@ const (
 	CategorySystem           = "system"
 )
 
-// operationCategories maps operation names to their category. Operations the
-// coming phases register (machines in Phase B, provisioners/assets in C,
-// templates in D) are mapped here as they land; an unmapped operation runs
-// without a category lock.
+// operationCategories maps operation names to their category. An unmapped
+// operation runs without a category lock — machine lifecycle operations are
+// deliberately unmapped: their guard is the queue's one-running-task-PER-
+// MACHINE rule (zoneweaver's per-zone exclusivity), which serializes a
+// machine's own operations while different machines' tasks run in parallel
+// (SHI's per-server ExecutorManager model — a global lifecycle category
+// would forbid parallel machine builds).
 var operationCategories = map[string]string{
 	// One import at a time: imports copy large trees into the shared
 	// provisioner registry directory.

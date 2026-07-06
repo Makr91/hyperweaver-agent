@@ -257,11 +257,13 @@ func (s *Store) Create(ctx context.Context, nm *NewMachine) (*Machine, error) {
 }
 
 // SetSpec replaces a machine's creation spec (PUT /machines/{name} — the
-// change materializes on the next start).
-func (s *Store) SetSpec(ctx context.Context, name string, spec json.RawMessage) error {
+// change materializes on the next start). The server_id column follows the
+// spec's resolved settings.server_id so the row and the document can never
+// drift; the column's UNIQUE constraint referees collisions.
+func (s *Store) SetSpec(ctx context.Context, name string, spec json.RawMessage, serverID string) error {
 	res, err := s.db.ExecContext(ctx, `UPDATE machines
-		SET spec = ?, updated_at = ? WHERE name = ?`,
-		string(spec), formatTime(time.Now()), name)
+		SET spec = ?, server_id = ?, updated_at = ? WHERE name = ?`,
+		string(spec), serverID, formatTime(time.Now()), name)
 	if err != nil {
 		return err
 	}

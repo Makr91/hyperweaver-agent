@@ -291,14 +291,28 @@ func (s *Store) StatusCounts(ctx context.Context) (map[string]int, error) {
 }
 
 // NextPending returns the highest-priority, oldest pending task whose
-// dependency (if any) has completed — the queue's pick order. Nil when the
-// queue has nothing runnable.
-func (s *Store) NextPending(ctx context.Context) (*Task, error) {
-	t, err := scanTask(s.db.QueryRowContext(ctx, `SELECT `+taskColumns+` FROM tasks
+// dependency (if any) has completed, skipping machines with a task already
+// in flight (one running task per machine — zoneweaver's per-zone rule, SHI's
+// per-server ExecutorManager dedup; a stop must never race a running start).
+// Skipped machines never head-of-line block: the pick moves on to the next
+// runnable machine. Nil when the queue has nothing runnable.
+func (s *Store) NextPending(ctx context.Context, busyMachines []string) (*Task, error) {
+	var query strings.Builder
+	query.WriteString(`SELECT ` + taskColumns + ` FROM tasks
 		WHERE status = 'pending'
 		  AND (depends_on IS NULL
-		       OR depends_on IN (SELECT id FROM tasks WHERE status = 'completed'))
-		ORDER BY priority DESC, created_at ASC LIMIT 1`))
+		       OR depends_on IN (SELECT id FROM tasks WHERE status = 'completed'))`)
+	args := []any{}
+	if len(busyMachines) > 0 {
+		query.WriteString(" AND machine_name NOT IN (?")
+		query.WriteString(strings.Repeat(", ?", len(busyMachines)-1))
+		query.WriteString(")")
+		for _, name := range busyMachines {
+			args = append(args, name)
+		}
+	}
+	query.WriteString(" ORDER BY priority DESC, created_at ASC LIMIT 1")
+	t, err := scanTask(s.db.QueryRowContext(ctx, query.String(), args...))
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}

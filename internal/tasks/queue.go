@@ -60,6 +60,8 @@ type QueueConfig struct {
 type runningEntry struct {
 	cancel    context.CancelFunc
 	cancelled bool
+	// machine is the task's machine_name — the per-machine exclusivity key.
+	machine string
 }
 
 // Queue is the task processor: a poll loop that picks the highest-priority
@@ -232,8 +234,20 @@ func (q *Queue) cleanupOld() {
 // the highest-priority runnable task unless capacity or its category lock
 // blocks it (the Node agent's processNextTask).
 func (q *Queue) tick() {
+	// One running task per machine (zoneweaver's per-zone rule): machines
+	// with a task in flight are excluded from the pick — never head-of-line
+	// blocked. "system" tasks are exempt; their category locks govern them.
+	// The busy set comes from the in-flight map, NOT the tasks table: parent
+	// anchors sit in the table as running rows and must never block their
+	// own children.
 	q.mu.Lock()
 	capacityFull := len(q.running) >= q.cfg.MaxConcurrent
+	busyMachines := []string{}
+	for _, entry := range q.running {
+		if entry.machine != "" && entry.machine != "system" {
+			busyMachines = append(busyMachines, entry.machine)
+		}
+	}
 	q.mu.Unlock()
 	if capacityFull {
 		return
@@ -251,7 +265,7 @@ func (q *Queue) tick() {
 		q.updateParentProgress(ctx, parentID)
 	}
 
-	task, err := q.store.NextPending(ctx)
+	task, err := q.store.NextPending(ctx, busyMachines)
 	if err != nil {
 		tlog().Error("pick next task", "error", err)
 		return
@@ -280,7 +294,7 @@ func (q *Queue) tick() {
 
 	runCtx, cancel := context.WithCancel(context.Background())
 	q.mu.Lock()
-	q.running[task.ID] = &runningEntry{cancel: cancel}
+	q.running[task.ID] = &runningEntry{cancel: cancel, machine: task.MachineName}
 	if category != "" {
 		q.categories[category] = task.ID
 	}

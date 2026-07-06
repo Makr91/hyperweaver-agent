@@ -404,7 +404,20 @@ func (s *Server) handleModifyMachine(w http.ResponseWriter, r *http.Request) {
 	if !s.validateSpec(w, &spec) {
 		return
 	}
-	if _, err := s.resolveServerID(r.Context(), &spec); err != nil {
+	// An omitted (or emptied) server_id keeps the machine's own — modify must
+	// never mint a fresh MAX+1 for an existing machine.
+	if machine.ServerID != nil {
+		switch v := spec.Settings["server_id"].(type) {
+		case nil:
+			spec.Settings["server_id"] = *machine.ServerID
+		case string:
+			if v == "" {
+				spec.Settings["server_id"] = *machine.ServerID
+			}
+		}
+	}
+	serverID, err := s.resolveServerID(r.Context(), &spec)
+	if err != nil {
 		taskError(w, http.StatusBadRequest, err.Error())
 		return
 	}
@@ -415,8 +428,12 @@ func (s *Server) handleModifyMachine(w http.ResponseWriter, r *http.Request) {
 		taskError(w, http.StatusInternalServerError, "Failed to modify machine")
 		return
 	}
-	if serr := s.machines.SetSpec(r.Context(), machine.Name, raw); serr != nil {
+	if serr := s.machines.SetSpec(r.Context(), machine.Name, raw, serverID); serr != nil {
 		slog.Error("store machine spec", "machine", machine.Name, "error", serr)
+		if strings.Contains(serr.Error(), "UNIQUE") {
+			taskError(w, http.StatusConflict, "server_id already in use by another machine")
+			return
+		}
 		taskError(w, http.StatusInternalServerError, "Failed to modify machine")
 		return
 	}
