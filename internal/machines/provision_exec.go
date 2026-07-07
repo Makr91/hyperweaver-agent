@@ -281,10 +281,15 @@ func (e *executors) provisionPlaybook(ctx context.Context, task *tasks.Task, out
 	if provisioningPath == "" {
 		provisioningPath = "/vagrant"
 	}
-	ansibleConfig := ""
-	if playbook.ConfigFile != "" {
-		ansibleConfig = "ANSIBLE_CONFIG=" + playbook.ConfigFile + " "
+	// Hosts.rb:519 sets ansible.config_file to /vagrant/ansible/ansible.cfg
+	// unconditionally for every local playbook — the document's own value
+	// wins here, the vagrant default covers documents that omit it (Mark's
+	// review 2026-07-07: it was never the template's job).
+	configFile := playbook.ConfigFile
+	if configFile == "" {
+		configFile = "/vagrant/ansible/ansible.cfg"
 	}
+	ansibleConfig := "ANSIBLE_CONFIG=" + configFile + " "
 	command := fmt.Sprintf("cd %s && %sansible-playbook -i 'localhost,' -c local %s --extra-vars '%s'",
 		provisioningPath, ansibleConfig, playbook.Playbook, escaped)
 

@@ -66,6 +66,9 @@ browser:
   # Optional: full path to the browser the tray "Open" action should launch
   # (an executable, or a .app bundle on macOS). Empty = system default browser.
   path: ''
+  # Open the signed-in UI in the browser when the desktop agent starts, so a
+  # fresh install lands in the app without hunting for the tray icon.
+  open_on_start: true
 
 logging:
   # error | warn | info | debug
@@ -197,10 +200,6 @@ provisioning:
   # vagrant runs from. Working copies are VM-scale data — keep this off
   # roaming profiles. Empty = <data dir>/machines
   machines_dir: ''
-  # Leave a machine running after a failed vagrant up so it can be debugged
-  # (SHI's keepfailedserversrunning). false powers the half-provisioned VM
-  # off.
-  keep_failed_machines_running: true
   # Sync method for machines whose spec sets none: rsync | scp (SHI's global
   # preference; platform rules still apply — forced rsync on Windows, macOS
   # auto-fallback to SCP on the ancient Apple rsync).
@@ -209,6 +208,47 @@ provisioning:
   # DEFAULT_NETWORK_INTERFACE when the spec sets none. Values come from
   # GET /provisioning/bridged-interfaces (VBoxManage list bridgedifs).
   default_network_interface: ''
+  # Timeout for one in-guest ansible-playbook run.
+  playbook_timeout_seconds: 21600
+  # Timeout for the in-guest ansible/collection installation steps.
+  ansible_install_timeout_seconds: 300
+  ssh:
+    # The agent's own provisioning private key — the SSH-auth fallback when
+    # the machine's document supplies neither a key nor a password; generated
+    # (ed25519) at startup when absent. Empty = <config dir>/ssh/provision_key
+    key_path: ''
+    # Total wait for a guest's SSH to become available (the document's
+    # settings.setup_wait wins when larger).
+    timeout_seconds: 300
+    # Interval between SSH availability checks.
+    poll_interval_seconds: 10
+  network:
+    # Dedicated provisioning network: ONE VirtualBox host-only interface
+    # (identified by host_ip — VirtualBox assigns interface names itself)
+    # plus its DHCP server. Set up via POST /provisioning/network/setup.
+    enabled: true
+    subnet: 10.190.190.0/24
+    host_ip: 10.190.190.1
+    netmask: 255.255.255.0
+    # The VirtualBox DHCP server's own address (must differ from host_ip).
+    dhcp_server_ip: 10.190.190.2
+    dhcp_range_start: 10.190.190.10
+    dhcp_range_end: 10.190.190.254
+
+template_sources:
+  # Box-template registry: downloaded box disk images machines clone from.
+  # Storage root (<root>/<organization>/<box>/<version>/).
+  # Empty = <data dir>/templates
+  local_storage_path: ''
+  # Vagrant/BoxVault-compatible registries. The entry named "Default
+  # Registry" (or flagged default) serves requests that name no source;
+  # auth_token authenticates private boxes.
+  sources:
+    - name: Default Registry
+      url: https://boxvault.startcloud.com
+      enabled: true
+      default: true
+      auth_token: ''
 
 assets:
   # Installer file cache (the artifacts capability token): hash-verified

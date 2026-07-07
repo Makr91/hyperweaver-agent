@@ -103,11 +103,16 @@ Optional directory to serve the UI from instead of the copy embedded in the
 binary (default: empty = embedded)
 .El
 .Ss browser
-Tray "Open" behavior (desktop mode only).
-.Bl -tag -width "path"
+Browser launching (desktop mode only).
+.Bl -tag -width "open_on_start"
 .It Cm path
 Optional full path to a browser executable (or .app bundle on macOS) used by
-the tray Open action. Empty selects the operating system's default browser.
+the tray Open action and the startup open. Empty selects the operating
+system's default browser.
+.It Cm open_on_start
+Boolean opening the signed-in UI in the browser when the desktop agent
+starts, so a fresh install lands in the app without hunting for the tray
+icon. Ignored in headless service mode (default: true).
 .El
 .Ss logging
 Logging configuration.
@@ -326,6 +331,32 @@ Total wait for a guest's SSH to become available; the document's
 settings.setup_wait wins when larger. Minimum 10 (default: 300).
 .It Cm ssh.poll_interval_seconds
 Interval between SSH availability checks, minimum 1 (default: 10).
+.It Cm network.enabled
+Boolean enabling the dedicated provisioning network: ONE VirtualBox
+host-only interface — identified by
+.Cm network.host_ip ,
+since VirtualBox assigns interface names itself — plus its DHCP server.
+Set up and torn down via POST /provisioning/network/setup and
+DELETE /provisioning/network/teardown; host-type networks[] entries in
+machine documents attach to the interface at create and their addresses pin
+as per-VM fixed DHCP leases, so guests receive their document's control IP
+from an ordinary DHCP request (default: true).
+.It Cm network.subnet
+Provisioning network subnet in CIDR form (default: "10.190.190.0/24")
+.It Cm network.host_ip
+Host address on the provisioning network — the interface's identity
+(default: "10.190.190.1")
+.It Cm network.netmask
+Provisioning network mask (default: "255.255.255.0")
+.It Cm network.dhcp_server_ip
+The VirtualBox DHCP server's own address; must differ from
+.Cm network.host_ip
+(default: "10.190.190.2")
+.It Cm network.dhcp_range_start
+Lowest assignable pool address; fixed leases and the clone allocator draw
+from the pool (default: "10.190.190.10")
+.It Cm network.dhcp_range_end
+Highest assignable pool address (default: "10.190.190.254")
 .El
 .Ss template_sources
 Box-template registry: downloaded box disk images machines clone from

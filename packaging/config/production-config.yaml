@@ -52,6 +52,9 @@ browser:
   # Unused in headless service mode; in tray mode, full path to the browser
   # the "Open" action launches. Empty = system default browser.
   path: ''
+  # Tray mode only: open the signed-in UI in the browser when the agent
+  # starts. Ignored in headless service mode.
+  open_on_start: true
 
 logging:
   # error | warn | info | debug

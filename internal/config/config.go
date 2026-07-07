@@ -104,11 +104,17 @@ type UIConfig struct {
 	Path string `yaml:"path" json:"path"`
 }
 
-// BrowserConfig controls how the tray "Open" action launches a browser.
+// BrowserConfig controls how the agent launches a browser (the tray "Open"
+// action and the startup open).
 type BrowserConfig struct {
 	// Path is an optional browser executable (or macOS .app bundle). Empty
 	// means the operating system's default browser.
 	Path string `yaml:"path" json:"path"`
+	// OpenOnStart opens the signed-in UI in the browser when the desktop
+	// agent starts (Mark's ruling 2026-07-07: one less click — a fresh
+	// install lands in the browser instead of a tray hunt). Headless mode
+	// ignores it.
+	OpenOnStart bool `yaml:"open_on_start" json:"open_on_start"`
 }
 
 // LoggingConfig controls slog output.
@@ -399,7 +405,7 @@ func Default() *Config {
 		SSL:     SSLConfig{Enabled: true, ForceSecure: true, GenerateSSL: true},
 		CORS:    CORSConfig{AllowAll: true, Whitelist: []string{}},
 		UI:      UIConfig{Enabled: true},
-		Browser: BrowserConfig{},
+		Browser: BrowserConfig{OpenOnStart: true},
 		Logging: LoggingConfig{
 			Level:       "info",
 			Console:     true,

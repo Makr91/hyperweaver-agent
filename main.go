@@ -234,6 +234,13 @@ func run() error {
 		go openUI()
 	}
 
+	// Open the signed-in UI when the desktop agent starts (Mark's ruling
+	// 2026-07-07: one less click — a fresh install lands in the browser
+	// instead of a tray hunt). A protocol invocation already opens above.
+	if !*headless && cfg.Browser.OpenOnStart && !pendingProtocolOpen {
+		go openUI()
+	}
+
 	shutdown := func() {
 		monitor.Stop()
 		reconciler.Stop()

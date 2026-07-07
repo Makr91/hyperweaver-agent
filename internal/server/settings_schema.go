@@ -104,13 +104,18 @@ var settingsSchema = map[string]any{
 		},
 	},
 	"browser": map[string]any{
-		"description":      "Tray Open browser configuration",
+		"description":      "Browser launching (tray Open and the startup open; desktop mode only)",
 		"requires_restart": false,
 		"properties": map[string]any{
 			"path": map[string]any{
 				"type":        "string",
-				"description": "Browser executable (or macOS .app) the tray Open action launches (empty = system default)",
+				"description": "Browser executable (or macOS .app) the tray Open action and the startup open launch (empty = system default)",
 				"default":     "",
+			},
+			"open_on_start": map[string]any{
+				"type":        "boolean",
+				"description": "Open the signed-in UI in the browser when the desktop agent starts (ignored in headless mode)",
+				"default":     true,
 			},
 		},
 	},
