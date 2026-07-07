@@ -2,9 +2,11 @@ package server
 
 import (
 	"context"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"regexp"
@@ -26,10 +28,9 @@ import (
 // machine_prepare (render + materialize — the SHI registry layer in the
 // provisioning-content slot) → machine_create_storage →
 // machine_create_config → machine_create_finalize (+ optional start).
-// PUT /machines/{name} stores the provisioner document verbatim
-// (configuration.provisioner) — create DROPS any provisioner config in its
-// body beyond the package reference; provisioning config arrives via PUT or
-// the render.
+// PUT /machines/{name} is the modify mechanism (machines_modify.go) — create
+// DROPS any provisioner config in its body beyond the package reference;
+// provisioning config arrives via PUT's provisioner store or the render.
 
 // serverIDPattern is the numeric server_id vocabulary.
 var serverIDPattern = regexp.MustCompile(`^\d{1,8}$`)
@@ -380,40 +381,6 @@ func (s *Server) workdirTaken(ctx context.Context, name string) (taken bool, hom
 	return false, home, nil
 }
 
-// handleSetProvisioner stores the provisioner document verbatim — the base's
-// PUT /machines/{name} {provisioner:{...}}: an immediate DB-only update; the
-// next /provision consumes it.
-func (s *Server) handleSetProvisioner(w http.ResponseWriter, r *http.Request) {
-	machine := s.findMachine(w, r)
-	if machine == nil {
-		return
-	}
-	var body struct {
-		Provisioner map[string]any `json:"provisioner"`
-	}
-	if err := decodeBody(r, &body); err != nil {
-		taskError(w, http.StatusBadRequest, "Invalid JSON body")
-		return
-	}
-	if len(body.Provisioner) == 0 {
-		taskError(w, http.StatusBadRequest, "provisioner {…} is required — the Hosts.yml host-entry document")
-		return
-	}
-	if err := s.machines.MergeConfigurationSections(r.Context(), machine.Name,
-		map[string]any{"provisioner": body.Provisioner}); err != nil {
-		slog.Error("store provisioner document", "machine", machine.Name, "error", err)
-		taskError(w, http.StatusInternalServerError, "Failed to store provisioner configuration")
-		return
-	}
-	slog.Info("provisioner configuration updated", "machine", machine.Name,
-		"by", auth.FromContext(r.Context()).Name)
-	writeJSON(w, map[string]any{
-		"success":      true,
-		"machine_name": machine.Name,
-		"message":      "Provisioner configuration updated",
-	})
-}
-
 // handleCloneMachine clones a spec-carrying machine: the source spec with the
 // caller's settings/overrides merged, network identity stripped, then the
 // SAME create orchestration (the clone builds real infrastructure too).
@@ -460,7 +427,21 @@ func (s *Server) handleCloneMachine(w http.ResponseWriter, r *http.Request) {
 	for key, value := range body.Overrides {
 		spec.Settings[key] = value
 	}
-	stripCloneNetworks(spec.Networks)
+	provisionalCount := 0
+	for _, entry := range spec.Networks {
+		if network, ok := entry.(map[string]any); ok {
+			if provisional, _ := network["provisional"].(bool); provisional {
+				provisionalCount++
+			}
+		}
+	}
+	provisioningIPs, aerr := s.allocateProvisioningIPs(r.Context(), provisionalCount)
+	if aerr != nil {
+		slog.Error("allocate provisioning IPs", "error", aerr)
+		taskError(w, http.StatusInternalServerError, "Failed to clone machine")
+		return
+	}
+	stripCloneNetworks(spec.Networks, provisioningIPs)
 	spec.StartAfterCreate = false
 
 	if !s.validateSpec(w, spec) {
@@ -506,15 +487,102 @@ func (s *Server) handleCloneMachine(w http.ResponseWriter, r *http.Request) {
 }
 
 // stripCloneNetworks removes identity and addressing from cloned network
-// entries so source and clone can never collide.
-func stripCloneNetworks(networks []any) {
+// entries so source and clone can never collide — the base's rule with its
+// provisional exception (ZoneCloneController.buildCloneMetadata): provisional
+// entries receive a FRESH address from the provisioning DHCP range instead of
+// losing addressing (an exhausted range leaves it empty, the base's own
+// behavior). mac always strips: the document's networks[] carry the adapter
+// identity here.
+func stripCloneNetworks(networks, provisioningIPs []any) {
+	next := 0
 	for _, entry := range networks {
 		network, ok := entry.(map[string]any)
 		if !ok {
 			continue
 		}
-		for _, key := range []string{"mac", "address", "gateway", "netmask", "dns"} {
+		delete(network, "mac")
+		if provisional, _ := network["provisional"].(bool); provisional {
+			address := ""
+			if next < len(provisioningIPs) {
+				address, _ = provisioningIPs[next].(string)
+				next++
+			}
+			network["address"] = address
+			continue
+		}
+		for _, key := range []string{"address", "gateway", "netmask", "dns"} {
 			delete(network, key)
 		}
 	}
+}
+
+// allocateProvisioningIPs is the base's batch allocator
+// (ZoneCloneController.allocateProvisioningIPs): one pass over the stored
+// configurations collects the provisional addresses in use, then count unused
+// IPs come from the configured DHCP range (empty when the network is disabled
+// or unconfigured — the base's warn-and-continue).
+func (s *Server) allocateProvisioningIPs(ctx context.Context, count int) ([]any, error) {
+	allocated := []any{}
+	if count == 0 {
+		return allocated, nil
+	}
+	network := s.cfg.Provisioning.Network
+	if !network.Enabled || network.DHCPRangeStart == "" || network.DHCPRangeEnd == "" {
+		slog.Warn("provisioning DHCP range not configured — clone provisional networks get no address")
+		return allocated, nil
+	}
+	start := ipToLong(network.DHCPRangeStart)
+	end := ipToLong(network.DHCPRangeEnd)
+	if start == 0 || end == 0 {
+		return allocated, nil
+	}
+
+	list, err := s.machines.List(ctx, &machines.ListFilter{})
+	if err != nil {
+		return nil, err
+	}
+	used := map[string]bool{}
+	for _, machine := range list {
+		config := machines.ParseConfiguration(machine)
+		for _, entry := range config.List("networks") {
+			network, ok := entry.(map[string]any)
+			if !ok {
+				continue
+			}
+			if provisional, _ := network["provisional"].(bool); !provisional {
+				continue
+			}
+			if address, _ := network["address"].(string); address != "" {
+				used[address] = true
+			}
+		}
+	}
+
+	for ip := start; ip <= end && len(allocated) < count; ip++ {
+		candidate := longToIP(ip)
+		if !used[candidate] {
+			allocated = append(allocated, candidate)
+			used[candidate] = true
+		}
+	}
+	return allocated, nil
+}
+
+// ipToLong/longToIP are the base's IPv4 <-> integer helpers (0 on non-IPv4).
+func ipToLong(s string) uint32 {
+	ip := net.ParseIP(s)
+	if ip == nil {
+		return 0
+	}
+	ip = ip.To4()
+	if ip == nil {
+		return 0
+	}
+	return binary.BigEndian.Uint32(ip)
+}
+
+func longToIP(v uint32) string {
+	ip := make(net.IP, 4)
+	binary.BigEndian.PutUint32(ip, v)
+	return ip.String()
 }

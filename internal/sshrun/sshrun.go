@@ -130,9 +130,30 @@ func Run(ctx context.Context, ip string, port int, credentials Credentials,
 	if err != nil {
 		return fmt.Errorf("dial %s:%d: %w", ip, port, err)
 	}
+
+	// The context kills the TRANSPORT, not just the session: a guest whose
+	// kernel lives but whose sshd is wedged (ICMP answers, no SSH banner)
+	// stalls the handshake — which runs BEFORE any session exists — and a
+	// black-holed connection never delivers a session-close message either.
+	// Closing the TCP connection unblocks every phase: handshake, session
+	// open, and the running command (runtime-proven 2026-07-07 — a frozen
+	// guest wedged machine_sync past its timeout).
+	watchdogDone := make(chan struct{})
+	defer close(watchdogDone)
+	go func() {
+		select {
+		case <-runCtx.Done():
+			_ = conn.Close()
+		case <-watchdogDone:
+		}
+	}()
+
 	sshConn, channels, requests, err := ssh.NewClientConn(conn, ip, config)
 	if err != nil {
 		_ = conn.Close()
+		if runCtx.Err() != nil {
+			return fmt.Errorf("ssh handshake %s: %w", ip, runCtx.Err())
+		}
 		return fmt.Errorf("ssh handshake %s: %w", ip, err)
 	}
 	client := ssh.NewClient(sshConn, channels, requests)
@@ -142,6 +163,9 @@ func Run(ctx context.Context, ip string, port int, credentials Credentials,
 
 	session, err := client.NewSession()
 	if err != nil {
+		if runCtx.Err() != nil {
+			return fmt.Errorf("ssh session: %w", runCtx.Err())
+		}
 		return fmt.Errorf("ssh session: %w", err)
 	}
 	defer func() {
@@ -153,19 +177,11 @@ func Run(ctx context.Context, ip string, port int, credentials Credentials,
 		session.Stderr = streamWriter{stream: "stderr", cb: stream}
 	}
 
-	// The context is the kill switch: closing the session unblocks Wait.
-	done := make(chan error, 1)
-	go func() {
-		done <- session.Run(command)
-	}()
-	select {
-	case <-runCtx.Done():
-		_ = session.Close()
-		<-done
-		return runCtx.Err()
-	case err := <-done:
-		return err
+	err = session.Run(command)
+	if runCtx.Err() != nil {
+		return fmt.Errorf("remote command cancelled or timed out: %w", runCtx.Err())
 	}
+	return err
 }
 
 // streamWriter adapts a StreamFunc to io.Writer.

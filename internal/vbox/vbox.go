@@ -93,8 +93,12 @@ type Info struct {
 }
 
 // machineReadableLine matches the machinereadable forms key="value",
-// key=value, and "quoted key"="value" (storage attachment lines).
-var machineReadableLine = regexp.MustCompile(`^(?:"([^"]+)"|([A-Za-z0-9_\-/]+))=(?:"(.*)"|(.*))$`)
+// key=value, and "quoted key"="value" (storage attachment lines). Parens in
+// the bare-key class carry the indexed families — Forwarding(0), natnet
+// rules — which the transport resolution reads (runtime-proven 2026-07-07:
+// without them every Forwarding line was silently dropped and the pipeline
+// fell back to dialing the guest IP).
+var machineReadableLine = regexp.MustCompile(`^(?:"([^"]+)"|([A-Za-z0-9_\-/()]+))=(?:"(.*)"|(.*))$`)
 
 // ShowVMInfo fetches a machine's live state. ErrNotFound when VirtualBox no
 // longer knows the machine.

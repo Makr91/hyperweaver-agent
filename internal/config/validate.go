@@ -107,6 +107,22 @@ func (c *Config) validate() error {
 		return fmt.Errorf("provisioning.ssh.poll_interval_seconds %d must be at least 1",
 			c.Provisioning.SSH.PollIntervalSeconds)
 	}
+	if c.Provisioning.Network.Enabled {
+		if _, _, err := net.ParseCIDR(c.Provisioning.Network.Subnet); err != nil {
+			return fmt.Errorf("provisioning.network.subnet %q is not CIDR notation", c.Provisioning.Network.Subnet)
+		}
+		for field, value := range map[string]string{
+			"host_ip":          c.Provisioning.Network.HostIP,
+			"netmask":          c.Provisioning.Network.Netmask,
+			"dhcp_server_ip":   c.Provisioning.Network.DHCPServerIP,
+			"dhcp_range_start": c.Provisioning.Network.DHCPRangeStart,
+			"dhcp_range_end":   c.Provisioning.Network.DHCPRangeEnd,
+		} {
+			if net.ParseIP(value) == nil {
+				return fmt.Errorf("provisioning.network.%s %q is not an IP address", field, value)
+			}
+		}
+	}
 	for i := range c.TemplateSources.Sources {
 		if c.TemplateSources.Sources[i].Name == "" || c.TemplateSources.Sources[i].URL == "" {
 			return fmt.Errorf("template_sources.sources[%d] needs both name and url", i)

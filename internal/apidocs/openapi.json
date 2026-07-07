@@ -85,7 +85,7 @@
           "auth": { "type": "array", "items": { "type": "string" }, "example": ["apikey"] },
           "bootstrapAvailable": { "type": "boolean", "example": true },
           "console": { "type": "array", "items": { "type": "string" }, "example": [] },
-          "features": { "type": "array", "items": { "type": "string" }, "description": "Capability tokens (platform support ∧ config state): host-power is absent when host_power.enabled is false, artifacts when assets.enabled is false. provisioner-registry names the SHI-format package registry surface and secrets the global secrets store — finer than the cross-agent provisioning/machine-create tokens, which are true on every provisioning-capable agent regardless of wire shape (Mark's gating ruling, 2026-07-06).", "example": ["tasks", "machines", "machine-suspend", "machine-create", "swap", "monitoring", "processes", "provisioning", "provisioner-registry", "secrets", "templates", "host-power", "artifacts"] },
+          "features": { "type": "array", "items": { "type": "string" }, "description": "Capability tokens (platform support ∧ config state): host-power is absent when host_power.enabled is false, artifacts when assets.enabled is false. provisioner-registry names the SHI-format package registry surface and secrets the global secrets store — finer than the cross-agent provisioning/machine-create tokens, which are true on every provisioning-capable agent regardless of wire shape (Mark's gating ruling, 2026-07-06). machine-modify names PUT's infrastructure-modify surface (the base's zone_modify contract).", "example": ["tasks", "machines", "machine-suspend", "machine-create", "machine-modify", "swap", "monitoring", "processes", "provisioning", "provisioner-registry", "secrets", "templates", "host-power", "artifacts"] },
           "uptime": { "type": "integer", "description": "Seconds since the agent started", "example": 86400 }
         }
       },
@@ -138,7 +138,7 @@
         "properties": {
           "id": { "type": "string", "format": "uuid", "example": "123e4567-e89b-12d3-a456-426614174000" },
           "machine_name": { "type": "string", "description": "Target machine name", "example": "domino-01" },
-          "operation": { "type": "string", "description": "Operation kind. Vocabulary: start, stop, suspend, delete, discover, restart (never dispatched — a restart is a stop→start chain); create orchestration: machine_create_orchestration (parent), machine_prepare, machine_create_storage, machine_create_config, machine_create_finalize, template_download; provisioning pipeline: machine_provision_orchestration (parent), machine_wait_ssh, machine_sync_parent, machine_sync (one per folder), machine_provision_parent, machine_provision (one per playbook); registry/cache/system: provisioner_import, artifact_scan, artifact_download, hcl_download, agent_update.", "example": "start" },
+          "operation": { "type": "string", "description": "Operation kind. Vocabulary: start, stop, suspend, delete, discover, machine_modify (PUT's infrastructure changes), restart (never dispatched — a restart is a stop→start chain); create orchestration: machine_create_orchestration (parent), machine_prepare, machine_create_storage, machine_create_config, machine_create_finalize, template_download; provisioning pipeline: machine_provision_orchestration (parent), machine_wait_ssh, machine_sync_parent, machine_sync (one per folder), machine_provision_parent, machine_provision (one per playbook); network: provisioning_network_setup, provisioning_network_teardown; registry/cache/system: provisioner_import, artifact_scan, artifact_download, hcl_download, agent_update.", "example": "start" },
           "status": {
             "type": "string",
             "enum": ["pending", "running", "completed", "failed", "cancelled", "completed_with_errors"],
@@ -1113,7 +1113,7 @@
       "post": {
         "tags": ["Machine Management"],
         "summary": "Create a machine (orchestration)",
-        "description": "Minimum role: operator (the machine-create capability token). Queues the CREATE ORCHESTRATION (the zoneweaver mechanism — the agent builds real infrastructure natively, no vagrant): a parent task plus chained children machine_prepare (render the package's Jinja2 template + materialize the working directory + hash-verified installer mounts) → machine_create_storage (clone the box template's disk image, grow to disks.boot.size, create additional media; rollback on failure) → machine_create_config (createvm/modifyvm/storage/NICs from the rendered document + vbox.directives passthrough + cloud-init guest properties) → machine_create_finalize (registry row + document sections + the render-produced provisioner document stored in configuration + UUID) → optional start. The machine ROW appears at finalize, not at POST. settings.hostname AND settings.domain are REQUIRED (settings.machine_domain overrides the naming domain). With machines.prefix_machine_names, settings.server_id is REQUIRED (numeric, padded to 4; never auto-assigned — GET /machines/ids/next feeds the field) and the name becomes <id>--<hostname>.<domain>. settings.box (org/name + box_version/box_arch/box_url) resolves against the local template registry; a missing box chains a template_download child in front (requires_download: true; box_version must then be specific).",
+        "description": "Minimum role: operator (the machine-create capability token). Queues the CREATE ORCHESTRATION (the zoneweaver mechanism — the agent builds real infrastructure natively, no vagrant): a parent task plus chained children machine_prepare (render the package's Jinja2 template + materialize the working directory + hash-verified installer mounts) → machine_create_storage (clone the box template's disk image, grow to disks.boot.size, create additional media; rollback on failure) → machine_create_config (createvm/modifyvm/storage/NICs from the rendered document + vbox.directives passthrough + cloud-init guest properties; adapter 1 is the PROVISIONING NIC — NAT with an allocated ssh port-forward (127.0.0.1:<port> → guest 22), giving guest egress and the host's provisioning access, vagrant's exact layout; document networks[] ride adapters 2+) → machine_create_finalize (registry row + document sections + the render-produced provisioner document stored in configuration + UUID) → optional start. The machine ROW appears at finalize, not at POST. settings.hostname AND settings.domain are REQUIRED (settings.machine_domain overrides the naming domain). With machines.prefix_machine_names, settings.server_id is REQUIRED (numeric, padded to 4; never auto-assigned — GET /machines/ids/next feeds the field) and the name becomes <id>--<hostname>.<domain>. settings.box (org/name + box_version/box_arch/box_url) resolves against the local template registry; a missing box chains a template_download child in front (requires_download: true; box_version must then be specific).",
         "requestBody": {
           "required": true,
           "content": {
@@ -1263,32 +1263,66 @@
       },
       "put": {
         "tags": ["Machine Management"],
-        "summary": "Set the provisioner document",
-        "description": "Minimum role: operator. Stores the machine's PROVISIONER DOCUMENT verbatim (configuration.provisioner) — a Hosts.yml host entry: folders[] (map/to/type/args/exclude/delete/owner/group/disabled), provisioning.ansible.playbooks (object {local:[...]} or list [{local:[...]}] form), vars, roles[], secrets, pre_tasks/post_tasks, ssh_port. An immediate DB-only update (the zoneweaver mechanism); the next /provision consumes it. Create's finalize auto-fills this document from the rendered package template — PUT overrides it whole.",
+        "summary": "Modify machine configuration",
+        "description": "Minimum role: operator (the machine-modify capability token). The zoneweaver modify mechanism, changed-fields-only body with three change classes. (1) notes/tags: immediate registry-only updates. (2) provisioner: the PROVISIONER DOCUMENT stored verbatim into configuration.provisioner — a Hosts.yml host entry (folders[], provisioning.ansible.playbooks in object or list form, vars, roles[], secrets, pre_tasks/post_tasks, ssh_port); an immediate DB-only update the next /provision consumes; create's finalize auto-fills it from the rendered package template and PUT overrides it whole. (3) every infrastructure field queues a machine_modify task and the answer carries requires_restart: true — VirtualBox applies configuration only to a POWERED-OFF machine, so the task fails with guidance while the machine runs; stop it and re-run. Translations from the base vocabulary: ram→memory, vcpus→cpus, os_type→ostype, vnc→VRDE on/off, acpi/xhci→--acpi/--usb-xhci, autoboot→autostart, bootrom→firmware (efi when the value names EFI, else bios), hostbridge→chipset (i440fx→piix3), netif (virtio|e1000)→every configured adapter's hardware type. diskif and complex CPU topology have no modifyvm analog — reported as skipped in task output, never silently accepted. add_nics land on the first free adapters (bridged; global_nic = the bridge interface, mac_addr honored; vlan_id/allowed_address have no analog and are noted); remove_nics name adapter numbers 1-8 — on agent-created machines adapter 1 is the reserved NAT (egress) and document networks sit on 2+, so removing adapter 1 cuts the guest's internet. add_disks create media under the machine's working directory (volume_name/size/sparse) or attach an existing file by path, at the next free SATA port; add_cdroms attach ISOs by path. remove_disks/remove_cdroms name SATA PORT numbers 1 and up — port 0 is the boot medium and is refused; detached files are PRESERVED (the base never destroys the volume). cloud_init keys update the machine's guest properties. When only DB-immediate fields changed, the answer is status completed with requires_restart: false and no task.",
         "parameters": [
           { "name": "machineName", "in": "path", "required": true, "schema": { "type": "string" } }
         ],
         "requestBody": {
           "required": true,
-          "content": { "application/json": { "schema": { "type": "object", "required": ["provisioner"], "properties": { "provisioner": { "type": "object", "description": "The Hosts.yml host-entry document, stored verbatim" } } } } }
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "description": "Changed fields only — at least one of the modify vocabulary",
+                "properties": {
+                  "ram": { "type": "string", "description": "Memory allocation (G/M suffixes; bare numbers are MB)", "example": "4G" },
+                  "vcpus": { "type": "integer", "example": 4 },
+                  "bootrom": { "type": "string", "description": "Firmware selector — a value naming EFI/UEFI sets --firmware efi, anything else bios", "example": "UEFI" },
+                  "hostbridge": { "type": "string", "description": "Chipset (i440fx maps to piix3)", "example": "i440fx" },
+                  "diskif": { "type": "string", "description": "No VirtualBox modifyvm analog — accepted, reported as skipped" },
+                  "netif": { "type": "string", "description": "Adapter hardware type for every configured NIC", "enum": ["virtio", "e1000"] },
+                  "os_type": { "type": "string", "example": "Debian_64" },
+                  "vnc": { "type": "string", "description": "VRDE remote display on/off", "example": "on" },
+                  "acpi": { "type": "string", "example": "on" },
+                  "xhci": { "type": "string", "description": "xHCI USB controller on/off", "example": "on" },
+                  "autoboot": { "type": "boolean", "description": "Host-startup autostart" },
+                  "add_nics": { "type": "array", "items": { "type": "object", "properties": { "global_nic": { "type": "string", "description": "Bridge interface for the new adapter" }, "mac_addr": { "type": "string" } } } },
+                  "remove_nics": { "type": "array", "description": "Adapter numbers (1-8) to disable", "items": { "type": "integer" }, "example": [2] },
+                  "add_disks": { "type": "array", "items": { "type": "object", "properties": { "volume_name": { "type": "string" }, "size": { "type": "string", "example": "100G" }, "sparse": { "type": "boolean", "default": true }, "path": { "type": "string", "description": "Existing medium to attach instead of creating one" } } } },
+                  "remove_disks": { "type": "array", "description": "SATA port numbers (1+; port 0 is the boot medium and refused). Files are preserved.", "items": { "type": "integer" }, "example": [1] },
+                  "add_cdroms": { "type": "array", "items": { "type": "object", "required": ["path"], "properties": { "path": { "type": "string", "example": "C:\\iso\\install.iso" } } } },
+                  "remove_cdroms": { "type": "array", "description": "SATA port numbers (1+)", "items": { "type": "integer" } },
+                  "cloud_init": { "type": "object", "description": "Guest-property updates (enabled/dns_domain/password/resolvers/sshkey vocabulary)" },
+                  "provisioner": { "type": "object", "description": "The Hosts.yml host-entry document, stored verbatim (DB-immediate)" },
+                  "notes": { "type": "string", "nullable": true, "description": "Registry-only, applied immediately" },
+                  "tags": { "type": "array", "nullable": true, "items": { "type": "string" }, "description": "Registry-only, applied immediately" }
+                }
+              }
+            }
+          }
         },
         "responses": {
           "200": {
-            "description": "Provisioner document stored",
+            "description": "Modification queued (infrastructure fields) or applied (DB-immediate fields only)",
             "content": {
               "application/json": {
                 "schema": {
                   "type": "object",
                   "properties": {
                     "success": { "type": "boolean" },
+                    "task_id": { "type": "string", "format": "uuid", "description": "Present when a machine_modify task was queued" },
                     "machine_name": { "type": "string" },
-                    "message": { "type": "string" }
+                    "operation": { "type": "string", "example": "machine_modify" },
+                    "status": { "type": "string", "description": "pending (task queued) or completed (DB-immediate only)", "example": "pending" },
+                    "message": { "type": "string" },
+                    "requires_restart": { "type": "boolean", "description": "true when infrastructure changes were queued — they apply to a powered-off machine and take effect on next boot" }
                   }
                 }
               }
             }
           },
-          "400": { "description": "Missing or empty provisioner document" },
+          "400": { "description": "No modification fields specified, or an invalid field value" },
           "404": { "description": "Machine not found" }
         }
       },
@@ -1446,7 +1480,7 @@
       "post": {
         "tags": ["Machine Management"],
         "summary": "Start the provisioning pipeline",
-        "description": "Minimum role: operator. Orchestrates the full pipeline against the STORED provisioner document (the zoneweaver mechanism): machine_prepare (re-render + refresh the working copy — regenerated before every provision) → boot (the plain start operation as a child, skipped when running or skip_boot) → machine_wait_ssh (credentials = settings.vagrant_user/vagrant_user_pass/vagrant_user_private_key_path, agent provisioning key as last-resort fallback; IP = networks[] is_control → provisional → first) → machine_sync_parent + one machine_sync per folders[] entry (transport per folder.type: rsync | scp; virtualbox/disabled skipped) → machine_provision_parent + one machine_provision per playbook, RUN-FILTERED first (always = every run; not_first = only after a prior success; once/unset = only when never provisioned — judged by configuration.provisioner_state.last_provisioned_at, stamped on success). Prerequisites: provisioner config stored (create auto-fills it; PUT overrides) and a control IP in networks[].",
+        "description": "Minimum role: operator. Orchestrates the full pipeline against the STORED provisioner document (the zoneweaver mechanism): machine_prepare (re-render + refresh the working copy — regenerated before every provision) → boot (the plain start operation as a child, skipped when running or skip_boot) → machine_wait_ssh (credentials = settings.vagrant_user/vagrant_user_pass/vagrant_user_private_key_path, agent provisioning key as last-resort fallback; transport = the provisioning NIC's NAT ssh port-forward at 127.0.0.1 when the machine carries one — vagrant's model, immune to guest network reconfiguration — else the control IP from networks[] is_control → provisional → first; neither existing is a 400) → machine_sync_parent + one machine_sync per folders[] entry (transport per folder.type: rsync | scp; virtualbox/disabled skipped) → machine_provision_parent + one machine_provision per playbook, RUN-FILTERED first (always = every run; not_first = only after a prior success; once/unset = only when never provisioned — judged by configuration.provisioner_state.last_provisioned_at, stamped only when the run's FINAL playbook succeeds: a partial run never marks the machine provisioned, Hosts.rb's results.yml semantics). The extra_vars networks[] carry each adapter's LIVE MAC when the document leaves mac auto/empty (adapter = network index + 2; resolved into the run's variable document only — the stored document is never modified). Prerequisites: provisioner config stored (create auto-fills it; PUT overrides) and a control IP in networks[].",
         "parameters": [
           { "name": "machineName", "in": "path", "required": true, "schema": { "type": "string" } }
         ],
@@ -1952,6 +1986,42 @@
             "content": { "application/json": { "schema": { "type": "object", "properties": { "interfaces": { "type": "array", "items": { "type": "string" } }, "default": { "type": "string" }, "total": { "type": "integer" } } } } }
           },
           "503": { "description": "VirtualBox is not installed" }
+        }
+      }
+    },
+    "/provisioning/network/status": {
+      "get": {
+        "tags": ["Provisioning"],
+        "summary": "Provisioning network status",
+        "description": "Minimum role: viewer. The dedicated provisioning network (the zoneweaver mechanism's etherstub+dhcpd, as ONE VirtualBox host-only interface — identified by provisioning.network.host_ip, since VirtualBox assigns interface names itself — plus its DHCP server). Disabled answers just {enabled:false, message}; enabled answers ready + per-component existence + the effective configuration. NAT/forwarding components are deliberately absent: a host-only network reaches the host directly, which is everything the pipeline needs.",
+        "responses": {
+          "200": {
+            "description": "Provisioning network status",
+            "content": { "application/json": { "schema": { "type": "object", "properties": { "enabled": { "type": "boolean" }, "message": { "type": "string", "description": "Present only on the disabled branch" }, "ready": { "type": "boolean" }, "components": { "type": "object", "properties": { "interface": { "type": "object", "properties": { "name": { "type": "string" }, "exists": { "type": "boolean" } } }, "ip_address": { "type": "object", "properties": { "address": { "type": "string" }, "configured": { "type": "boolean" } } }, "dhcp": { "type": "object", "properties": { "exists": { "type": "boolean" }, "enabled": { "type": "boolean" } } } } }, "config": { "type": "object" } } } } }
+          },
+          "503": { "description": "VirtualBox is not installed" }
+        }
+      }
+    },
+    "/provisioning/network/setup": {
+      "post": {
+        "tags": ["Provisioning"],
+        "summary": "Set up the provisioning network",
+        "description": "Minimum role: operator. Queues a provisioning_network_setup task (category-locked — one network mutation at a time), idempotent at every component: the host-only interface is created only when none carries the configured host_ip, its address always converges onto the configuration, and the DHCP server (subnet range, its own dhcp_server_ip) is added or modified to match. Machines with host-type networks[] entries then attach to this interface at create, and each entry's address pins as a per-VM-NIC DHCP fixed lease — the guest's ordinary DHCP request receives the document's own control IP, so wait_ssh dials a deterministic address.",
+        "responses": {
+          "202": { "description": "Setup task queued" },
+          "400": { "description": "Provisioning network is disabled in configuration" }
+        }
+      }
+    },
+    "/provisioning/network/teardown": {
+      "delete": {
+        "tags": ["Provisioning"],
+        "summary": "Tear down the provisioning network",
+        "description": "Minimum role: operator. Queues a provisioning_network_teardown task: the DHCP server first, then the host-only interface (the base's reverse order); absent components are noted, never errors.",
+        "responses": {
+          "202": { "description": "Teardown task queued" },
+          "400": { "description": "Provisioning network is disabled in configuration" }
         }
       }
     },

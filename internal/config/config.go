@@ -249,6 +249,32 @@ type MachinesConfig struct {
 	KeepRunningOnExit bool `yaml:"keep_running_on_exit" json:"keep_running_on_exit"`
 }
 
+// ProvisioningNetworkConfig controls the dedicated provisioning network (the
+// base's provisioning.network block — etherstub + host VNIC + static IP +
+// dhcpd on illumos). VirtualBox collapses that triple into ONE host-only
+// interface, identified by host_ip because VirtualBox assigns interface names
+// itself; its own DHCP server carries the base's dhcpd role, so the base's
+// etherstub_name/host_vnic_name fields have no analog here. NAT/forwarding
+// are deliberately absent too: a host-only network reaches the host directly,
+// which is everything wait_ssh/sync/ansible-local need.
+type ProvisioningNetworkConfig struct {
+	Enabled bool `yaml:"enabled" json:"enabled"`
+	// Subnet is the provisioning network in CIDR form.
+	Subnet string `yaml:"subnet" json:"subnet"`
+	// HostIP is the host's address on the network — the interface identity.
+	HostIP string `yaml:"host_ip" json:"host_ip"`
+	// Netmask is the network mask.
+	Netmask string `yaml:"netmask" json:"netmask"`
+	// DHCPServerIP is the VirtualBox DHCP server's OWN address (VirtualBox
+	// requires one distinct from the interface's — the base's dhcpd binds the
+	// host IP itself, which has no analog here).
+	DHCPServerIP string `yaml:"dhcp_server_ip" json:"dhcp_server_ip"`
+	// DHCPRangeStart/DHCPRangeEnd bound the assignable pool; fixed leases and
+	// the clone allocator draw from it.
+	DHCPRangeStart string `yaml:"dhcp_range_start" json:"dhcp_range_start"`
+	DHCPRangeEnd   string `yaml:"dhcp_range_end"   json:"dhcp_range_end"`
+}
+
 // ProvisioningSSHConfig controls the pipeline's SSH access to guests (the
 // base's provisioning.ssh block).
 type ProvisioningSSHConfig struct {
@@ -293,6 +319,8 @@ type ProvisioningConfig struct {
 	AnsibleInstallTimeoutSeconds int `yaml:"ansible_install_timeout_seconds" json:"ansible_install_timeout_seconds"`
 	// SSH is the pipeline's guest-access configuration.
 	SSH ProvisioningSSHConfig `yaml:"ssh" json:"ssh"`
+	// Network is the dedicated provisioning network.
+	Network ProvisioningNetworkConfig `yaml:"network" json:"network"`
 }
 
 // TemplateSourceConfig is one configured box registry
@@ -433,6 +461,15 @@ func Default() *Config {
 			SSH: ProvisioningSSHConfig{
 				TimeoutSeconds:      300,
 				PollIntervalSeconds: 10,
+			},
+			Network: ProvisioningNetworkConfig{
+				Enabled:        true,
+				Subnet:         "10.190.190.0/24",
+				HostIP:         "10.190.190.1",
+				Netmask:        "255.255.255.0",
+				DHCPServerIP:   "10.190.190.2",
+				DHCPRangeStart: "10.190.190.10",
+				DHCPRangeEnd:   "10.190.190.254",
 			},
 		},
 		TemplateSources: TemplateSourcesConfig{

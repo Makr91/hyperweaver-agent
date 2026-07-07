@@ -479,6 +479,47 @@ var settingsSchema = map[string]any{
 					},
 				},
 			},
+			"network": map[string]any{
+				"type":        "object",
+				"description": "Dedicated provisioning network: one VirtualBox host-only interface (identified by host_ip — VirtualBox assigns interface names itself) plus its DHCP server; host-type networks[] entries ride it and their addresses pin as fixed leases",
+				"properties": map[string]any{
+					"enabled": map[string]any{
+						"type":        "boolean",
+						"description": "Enable the provisioning network (setup runs via POST /provisioning/network/setup)",
+						"default":     true,
+					},
+					"subnet": map[string]any{
+						"type":        "string",
+						"description": "Provisioning network subnet (CIDR)",
+						"default":     "10.190.190.0/24",
+					},
+					"host_ip": map[string]any{
+						"type":        "string",
+						"description": "Host address on the provisioning network — the interface's identity",
+						"default":     "10.190.190.1",
+					},
+					"netmask": map[string]any{
+						"type":        "string",
+						"description": "Provisioning network netmask",
+						"default":     "255.255.255.0",
+					},
+					"dhcp_server_ip": map[string]any{
+						"type":        "string",
+						"description": "The VirtualBox DHCP server's own address (must differ from host_ip)",
+						"default":     "10.190.190.2",
+					},
+					"dhcp_range_start": map[string]any{
+						"type":        "string",
+						"description": "First DHCP-assignable provisioning IP (fixed leases and the clone allocator draw from the range)",
+						"default":     "10.190.190.10",
+					},
+					"dhcp_range_end": map[string]any{
+						"type":        "string",
+						"description": "Last DHCP-assignable provisioning IP",
+						"default":     "10.190.190.254",
+					},
+				},
+			},
 		},
 	},
 	"template_sources": map[string]any{

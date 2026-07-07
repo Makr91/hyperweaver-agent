@@ -5,18 +5,22 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/Makr91/hyperweaver-agent/internal/sshrun"
 	"github.com/Makr91/hyperweaver-agent/internal/tasks"
+	"github.com/Makr91/hyperweaver-agent/internal/vbox"
 )
 
 // The provision pipeline children — zoneweaver's ZoneProvisionManager ported
 // 1:1: machine_wait_ssh polls the guest, machine_sync lands ONE folder
 // (transport per the folder's own type: rsync | scp; virtualbox/disabled
 // skip), machine_provision runs ONE playbook ansible-local inside the guest
-// with the full extra_vars document and stamps provisioner_state on success.
+// with the full extra_vars document; the run's FINAL playbook stamps
+// provisioner_state (Hosts.rb semantics — the one deliberate divergence
+// from the base's per-playbook stamping, Mark's ruling 2026-07-07).
 
 // Provision-chain operations.
 const (
@@ -29,13 +33,16 @@ const (
 )
 
 // provisionTaskMetadata is the wait_ssh/sync/provision children's metadata —
-// the base's exact shape: {ip, port, credentials, folder? , playbook?}.
+// the base's exact shape: {ip, port, credentials, folder?, playbook?} plus
+// final, marking the run's LAST playbook (the provisioned-state stamp rides
+// it — Hosts.rb's results.yml semantics).
 type provisionTaskMetadata struct {
 	IP          string             `json:"ip"`
 	Port        int                `json:"port"`
 	Credentials sshrun.Credentials `json:"credentials"`
 	Folder      *Folder            `json:"folder,omitempty"`
 	Playbook    *Playbook          `json:"playbook,omitempty"`
+	Final       bool               `json:"final,omitempty"`
 }
 
 func readProvisionMetadata(task *tasks.Task) (*provisionTaskMetadata, error) {
@@ -199,7 +206,8 @@ func transportFor(folder *Folder) string {
 // built AT RUN TIME from the stored document + working-directory secrets,
 // ansible installed in the guest (pip or pkg), galaxy collections --force,
 // then ansible-playbook -i 'localhost,' -c local with the JSON extra_vars;
-// success stamps provisioner_state.last_provisioned_at.
+// provisioner_state.last_provisioned_at stamps only on the run's final
+// playbook (metadata final: true).
 func (e *executors) provisionPlaybook(ctx context.Context, task *tasks.Task, out *tasks.OutputWriter) error {
 	meta, err := readProvisionMetadata(task)
 	if err != nil {
@@ -215,6 +223,7 @@ func (e *executors) provisionPlaybook(ctx context.Context, task *tasks.Task, out
 		return fmt.Errorf("machine %s: %w", task.MachineName, err)
 	}
 	config := ParseConfiguration(machine)
+	e.fillLiveMACs(ctx, machine, config, out)
 	workdir := e.machineWorkdir(task.MachineName)
 
 	installTimeout := e.env.AnsibleInstallTimeout
@@ -239,12 +248,21 @@ func (e *executors) provisionPlaybook(ctx context.Context, task *tasks.Task, out
 	}
 
 	e.taskProgress(task, 25, "installing_collections")
-	for _, collection := range playbook.Collections {
-		if cerr := sshrun.Run(ctx, meta.IP, meta.Port, meta.Credentials,
-			"ansible-galaxy collection install "+collection+" --force",
-			workdir, e.env.ProvisionKeyPath, installTimeout, out.Write); cerr != nil {
-			return fmt.Errorf("install collection %s: %w", collection, cerr)
+	if playbook.RemoteCollections {
+		for _, collection := range playbook.Collections {
+			if cerr := sshrun.Run(ctx, meta.IP, meta.Port, meta.Credentials,
+				"ansible-galaxy collection install "+collection+" --force",
+				workdir, e.env.ProvisionKeyPath, installTimeout, out.Write); cerr != nil {
+				return fmt.Errorf("install collection %s: %w", collection, cerr)
+			}
 		}
+	} else if len(playbook.Collections) > 0 {
+		// Hosts.rb's remote_collections:false contract (Mark's ruling
+		// 2026-07-07): the collections ship INSIDE the provisioner package
+		// and reach the guest through the folder sync — the galaxy is never
+		// called (guests need no internet for them; zoneweaver's
+		// always-install is its routed-network reality, not the contract).
+		out.Write("stdout", "Collections are package-local (remote_collections: false) — skipping ansible-galaxy\n")
 	}
 
 	e.taskProgress(task, 40, "running_playbook")
@@ -276,13 +294,80 @@ func (e *executors) provisionPlaybook(ctx context.Context, task *tasks.Task, out
 		return fmt.Errorf("ansible-local failed: %w", rerr)
 	}
 
-	e.taskProgress(task, 95, "recording_provision_state")
-	if serr := e.store.StampProvisionerState(context.Background(), task.MachineName); serr != nil {
-		out.Write("stderr", "Failed to record provision state: "+serr.Error()+"\n")
+	// The provisioned-state stamp fires ONLY on the run's final playbook —
+	// Hosts.rb's results.yml semantics (Mark's ruling 2026-07-07): a partial
+	// run must not mark the machine provisioned, or the once/not_first
+	// filters flip after a mid-chain failure (runtime-proven: a successful
+	// generate-playbook alone skipped the main playbook forever). zoneweaver
+	// stamps after EVERY playbook — flagged to its session as the same defect.
+	if meta.Final {
+		e.taskProgress(task, 95, "recording_provision_state")
+		if serr := e.store.StampProvisionerState(context.Background(), task.MachineName); serr != nil {
+			out.Write("stderr", "Failed to record provision state: "+serr.Error()+"\n")
+		}
 	}
 	e.taskProgress(task, 100, "completed")
 	out.Write("stdout", "Playbook completed: "+playbook.Playbook+"\n")
 	return nil
+}
+
+// fillLiveMACs resolves auto/empty networks[].mac entries in the PARSED
+// configuration copy feeding the extra_vars — the networking role's netplan
+// matches guest adapters BY MAC (runtime-proven 2026-07-07: a vars mac of
+// "auto" left the second adapter addressless mid-provision), while the
+// STORED document keeps the user's own words verbatim (Mark's ruling: the
+// document is the user's source of truth — hypervisor facts are resolved
+// into the run's variable document ONLY, zoneweaver's live-scan model).
+// Adapter numbering follows the create layout: NAT at 1, document network i
+// at adapter i+2. The row's merged live view answers first; a fresh machine
+// the sweeps haven't merged yet falls back to one live showvminfo. Failures
+// narrate and never fail the run.
+func (e *executors) fillLiveMACs(ctx context.Context, machine *Machine, config MachineConfig, out *tasks.OutputWriter) {
+	var live *vbox.Info
+	for i, entry := range config.List("networks") {
+		network := mapOr(entry)
+		if mac := stringOr(network["mac"], ""); mac != "" && !strings.EqualFold(mac, "auto") {
+			continue
+		}
+		adapter := "macaddress" + strconv.Itoa(i+2)
+		raw, _ := config[adapter].(string)
+		if raw == "" {
+			if live == nil {
+				vboxExe := VBoxManagePath(ctx)
+				if vboxExe == "" {
+					out.Write("stderr", "Live MAC resolution skipped: VirtualBox is not installed\n")
+					return
+				}
+				info, ierr := vbox.ShowVMInfo(ctx, vboxExe, machine.VBoxTarget())
+				if ierr != nil {
+					out.Write("stderr", "Live MAC resolution failed: "+ierr.Error()+"\n")
+					return
+				}
+				live = info
+			}
+			raw = live.Raw[adapter]
+		}
+		if raw == "" {
+			out.Write("stderr", fmt.Sprintf("No live MAC for adapter %d — networks[%d] keeps its document value\n", i+2, i))
+			continue
+		}
+		network["mac"] = formatMAC(raw)
+		out.Write("stdout", fmt.Sprintf("Resolved live MAC for networks[%d]: %s\n", i, network["mac"]))
+	}
+}
+
+// formatMAC converts machinereadable's bare MAC ("080027018B40") into the
+// colon form the roles expect ("08:00:27:01:8B:40").
+func formatMAC(raw string) string {
+	raw = strings.ToUpper(strings.TrimSpace(raw))
+	if len(raw) != 12 {
+		return raw
+	}
+	pairs := make([]string, 0, 6)
+	for i := 0; i < len(raw); i += 2 {
+		pairs = append(pairs, raw[i:i+2])
+	}
+	return strings.Join(pairs, ":")
 }
 
 // syncParentAnchor is the zone_sync_parent/zone_provision_parent executor —

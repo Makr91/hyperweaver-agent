@@ -311,7 +311,12 @@ func (s *Store) NextPending(ctx context.Context, busyMachines []string) (*Task, 
 			args = append(args, name)
 		}
 	}
-	query.WriteString(" ORDER BY priority DESC, created_at ASC LIMIT 1")
+	// rowid tiebreak: a chain created in one burst lands identical
+	// created_at strings (clock-tick granularity), and without a stable
+	// third key two eligible chain tasks pick in ARBITRARY order
+	// (runtime-proven 2026-07-07: a provision child overtook the sync
+	// children created microseconds earlier). rowid is insertion order.
+	query.WriteString(" ORDER BY priority DESC, created_at ASC, rowid ASC LIMIT 1")
 	t, err := scanTask(s.db.QueryRowContext(ctx, query.String(), args...))
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil

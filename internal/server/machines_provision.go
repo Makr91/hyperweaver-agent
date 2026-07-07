@@ -62,10 +62,10 @@ func validateProvisionRequest(machine *machines.Machine) (validation *provisionV
 	if credentials.Username == "" {
 		return nil, "Credentials missing: settings.vagrant_user is required"
 	}
+	// The control IP is the FALLBACK transport only — resolveTransport
+	// prefers the provisioning NIC's ssh port-forward and errors when
+	// neither exists.
 	ip := machines.ExtractControlIP(config.List("networks"))
-	if ip == "" {
-		return nil, "Machine IP address not found in networks array (set is_control: true on one network)"
-	}
 	port := 22
 	if p, ok := provisioner["ssh_port"].(float64); ok && p > 0 {
 		port = int(p)
@@ -74,6 +74,22 @@ func validateProvisionRequest(machine *machines.Machine) (validation *provisionV
 		config: config, provisioner: provisioner,
 		ip: ip, port: port, credentials: credentials,
 	}, ""
+}
+
+// resolveTransport picks the pipeline's SSH target (Mark's architecture,
+// 2026-07-07): the provisioning NIC's NAT ssh port-forward first — vagrant's
+// model, immune to anything the guest's networking role does to real
+// adapters — falling back to the document's control IP for machines without
+// a forward (pre-forward creates, user-built VMs).
+func resolveTransport(ctx context.Context, machine *machines.Machine, v *provisionValidation) (problem string) {
+	if port := machines.FindSSHForward(ctx, machine); port > 0 {
+		v.ip, v.port = "127.0.0.1", port
+		return ""
+	}
+	if v.ip == "" {
+		return "No SSH transport: machine has no NAT ssh port-forward and no control IP in networks[] (set is_control: true on one network)"
+	}
+	return ""
 }
 
 // childMetadata marshals one provision child's metadata document.
@@ -195,7 +211,13 @@ func (s *Server) buildProvisionChain(ctx context.Context, machine *machines.Mach
 			}
 			childPrevious = &child.ID
 		}
-		previous = &syncParent.ID
+		// The provision phase gates on the LAST sync child, not the sync
+		// parent: the parent anchor completes instantly, so depending on it
+		// let a playbook overtake the folder syncs (runtime-proven
+		// 2026-07-07 — "playbook not found" while its sync was still
+		// running). The base carries the same latent hazard, masked only by
+		// its ordering luck — flagged in the sync for the zoneweaver session.
+		previous = childPrevious
 	}
 
 	// Per-playbook provision under a provision parent, run-filtered first.
@@ -226,7 +248,13 @@ func (s *Server) buildProvisionChain(ctx context.Context, machine *machines.Mach
 		})
 		childPrevious := &provisionParent.ID
 		for i := range playbooks {
-			playbookMeta, ferr := childMetadata(v, map[string]any{"playbook": playbooks[i]})
+			extra := map[string]any{"playbook": playbooks[i]}
+			if i == len(playbooks)-1 {
+				// The last playbook carries the provisioned-state stamp
+				// (Hosts.rb's results.yml semantics — never a partial run).
+				extra["final"] = true
+			}
+			playbookMeta, ferr := childMetadata(v, extra)
 			if ferr != nil {
 				return nil, ferr
 			}
@@ -258,6 +286,10 @@ func (s *Server) handleProvisionMachine(w http.ResponseWriter, r *http.Request) 
 	}
 	validation, problem := validateProvisionRequest(machine)
 	if problem != "" {
+		taskError(w, http.StatusBadRequest, problem)
+		return
+	}
+	if problem := resolveTransport(r.Context(), machine, validation); problem != "" {
 		taskError(w, http.StatusBadRequest, problem)
 		return
 	}
@@ -314,6 +346,10 @@ func (s *Server) handleSyncMachine(w http.ResponseWriter, r *http.Request) {
 	}
 	validation, problem := validateProvisionRequest(machine)
 	if problem != "" {
+		taskError(w, http.StatusBadRequest, problem)
+		return
+	}
+	if problem := resolveTransport(r.Context(), machine, validation); problem != "" {
 		taskError(w, http.StatusBadRequest, problem)
 		return
 	}
@@ -376,6 +412,10 @@ func (s *Server) handleRunProvisioners(w http.ResponseWriter, r *http.Request) {
 		taskError(w, http.StatusBadRequest, problem)
 		return
 	}
+	if problem := resolveTransport(r.Context(), machine, validation); problem != "" {
+		taskError(w, http.StatusBadRequest, problem)
+		return
+	}
 	configured := machines.ProvisionerPlaybooks(validation.provisioner)
 	if len(configured) == 0 {
 		taskError(w, http.StatusBadRequest, "No provisioners configured in provisioner metadata")
@@ -412,7 +452,12 @@ func (s *Server) handleRunProvisioners(w http.ResponseWriter, r *http.Request) {
 	}
 	previous := &provisionParent.ID
 	for i := range playbooks {
-		playbookMeta, ferr := childMetadata(validation, map[string]any{"playbook": playbooks[i]})
+		extra := map[string]any{"playbook": playbooks[i]}
+		if i == len(playbooks)-1 {
+			// The stamp rides the run's last playbook (Hosts.rb semantics).
+			extra["final"] = true
+		}
+		playbookMeta, ferr := childMetadata(validation, extra)
 		if ferr != nil {
 			taskError(w, http.StatusInternalServerError, "Failed to create provisioner tasks")
 			return

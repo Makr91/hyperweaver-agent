@@ -47,6 +47,10 @@ func RegisterExecutors(queue *tasks.Queue, store *Store, reconciler *Reconciler,
 	queue.Register(OpSuspend, tasks.Executor{Run: e.suspend})
 	queue.Register(OpDelete, tasks.Executor{Run: e.deleteMachine})
 	queue.Register(OpDiscover, tasks.Executor{Run: e.discover})
+	// machine_modify — the base's zone_modify (TASK_OBJECT_OPERATIONS +
+	// zone_lifecycle category). Its serialization guard here is the queue's
+	// one-running-task-per-machine rule, so it stays category-unmapped.
+	queue.Register(OpModify, tasks.Executor{Run: e.modifyMachine})
 
 	// Create-orchestration children (storage/config carry post-kill cleanup:
 	// a cancellation mid-clone or mid-configure must not leave debris).
@@ -55,6 +59,11 @@ func RegisterExecutors(queue *tasks.Queue, store *Store, reconciler *Reconciler,
 	queue.Register(OpCreateConfig, tasks.Executor{Run: e.createConfig, OnCancel: e.cancelCreateConfig})
 	queue.Register(OpCreateFinalize, tasks.Executor{Run: e.createFinalize})
 	queue.Register(OpTemplateDownload, tasks.Executor{Run: e.templateDownload})
+
+	// Provisioning-network backbone (the base's setup/teardown operations,
+	// category-locked like its network_provisioning family).
+	queue.Register(OpNetworkSetup, tasks.Executor{Run: e.networkSetup})
+	queue.Register(OpNetworkTeardown, tasks.Executor{Run: e.networkTeardown})
 
 	// Provision-pipeline children.
 	queue.Register(OpWaitSSH, tasks.Executor{Run: e.waitSSH})
@@ -259,6 +268,9 @@ func (e *executors) deleteMachine(ctx context.Context, task *tasks.Task, out *ta
 				out.Write("stderr", "Power off failed: "+perr.Error()+"\n")
 			}
 		}
+		// Lease cleanup precedes unregister — the DHCP individual config's
+		// --vm reference stops resolving the moment the VM is gone.
+		e.removeDHCPLeases(ctx, vboxExe, machine, out)
 		out.Write("stdout", "Unregistering "+machine.Name+" from VirtualBox (deleting media)\n")
 		if uerr := vbox.UnregisterVM(ctx, vboxExe, target, true); uerr != nil {
 			return uerr

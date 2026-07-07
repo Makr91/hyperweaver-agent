@@ -200,7 +200,7 @@ func New(cfg *config.Config, keyStore *keys.Store, trayTokens *auth.TrayTokens, 
 	mux.Handle("POST /machines/bulk/start", requireKey(http.HandlerFunc(s.handleBulkStart)))
 	mux.Handle("POST /machines/bulk/stop", requireKey(http.HandlerFunc(s.handleBulkStop)))
 	mux.Handle("GET /machines/{machineName}", requireKey(http.HandlerFunc(s.handleMachineDetails)))
-	mux.Handle("PUT /machines/{machineName}", requireKey(http.HandlerFunc(s.handleSetProvisioner)))
+	mux.Handle("PUT /machines/{machineName}", requireKey(http.HandlerFunc(s.handleModifyMachine)))
 	mux.Handle("GET /machines/{machineName}/config", requireKey(http.HandlerFunc(s.handleMachineConfig)))
 	mux.Handle("POST /machines/{machineName}/start", requireKey(http.HandlerFunc(s.handleStartMachine)))
 	mux.Handle("POST /machines/{machineName}/stop", requireKey(http.HandlerFunc(s.handleStopMachine)))
@@ -227,6 +227,9 @@ func New(cfg *config.Config, keyStore *keys.Store, trayTokens *auth.TrayTokens, 
 	// provisioning engine). The literal "import" segment wins over {name} in
 	// ServeMux precedence.
 	mux.Handle("GET /provisioning/bridged-interfaces", requireKey(http.HandlerFunc(s.handleBridgedInterfaces)))
+	mux.Handle("GET /provisioning/network/status", requireKey(http.HandlerFunc(s.handleProvisioningNetworkStatus)))
+	mux.Handle("POST /provisioning/network/setup", requireKey(http.HandlerFunc(s.handleProvisioningNetworkSetup)))
+	mux.Handle("DELETE /provisioning/network/teardown", requireKey(http.HandlerFunc(s.handleProvisioningNetworkTeardown)))
 	mux.Handle("GET /provisioning/provisioners", requireKey(http.HandlerFunc(s.handleListProvisioners)))
 	mux.Handle("POST /provisioning/provisioners/import", requireKey(http.HandlerFunc(s.handleImportProvisioner)))
 	mux.Handle("GET /provisioning/provisioners/{name}", requireKey(http.HandlerFunc(s.handleProvisionerDetails)))

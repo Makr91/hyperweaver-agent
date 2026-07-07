@@ -6,11 +6,12 @@ package tasks
 // (design §3) — the Node agent's ~20 illumos categories collapse to the five
 // that exist on a VirtualBox/Vagrant host.
 const (
-	CategoryMachineLifecycle = "machine_lifecycle"
-	CategoryMachineProvision = "machine_provision"
-	CategoryTemplate         = "template"
-	CategoryArtifact         = "artifact"
-	CategorySystem           = "system"
+	CategoryMachineLifecycle    = "machine_lifecycle"
+	CategoryMachineProvision    = "machine_provision"
+	CategoryTemplate            = "template"
+	CategoryArtifact            = "artifact"
+	CategorySystem              = "system"
+	CategoryNetworkProvisioning = "network_provisioning"
 )
 
 // operationCategories maps operation names to their category. An unmapped
@@ -29,8 +30,17 @@ var operationCategories = map[string]string{
 	"artifact_scan":     CategoryArtifact,
 	"artifact_download": CategoryArtifact,
 	"hcl_download":      CategoryArtifact,
+	// One template download at a time: two same-tuple downloads race the
+	// same target files (runtime-proven 2026-07-06 — the loser dies at the
+	// rename); the later one then no-ops on the already-exists check.
+	"template_download": CategoryTemplate,
 	// One agent update at a time — it ends with the process exiting.
 	"agent_update": CategorySystem,
+	// One provisioning-network mutation at a time (the base's
+	// network_provisioning category): setup and teardown converge the same
+	// host-only interface + DHCP server.
+	"provisioning_network_setup":    CategoryNetworkProvisioning,
+	"provisioning_network_teardown": CategoryNetworkProvisioning,
 }
 
 // OperationCategory returns the concurrency category for an operation, or ""

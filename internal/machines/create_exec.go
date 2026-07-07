@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"net"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -274,6 +275,7 @@ func (e *executors) createStorage(ctx context.Context, task *tasks.Task, out *ta
 
 	e.taskProgress(task, 30, "importing_template")
 	bootPath := filepath.Join(workdir, "boot"+filepath.Ext(template.DiskPath))
+	clearStaleMedium(ctx, vboxExe, bootPath, out)
 	out.Write("stdout", "Cloning template "+template.DiskPath+" → "+bootPath+"\n")
 	if cerr := vbox.CloneMedium(ctx, vboxExe, template.DiskPath, bootPath, ""); cerr != nil {
 		rollback()
@@ -309,6 +311,7 @@ func (e *executors) createStorage(ctx context.Context, task *tasks.Task, out *ta
 		if v, bok := disk["sparse"].(bool); bok {
 			sparse = v
 		}
+		clearStaleMedium(ctx, vboxExe, diskPath, out)
 		out.Write("stdout", fmt.Sprintf("Creating %s (%d MB)\n", diskPath, sizeMB))
 		if cerr := vbox.CreateMedium(ctx, vboxExe, diskPath, sizeMB, sparse); cerr != nil {
 			rollback()
@@ -348,6 +351,7 @@ func (e *executors) createConfig(ctx context.Context, task *tasks.Task, out *tas
 	}
 
 	e.taskProgress(task, 20, "creating_vm")
+	e.clearStaleSettings(ctx, vboxExe, task.MachineName, out)
 	arch := "x86"
 	if strings.Contains(stringOr(settings["box_arch"], "amd64"), "arm") {
 		arch = "arm"
@@ -359,15 +363,80 @@ func (e *executors) createConfig(ctx context.Context, task *tasks.Task, out *tas
 	}
 	failed := func(step string, ferr error) error {
 		out.Write("stderr", step+" failed — unregistering the half-made machine\n")
-		if uerr := vbox.UnregisterVM(context.Background(), vboxExe, task.MachineName, false); uerr != nil {
+		cleanupCtx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+		defer cancel()
+		if uerr := vbox.UnregisterVM(cleanupCtx, vboxExe, task.MachineName, false); uerr != nil {
 			out.Write("stderr", "Unregister failed: "+uerr.Error()+"\n")
 		}
+		e.clearStaleSettings(cleanupCtx, vboxExe, task.MachineName, out)
 		return ferr
 	}
 
+	// Host-type NICs ride the provisioning network's host-only interface —
+	// resolved by host IP (VirtualBox names interfaces itself); absent setup
+	// is a loud note, never an invented adapter.
+	hostAdapter := ""
+	if e.env.Network.Enabled && hasHostNetworks(document) {
+		if iface, ferr := FindProvisioningIf(ctx, vboxExe, e.env.Network.HostIP); ferr == nil && iface != nil {
+			hostAdapter = iface.Name
+		} else {
+			out.Write("stderr", "Provisioning network is not set up — host-type NICs attach without an adapter (run POST /provisioning/network/setup first)\n")
+		}
+	}
+
+	// The provisioning NIC's transport (Mark's architecture, 2026-07-07):
+	// adapter 1 is the provisioning NIC — on VirtualBox that is the NAT
+	// adapter, and the host reaches the guest through an ssh port-forward
+	// (vagrant's model). The pipeline dials 127.0.0.1:<port>, never a real
+	// adapter, so the networking role can reconfigure every guest interface
+	// without ever killing the session carrying it.
+	sshPort, perr := allocateLocalPort(ctx)
+	if perr != nil {
+		return failed("ssh port-forward allocation", perr)
+	}
+	out.Write("stdout", fmt.Sprintf("Provisioning SSH port-forward: 127.0.0.1:%d → guest 22\n", sshPort))
+
 	e.taskProgress(task, 40, "configuring_vm")
-	if merr := vbox.ModifyVM(ctx, vboxExe, task.MachineName, modifyFlags(document)); merr != nil {
+	if merr := vbox.ModifyVM(ctx, vboxExe, task.MachineName, modifyFlags(document, hostAdapter, sshPort)); merr != nil {
 		return failed("modifyvm", merr)
+	}
+
+	// Pin each host-network address as a DHCP fixed lease (the base's
+	// dhcp_add_host block): the guest's ordinary DHCP request then receives
+	// the document's own control IP — the deterministic addressing wait_ssh
+	// dials.
+	if hostAdapter != "" {
+		leases := 0
+		for i, entry := range document.List("networks") {
+			network := mapOr(entry)
+			if stringOr(network["type"], "") != "host" {
+				continue
+			}
+			address := stringOr(network["address"], "")
+			if address == "" {
+				continue
+			}
+			// NIC numbering follows the adapter shift: NAT at 1, this
+			// document network at adapter i+2.
+			if lerr := vbox.SetDHCPFixedAddress(ctx, vboxExe, hostAdapter,
+				task.MachineName, i+2, address); lerr != nil {
+				return failed("dhcp fixed lease", lerr)
+			}
+			out.Write("stdout", fmt.Sprintf("Fixed DHCP lease: NIC %d → %s\n", i+2, address))
+			leases++
+		}
+		// A running VBoxNetDHCP never re-reads its configuration
+		// (runtime-proven 2026-07-07: hwtest-03's registered lease was
+		// ignored — the guest drew the range start — until `dhcpserver
+		// restart`). No process yet refuses the restart; that is fine, the
+		// first boot starts it with fresh config.
+		if leases > 0 {
+			if rerr := vbox.RestartDHCPServer(ctx, vboxExe, hostAdapter); rerr != nil {
+				out.Write("stdout", "DHCP server restart skipped (not running yet)\n")
+			} else {
+				out.Write("stdout", "DHCP server restarted — fixed leases active\n")
+			}
+		}
 	}
 
 	e.taskProgress(task, 60, "attaching_storage")
@@ -394,16 +463,55 @@ func (e *executors) createConfig(ctx context.Context, task *tasks.Task, out *tas
 	return nil
 }
 
+// allocateLocalPort reserves a free localhost TCP port for the ssh
+// port-forward (bind :0, read the assignment, release).
+func allocateLocalPort(ctx context.Context) (int, error) {
+	var config net.ListenConfig
+	listener, err := config.Listen(ctx, "tcp", "127.0.0.1:0")
+	if err != nil {
+		return 0, err
+	}
+	port := listener.Addr().(*net.TCPAddr).Port
+	_ = listener.Close()
+	return port, nil
+}
+
+// hasHostNetworks reports whether the document declares any host-type
+// network (the provisioning-network riders).
+func hasHostNetworks(document MachineConfig) bool {
+	for _, entry := range document.List("networks") {
+		if stringOr(mapOr(entry)["type"], "") == "host" {
+			return true
+		}
+	}
+	return false
+}
+
 // modifyFlags assembles the modifyvm set FROM THE DOCUMENT — zoneweaver's
 // model: core config + the document-driven attribute map, nothing hardcoded.
-// settings drive resources/console/firmware, networks[] drive the adapters
-// (1:1 from adapter 1 — no vagrant, no reserved NAT NIC), and
-// vbox.directives is the generic passthrough (the zonecfg attr-map analog).
-func modifyFlags(document MachineConfig) []string {
+// settings drive resources/console/firmware, networks[] drive the adapters,
+// and vbox.directives is the generic passthrough (the zonecfg attr-map
+// analog). Adapter 1 is vagrant's reserved NAT (Mark's ruling 2026-07-07):
+// guest internet egress AND the layout every provisioner assumes — the role
+// stacks were built for vagrant's NAT-first guests on BOTH hypervisors
+// (vagrant-zones emulated it on bhyve; runtime-proven: the networking role
+// refuses guests with fewer than two interfaces). Document networks occupy
+// adapters 2+ (host-type entries ride hostOnlyAdapter, the provisioning
+// network's interface).
+func modifyFlags(document MachineConfig, hostOnlyAdapter string, sshForwardPort int) []string {
 	settings := document.Section("settings")
 	flags := []string{
 		"--cpus=" + strconv.FormatInt(intOr(settings["vcpus"], 2), 10),
 		"--memory=" + strconv.FormatInt(memoryToMB(settings["memory"]), 10),
+		"--nic1=nat",
+		// The NAT adapter's fixed marker MAC — Hosts.rb:310 verbatim
+		// (vb.customize --macaddress1 00FF00FF00FF): the role stacks know
+		// vagrant's NAT adapter by it.
+		"--mac-address1=00FF00FF00FF",
+	}
+	if sshForwardPort > 0 {
+		flags = append(flags,
+			fmt.Sprintf("--natpf1=ssh,tcp,127.0.0.1,%d,,22", sshForwardPort))
 	}
 	if port := intOr(settings["consoleport"], 0); port > 0 {
 		flags = append(flags, "--vrde=on",
@@ -419,14 +527,16 @@ func modifyFlags(document MachineConfig) []string {
 		flags = append(flags, "--autostart-enabled=on")
 	}
 
-	// Adapters map 1:1 from networks[] — the agent SSHes to the control IP
-	// directly (zoneweaver's model), so no adapter is reserved for NAT.
+	// Document networks from adapter 2 — adapter 1 is the reserved NAT.
 	for i, entry := range document.List("networks") {
 		network := mapOr(entry)
-		n := strconv.Itoa(i + 1)
+		n := strconv.Itoa(i + 2)
 		switch stringOr(network["type"], "external") {
 		case "host":
 			flags = append(flags, "--nic"+n+"=hostonly")
+			if hostOnlyAdapter != "" {
+				flags = append(flags, "--host-only-adapter"+n+"="+hostOnlyAdapter)
+			}
 		default:
 			flags = append(flags, "--nic"+n+"=bridged")
 			if bridge := stringOr(network["bridge"], ""); bridge != "" {
@@ -492,6 +602,46 @@ func (e *executors) attachStorage(ctx context.Context, vboxExe, name string,
 	return nil
 }
 
+// clearStaleSettings removes a leftover machine settings file from a
+// previous failed attempt: unregistervm (deliberately WITHOUT --delete —
+// that would take the whole working directory with it) keeps the .vbox
+// file, and createvm then refuses with "settings file already exists"
+// (runtime-proven 2026-07-06). Only acts when VirtualBox no longer knows
+// the machine.
+func (e *executors) clearStaleSettings(ctx context.Context, vboxExe, name string, out *tasks.OutputWriter) {
+	if _, err := vbox.ShowVMInfo(ctx, vboxExe, name); !errors.Is(err, vbox.ErrNotFound) {
+		return
+	}
+	workdir := e.machineWorkdir(name)
+	for _, file := range []string{name + ".vbox", name + ".vbox-prev"} {
+		path := filepath.Join(workdir, file)
+		if _, serr := os.Stat(path); serr != nil {
+			continue
+		}
+		out.Write("stderr", "Removing stale settings file from a previous attempt: "+path+"\n")
+		if rerr := os.Remove(path); rerr != nil {
+			out.Write("stderr", "Stale settings removal failed: "+rerr.Error()+"\n")
+		}
+	}
+}
+
+// clearStaleMedium makes a create retry idempotent: a previous failed run
+// can leave the target medium on disk AND registered as an orphan in
+// VirtualBox's media registry (runtime-proven 2026-07-06 — clonemedium onto
+// it would fail). Close+delete via VirtualBox first; fall back to removing
+// the bare file when it was never registered.
+func clearStaleMedium(ctx context.Context, vboxExe, path string, out *tasks.OutputWriter) {
+	if _, err := os.Stat(path); err != nil {
+		return
+	}
+	out.Write("stderr", "Removing stale medium from a previous attempt: "+path+"\n")
+	if cerr := vbox.CloseMedium(ctx, vboxExe, path, true); cerr != nil {
+		if rerr := os.Remove(path); rerr != nil {
+			out.Write("stderr", "Stale medium removal failed (the clone will error): "+rerr.Error()+"\n")
+		}
+	}
+}
+
 // cancelCreateStorage is machine_create_storage's post-kill cleanup (D-F): a
 // kill mid-clone can leave half-written media the in-memory rollback list
 // never saw — close and delete every medium the child places under the
@@ -544,6 +694,7 @@ func (e *executors) cancelCreateConfig(task *tasks.Task, out *tasks.OutputWriter
 		// A machine that never reached createvm has nothing to unregister.
 		out.Write("stderr", "Unregister after cancel: "+err.Error()+"\n")
 	}
+	e.clearStaleSettings(ctx, vboxExe, task.MachineName, out)
 }
 
 // createFinalize executes machine_create_finalize: the registry row lands

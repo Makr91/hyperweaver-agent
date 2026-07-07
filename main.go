@@ -550,6 +550,15 @@ func setupTasks(cfg *config.Config, secretsStore *secrets.Store) (*agentSystems,
 			SSHPollInterval:         time.Duration(cfg.Provisioning.SSH.PollIntervalSeconds) * time.Second,
 			AnsibleInstallTimeout:   time.Duration(cfg.Provisioning.AnsibleInstallTimeoutSeconds) * time.Second,
 			PlaybookTimeout:         time.Duration(cfg.Provisioning.PlaybookTimeoutSeconds) * time.Second,
+			Network: machines.NetworkEnv{
+				Enabled:        cfg.Provisioning.Network.Enabled,
+				Subnet:         cfg.Provisioning.Network.Subnet,
+				HostIP:         cfg.Provisioning.Network.HostIP,
+				Netmask:        cfg.Provisioning.Network.Netmask,
+				DHCPServerIP:   cfg.Provisioning.Network.DHCPServerIP,
+				DHCPRangeStart: cfg.Provisioning.Network.DHCPRangeStart,
+				DHCPRangeEnd:   cfg.Provisioning.Network.DHCPRangeEnd,
+			},
 		})
 
 	// Host power operations run through the queue too (config-gated at the

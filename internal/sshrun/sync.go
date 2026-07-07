@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 
@@ -17,6 +18,47 @@ import (
 	"github.com/Makr91/hyperweaver-agent/internal/procattr"
 	"github.com/Makr91/hyperweaver-agent/internal/safepath"
 )
+
+// cygwinPath converts a Windows path for Cygwin-built transports (vagrant's
+// embedded rsync/scp): C:\foo\bar → /cygdrive/c/foo/bar — vagrant's own
+// cygwin_path rule. A bare drive-letter path reads as a remote host:path to
+// Cygwin rsync ("The source and destination cannot both be remote", the
+// vagrant behavior the cut orphaned; runtime-proven 2026-07-07). No-op off
+// Windows.
+func cygwinPath(path string) string {
+	if runtime.GOOS != "windows" {
+		return path
+	}
+	path = strings.ReplaceAll(path, `\`, "/")
+	if len(path) >= 2 && path[1] == ':' {
+		path = "/cygdrive/" + strings.ToLower(string(path[0])) + path[2:]
+	}
+	return path
+}
+
+// isCygwinTool reports a Cygwin/MSYS-built transport binary (vagrant's
+// embedded tree; there is no native Windows rsync) — those need cygwinPath
+// for every local path; Windows' native OpenSSH scp takes drive-letter paths.
+func isCygwinTool(exe string) bool {
+	if runtime.GOOS != "windows" {
+		return false
+	}
+	lower := strings.ToLower(exe)
+	return strings.Contains(lower, "vagrant") ||
+		strings.Contains(lower, "cygwin") || strings.Contains(lower, "msys")
+}
+
+// toolEnv puts the transport's own directory FIRST on the child's PATH so
+// rsync's `-e ssh` resolves to the sibling ssh binary it shipped with
+// (vagrant's embedded ssh.exe beside its rsync.exe) instead of whichever ssh
+// the agent inherited.
+func toolEnv(exe string) []string {
+	if runtime.GOOS != "windows" {
+		return os.Environ()
+	}
+	return append(os.Environ(),
+		"PATH="+filepath.Dir(exe)+string(os.PathListSeparator)+os.Getenv("PATH"))
+}
 
 // defaultRsyncArgs is the base's rsync default flag set (vagrant-zones
 // parity).
@@ -87,14 +129,18 @@ func SyncFiles(ctx context.Context, rsyncExe, ip string, port int, credentials C
 		"-p", strconv.Itoa(port),
 	}
 	if keyPath := credentialKeyPath(credentials, basePath, defaultKeyPath); keyPath != "" {
-		sshCommand = append(sshCommand, "-i", keyPath)
+		// rsync's -e ssh is the sibling Cygwin ssh (toolEnv), so the key path
+		// speaks its dialect too.
+		sshCommand = append(sshCommand, "-i", cygwinPath(keyPath))
 	}
 	args = append(args,
 		"--rsync-path=sudo rsync",
 		"-e", strings.Join(sshCommand, " "),
 	)
 
-	source := localDir
+	// Every Windows rsync is a Cygwin build: local paths convert to
+	// /cygdrive form or they read as remote host:path specs.
+	source := cygwinPath(localDir)
 	if !strings.HasSuffix(source, "/") {
 		source += "/"
 	}
@@ -105,6 +151,7 @@ func SyncFiles(ctx context.Context, rsyncExe, ip string, port int, credentials C
 	args = append(args, source, fmt.Sprintf("%s@%s:%s", username, ip, remoteDir))
 
 	command := exec.CommandContext(ctx, exe, args...)
+	command.Env = toolEnv(exe)
 	if credentials.Password != "" && credentials.SSHKeyPath == "" {
 		// Password auth: sshpass reads SSHPASS from the environment — the
 		// secret never appears on a command line.
@@ -113,7 +160,7 @@ func SyncFiles(ctx context.Context, rsyncExe, ip string, port int, credentials C
 			return fmt.Errorf("password-auth sync needs sshpass on the agent host: %w", perr)
 		}
 		command = exec.CommandContext(ctx, sshpass, append([]string{"-e", exe}, args...)...)
-		command.Env = append(os.Environ(), "SSHPASS="+credentials.Password)
+		command.Env = append(toolEnv(exe), "SSHPASS="+credentials.Password)
 	}
 	command.SysProcAttr = procattr.NoConsole()
 
@@ -139,7 +186,18 @@ func SCPSync(ctx context.Context, scpExe, ip string, port int, credentials Crede
 		"-P", strconv.Itoa(port),
 		"-r",
 	}
-	if keyPath := credentialKeyPath(credentials, basePath, defaultKeyPath); keyPath != "" {
+	// Windows ships a NATIVE OpenSSH scp (drive-letter paths fine); vagrant's
+	// embedded scp is Cygwin and needs /cygdrive form — convert per binary.
+	keyPath := credentialKeyPath(credentials, basePath, defaultKeyPath)
+	source := strings.TrimSuffix(localDir, "/")
+	if isCygwinTool(exe) {
+		keyPath = cygwinPath(keyPath)
+		source = cygwinPath(source)
+	} else {
+		keyPath = filepath.ToSlash(keyPath)
+		source = filepath.ToSlash(source)
+	}
+	if keyPath != "" {
 		args = append(args, "-i", keyPath)
 	}
 	username := credentials.Username
@@ -147,17 +205,18 @@ func SCPSync(ctx context.Context, scpExe, ip string, port int, credentials Crede
 		username = "root"
 	}
 	// scp of dir/. copies the CONTENT (rsync's trailing-slash semantics).
-	source := strings.TrimSuffix(localDir, "/") + "/."
+	source += "/."
 	args = append(args, source, fmt.Sprintf("%s@%s:%s", username, ip, remoteDir))
 
 	command := exec.CommandContext(ctx, exe, args...)
+	command.Env = toolEnv(exe)
 	if credentials.Password != "" && credentials.SSHKeyPath == "" {
 		sshpass, perr := exec.LookPath("sshpass")
 		if perr != nil {
 			return fmt.Errorf("password-auth sync needs sshpass on the agent host: %w", perr)
 		}
 		command = exec.CommandContext(ctx, sshpass, append([]string{"-e", exe}, args...)...)
-		command.Env = append(os.Environ(), "SSHPASS="+credentials.Password)
+		command.Env = append(toolEnv(exe), "SSHPASS="+credentials.Password)
 	}
 	command.SysProcAttr = procattr.NoConsole()
 	return streamCommand(command, stream)

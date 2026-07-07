@@ -57,16 +57,21 @@ type Folder struct {
 // Playbook is one provisioning.ansible.playbooks.local[] entry
 // (zone_provision metadata shape).
 type Playbook struct {
-	Playbook          string   `json:"playbook"`
-	Run               string   `json:"run,omitempty"`
-	InstallMode       string   `json:"install_mode,omitempty"`
-	ConfigFile        string   `json:"config_file,omitempty"`
-	ProvisioningPath  string   `json:"provisioning_path,omitempty"`
-	Collections       []string `json:"collections,omitempty"`
-	Callbacks         any      `json:"callbacks,omitempty"`
-	SSHPipelining     any      `json:"ssh_pipelining,omitempty"`
-	PythonInterpreter string   `json:"ansible_python_interpreter,omitempty"`
-	Description       string   `json:"description,omitempty"`
+	Playbook         string   `json:"playbook"`
+	Run              string   `json:"run,omitempty"`
+	InstallMode      string   `json:"install_mode,omitempty"`
+	ConfigFile       string   `json:"config_file,omitempty"`
+	ProvisioningPath string   `json:"provisioning_path,omitempty"`
+	Collections      []string `json:"collections,omitempty"`
+	// RemoteCollections gates the in-guest ansible-galaxy install —
+	// Hosts.rb's contract (Mark's ruling 2026-07-07): false (the packages'
+	// own setting) means the collections ship INSIDE the provisioner and
+	// ride the folder sync; only true fetches them from the galaxy.
+	RemoteCollections bool   `json:"remote_collections,omitempty"`
+	Callbacks         any    `json:"callbacks,omitempty"`
+	SSHPipelining     any    `json:"ssh_pipelining,omitempty"`
+	PythonInterpreter string `json:"ansible_python_interpreter,omitempty"`
+	Description       string `json:"description,omitempty"`
 }
 
 // MachineConfig is the parsed configuration document.

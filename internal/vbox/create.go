@@ -6,9 +6,32 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/Makr91/hyperweaver-agent/internal/procattr"
 )
+
+// runConfig runs a machine-configuration command, retrying VirtualBox's
+// transient session-lock refusal: createvm/modifyvm release their write
+// session ASYNCHRONOUSLY, so an immediately-following config command can
+// catch "already locked for a session (or being unlocked)"
+// (VBOX_E_INVALID_OBJECT_STATE — runtime-proven 2026-07-06; vagrant's own
+// pacing hid this race).
+func runConfig(ctx context.Context, vboxManage string, args ...string) error {
+	var err error
+	for attempt := 0; attempt < 10; attempt++ {
+		err = runSimple(ctx, vboxManage, args...)
+		if err == nil || !strings.Contains(err.Error(), "already locked for a session") {
+			return err
+		}
+		select {
+		case <-ctx.Done():
+			return err
+		case <-time.After(500 * time.Millisecond):
+		}
+	}
+	return err
+}
 
 // Machine-creation verbs — zoneweaver's zonecfg/zfs storage+config operations
 // spoken in VBoxManage (Mark's ruling: same mechanism, hypervisor-native
@@ -94,30 +117,39 @@ func CreateVM(ctx context.Context, vboxManage, name, platformArch, osType, baseF
 // ModifyVM applies machine settings (the zonecfg attribute batch): flags are
 // raw `--key value` pairs assembled by the caller from the document.
 func ModifyVM(ctx context.Context, vboxManage, name string, flags []string) error {
-	return runSimple(ctx, vboxManage, append([]string{"modifyvm", name}, flags...)...)
+	return runConfig(ctx, vboxManage, append([]string{"modifyvm", name}, flags...)...)
 }
 
 // AddStorageController attaches a named controller (the device bus the
 // bootdisk/additional disks/cdroms hang off).
 func AddStorageController(ctx context.Context, vboxManage, name, controller, kind string) error {
-	return runSimple(ctx, vboxManage, "storagectl", name,
+	return runConfig(ctx, vboxManage, "storagectl", name,
 		"--name="+controller, "--add="+kind, "--bootable=on")
 }
 
 // StorageAttach attaches one medium (disk image or ISO) to a controller port
 // (the base's add device / add fs blocks).
 func StorageAttach(ctx context.Context, vboxManage, name, controller string, port int, kind, medium string) error {
-	return runSimple(ctx, vboxManage, "storageattach", name,
+	return runConfig(ctx, vboxManage, "storageattach", name,
 		"--storagectl="+controller,
 		"--port="+strconv.Itoa(port), "--device=0",
 		"--type="+kind, "--medium="+medium)
+}
+
+// StorageDetach removes the medium at a controller port (the modify path's
+// remove device / remove fs — the file itself is preserved, matching the
+// base's rule that removal never destroys the volume).
+func StorageDetach(ctx context.Context, vboxManage, name, controller string, port int) error {
+	return runConfig(ctx, vboxManage, "storageattach", name,
+		"--storagectl="+controller,
+		"--port="+strconv.Itoa(port), "--device=0", "--medium=none")
 }
 
 // SetGuestProperty records one key/value on the machine (the cloud-init
 // attribute transport — guest tooling reads these where zones read zonecfg
 // attrs).
 func SetGuestProperty(ctx context.Context, vboxManage, name, key, value string) error {
-	return runSimple(ctx, vboxManage, "guestproperty", "set", name, key, value)
+	return runConfig(ctx, vboxManage, "guestproperty", "set", name, key, value)
 }
 
 // GuestProperty reads one guest property value ("" when unset) — the

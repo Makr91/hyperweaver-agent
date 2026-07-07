@@ -201,6 +201,24 @@ provisioning:
     timeout_seconds: 300
     # Interval between SSH availability checks.
     poll_interval_seconds: 10
+  network:
+    # Dedicated provisioning network: ONE VirtualBox host-only interface
+    # (identified by host_ip — VirtualBox assigns interface names itself)
+    # plus its DHCP server. Set up via POST /provisioning/network/setup;
+    # host-type networks[] entries ride the interface and their addresses
+    # pin as per-VM fixed DHCP leases, so guests receive their document's
+    # control IP from an ordinary DHCP request.
+    enabled: true
+    # Provisioning network subnet (CIDR).
+    subnet: 10.190.190.0/24
+    # Host address on the provisioning network — the interface's identity.
+    host_ip: 10.190.190.1
+    netmask: 255.255.255.0
+    # The VirtualBox DHCP server's own address (must differ from host_ip).
+    dhcp_server_ip: 10.190.190.2
+    # Assignable pool; fixed leases and the clone allocator draw from it.
+    dhcp_range_start: 10.190.190.10
+    dhcp_range_end: 10.190.190.254
 
 template_sources:
   # Box-template registry: downloaded box disk images machines clone from.

@@ -47,11 +47,13 @@ type statusPayload struct {
 // parity lands, and the UI's Installer Files gate is artifacts ∧
 // provisioner-registry. templates shipped with the box-template registry
 // (the create orchestration's storage source) — always on here; zoneweaver
-// config-gates its counterpart on template_sources.enabled.
+// config-gates its counterpart on template_sources.enabled. machine-modify
+// shipped with the machine_modify port of zoneweaver's PUT modify (the UI's
+// Edit modal gates on it; zoneweaver adds it in its own session).
 var platformFeatures = []string{
-	"tasks", "machines", "machine-suspend", "machine-create", "swap",
-	"monitoring", "processes", "provisioning", "provisioner-registry",
-	"secrets", "templates",
+	"tasks", "machines", "machine-suspend", "machine-create",
+	"machine-modify", "swap", "monitoring", "processes", "provisioning",
+	"provisioner-registry", "secrets", "templates",
 }
 
 // features derives the advertised token list: platform tokens plus the

@@ -138,6 +138,10 @@ type ProvisionEnv struct {
 	// playbook_timeout_seconds).
 	AnsibleInstallTimeout time.Duration
 	PlaybookTimeout       time.Duration
+	// Network is the dedicated provisioning network (provisioning.network —
+	// the base's etherstub+dhcpd block as a host-only interface + VirtualBox
+	// DHCP with per-VM fixed leases).
+	Network NetworkEnv
 }
 
 // resolveInstallerFiles verifies every role file reference against the file
