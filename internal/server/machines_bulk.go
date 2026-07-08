@@ -126,6 +126,15 @@ func (s *Server) handleBulk(w http.ResponseWriter, r *http.Request, operationLab
 			skipped = append(skipped, map[string]string{"machine": machine.Name, "reason": reason})
 			continue
 		}
+		// machines.provision_on_start applies to bulk starts too: a
+		// never-provisioned machine with a stored document boots through the
+		// provision pipeline (the returned id is the orchestration parent).
+		if operation == machines.OpStart {
+			if parentID, ok := s.provisionOnStartPipeline(r.Context(), machine, createdBy); ok {
+				taskIDs = append(taskIDs, parentID)
+				continue
+			}
+		}
 		nt := tasks.NewTask{
 			MachineName: machine.Name,
 			Operation:   operation,

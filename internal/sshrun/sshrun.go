@@ -16,6 +16,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"sync"
 	"time"
 
 	"golang.org/x/crypto/ssh"
@@ -109,40 +110,33 @@ func clientConfig(credentials Credentials, basePath, defaultKeyPath string) (*ss
 	}, nil
 }
 
-// Run executes one command on the machine, streaming its output. The context
-// bounds the whole call (task cancellation kills the session).
-func Run(ctx context.Context, ip string, port int, credentials Credentials,
-	command, basePath, defaultKeyPath string, timeout time.Duration, stream StreamFunc,
-) error {
+// connectSSH dials and handshakes an SSH client, wiring the context-cancel
+// watchdog that closes the raw TCP connection. The context kills the
+// TRANSPORT, not just the session: a guest whose kernel lives but whose sshd
+// is wedged (ICMP answers, no SSH banner) stalls the handshake — which runs
+// BEFORE any session exists — and a black-holed connection never delivers a
+// session-close message either. Closing the TCP connection unblocks every
+// phase: handshake, session open, and the running operation (runtime-proven
+// 2026-07-07 — a frozen guest wedged machine_sync past its timeout). The
+// returned closer is idempotent and releases the watchdog with the client.
+func connectSSH(ctx context.Context, ip string, port int, credentials Credentials,
+	basePath, defaultKeyPath string,
+) (*ssh.Client, func(), error) {
 	config, err := clientConfig(credentials, basePath, defaultKeyPath)
 	if err != nil {
-		return err
-	}
-	runCtx := ctx
-	if timeout > 0 {
-		var cancel context.CancelFunc
-		runCtx, cancel = context.WithTimeout(ctx, timeout)
-		defer cancel()
+		return nil, nil, err
 	}
 
 	dialer := net.Dialer{Timeout: config.Timeout}
-	conn, err := dialer.DialContext(runCtx, "tcp", net.JoinHostPort(ip, strconv.Itoa(port)))
+	conn, err := dialer.DialContext(ctx, "tcp", net.JoinHostPort(ip, strconv.Itoa(port)))
 	if err != nil {
-		return fmt.Errorf("dial %s:%d: %w", ip, port, err)
+		return nil, nil, fmt.Errorf("dial %s:%d: %w", ip, port, err)
 	}
 
-	// The context kills the TRANSPORT, not just the session: a guest whose
-	// kernel lives but whose sshd is wedged (ICMP answers, no SSH banner)
-	// stalls the handshake — which runs BEFORE any session exists — and a
-	// black-holed connection never delivers a session-close message either.
-	// Closing the TCP connection unblocks every phase: handshake, session
-	// open, and the running command (runtime-proven 2026-07-07 — a frozen
-	// guest wedged machine_sync past its timeout).
 	watchdogDone := make(chan struct{})
-	defer close(watchdogDone)
 	go func() {
 		select {
-		case <-runCtx.Done():
+		case <-ctx.Done():
 			_ = conn.Close()
 		case <-watchdogDone:
 		}
@@ -150,16 +144,42 @@ func Run(ctx context.Context, ip string, port int, credentials Credentials,
 
 	sshConn, channels, requests, err := ssh.NewClientConn(conn, ip, config)
 	if err != nil {
+		close(watchdogDone)
 		_ = conn.Close()
-		if runCtx.Err() != nil {
-			return fmt.Errorf("ssh handshake %s: %w", ip, runCtx.Err())
+		if ctx.Err() != nil {
+			return nil, nil, fmt.Errorf("ssh handshake %s: %w", ip, ctx.Err())
 		}
-		return fmt.Errorf("ssh handshake %s: %w", ip, err)
+		return nil, nil, fmt.Errorf("ssh handshake %s: %w", ip, err)
 	}
 	client := ssh.NewClient(sshConn, channels, requests)
-	defer func() {
-		_ = client.Close()
-	}()
+
+	var once sync.Once
+	closer := func() {
+		once.Do(func() {
+			_ = client.Close()
+			close(watchdogDone)
+		})
+	}
+	return client, closer, nil
+}
+
+// Run executes one command on the machine, streaming its output. The context
+// bounds the whole call (task cancellation kills the session).
+func Run(ctx context.Context, ip string, port int, credentials Credentials,
+	command, basePath, defaultKeyPath string, timeout time.Duration, stream StreamFunc,
+) error {
+	runCtx := ctx
+	if timeout > 0 {
+		var cancel context.CancelFunc
+		runCtx, cancel = context.WithTimeout(ctx, timeout)
+		defer cancel()
+	}
+
+	client, closeClient, err := connectSSH(runCtx, ip, port, credentials, basePath, defaultKeyPath)
+	if err != nil {
+		return err
+	}
+	defer closeClient()
 
 	session, err := client.NewSession()
 	if err != nil {

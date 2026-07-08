@@ -12,9 +12,11 @@ import (
 // The provisioning-network surface — zoneweaver's
 // ProvisioningNetworkController (status / setup / teardown) on VirtualBox:
 // ONE host-only interface (the base's etherstub + host VNIC + static IP) and
-// VirtualBox's own DHCP server (the base's dhcpd), no NAT/forwarding pieces
-// (a host-only network reaches the host directly). Setup and teardown queue
-// the base's exact operations; status answers its component-map shape.
+// VirtualBox's own DHCP server (the base's dhcpd). The base's NAT/forwarding
+// pieces translate to the create-time NAT adapter + ssh port-forward
+// transport (Mark's architecture 2026-07-07); this surface stays
+// dormant-but-available for host-type networks[] entries. Setup and teardown
+// queue the base's exact operations; status answers its component-map shape.
 
 // handleProvisioningNetworkStatus mirrors GET /provisioning/network/status:
 // the disabled branch is bare {enabled:false, message}; enabled answers

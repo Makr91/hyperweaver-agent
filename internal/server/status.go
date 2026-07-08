@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"log/slog"
 	"net/http"
@@ -50,9 +51,15 @@ type statusPayload struct {
 // config-gates its counterpart on template_sources.enabled. machine-modify
 // shipped with the machine_modify port of zoneweaver's PUT modify (the UI's
 // Edit modal gates on it; zoneweaver adds it in its own session).
+// machine-snapshots shipped with the VBoxManage snapshot family
+// (/machines/{name}/snapshots — list/take/restore/delete + clone
+// source=current); machine-screenshot with the no-session framebuffer PNG
+// (GET /machines/{name}/vnc/screenshot — zoneweaver serves the same endpoint
+// from the bhyve framebuffer and gains the token in its own session).
 var platformFeatures = []string{
 	"tasks", "machines", "machine-suspend", "machine-create",
-	"machine-modify", "swap", "monitoring", "processes", "provisioning",
+	"machine-modify", "machine-snapshots", "machine-screenshot",
+	"swap", "monitoring", "processes", "provisioning",
 	"provisioner-registry", "secrets", "templates",
 }
 
@@ -83,7 +90,17 @@ func archName() string {
 	}
 }
 
-func (s *Server) handleStatus(w http.ResponseWriter, _ *http.Request) {
+// consoles derives the advertised console list: ssh always (the terminal
+// surface has no extra requirement), vnc when a usable VBoxVNC module exists.
+func (s *Server) consoles(ctx context.Context) []string {
+	list := []string{"ssh"}
+	if vncConsoleAvailable(ctx) {
+		list = append(list, "vnc")
+	}
+	return list
+}
+
+func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 	hostname, err := os.Hostname()
 	if err != nil {
 		hostname = "unknown"
@@ -116,7 +133,12 @@ func (s *Server) handleStatus(w http.ResponseWriter, _ *http.Request) {
 		// pack" says which module VMs use (set: VBoxManage setproperty
 		// vrdeextpack VNC); per-VM it's `modifyvm --vrde on` + VNC properties.
 		// Advertise ["vnc"] only when a usable VBoxVNC module exists.
-		Console:  []string{},
+		// ssh shipped with the SSH terminal sessions (POST
+		// /machines/{name}/ssh/start + the /ssh/{id} WebSocket); vnc
+		// advertises only when a usable VBoxVNC VRDE module exists (the
+		// detection recipe above — the websockify bridge needs RFB on the
+		// VRDE port).
+		Console:  s.consoles(r.Context()),
 		Features: s.features(),
 		Uptime:   int64(time.Since(s.startedAt).Seconds()),
 	}

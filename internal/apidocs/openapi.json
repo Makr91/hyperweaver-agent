@@ -25,6 +25,7 @@
     { "name": "System", "description": "Version, update checking, prerequisite detection" },
     { "name": "Task Management", "description": "The task queue: every machine operation runs as a prioritized, dependency-chained task with streamed output" },
     { "name": "Machine Management", "description": "VirtualBox machines, built and provisioned natively by the agent (the zoneweaver mechanism: create orchestration → SSH/ansible pipeline; vagrant is never executed — externally-created vagrant projects are still discovered read-only), operated through queued tasks" },
+    { "name": "Console", "description": "Machine consoles: SSH terminal sessions (interactive shell over the provisioning transport), the VNC websockify bridge onto the machine's VRDE port (requires a usable VBoxVNC extpack — the console list in /api/status advertises vnc only then), no-session framebuffer screenshots, and the WebSocket ticket every upgrade requires. WebSocket upgrades authenticate by ?ticket= (minted at GET /ws-ticket), never by API-key headers — browser WebSocket clients cannot send them." },
     { "name": "Provisioning", "description": "Provisioner package registry (the provisioner-registry capability token — finer than the cross-agent provisioning token, which any provisioning-capable agent advertises regardless of wire shape): packages in SHI's on-disk format — <name>/provisioner-collection.yml with <version>/provisioner.yml trees — listed, imported (folder, archive, or git clone; task-queued), and deleted only while no machine references them. One system for every package family; installer-bundled packages seed on startup without ever overwriting existing versions. Hosts.template.yml renders with TRUE Jinja2 semantics (gonja): parenthesized filter args, loop.*, is defined; undefined variables render empty; includes resolve inside the package's templates/ dir only." },
     { "name": "Artifacts", "description": "Installer file cache (the artifacts capability token, config-gated by assets.enabled — SHI's file cache with hash verification implemented in FULL, Mark's 2026-07-06 ruling): SHA-256-hashed installer/fixpack/hotfix files under <cache>/<role>/{installers,fixpacks,hotfixes}/, with hash EXPECTATIONS (bundled registry seed + the HCL catalog's authoritative hashes), on-demand scans, verified URL/HCL-portal downloads with live progress, streaming uploads, and local-path registration. Machine prepare REFUSES any referenced file that is absent, unhashed, or hash-mismatched; mounts are hard links or hash-verified copies." },
     { "name": "Swap Management", "description": "Read-only swap information (the swap capability token); add/remove are OmniOS semantics and not implemented on this agent" },
@@ -84,8 +85,8 @@
           "hostname": { "type": "string", "example": "desktop-01" },
           "auth": { "type": "array", "items": { "type": "string" }, "example": ["apikey"] },
           "bootstrapAvailable": { "type": "boolean", "example": true },
-          "console": { "type": "array", "items": { "type": "string" }, "example": [] },
-          "features": { "type": "array", "items": { "type": "string" }, "description": "Capability tokens (platform support ∧ config state): host-power is absent when host_power.enabled is false, artifacts when assets.enabled is false. provisioner-registry names the SHI-format package registry surface and secrets the global secrets store — finer than the cross-agent provisioning/machine-create tokens, which are true on every provisioning-capable agent regardless of wire shape (Mark's gating ruling, 2026-07-06). machine-modify names PUT's infrastructure-modify surface (the base's zone_modify contract).", "example": ["tasks", "machines", "machine-suspend", "machine-create", "machine-modify", "swap", "monitoring", "processes", "provisioning", "provisioner-registry", "secrets", "templates", "host-power", "artifacts"] },
+          "console": { "type": "array", "items": { "type": "string" }, "description": "ssh always (SSH terminal sessions); vnc only when a USABLE VBoxVNC VRDE module is installed (the websockify bridge needs RFB on the VRDE port)", "example": ["ssh", "vnc"] },
+          "features": { "type": "array", "items": { "type": "string" }, "description": "Capability tokens (platform support ∧ config state): host-power is absent when host_power.enabled is false, artifacts when assets.enabled is false. provisioner-registry names the SHI-format package registry surface and secrets the global secrets store — finer than the cross-agent provisioning/machine-create tokens, which are true on every provisioning-capable agent regardless of wire shape (Mark's gating ruling, 2026-07-06). machine-modify names PUT's infrastructure-modify surface (the base's zone_modify contract).", "example": ["tasks", "machines", "machine-suspend", "machine-create", "machine-modify", "machine-snapshots", "machine-screenshot", "swap", "monitoring", "processes", "provisioning", "provisioner-registry", "secrets", "templates", "host-power", "artifacts"] },
           "uptime": { "type": "integer", "description": "Seconds since the agent started", "example": 86400 }
         }
       },
@@ -138,7 +139,7 @@
         "properties": {
           "id": { "type": "string", "format": "uuid", "example": "123e4567-e89b-12d3-a456-426614174000" },
           "machine_name": { "type": "string", "description": "Target machine name", "example": "domino-01" },
-          "operation": { "type": "string", "description": "Operation kind. Vocabulary: start, stop, suspend, delete, discover, machine_modify (PUT's infrastructure changes), restart (never dispatched — a restart is a stop→start chain); create orchestration: machine_create_orchestration (parent), machine_prepare, machine_create_storage, machine_create_config, machine_create_finalize, template_download; provisioning pipeline: machine_provision_orchestration (parent), machine_wait_ssh, machine_sync_parent, machine_sync (one per folder), machine_provision_parent, machine_provision (one per playbook); network: provisioning_network_setup, provisioning_network_teardown; registry/cache/system: provisioner_import, artifact_scan, artifact_download, hcl_download, agent_update.", "example": "start" },
+          "operation": { "type": "string", "description": "Operation kind. Vocabulary: start, stop, suspend, delete, discover, machine_modify (PUT's infrastructure changes), restart (never dispatched — a restart is a stop→start chain); create orchestration: machine_create_orchestration (parent), machine_prepare, machine_create_storage, machine_create_config, machine_create_finalize, template_download; provisioning pipeline: machine_provision_orchestration (parent), machine_wait_ssh, machine_sync_parent, machine_sync (one per folder), machine_provision_parent, machine_provision (one per playbook); network: provisioning_network_setup, provisioning_network_teardown; consoles/snapshots: reset, pause, resume, snapshot_take, snapshot_restore, snapshot_delete, machine_clone_current (clonevm current-state clone); templates: template_download, template_delete, template_export, template_upload (publish), template_move; registry/cache/system: provisioner_import, artifact_scan, artifact_download, hcl_download, agent_update.", "example": "start" },
           "status": {
             "type": "string",
             "enum": ["pending", "running", "completed", "failed", "cancelled", "completed_with_errors"],
@@ -157,7 +158,7 @@
           "metadata": { "type": "string", "nullable": true, "description": "JSON-encoded execution parameters" },
           "progress_percent": { "type": "number", "example": 42.5 },
           "progress_info": { "type": "object", "nullable": true, "description": "Freeform progress detail; parent tasks carry {completed_tasks, failed_tasks, total_tasks, status}" },
-          "output": { "type": "string", "nullable": true, "description": "JSON-encoded array of output entries as last flushed; GET /tasks/{taskId}/output serves the parsed, live view" }
+          "output": { "type": "string", "nullable": true, "description": "JSON-encoded array of output entries as last flushed — ALWAYS null on GET /tasks (the list never carries output blobs); GET /tasks/{taskId} (detail), GET /tasks/{taskId}/output, and the /tasks/{taskId}/stream WebSocket serve it in full" }
         }
       },
       "Machine": {
@@ -187,25 +188,39 @@
           "notes": { "type": "string", "nullable": true },
           "tags": { "type": "array", "nullable": true, "items": { "type": "string" } },
           "configuration": { "type": "object", "nullable": true, "description": "Live machine configuration (VBoxManage showvminfo --machinereadable key/value map on this agent)" },
-          "spec": { "$ref": "#/components/schemas/MachineSpec", "nullable": true, "description": "The creation document (provisioner-managed machines only) — the user's intent, never overwritten by discovery" },
+          "spec": { "$ref": "#/components/schemas/MachineSpec", "nullable": true, "description": "The creation document (machines this agent created; discovered VMs have none) — the user's intent, never overwritten by discovery" },
           "created_at": { "type": "string", "format": "date-time" },
           "updatedAt": { "type": "string", "format": "date-time" }
         }
       },
       "MachineSpec": {
         "type": "object",
-        "description": "The machine-create document (the Hosts.yml-shaped structure, design §4): stored verbatim on the machine row, rendered through the provisioner package's Jinja2 templates/Hosts.template.yml by machine_prepare — at create and again before every provision. The rendered hosts[0] drives everything: its settings/networks/disks build the VM natively (VBoxManage), and its folders/provisioning/vars/roles become the stored provisioner document the pipeline consumes. Template context precedence: settings (also flattened UPPERCASE) → per-role <ROLE>_INSTALLER/_INSTALLER_HASH/_INSTALLER_VERSION/_FIXPACK*/_HOTFIX* vars + boolean role flags (both casings) → package configuration.basicFields/advancedFields defaults → properties/advanced_properties (exact field names) → SECRETS_* vars. Structured settings/networks/roles ride alongside.",
+        "description": "The machine-create document (the Hosts.yml-shaped structure, design §4), stored verbatim on the machine row. The provisioner reference is OPTIONAL — a machine is just a machine, provisioning is optional (the base's provisioner-free create). WITH a provisioner: machine_prepare renders the package's Jinja2 templates/Hosts.template.yml — at create and again before every provision — and the rendered hosts[0] drives everything: its settings/networks/disks build the VM natively (VBoxManage), and its folders/provisioning/vars/roles become the stored provisioner document the pipeline consumes. WITHOUT one: no prepare/render step exists, the spec's own settings/networks build the VM directly, finalize persists no provisioner, and a provisioner document can attach later via PUT /machines/{name} + POST /provision. Template context precedence (package-based creates): settings (also flattened UPPERCASE) → per-role <ROLE>_INSTALLER/_INSTALLER_HASH/_INSTALLER_VERSION/_FIXPACK*/_HOTFIX* vars + boolean role flags (both casings) → package configuration.basicFields/advancedFields defaults → properties/advanced_properties (exact field names) → SECRETS_* vars. Structured settings/networks/roles ride alongside.",
         "properties": {
           "provisioner": {
             "type": "object",
-            "required": ["name", "version"],
+            "description": "OPTIONAL package reference. Omit it entirely for a provisioner-less machine; when present, both name and version are required and must exist in the registry.",
             "properties": {
               "name": { "type": "string", "example": "hcl_domino_standalone_provisioner" },
               "version": { "type": "string", "example": "0.1.24" }
             }
           },
-          "settings": { "type": "object", "description": "Hosts.yml settings vocabulary. hostname and domain are REQUIRED (machine_domain optionally overrides the naming domain); with machines.prefix_machine_names server_id is REQUIRED too (numeric 1-8 digits, padded to 4 — never auto-assigned; GET /machines/ids/next prefills it). box/box_version/box_arch/box_url select the template (package defaults apply); vcpus/memory/os_type/firmware_type/consoleport/consolehost/setup_wait/vagrant_user* drive the build and the pipeline." },
+          "settings": { "type": "object", "description": "Hosts.yml settings vocabulary. hostname and domain are REQUIRED (machine_domain optionally overrides the naming domain); with machines.prefix_machine_names server_id is REQUIRED too (numeric 1-8 digits, padded to 4 — never auto-assigned; GET /machines/ids/next prefills it). box/box_version/box_arch/box_url select the template (package defaults apply); vcpus/memory/os_type/firmware_type/consoleport/consolehost/setup_wait/vagrant_user* drive the build and the pipeline. boot_order: ordered list of floppy|dvd|disk|net|none → --boot1..4 (remaining slots cleared) — the ISO-first install story with disks.cdroms." },
           "networks": { "type": "array", "items": { "type": "object" } },
+          "disks": {
+            "type": "object",
+            "description": "OPTIONAL disks section at create (the base's contract — omit entirely for a DISKLESS stub; attach media later via modify). boot: {path: attach an existing disk-image file} | {size, sparse?, volume_name?: create a blank scratch volume} | omitted with settings.box: template clone | omitted without box: no boot medium. additional_disks[]: {volume_name, size, sparse?, port?} to create, or {path, port?} to attach existing. cdroms[]: [{path: agent-host ISO path}] — the attach-an-ISO-and-install-yourself flow. With a provisioner package the render's disks win.",
+            "properties": {
+              "boot": { "type": "object" },
+              "additional_disks": { "type": "array", "items": { "type": "object" } },
+              "cdroms": { "type": "array", "items": { "type": "object", "properties": { "path": { "type": "string" } } } }
+            }
+          },
+          "zones": { "type": "object", "description": "OPTIONAL zones section at create — the base's named system fields, translated exactly like modify: autostart (host-startup), bootrom (efi|bios → firmware), hostbridge (i440fx→piix3 → chipset), vnc (on/off → VRDE; settings.consoleport sets the port), acpi, xhci, netif (virtio|e1000 → every document adapter's hardware type; the reserved NAT adapter keeps the default). diskif selects the STORAGE CONTROLLER type at create: ide|sata(default)|scsi|sas|nvme|virtio — VirtualBox fixes it once media attach, so modify refuses it." },
+          "cloud_init": { "type": "object", "description": "OPTIONAL cloud-init section at create (enabled/dns_domain/password/resolvers/sshkey — set as guest properties under /Hyperweaver/CloudInit/)" },
+          "vbox": { "type": "object", "description": "OPTIONAL vbox section at create: directives[] = [{directive, value}] — the generic modifyvm passthrough (any --flag=value: acpi, chipset, usb-xhci, nic hardware types...), the base's zone attr-map analog" },
+          "notes": { "type": "string", "description": "Free-form notes, persisted onto the machine row at finalize (the base's create contract)" },
+          "tags": { "type": "array", "items": { "type": "string" }, "description": "Tags, persisted at finalize" },
           "roles": {
             "type": "array",
             "items": {
@@ -353,6 +368,22 @@
           "custom_resource_url": { "type": "array", "items": { "type": "object", "properties": { "name": { "type": "string" }, "url": { "type": "string" }, "useAuth": { "type": "boolean" }, "user": { "type": "string" }, "pass": { "type": "string" } } } },
           "docker_hub": { "type": "array", "items": { "type": "object", "properties": { "name": { "type": "string" }, "docker_hub_user": { "type": "string" }, "docker_hub_token": { "type": "string" } } } },
           "ssh_keys": { "type": "array", "items": { "type": "object", "properties": { "name": { "type": "string" }, "key": { "type": "string", "description": "PEM private key" } } } }
+        }
+      },
+      "ProvisioningProfile": {
+        "type": "object",
+        "description": "One reusable provisioning profile (the base's model, minus the zlogin-only recipe_id): the UI composes provisioning without a bundled Hosts.yml or provisioner package and applies it into a machine's provisioner document.",
+        "properties": {
+          "id": { "type": "integer", "readOnly": true },
+          "name": { "type": "string", "example": "debian-web-servers" },
+          "description": { "type": "string" },
+          "default_credentials": { "type": "object", "description": "{username, password?, ssh_key_path?} — the vagrant_user vocabulary" },
+          "default_sync_folders": { "type": "array", "items": { "type": "object" }, "description": "folders[] entries ({map, to, type, ...})" },
+          "default_provisioners": { "type": "array", "items": { "type": "object" }, "description": "playbook entries ({playbook, run, ...})" },
+          "default_variables": { "type": "object", "description": "vars merged into extra_vars.role_vars" },
+          "created_by": { "type": "string", "readOnly": true },
+          "created_at": { "type": "string", "format": "date-time", "readOnly": true },
+          "updated_at": { "type": "string", "format": "date-time", "readOnly": true }
         }
       },
       "MonitoringSampling": {
@@ -824,7 +855,7 @@
       "get": {
         "tags": ["System"],
         "summary": "Application version and host environment",
-        "description": "Minimum role: viewer. Includes the detected provisioning prerequisites (Vagrant, VirtualBox, Git, rsync) and host information — SHI's footer data.",
+        "description": "Minimum role: viewer. Includes the detected provisioning prerequisites (Vagrant, VirtualBox, Git, rsync, scp, plus builtin_sync — the embedded pure-Go transports) and host information — SHI's footer data.",
         "responses": {
           "200": {
             "description": "Version information",
@@ -909,7 +940,7 @@
       "get": {
         "tags": ["System"],
         "summary": "Provisioning prerequisite availability",
-        "description": "Minimum role: viewer. A bare tool-name → installed map; this agent's tools are vagrant, virtualbox, git, and rsync (the Node agent lists its OmniOS set — same endpoint, platform-appropriate contents).",
+        "description": "Minimum role: viewer. A bare tool-name → installed map; this agent's tools are vagrant, virtualbox, git, rsync, scp, and builtin_sync (always true — the embedded pure-Go rsync client + SFTP that make vagrant optional). rsync/scp probe with the pipeline's own lookup: PATH, vagrant's embedded toolchain, and the Windows OpenSSH directory. (The Node agent lists its OmniOS set — same endpoint, platform-appropriate contents.)",
         "responses": {
           "200": {
             "description": "Tool availability map",
@@ -918,7 +949,7 @@
                 "schema": {
                   "type": "object",
                   "additionalProperties": { "type": "boolean" },
-                  "example": { "vagrant": true, "virtualbox": true, "git": true, "rsync": false }
+                  "example": { "vagrant": true, "virtualbox": true, "git": true, "rsync": false, "scp": true, "builtin_sync": true }
                 }
               }
             }
@@ -1113,7 +1144,7 @@
       "post": {
         "tags": ["Machine Management"],
         "summary": "Create a machine (orchestration)",
-        "description": "Minimum role: operator (the machine-create capability token). Queues the CREATE ORCHESTRATION (the zoneweaver mechanism — the agent builds real infrastructure natively, no vagrant): a parent task plus chained children machine_prepare (render the package's Jinja2 template + materialize the working directory + hash-verified installer mounts) → machine_create_storage (clone the box template's disk image, grow to disks.boot.size, create additional media; rollback on failure) → machine_create_config (createvm/modifyvm/storage/NICs from the rendered document + vbox.directives passthrough + cloud-init guest properties; adapter 1 is the PROVISIONING NIC — NAT with an allocated ssh port-forward (127.0.0.1:<port> → guest 22), giving guest egress and the host's provisioning access, vagrant's exact layout; document networks[] ride adapters 2+) → machine_create_finalize (registry row + document sections + the render-produced provisioner document stored in configuration + UUID) → optional start. The machine ROW appears at finalize, not at POST. settings.hostname AND settings.domain are REQUIRED (settings.machine_domain overrides the naming domain). With machines.prefix_machine_names, settings.server_id is REQUIRED (numeric, padded to 4; never auto-assigned — GET /machines/ids/next feeds the field) and the name becomes <id>--<hostname>.<domain>. settings.box (org/name + box_version/box_arch/box_url) resolves against the local template registry; a missing box chains a template_download child in front (requires_download: true; box_version must then be specific).",
+        "description": "Minimum role: operator (the machine-create capability token). Queues the CREATE ORCHESTRATION (the zoneweaver mechanism — the agent builds real infrastructure natively, no vagrant): a parent task plus chained children machine_prepare (render the package's Jinja2 template + materialize the working directory + hash-verified installer mounts — queued ONLY when the spec names a provisioner; the reference is OPTIONAL, a machine is just a machine and provisioning never gates its existence) → machine_create_storage (clone the box template's disk image, grow to disks.boot.size, create additional media; rollback on failure) → machine_create_config (createvm/modifyvm/storage/NICs from the document + vbox.directives passthrough + cloud-init guest properties; adapter 1 is the PROVISIONING NIC — NAT with an allocated ssh port-forward (127.0.0.1:<port> → guest 22), giving guest egress and the host's provisioning access, vagrant's exact layout; document networks[] ride adapters 2+) → machine_create_finalize (registry row + document sections + — package-based creates only — the render-produced provisioner document stored in configuration + UUID) → optional start. Provisioner-less creates build straight from the spec's own settings/networks; a provisioner document can attach later via PUT + POST /provision (the base's model). The machine ROW appears at finalize, not at POST. settings.hostname AND settings.domain are REQUIRED (settings.machine_domain overrides the naming domain). With machines.prefix_machine_names, settings.server_id is REQUIRED (numeric, padded to 4; never auto-assigned — GET /machines/ids/next feeds the field) and the name becomes <id>--<hostname>.<domain>. settings.box is OPTIONAL (the base's contract): present, it resolves against the local template registry and a missing box chains a template_download child in front (requires_download: true; box_version must then be specific); absent, the boot medium comes from disks.boot (existing path | scratch size) or the machine is DISKLESS — a stub, Proxmox-style: hostname + domain alone makes a machine, media/NICs attach later via modify, first start is manual. notes/tags/cloud_init/zones/vbox.directives are accepted at create too.",
         "requestBody": {
           "required": true,
           "content": {
@@ -1142,13 +1173,14 @@
                     "status": { "type": "string", "example": "pending" },
                     "message": { "type": "string" },
                     "requires_download": { "type": "boolean", "description": "Whether a template_download child was chained in front" },
-                    "sub_tasks": { "type": "object", "description": "Child task ids by step", "properties": { "template_download": { "type": "string" }, "prepare": { "type": "string" }, "storage": { "type": "string" }, "config": { "type": "string" }, "finalize": { "type": "string" }, "start": { "type": "string" } } }
+                    "sub_tasks": { "type": "object", "description": "Child task ids by step", "properties": { "template_download": { "type": "string" }, "prepare": { "type": "string" }, "storage": { "type": "string" }, "config": { "type": "string" }, "finalize": { "type": "string" }, "start": { "type": "string" } } },
+                    "resource_warnings": { "type": "array", "items": { "type": "object" }, "description": "Present when resource validation passed with threshold warnings (machines.resource_validation)" }
                   }
                 }
               }
             }
           },
-          "400": { "description": "Invalid spec, provisioner reference, server_id, safe_id_path, box reference, or template render failure" },
+          "400": { "description": "Invalid spec, provisioner reference, server_id, safe_id_path, box reference, template render failure, or Insufficient resources ({error, details[]} — the pre-flight resource validation rejection, machines.resource_validation)" },
           "409": { "description": "Machine name (DB or hypervisor), server_id, or working directory already in use" }
         }
       },
@@ -1280,7 +1312,9 @@
                   "vcpus": { "type": "integer", "example": 4 },
                   "bootrom": { "type": "string", "description": "Firmware selector — a value naming EFI/UEFI sets --firmware efi, anything else bios", "example": "UEFI" },
                   "hostbridge": { "type": "string", "description": "Chipset (i440fx maps to piix3)", "example": "i440fx" },
-                  "diskif": { "type": "string", "description": "No VirtualBox modifyvm analog — accepted, reported as skipped" },
+                  "diskif": { "type": "string", "description": "Storage controller type is fixed once media attach — accepted, reported as skipped (set it at CREATE via zones.diskif)" },
+                  "boot_order": { "type": "array", "items": { "type": "string", "enum": ["floppy", "dvd", "disk", "net", "none"] }, "description": "Ordered boot devices → --boot1..4; remaining slots cleared", "example": ["dvd", "disk"] },
+                  "vbox": { "type": "object", "description": "The generic modifyvm passthrough at MODIFY too (same shape as create): {directives: [{directive, value}]} — any --flag=value", "properties": { "directives": { "type": "array", "items": { "type": "object", "properties": { "directive": { "type": "string" }, "value": { "type": "string" } } } } } },
                   "netif": { "type": "string", "description": "Adapter hardware type for every configured NIC", "enum": ["virtio", "e1000"] },
                   "os_type": { "type": "string", "example": "Debian_64" },
                   "vnc": { "type": "string", "description": "VRDE remote display on/off", "example": "on" },
@@ -1296,7 +1330,8 @@
                   "cloud_init": { "type": "object", "description": "Guest-property updates (enabled/dns_domain/password/resolvers/sshkey vocabulary)" },
                   "provisioner": { "type": "object", "description": "The Hosts.yml host-entry document, stored verbatim (DB-immediate)" },
                   "notes": { "type": "string", "nullable": true, "description": "Registry-only, applied immediately" },
-                  "tags": { "type": "array", "nullable": true, "items": { "type": "string" }, "description": "Registry-only, applied immediately" }
+                  "tags": { "type": "array", "nullable": true, "items": { "type": "string" }, "description": "Registry-only, applied immediately" },
+                  "boot_priority": { "type": "integer", "minimum": 1, "maximum": 100, "description": "Orchestration boot priority (stored in the spec's settings, DB-immediate — VirtualBox never sees it; the base's zonecfg attr analog)" }
                 }
               }
             }
@@ -1316,23 +1351,25 @@
                     "operation": { "type": "string", "example": "machine_modify" },
                     "status": { "type": "string", "description": "pending (task queued) or completed (DB-immediate only)", "example": "pending" },
                     "message": { "type": "string" },
-                    "requires_restart": { "type": "boolean", "description": "true when infrastructure changes were queued — they apply to a powered-off machine and take effect on next boot" }
+                    "requires_restart": { "type": "boolean", "description": "true when infrastructure changes were queued — they apply to a powered-off machine and take effect on next boot" },
+                    "resource_warnings": { "type": "array", "items": { "type": "object" }, "description": "Present when resource validation passed with threshold warnings" }
                   }
                 }
               }
             }
           },
-          "400": { "description": "No modification fields specified, or an invalid field value" },
+          "400": { "description": "No modification fields specified, an invalid field value, or Insufficient resources ({error, details[]} — the resource validation rejection)" },
           "404": { "description": "Machine not found" }
         }
       },
       "delete": {
         "tags": ["Machine Management"],
         "summary": "Delete a machine",
-        "description": "Minimum role: operator. Running machines need force=true, which chains a CRITICAL stop before the CRITICAL delete. The machine is powered off if still running, unregistered from VirtualBox with media deletion, its working directory removed (only when it sits under the machines root — a discovered project's home is never touched), its registry row removed, and its leftover pending tasks cancelled.",
+        "description": "Minimum role: operator. Running machines need force=true, which chains a CRITICAL stop before the CRITICAL delete. The machine is powered off if still running, unregistered from VirtualBox — with media deletion when cleanup_disks (default true) — its working directory removed (only when it sits under the machines root), its registry row removed, and its leftover pending tasks cancelled. SAFETY: media whose file lives OUTSIDE the machine's working directory (user-attached disk images, external ISOs) are ALWAYS detached and preserved regardless of cleanup_disks. cleanup_disks=false unregisters only — every medium file and the working directory stay on disk.",
         "parameters": [
           { "name": "machineName", "in": "path", "required": true, "schema": { "type": "string" } },
-          { "name": "force", "in": "query", "schema": { "type": "boolean", "default": false } }
+          { "name": "force", "in": "query", "schema": { "type": "boolean", "default": false } },
+          { "name": "cleanup_disks", "in": "query", "schema": { "type": "boolean", "default": true }, "description": "false preserves every medium file and the working directory (the base's keep-datasets default, as an explicit flag)" }
         ],
         "responses": {
           "200": {
@@ -1348,7 +1385,8 @@
                     "operation": { "type": "string", "example": "delete" },
                     "status": { "type": "string", "example": "pending" },
                     "message": { "type": "string" },
-                    "force": { "type": "boolean" }
+                    "force": { "type": "boolean" },
+                    "cleanup_disks": { "type": "boolean" }
                   }
                 }
               }
@@ -1390,7 +1428,7 @@
       "post": {
         "tags": ["Machine Management"],
         "summary": "Start a machine",
-        "description": "Minimum role: operator. One native start task for EVERY machine (VBoxManage startvm --type headless) — the provision pipeline queues this same operation as its boot child. Idempotent: already-running machines answer already_running; an existing pending/running start task is reused.",
+        "description": "Minimum role: operator. One native start task for EVERY machine (VBoxManage startvm --type headless) — the provision pipeline queues this same operation as its boot child. Idempotent: already-running machines answer already_running; an existing pending/running start task is reused. With machines.provision_on_start enabled, a machine's VERY FIRST start (stored provisioner document, never provisioned) queues the full provision pipeline instead — the answer carries operation machine_provision_orchestration and the parent task id; later starts, restarts, and document-less machines always boot plainly.",
         "parameters": [
           { "name": "machineName", "in": "path", "required": true, "schema": { "type": "string" } }
         ],
@@ -1480,7 +1518,7 @@
       "post": {
         "tags": ["Machine Management"],
         "summary": "Start the provisioning pipeline",
-        "description": "Minimum role: operator. Orchestrates the full pipeline against the STORED provisioner document (the zoneweaver mechanism): machine_prepare (re-render + refresh the working copy — regenerated before every provision) → boot (the plain start operation as a child, skipped when running or skip_boot) → machine_wait_ssh (credentials = settings.vagrant_user/vagrant_user_pass/vagrant_user_private_key_path, agent provisioning key as last-resort fallback; transport = the provisioning NIC's NAT ssh port-forward at 127.0.0.1 when the machine carries one — vagrant's model, immune to guest network reconfiguration — else the control IP from networks[] is_control → provisional → first; neither existing is a 400) → machine_sync_parent + one machine_sync per folders[] entry (transport per folder.type: rsync | scp; virtualbox/disabled skipped) → machine_provision_parent + one machine_provision per playbook, RUN-FILTERED first (always = every run; not_first = only after a prior success; once/unset = only when never provisioned — judged by configuration.provisioner_state.last_provisioned_at, stamped only when the run's FINAL playbook succeeds: a partial run never marks the machine provisioned, Hosts.rb's results.yml semantics). The extra_vars networks[] carry each adapter's LIVE MAC when the document leaves mac auto/empty (adapter = network index + 2; resolved into the run's variable document only — the stored document is never modified). Prerequisites: provisioner config stored (create auto-fills it; PUT overrides) and a control IP in networks[].",
+        "description": "Minimum role: operator. Orchestrates the full pipeline against the STORED provisioner document (the zoneweaver mechanism): machine_prepare (re-render + refresh the working copy — regenerated before every provision) → boot (the plain start operation as a child, skipped when running or skip_boot) → machine_wait_ssh (credentials = settings.vagrant_user/vagrant_user_pass/vagrant_user_private_key_path, agent provisioning key as last-resort fallback; transport = the provisioning NIC's NAT ssh port-forward at 127.0.0.1 when the machine carries one — vagrant's model, immune to guest network reconfiguration — else the control IP from networks[] is_control → provisional → first; neither existing is a 400) → machine_sync_parent + one machine_sync per folders[] entry (transport per folder.type: rsync | scp, each with a pure-Go fallback when the binary is absent — embedded rsync client / SFTP, loudly narrated in the task output; vagrant is optional; virtualbox/disabled skipped) → machine_provision_parent + one machine_provision per playbook, RUN-FILTERED first (always = every run; not_first = only after a prior success; once/unset = only when never provisioned — judged by configuration.provisioner_state.last_provisioned_at, stamped only when the run's FINAL playbook succeeds: a partial run never marks the machine provisioned, Hosts.rb's results.yml semantics). The extra_vars networks[] carry each adapter's LIVE MAC when the document leaves mac auto/empty (adapter = network index + 2; resolved into the run's variable document only — the stored document is never modified). Prerequisites: provisioner config stored (create auto-fills it; PUT overrides) and a control IP in networks[].",
         "parameters": [
           { "name": "machineName", "in": "path", "required": true, "schema": { "type": "string" } }
         ],
@@ -1579,11 +1617,51 @@
         }
       }
     },
+    "/templates/sources": {
+      "get": {
+        "tags": ["Machine Management"],
+        "summary": "List configured template sources",
+        "description": "Minimum role: viewer. The enabled Vagrant/BoxVault-compatible registries (name, url, default) — credentials are never returned. The base's GET /templates/sources.",
+        "responses": {
+          "200": { "description": "Enabled sources", "content": { "application/json": { "schema": { "type": "object", "properties": { "sources": { "type": "array", "items": { "type": "object", "properties": { "name": { "type": "string" }, "url": { "type": "string" }, "default": { "type": "boolean" } } } } } } } } }
+        }
+      }
+    },
+    "/templates/remote/{sourceName}": {
+      "get": {
+        "tags": ["Machine Management"],
+        "summary": "List a source's remote box catalog",
+        "description": "Minimum role: viewer. Proxies the registry's discovery endpoint (BoxVault's /api/discover): every available box with its versions, providers, and architectures — the machine wizard's box-picker feed. An x-registry-token request header overrides the source's configured auth token (never returned). The base's GET /templates/remote/{sourceName}.",
+        "parameters": [ { "name": "sourceName", "in": "path", "required": true, "schema": { "type": "string" } } ],
+        "responses": {
+          "200": { "description": "The registry's catalog document, relayed verbatim" },
+          "404": { "description": "Source not found or disabled" },
+          "502": { "description": "Remote source unreachable or answered an error" }
+        }
+      }
+    },
+    "/templates/remote/{sourceName}/{org}/{boxName}": {
+      "get": {
+        "tags": ["Machine Management"],
+        "summary": "Get one remote box's metadata",
+        "description": "Minimum role: viewer. Proxies the registry's Vagrant-compatible /{org}/{box} metadata document: versions with providers and download URLs. The base's GET /templates/remote/{sourceName}/{org}/{boxName}.",
+        "parameters": [
+          { "name": "sourceName", "in": "path", "required": true, "schema": { "type": "string" } },
+          { "name": "org", "in": "path", "required": true, "schema": { "type": "string" } },
+          { "name": "boxName", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": { "description": "The box's metadata document, relayed verbatim" },
+          "404": { "description": "Source disabled, or box not on the remote" },
+          "502": { "description": "Remote source unreachable or answered an error" }
+        }
+      }
+    },
     "/machines/{machineName}/clone": {
       "post": {
         "tags": ["Machine Management"],
         "summary": "Clone a machine",
-        "description": "Minimum role: operator. Spec-carrying machines only. The clone is a SPEC copy fed through the SAME create orchestration as POST /machines — it builds real infrastructure (parent + prepare/storage/config/finalize children; response shape identical to create, plus source_machine). settings.hostname is required (a clone must not reuse the source hostname); domain and everything else default from the source spec; overrides (memory, vcpus, …) merge into settings; consoleport and server_id never survive (prefix mode requires a fresh server_id in settings). Cloned networks lose mac/address/gateway/netmask/dns so source and clone can never collide.",
+        "description": "Minimum role: operator. Spec-carrying machines only. TWO disk semantics via source: \"template\" (default) feeds a SPEC copy through the SAME create orchestration as POST /machines — a fresh build from the original template (response shape identical to create, plus source_machine); \"current\" runs ONE machine_clone_current task: VBoxManage clonevm copies the source's CURRENT disk state (the base's ZFS-snapshot clone semantics), the clone gets a fresh provisioning ssh port-forward and VRDE off, MACs reinitialize, and the row lands with the identity-stripped spec — the source must be stopped unless snapshot names a source snapshot to clone from (linked=true makes a differencing clone against it). settings.hostname is required (a clone must not reuse the source hostname); domain and everything else default from the source spec; overrides (memory, vcpus, …) merge into settings; consoleport and server_id never survive (prefix mode requires a fresh server_id in settings). Cloned networks lose mac/address/gateway/netmask/dns so source and clone can never collide; provisional entries draw fresh IPs from the provisioning DHCP range. Resource validation runs first (400 Insufficient resources; storage is skipped for source=current — the footprint is the source's current usage, unknowable from the spec).",
         "parameters": [
           { "name": "machineName", "in": "path", "required": true, "schema": { "type": "string" }, "description": "The SOURCE machine" }
         ],
@@ -1614,7 +1692,10 @@
                       "vcpus": { "type": "integer", "example": 4 }
                     }
                   },
-                  "start_after_create": { "type": "boolean", "default": false }
+                  "start_after_create": { "type": "boolean", "default": false },
+                  "source": { "type": "string", "enum": ["template", "current"], "default": "template", "description": "template = spec rebuild from the original template; current = clonevm of today's disk state" },
+                  "snapshot": { "type": "string", "description": "source=current only: clone from this source snapshot (required for linked, and for cloning a RUNNING source)" },
+                  "linked": { "type": "boolean", "default": false, "description": "source=current only: differencing clone against snapshot instead of a full copy" }
                 }
               }
             }
@@ -1622,7 +1703,7 @@
         },
         "responses": {
           "200": {
-            "description": "Clone create orchestration queued (the row lands at the finalize child)",
+            "description": "Clone create orchestration queued (the row lands at the finalize child); source=current answers {task_id, operation: machine_clone_current, ...} (+start_task_id) instead",
             "content": {
               "application/json": {
                 "schema": {
@@ -1993,7 +2074,7 @@
       "get": {
         "tags": ["Provisioning"],
         "summary": "Provisioning network status",
-        "description": "Minimum role: viewer. The dedicated provisioning network (the zoneweaver mechanism's etherstub+dhcpd, as ONE VirtualBox host-only interface — identified by provisioning.network.host_ip, since VirtualBox assigns interface names itself — plus its DHCP server). Disabled answers just {enabled:false, message}; enabled answers ready + per-component existence + the effective configuration. NAT/forwarding components are deliberately absent: a host-only network reaches the host directly, which is everything the pipeline needs.",
+        "description": "Minimum role: viewer. The dedicated provisioning network (the zoneweaver mechanism's etherstub+dhcpd, as ONE VirtualBox host-only interface — identified by provisioning.network.host_ip, since VirtualBox assigns interface names itself — plus its DHCP server). Disabled answers just {enabled:false, message}; enabled answers ready + per-component existence + the effective configuration. The base's NAT/forwarding components translate to the create-time NAT adapter + ssh port-forward transport (the provisioning NIC); this host-only machinery stays dormant-but-available for host-type networks[] entries and build-it-yourself setups.",
         "responses": {
           "200": {
             "description": "Provisioning network status",
@@ -2022,6 +2103,60 @@
         "responses": {
           "202": { "description": "Teardown task queued" },
           "400": { "description": "Provisioning network is disabled in configuration" }
+        }
+      }
+    },
+    "/provisioning/profiles": {
+      "get": {
+        "tags": ["Provisioning"],
+        "summary": "List provisioning profiles",
+        "description": "Minimum role: viewer. Reusable bundles of credentials, sync folders, provisioners, and variables — composed in the UI without bundling a Hosts.yml or provisioner package, applied by feeding the pieces into a machine's provisioner document (PUT /machines/{name}).",
+        "responses": {
+          "200": { "description": "Profiles", "content": { "application/json": { "schema": { "type": "object", "properties": { "success": { "type": "boolean" }, "count": { "type": "integer" }, "profiles": { "type": "array", "items": { "$ref": "#/components/schemas/ProvisioningProfile" } } } } } } }
+        }
+      },
+      "post": {
+        "tags": ["Provisioning"],
+        "summary": "Create a provisioning profile",
+        "description": "Minimum role: operator. name is required and unique.",
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ProvisioningProfile" } } } },
+        "responses": {
+          "201": { "description": "Profile created", "content": { "application/json": { "schema": { "type": "object", "properties": { "success": { "type": "boolean" }, "profile": { "$ref": "#/components/schemas/ProvisioningProfile" } } } } } },
+          "400": { "description": "Missing name" },
+          "409": { "description": "Profile name already exists" }
+        }
+      }
+    },
+    "/provisioning/profiles/{profileId}": {
+      "get": {
+        "tags": ["Provisioning"],
+        "summary": "Profile details",
+        "description": "Minimum role: viewer.",
+        "parameters": [ { "name": "profileId", "in": "path", "required": true, "schema": { "type": "integer" } } ],
+        "responses": {
+          "200": { "description": "The profile" },
+          "404": { "description": "Profile not found" }
+        }
+      },
+      "put": {
+        "tags": ["Provisioning"],
+        "summary": "Update a provisioning profile",
+        "description": "Minimum role: operator. Only submitted fields change.",
+        "parameters": [ { "name": "profileId", "in": "path", "required": true, "schema": { "type": "integer" } } ],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ProvisioningProfile" } } } },
+        "responses": {
+          "200": { "description": "Profile updated" },
+          "404": { "description": "Profile not found" }
+        }
+      },
+      "delete": {
+        "tags": ["Provisioning"],
+        "summary": "Delete a provisioning profile",
+        "description": "Minimum role: operator.",
+        "parameters": [ { "name": "profileId", "in": "path", "required": true, "schema": { "type": "integer" } } ],
+        "responses": {
+          "200": { "description": "Profile deleted" },
+          "404": { "description": "Profile not found" }
         }
       }
     },
@@ -3605,6 +3740,393 @@
             "description": "Backup not found",
             "content": { "application/json": { "schema": { "$ref": "#/components/schemas/WrappedError" } } }
           }
+        }
+      }
+    },
+    "/machines/orchestration/status": {
+      "get": {
+        "tags": ["Machine Management"],
+        "summary": "Orchestration status",
+        "description": "Minimum role: viewer. Whether ordered startup/shutdown is enabled (machines.orchestration.enabled) and the configured strategy. The base's SMF-controller handoff is illumos-only — this agent is the only lifecycle controller on its platform, so controller is hyperweaver-agent or none.",
+        "responses": {
+          "200": { "description": "Orchestration status", "content": { "application/json": { "schema": { "type": "object", "properties": { "success": { "type": "boolean" }, "message": { "type": "string" }, "orchestration_enabled": { "type": "boolean" }, "controller": { "type": "string", "enum": ["hyperweaver-agent", "none"] }, "strategy": { "type": "string" } } } } } }
+        }
+      }
+    },
+    "/machines/orchestration/enable": {
+      "post": {
+        "tags": ["Machine Management"],
+        "summary": "Enable machine orchestration",
+        "description": "Minimum role: operator. Requires {\"confirm\": true}. Persists machines.orchestration.enabled to config.yaml and applies live: on the NEXT agent startup, autostart machines (zones.autostart in the spec) boot in settings.boot_priority order, highest first; agent exit with keep_running_on_exit false stops machines lowest-first.",
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "required": ["confirm"], "properties": { "confirm": { "type": "boolean" } } } } } },
+        "responses": {
+          "200": { "description": "Orchestration enabled" },
+          "400": { "description": "Missing confirmation" }
+        }
+      }
+    },
+    "/machines/orchestration/disable": {
+      "post": {
+        "tags": ["Machine Management"],
+        "summary": "Disable machine orchestration",
+        "description": "Minimum role: operator. Persists machines.orchestration.enabled: false.",
+        "responses": {
+          "200": { "description": "Orchestration disabled" }
+        }
+      }
+    },
+    "/machines/orchestration/test": {
+      "post": {
+        "tags": ["Machine Management"],
+        "summary": "Test orchestration (dry run)",
+        "description": "Minimum role: operator. Computes the SHUTDOWN execution plan over running machines — priority groups of ten, lowest first — without executing anything, plus a duration estimate (30s between groups + 120s per machine in the largest group, the base's arithmetic).",
+        "requestBody": { "required": false, "content": { "application/json": { "schema": { "type": "object", "properties": { "strategy": { "type": "string", "enum": ["sequential", "parallel_by_priority", "staggered"] } } } } } },
+        "responses": {
+          "200": { "description": "Execution plan", "content": { "application/json": { "schema": { "type": "object", "properties": { "success": { "type": "boolean" }, "message": { "type": "string" }, "execution_plan": { "type": "array", "items": { "type": "object", "properties": { "priority_range": { "type": "integer" }, "machines": { "type": "array", "items": { "type": "object", "properties": { "name": { "type": "string" }, "priority": { "type": "integer" }, "state": { "type": "string" } } } } } } }, "total_machines": { "type": "integer" }, "estimated_duration": { "type": "integer" }, "strategy": { "type": "string" } } } } } },
+          "400": { "description": "Invalid strategy" }
+        }
+      }
+    },
+    "/machines/priorities": {
+      "get": {
+        "tags": ["Machine Management"],
+        "summary": "Machine boot priorities",
+        "description": "Minimum role: viewer. Every machine with its boot priority (settings.boot_priority, 1-100, default 95 — set via PUT /machines/{name} {boot_priority}, DB-immediate) plus the tens-range grouping.",
+        "responses": {
+          "200": { "description": "Priorities", "content": { "application/json": { "schema": { "type": "object", "properties": { "success": { "type": "boolean" }, "message": { "type": "string" }, "machines": { "type": "array", "items": { "type": "object", "properties": { "name": { "type": "string" }, "priority": { "type": "integer" }, "state": { "type": "string" }, "has_custom_priority": { "type": "boolean" } } } }, "total_machines": { "type": "integer" }, "priority_groups": { "type": "object" } } } } } }
+        }
+      }
+    },
+    "/machines/{machineName}/reset": {
+      "post": {
+        "tags": ["Machine Management"],
+        "summary": "Hard-reset a machine",
+        "description": "Minimum role: operator. VBoxManage controlvm reset — the hard reboot beyond the stop→start chain (no guest shutdown; like pressing the reset button).",
+        "parameters": [ { "name": "machineName", "in": "path", "required": true, "schema": { "type": "string" } } ],
+        "responses": {
+          "200": { "description": "Reset task queued", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/QueuedOperation" } } } },
+          "400": { "description": "Machine is not running" },
+          "404": { "description": "Machine not found" }
+        }
+      }
+    },
+    "/machines/{machineName}/pause": {
+      "post": {
+        "tags": ["Machine Management"],
+        "summary": "Pause a machine",
+        "description": "Minimum role: operator. VBoxManage controlvm pause — execution freezes in RAM (resume continues it; unlike suspend's save-to-disk).",
+        "parameters": [ { "name": "machineName", "in": "path", "required": true, "schema": { "type": "string" } } ],
+        "responses": {
+          "200": { "description": "Pause task queued", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/QueuedOperation" } } } },
+          "400": { "description": "Machine is not running" },
+          "404": { "description": "Machine not found" }
+        }
+      }
+    },
+    "/machines/{machineName}/resume": {
+      "post": {
+        "tags": ["Machine Management"],
+        "summary": "Resume a paused machine",
+        "description": "Minimum role: operator. VBoxManage controlvm resume.",
+        "parameters": [ { "name": "machineName", "in": "path", "required": true, "schema": { "type": "string" } } ],
+        "responses": {
+          "200": { "description": "Resume task queued", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/QueuedOperation" } } } },
+          "400": { "description": "Machine is not paused" },
+          "404": { "description": "Machine not found" }
+        }
+      }
+    },
+    "/machines/{machineName}/snapshots": {
+      "get": {
+        "tags": ["Machine Management"],
+        "summary": "List a machine's snapshots",
+        "description": "Minimum role: viewer (the machine-snapshots capability token). Synchronous — the live VirtualBox snapshot tree. node encodes the tree position (SnapshotName, SnapshotName-1, SnapshotName-1-1, ...); current marks the snapshot the machine's state derives from.",
+        "parameters": [ { "name": "machineName", "in": "path", "required": true, "schema": { "type": "string" } } ],
+        "responses": {
+          "200": {
+            "description": "The snapshot tree (empty array when none)",
+            "content": { "application/json": { "schema": { "type": "object", "properties": { "machine_name": { "type": "string" }, "snapshots": { "type": "array", "items": { "type": "object", "properties": { "name": { "type": "string" }, "uuid": { "type": "string" }, "description": { "type": "string" }, "node": { "type": "string" }, "current": { "type": "boolean" } } } }, "total": { "type": "integer" } } } } }
+          },
+          "404": { "description": "Machine not found, or no VM exists behind it yet" },
+          "503": { "description": "VirtualBox is not installed" }
+        }
+      },
+      "post": {
+        "tags": ["Machine Management"],
+        "summary": "Take a snapshot",
+        "description": "Minimum role: operator. Queues snapshot_take (VBoxManage snapshot take). Works on running and stopped machines; live=true avoids pausing a running machine.",
+        "parameters": [ { "name": "machineName", "in": "path", "required": true, "schema": { "type": "string" } } ],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "type": "object", "required": ["name"], "properties": { "name": { "type": "string", "example": "before-upgrade" }, "description": { "type": "string" }, "live": { "type": "boolean", "default": false } } } } }
+        },
+        "responses": {
+          "200": { "description": "Snapshot task queued", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/QueuedOperation" } } } },
+          "400": { "description": "Missing name" },
+          "404": { "description": "Machine not found" }
+        }
+      }
+    },
+    "/machines/{machineName}/snapshots/{snapshotName}/restore": {
+      "post": {
+        "tags": ["Machine Management"],
+        "summary": "Restore a snapshot",
+        "description": "Minimum role: operator. Queues snapshot_restore — the machine reverts to the snapshot's state. VirtualBox only restores powered-off machines; the task fails with guidance while it runs.",
+        "parameters": [
+          { "name": "machineName", "in": "path", "required": true, "schema": { "type": "string" } },
+          { "name": "snapshotName", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": { "description": "Restore task queued", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/QueuedOperation" } } } },
+          "404": { "description": "Machine not found" }
+        }
+      }
+    },
+    "/machines/{machineName}/snapshots/{snapshotName}": {
+      "delete": {
+        "tags": ["Machine Management"],
+        "summary": "Delete a snapshot",
+        "description": "Minimum role: operator. Queues snapshot_delete — the snapshot's state merges into its children.",
+        "parameters": [
+          { "name": "machineName", "in": "path", "required": true, "schema": { "type": "string" } },
+          { "name": "snapshotName", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": { "description": "Snapshot delete task queued", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/QueuedOperation" } } } },
+          "404": { "description": "Machine not found" }
+        }
+      }
+    },
+    "/machines/{machineName}/guest-properties": {
+      "get": {
+        "tags": ["Machine Management"],
+        "summary": "Enumerate guest properties",
+        "description": "Minimum role: viewer. Synchronous VBoxManage guestproperty enumerate — the post-boot view: guest-additions data (/VirtualBox/GuestInfo/Net/* carries the guest's live IPs), OS info, and this agent's cloud-init keys.",
+        "parameters": [ { "name": "machineName", "in": "path", "required": true, "schema": { "type": "string" } } ],
+        "responses": {
+          "200": {
+            "description": "Guest properties",
+            "content": { "application/json": { "schema": { "type": "object", "properties": { "machine_name": { "type": "string" }, "properties": { "type": "array", "items": { "type": "object", "properties": { "name": { "type": "string", "example": "/VirtualBox/GuestInfo/Net/0/V4/IP" }, "value": { "type": "string" }, "timestamp": { "type": "string" }, "flags": { "type": "string" } } } }, "total": { "type": "integer" } } } } }
+          },
+          "404": { "description": "Machine not found, or no VM exists behind it yet" },
+          "503": { "description": "VirtualBox is not installed" }
+        }
+      }
+    },
+    "/ws-ticket": {
+      "get": {
+        "tags": ["Console"],
+        "summary": "Mint a WebSocket upgrade ticket",
+        "description": "Minimum role: operator. A short-lived (60s) UNBOUND ticket appended as ?ticket= to every WebSocket upgrade URL (task stream, SSH terminal, VNC websockify). Reusable within its lifetime; fetch a fresh one before each connect or reconnect.",
+        "responses": {
+          "200": {
+            "description": "Ticket minted",
+            "content": { "application/json": { "schema": { "type": "object", "properties": { "ticket": { "type": "string", "description": "64 hex chars, valid 60 seconds" } } } } }
+          }
+        }
+      }
+    },
+    "/tasks/{taskId}/stream": {
+      "get": {
+        "tags": ["Console"],
+        "summary": "Live task output stream (WebSocket)",
+        "description": "WEBSOCKET upgrade — authenticate with ?ticket= (GET /ws-ticket), not API-key headers. Replays the task's buffered (or persisted) output as {type: \"output\", task_id, stream, data, timestamp} frames, streams live entries while the task runs, then sends {type: \"status\", task_id, status} and closes. Already-finished tasks get the full replay plus the status frame immediately.",
+        "security": [],
+        "parameters": [
+          { "name": "taskId", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } },
+          { "name": "ticket", "in": "query", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "101": { "description": "Switching Protocols — the stream begins" },
+          "401": { "description": "Missing or invalid ticket" },
+          "404": { "description": "Task not found" }
+        }
+      }
+    },
+    "/machines/{machineName}/ssh/start": {
+      "post": {
+        "tags": ["Console"],
+        "summary": "Start an SSH terminal session",
+        "description": "Minimum role: operator. Mints an SSH terminal session for a RUNNING machine; connect the terminal at the /ssh/{sessionId} WebSocket. Each call is an independent session. Credentials come from the stored configuration (settings.vagrant_user/vagrant_user_pass/vagrant_user_private_key_path; the agent's provisioning key is the last-resort fallback). Transport = the pipeline's ladder: the provisioning NAT ssh port-forward first (immune to guest network reconfiguration), the document's control IP as fallback.",
+        "parameters": [ { "name": "machineName", "in": "path", "required": true, "schema": { "type": "string" } } ],
+        "responses": {
+          "200": {
+            "description": "Session created",
+            "content": { "application/json": { "schema": { "type": "object", "properties": { "id": { "type": "string" }, "machine_name": { "type": "string" }, "status": { "type": "string", "enum": ["connecting", "active", "closed", "failed"] }, "ssh_host": { "type": "string" }, "ssh_port": { "type": "integer" }, "ssh_username": { "type": "string" }, "created_at": { "type": "string", "format": "date-time" }, "last_activity": { "type": "string", "format": "date-time" } } } } }
+          },
+          "400": { "description": "Machine not running, no credentials configured, or no SSH transport" },
+          "404": { "description": "Machine not found" }
+        }
+      }
+    },
+    "/ssh/sessions": {
+      "get": {
+        "tags": ["Console"],
+        "summary": "List SSH terminal sessions",
+        "description": "Minimum role: viewer. Newest first. Sessions are in-memory — an agent restart closes them all (shells cannot survive it).",
+        "responses": {
+          "200": { "description": "Sessions", "content": { "application/json": { "schema": { "type": "array", "items": { "type": "object" } } } } }
+        }
+      }
+    },
+    "/ssh/sessions/{sessionId}": {
+      "get": {
+        "tags": ["Console"],
+        "summary": "SSH session information",
+        "description": "Minimum role: viewer.",
+        "parameters": [ { "name": "sessionId", "in": "path", "required": true, "schema": { "type": "string" } } ],
+        "responses": {
+          "200": { "description": "The session" },
+          "404": { "description": "SSH session not found" }
+        }
+      }
+    },
+    "/ssh/sessions/{sessionId}/stop": {
+      "delete": {
+        "tags": ["Console"],
+        "summary": "Stop an SSH session",
+        "description": "Minimum role: operator. Closes the shell and marks the session closed.",
+        "parameters": [ { "name": "sessionId", "in": "path", "required": true, "schema": { "type": "string" } } ],
+        "responses": {
+          "200": { "description": "Session stopped" },
+          "404": { "description": "SSH session not found" }
+        }
+      }
+    },
+    "/ssh/{sessionId}": {
+      "get": {
+        "tags": ["Console"],
+        "summary": "SSH terminal (WebSocket)",
+        "description": "WEBSOCKET upgrade — authenticate with ?ticket= (GET /ws-ticket). Opens the interactive shell (xterm-256color PTY) for a session minted at POST /machines/{name}/ssh/start. Wire: remote output arrives as raw text frames; send raw text as terminal input; send {\"type\": \"resize\", \"cols\": N, \"rows\": N} JSON frames to resize the PTY. \"Connecting to SSH...\" opens the stream; \"SSH connection closed.\" marks remote exit.",
+        "security": [],
+        "parameters": [
+          { "name": "sessionId", "in": "path", "required": true, "schema": { "type": "string" } },
+          { "name": "ticket", "in": "query", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "101": { "description": "Switching Protocols — the terminal begins" },
+          "401": { "description": "Missing or invalid ticket" },
+          "404": { "description": "SSH session or machine not found" }
+        }
+      }
+    },
+    "/machines/{machineName}/vnc": {
+      "get": {
+        "tags": ["Console"],
+        "summary": "VNC console state",
+        "description": "Minimum role: viewer. The machine's live VRDE console state — everything the UI needs before connecting: whether VRDE is on and its port, whether the host can actually speak VNC on it (vnc_capable: a usable VBoxVNC extpack module; without it the VRDE port speaks RDP, which noVNC cannot), and the websockify URL.",
+        "parameters": [ { "name": "machineName", "in": "path", "required": true, "schema": { "type": "string" } } ],
+        "responses": {
+          "200": {
+            "description": "Console state",
+            "content": { "application/json": { "schema": { "type": "object", "properties": { "machine_name": { "type": "string" }, "vrde_enabled": { "type": "boolean" }, "vrde_port": { "type": "integer" }, "vnc_capable": { "type": "boolean" }, "running": { "type": "boolean" }, "websocket_url": { "type": "string" } } } } }
+          },
+          "404": { "description": "Machine not found, or no VM exists behind it yet" },
+          "503": { "description": "VirtualBox is not installed" }
+        }
+      }
+    },
+    "/machines/{machineName}/vnc/screenshot": {
+      "get": {
+        "tags": ["Console"],
+        "summary": "Console screenshot",
+        "description": "Minimum role: viewer (the machine-screenshot capability token). Synchronous PNG capture of the running machine's framebuffer (VBoxManage controlvm screenshotpng) — no console session or extpack needed.",
+        "parameters": [ { "name": "machineName", "in": "path", "required": true, "schema": { "type": "string" } } ],
+        "responses": {
+          "200": { "description": "PNG screenshot", "content": { "image/png": { "schema": { "type": "string", "format": "binary" } } } },
+          "404": { "description": "Machine not found" },
+          "502": { "description": "Machine not running, or capture failed" },
+          "503": { "description": "VirtualBox is not installed" }
+        }
+      }
+    },
+    "/machines/{machineName}/vnc/websockify": {
+      "get": {
+        "tags": ["Console"],
+        "summary": "VNC console bridge (WebSocket)",
+        "description": "WEBSOCKET upgrade — authenticate with ?ticket= (GET /ws-ticket). Bridges binary WebSocket frames onto the running machine's VRDE port (subprotocol \"binary\" — noVNC's wire). Requires an active VRDE console (settings.consoleport at create, or vnc: on via modify) AND a VNC-speaking VRDE module (the console list advertises vnc only then).",
+        "security": [],
+        "parameters": [
+          { "name": "machineName", "in": "path", "required": true, "schema": { "type": "string" } },
+          { "name": "ticket", "in": "query", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "101": { "description": "Switching Protocols — RFB flows" },
+          "400": { "description": "Machine not running, or no active VRDE console" },
+          "401": { "description": "Missing or invalid ticket" },
+          "404": { "description": "Machine not found" },
+          "502": { "description": "Console server connection failed" }
+        }
+      }
+    },
+    "/templates/{templateId}": {
+      "get": {
+        "tags": ["Machine Management"],
+        "summary": "Local template details",
+        "description": "Minimum role: viewer. One local template registry row (the base's GET /templates/local/{id}).",
+        "parameters": [ { "name": "templateId", "in": "path", "required": true, "schema": { "type": "integer" } } ],
+        "responses": {
+          "200": { "description": "The template row" },
+          "404": { "description": "Template not found" }
+        }
+      },
+      "delete": {
+        "tags": ["Machine Management"],
+        "summary": "Delete a local template",
+        "description": "Minimum role: operator. Queues template_delete: the disk image is released from VirtualBox's media registry and deleted, the version directory pruned, the row removed. Machines already built from it are untouched (they cloned their own media).",
+        "parameters": [ { "name": "templateId", "in": "path", "required": true, "schema": { "type": "integer" } } ],
+        "responses": {
+          "202": { "description": "Delete task created" },
+          "404": { "description": "Template not found" }
+        }
+      }
+    },
+    "/templates/{templateId}/move": {
+      "post": {
+        "tags": ["Machine Management"],
+        "summary": "Move a template's storage",
+        "description": "Minimum role: operator. Queues template_move: the disk image relocates to <target_path>/<org>/<box>/<version>/ (same-volume rename; cross-volume copy+delete) and the row's disk_path updates — the base's template move (zfs rename vs send-recv) in file terms.",
+        "parameters": [ { "name": "templateId", "in": "path", "required": true, "schema": { "type": "integer" } } ],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "type": "object", "required": ["target_path"], "properties": { "target_path": { "type": "string", "description": "The NEW storage root — the org/box/version layout is recreated beneath it" } } } } }
+        },
+        "responses": {
+          "202": { "description": "Move task created" },
+          "400": { "description": "Missing target_path" },
+          "404": { "description": "Template not found" }
+        }
+      }
+    },
+    "/templates/export": {
+      "post": {
+        "tags": ["Machine Management"],
+        "summary": "Export a machine to a local .box",
+        "description": "Minimum role: operator. Queues template_export (the machine must be powered off): VBoxManage export writes the machine as OVF + disk images, metadata.json marks provider virtualbox, and the tar.gz lands as a standard Vagrant box under <templates root>/exports/ — the path and sha256 in the task output. The base's zone → .box export in VirtualBox terms.",
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "type": "object", "required": ["machine_name"], "properties": { "machine_name": { "type": "string" }, "filename": { "type": "string", "description": "Optional custom filename (defaults to <machine>-<unix-ts>.box)" } } } } }
+        },
+        "responses": {
+          "202": { "description": "Export task created" },
+          "400": { "description": "Missing machine_name" },
+          "404": { "description": "Machine not found" }
+        }
+      }
+    },
+    "/templates/publish": {
+      "post": {
+        "tags": ["Machine Management"],
+        "summary": "Publish a template to a registry",
+        "description": "Minimum role: operator. Queues template_upload (the base's publish): exports the machine (or takes an existing .box by path), ensures the registry structure (box → version → provider virtualbox → architecture; duplicates tolerated), chunk-uploads the artifact (100MB chunks, three retries with backoff), and releases the box. Registry credentials live on the configured source ONLY (auth_token, or username+api_key exchanged for a JWT at signin; ca_file trusts self-signed registries) — tokens never ride task metadata, so the base's per-request auth_token has no analog.",
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "type": "object", "required": ["source_name", "organization", "box_name", "version"], "properties": { "machine_name": { "type": "string", "description": "Machine to export and publish (required unless box_path)" }, "box_path": { "type": "string", "description": "Existing .box file to publish (required unless machine_name)" }, "source_name": { "type": "string" }, "organization": { "type": "string" }, "box_name": { "type": "string" }, "version": { "type": "string" }, "description": { "type": "string" }, "architecture": { "type": "string", "default": "amd64" } } } } }
+        },
+        "responses": {
+          "202": { "description": "Publish task created" },
+          "400": { "description": "Missing required fields" },
+          "404": { "description": "Machine not found" }
         }
       }
     },

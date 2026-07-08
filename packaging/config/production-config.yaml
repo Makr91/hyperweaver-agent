@@ -168,6 +168,10 @@ machines:
   # keepserversrunning). false force-powers-off every machine this agent
   # created on the way out; discovered VMs are never touched.
   keep_running_on_exit: true
+  # Run the full provision pipeline on a machine's VERY FIRST start (stored
+  # provisioner document present, never provisioned) instead of a bare boot.
+  # Later starts, restarts, and document-less machines always boot plainly.
+  provision_on_start: false
 
 provisioning:
   # Directory holding provisioner packages (SHI's on-disk format:
@@ -271,3 +275,6 @@ host_power:
   # this agent runs on — remote power control for headless hosts. Set false
   # to remove the surface entirely.
   enabled: true
+  # Keep the host awake while the agent runs (systemd-logind sleep inhibitor
+  # on Linux). System sleep only — the display may still sleep and lock.
+  prevent_sleep: false

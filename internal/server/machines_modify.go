@@ -22,9 +22,10 @@ import (
 // must be present or the request is a 400.
 var modifyChangeFields = []string{
 	"ram", "vcpus", "bootrom", "hostbridge", "diskif", "netif", "os_type",
-	"vnc", "acpi", "xhci", "autoboot",
+	"vnc", "acpi", "xhci", "autoboot", "boot_order", "vbox",
 	"add_nics", "remove_nics", "add_disks", "remove_disks",
 	"add_cdroms", "remove_cdroms", "cloud_init", "provisioner", "notes", "tags",
+	"boot_priority",
 }
 
 // modifyCompleted answers the base's DB-only early returns: the change is
@@ -91,6 +92,41 @@ func (s *Server) applyModifyTags(w http.ResponseWriter, r *http.Request, machine
 	return true
 }
 
+// applyModifyBootPriority stores settings.boot_priority into the machine's
+// spec (1-100; DB-immediate — orchestration reads it, VirtualBox never does).
+// False return = response already written.
+func (s *Server) applyModifyBootPriority(w http.ResponseWriter, r *http.Request,
+	machine *machines.Machine, body map[string]any,
+) bool {
+	priority := int(machines.DocInt(body["boot_priority"], 0))
+	if priority < 1 || priority > 100 {
+		taskError(w, http.StatusBadRequest, "boot_priority must be 1-100")
+		return false
+	}
+	spec, err := machines.ParseSpec(machine)
+	if err != nil {
+		taskError(w, http.StatusBadRequest,
+			"Only machines this agent created carry a spec to hold boot_priority (discovered VM)")
+		return false
+	}
+	if spec.Settings == nil {
+		spec.Settings = map[string]any{}
+	}
+	spec.Settings["boot_priority"] = priority
+	raw, err := json.Marshal(spec)
+	if err != nil {
+		taskError(w, http.StatusInternalServerError, "Failed to update boot priority")
+		return false
+	}
+	serverID := machines.DocString(spec.Settings["server_id"], "")
+	if err := s.machines.SetSpec(r.Context(), machine.Name, raw, serverID); err != nil {
+		slog.Error("update boot priority", "machine", machine.Name, "error", err)
+		taskError(w, http.StatusInternalServerError, "Failed to update boot priority")
+		return false
+	}
+	return true
+}
+
 // handleModifyMachine executes the modify mechanism end to end.
 func (s *Server) handleModifyMachine(w http.ResponseWriter, r *http.Request) {
 	machine := s.findMachine(w, r)
@@ -119,16 +155,21 @@ func (s *Server) handleModifyMachine(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// notes/tags apply immediately (DB only, no task).
+	// notes/tags/boot_priority apply immediately (DB only, no task —
+	// boot_priority is orchestration metadata in the spec, the base's
+	// zonecfg-attr analog; VirtualBox never sees it).
 	if present("notes") && !s.applyModifyNotes(w, r, machine.Name, body) {
 		return
 	}
 	if present("tags") && !s.applyModifyTags(w, r, machine.Name, body) {
 		return
 	}
+	if present("boot_priority") && !s.applyModifyBootPriority(w, r, machine, body) {
+		return
+	}
 	hasOther := false
 	for _, field := range modifyChangeFields {
-		if field == "notes" || field == "tags" {
+		if field == "notes" || field == "tags" || field == "boot_priority" {
 			continue
 		}
 		if present(field) {
@@ -174,6 +215,15 @@ func (s *Server) handleModifyMachine(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Pre-flight resource validation on the changed fields (add_disks/ram/
+	// vcpus), excluding this machine from committed sums — the base's modify
+	// hook.
+	resourceErrors, resourceWarnings := s.validateModificationResources(r.Context(), body, machine.Name)
+	if len(resourceErrors) > 0 {
+		insufficientResources(w, resourceErrors)
+		return
+	}
+
 	// Infrastructure changes queue the machine_modify task — metadata is the
 	// body verbatim (the base's rule). VirtualBox applies them only to a
 	// powered-off machine; the executor enforces that.
@@ -198,7 +248,7 @@ func (s *Server) handleModifyMachine(w http.ResponseWriter, r *http.Request) {
 	}
 	slog.Info("machine modification queued", "machine", machine.Name,
 		"task_id", task.ID, "by", auth.FromContext(r.Context()).Name)
-	writeJSON(w, map[string]any{
+	response := map[string]any{
 		"success":          true,
 		"task_id":          task.ID,
 		"machine_name":     machine.Name,
@@ -206,5 +256,9 @@ func (s *Server) handleModifyMachine(w http.ResponseWriter, r *http.Request) {
 		"status":           tasks.StatusPending,
 		"message":          "Modification queued. The machine must be powered off for the task to apply; changes take effect on next boot.",
 		"requires_restart": true,
-	})
+	}
+	if len(resourceWarnings) > 0 {
+		response["resource_warnings"] = resourceWarnings
+	}
+	writeJSON(w, response)
 }

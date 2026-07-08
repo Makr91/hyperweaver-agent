@@ -27,9 +27,11 @@ import (
 	"github.com/Makr91/hyperweaver-agent/internal/config"
 	"github.com/Makr91/hyperweaver-agent/internal/db"
 	"github.com/Makr91/hyperweaver-agent/internal/hostpower"
+	"github.com/Makr91/hyperweaver-agent/internal/keepawake"
 	"github.com/Makr91/hyperweaver-agent/internal/keys"
 	"github.com/Makr91/hyperweaver-agent/internal/localclient"
 	"github.com/Makr91/hyperweaver-agent/internal/logging"
+	"github.com/Makr91/hyperweaver-agent/internal/loginitem"
 	"github.com/Makr91/hyperweaver-agent/internal/machines"
 	"github.com/Makr91/hyperweaver-agent/internal/monitoring"
 	"github.com/Makr91/hyperweaver-agent/internal/openbrowser"
@@ -102,6 +104,18 @@ func run() error {
 		pendingProtocolOpen = true
 	}
 
+	// SHI's preventsystemfromsleep: hold the OS's native sleep inhibitor for
+	// the agent's whole runtime (tray and headless alike). Failure only logs —
+	// a host that cannot inhibit sleep still provisions.
+	if cfg.HostPower.PreventSleep {
+		if release, kerr := keepawake.Acquire("Hyperweaver Agent: host_power.prevent_sleep"); kerr != nil {
+			slog.Warn("sleep prevention unavailable", "error", kerr)
+		} else {
+			defer release()
+			slog.Info("system sleep prevention active (host_power.prevent_sleep)")
+		}
+	}
+
 	keyStore, err := keys.Open(cfg.KeyStorePath())
 	if err != nil {
 		slog.Error("key store setup failed", "error", err)
@@ -159,6 +173,14 @@ func run() error {
 		restartArgs = append(restartArgs, "--headless")
 	}
 
+	// startup.start_at_login: converge the OS login-item registration onto
+	// the configured state (registered with these same arguments). Failure
+	// only logs — a broken registration never stops the agent.
+	if serr := loginitem.Sync(cfg.Startup.StartAtLogin, restartArgs); serr != nil {
+		slog.Warn("start-at-login registration failed", "error", serr,
+			"start_at_login", cfg.Startup.StartAtLogin)
+	}
+
 	systems, err := setupTasks(cfg, secretsStore)
 	if err != nil {
 		slog.Error("task system setup failed", "error", err)
@@ -214,6 +236,13 @@ func run() error {
 	taskQueue.Start()
 	reconciler.Start()
 	monitor.Start()
+
+	// Machine orchestration startup (the base's startZoneOrchestration):
+	// autostart machines boot in boot_priority order, highest first — plain
+	// start tasks through the queue, skipping machines already running.
+	if cfg.Machines.Orchestration.Enabled {
+		go machines.StartupOrchestration(context.Background(), systems.machines, taskQueue)
+	}
 
 	// Installer-bundled provisioner packages extract on startup — never
 	// clobbering existing versions, so every boot is safe — and likewise
@@ -396,6 +425,7 @@ func setupTasks(cfg *config.Config, secretsStore *secrets.Store) (*agentSystems,
 	// one ordered list.
 	agentMigrations := append(append([]string{}, machines.Migrations...), assets.Migrations...)
 	agentMigrations = append(agentMigrations, machines.TemplateMigrations...)
+	agentMigrations = append(agentMigrations, machines.ProfileMigrations...)
 	agentDB, err := openDB(agentPath, agentMigrations)
 	if err != nil {
 		_ = tasksDB.Close()
@@ -406,7 +436,7 @@ func setupTasks(cfg *config.Config, secretsStore *secrets.Store) (*agentSystems,
 	// them all, and the closer releases them in reverse-open order.
 	handles := []server.DBHandle{
 		{Name: "tasks.sqlite", Path: tasksPath, DB: tasksDB, Tables: []string{"tasks"}},
-		{Name: "agent.sqlite", Path: agentPath, DB: agentDB, Tables: []string{"machines", "artifacts"}},
+		{Name: "agent.sqlite", Path: agentPath, DB: agentDB, Tables: []string{"machines", "artifacts", "templates", "provisioning_profiles"}},
 	}
 	closer := func() {
 		for i := len(handles) - 1; i >= 0; i-- {
@@ -466,10 +496,11 @@ func setupTasks(cfg *config.Config, secretsStore *secrets.Store) (*agentSystems,
 		LogDirectory:     taskLogDir,
 	})
 	queue := tasks.NewQueue(store, output, tasks.QueueConfig{
-		PollInterval:    time.Duration(cfg.Tasks.PollIntervalSeconds) * time.Second,
-		MaxConcurrent:   cfg.Tasks.MaxConcurrent,
-		RetentionDays:   cfg.Tasks.RetentionDays,
-		CleanupInterval: time.Duration(cfg.Cleanup.Interval) * time.Second,
+		PollInterval:         time.Duration(cfg.Tasks.PollIntervalSeconds) * time.Second,
+		MaxConcurrent:        cfg.Tasks.MaxConcurrent,
+		RetentionDays:        cfg.Tasks.RetentionDays,
+		CleanupInterval:      time.Duration(cfg.Cleanup.Interval) * time.Second,
+		ResumePendingOnStart: cfg.Tasks.ResumePendingOnStart,
 	})
 
 	// Provisioner package registry (architecture §8): the directory is the
@@ -532,6 +563,9 @@ func setupTasks(cfg *config.Config, secretsStore *secrets.Store) (*agentSystems,
 			Enabled:   source.Enabled,
 			Default:   source.Default,
 			AuthToken: source.AuthToken,
+			Username:  source.Username,
+			APIKey:    source.APIKey,
+			CAFile:    source.CAFile,
 		})
 	}
 

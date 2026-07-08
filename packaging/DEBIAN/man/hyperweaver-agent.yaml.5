@@ -281,6 +281,11 @@ signal before forcing poweroff, 5-3600 (default: 120)
 Boolean keeping provisioned machines running when the agent exits (SHI's
 keepserversrunning). false force-powers-off every machine this agent created
 on the way out; discovered VMs are never touched (default: true).
+.It Cm provision_on_start
+Boolean running the full provision pipeline on a machine's VERY FIRST start —
+a stored provisioner document present and never provisioned — instead of a
+bare boot. Later starts, restarts, and document-less machines always boot
+plainly (default: false).
 .El
 .Ss provisioning
 Provisioning engine (the provisioner package registry and the provisioning
@@ -424,15 +429,21 @@ Stored samples older than this many days are deleted by the periodic
 cleanup, 1-365 (default: 7)
 .El
 .Ss host_power
-Host power management (the /system/host endpoints and the host-power
-capability token).
-.Bl -tag -width "enabled"
+Host power management (the /system/host endpoints, the host-power
+capability token, and sleep prevention).
+.Bl -tag -width "prevent_sleep"
 .It Cm enabled
 Boolean serving the host power endpoints: status and uptime, plus
 admin-key-gated shutdown, restart, poweroff, and halt of the machine the
 agent runs on — remote power control for headless hosts. When false every
 endpoint answers 503 and the token disappears from GET /api/status
 (default: true).
+.It Cm prevent_sleep
+Boolean keeping the host awake while the agent runs, via the operating
+system's native power-management API: a systemd-logind sleep inhibitor on
+Linux, SetThreadExecutionState on Windows, an IOKit power assertion on
+macOS. System sleep only — the display may still sleep and lock
+(default: false).
 .El
 .Sh FILES
 .Bl -tag -width ".Pa /var/log/hyperweaver-agent/"

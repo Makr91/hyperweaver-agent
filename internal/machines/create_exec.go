@@ -126,6 +126,11 @@ func (e *executors) prepareDocument(ctx context.Context, task *tasks.Task, out *
 		return err
 	}
 	spec := meta.Spec
+	if !spec.HasProvisioner() {
+		// The chain builders never queue prepare without a package — reaching
+		// here means a builder regressed; say so instead of a GetVersion error.
+		return errors.New("machine_prepare queued for a provisioner-less spec — nothing to render")
+	}
 	e.taskProgress(task, 10, "rendering_document")
 
 	version, err := e.env.Registry.GetVersion(spec.Provisioner.Name, spec.Provisioner.Version)
@@ -190,6 +195,31 @@ func effectiveSettings(ctx context.Context, env *ProvisionEnv, spec *Spec) map[s
 	return EffectiveSettings(ctx, spec, env.DefaultSyncMethod, env.DefaultNetworkInterface)
 }
 
+// specDocument builds the working document straight from the spec — the
+// provisioner-less create path (the base's model: the request body IS the
+// document; no render exists without a package). Every optional section the
+// base's create accepts rides through: disks (boot/additional/cdroms), zones,
+// cloud_init, and the vbox directives passthrough.
+func specDocument(ctx context.Context, env *ProvisionEnv, spec *Spec) map[string]any {
+	document := map[string]any{
+		"settings": effectiveSettings(ctx, env, spec),
+	}
+	if len(spec.Networks) > 0 {
+		document["networks"] = spec.Networks
+	}
+	for key, section := range map[string]map[string]any{
+		"disks":      spec.Disks,
+		"zones":      spec.Zones,
+		"cloud_init": spec.CloudInit,
+		"vbox":       spec.Vbox,
+	} {
+		if len(section) > 0 {
+			document[key] = section
+		}
+	}
+	return document
+}
+
 // EffectiveSettings builds the render-time settings document from a spec —
 // shared by the create handler's render-once box resolution and the prepare
 // executor.
@@ -239,9 +269,18 @@ func (e *executors) createStorage(ctx context.Context, task *tasks.Task, out *ta
 	if err != nil {
 		return err
 	}
-	output, err := e.dependencyOutput(ctx, task)
-	if err != nil {
-		return err
+	var output *createExecutionOutput
+	if meta.Spec.HasProvisioner() {
+		output, err = e.dependencyOutput(ctx, task)
+		if err != nil {
+			return err
+		}
+	} else {
+		// No prepare child ran — the base's shape (its chain has no render
+		// step; the create body IS the document): build the document straight
+		// from the spec. Provisioning attaches later via PUT, never here.
+		out.Write("stdout", "Provisioner-less create — building the document from the spec\n")
+		output = &createExecutionOutput{Document: specDocument(ctx, e.env, meta.Spec)}
 	}
 	document := MachineConfig(output.Document)
 	settings := document.Section("settings")
@@ -252,18 +291,13 @@ func (e *executors) createStorage(ctx context.Context, task *tasks.Task, out *ta
 		return errors.New("VirtualBox is not installed")
 	}
 
-	e.taskProgress(task, 10, "preparing_storage")
-	org, box, ok := strings.Cut(stringOr(settings["box"], ""), "/")
-	if !ok || org == "" || box == "" {
-		return errors.New(`settings.box must be "organization/box-name"`)
-	}
-	template, err := e.store.FindTemplate(ctx, org, box,
-		stringOr(settings["box_version"], "latest"), stringOr(settings["box_arch"], "amd64"))
-	if err != nil {
-		return fmt.Errorf("template %s/%s: %w (download it first — POST /templates/pull or let create chain it)", org, box, err)
-	}
-
 	workdir := e.machineWorkdir(task.MachineName)
+	// prepare's materialize normally creates the working directory; a
+	// provisioner-less create has no prepare, so ensure it (idempotent) —
+	// media land in it either way.
+	if merr := os.MkdirAll(workdir, 0o750); merr != nil {
+		return merr
+	}
 	media := []string{}
 	rollback := func() {
 		for i := len(media) - 1; i >= 0; i-- {
@@ -273,21 +307,69 @@ func (e *executors) createStorage(ctx context.Context, task *tasks.Task, out *ta
 		}
 	}
 
-	e.taskProgress(task, 30, "importing_template")
-	bootPath := filepath.Join(workdir, "boot"+filepath.Ext(template.DiskPath))
-	clearStaleMedium(ctx, vboxExe, bootPath, out)
-	out.Write("stdout", "Cloning template "+template.DiskPath+" → "+bootPath+"\n")
-	if cerr := vbox.CloneMedium(ctx, vboxExe, template.DiskPath, bootPath, ""); cerr != nil {
-		rollback()
-		return cerr
-	}
-	media = append(media, bootPath)
-
+	// Boot medium — the base's prepareBootVolume scenarios, VirtualBox terms
+	// (StorageManager.js: existing dataset | template | scratch | diskless):
+	//   boot.path      → attach an EXISTING disk-image file (never rolled back
+	//                    — it is not ours to delete)
+	//   settings.box   → clone the box template's image, grow to boot.size
+	//   boot.size      → create a blank scratch VDI (sparse by default)
+	//   none of those  → DISKLESS — no boot medium at all (PXE/manual)
+	e.taskProgress(task, 10, "preparing_storage")
 	boot := mapOr(disks["boot"])
-	if sizeMB := sizeToMB(boot["size"]); sizeMB > 0 {
-		if rerr := vbox.ResizeMedium(ctx, vboxExe, bootPath, sizeMB); rerr != nil {
-			out.Write("stderr", "Boot volume resize failed (continuing with template size): "+rerr.Error()+"\n")
+	bootPath := ""
+	boxRef := stringOr(settings["box"], "")
+	switch {
+	case stringOr(boot["path"], "") != "":
+		bootPath = stringOr(boot["path"], "")
+		if _, serr := os.Stat(bootPath); serr != nil {
+			return fmt.Errorf("boot disk %s does not exist on the agent host: %w", bootPath, serr)
 		}
+		out.Write("stdout", "Attaching existing boot medium "+bootPath+"\n")
+
+	case boxRef != "":
+		org, box, ok := strings.Cut(boxRef, "/")
+		if !ok || org == "" || box == "" {
+			return errors.New(`settings.box must be "organization/box-name"`)
+		}
+		template, terr := e.store.FindTemplate(ctx, org, box,
+			stringOr(settings["box_version"], "latest"), stringOr(settings["box_arch"], "amd64"))
+		if terr != nil {
+			return fmt.Errorf("template %s/%s: %w (download it first — POST /templates/pull or let create chain it)", org, box, terr)
+		}
+		e.taskProgress(task, 30, "importing_template")
+		bootPath = filepath.Join(workdir, "boot"+filepath.Ext(template.DiskPath))
+		clearStaleMedium(ctx, vboxExe, bootPath, out)
+		out.Write("stdout", "Cloning template "+template.DiskPath+" → "+bootPath+"\n")
+		if cerr := vbox.CloneMedium(ctx, vboxExe, template.DiskPath, bootPath, ""); cerr != nil {
+			rollback()
+			return cerr
+		}
+		media = append(media, bootPath)
+		if sizeMB := sizeToMB(boot["size"]); sizeMB > 0 {
+			if rerr := vbox.ResizeMedium(ctx, vboxExe, bootPath, sizeMB); rerr != nil {
+				out.Write("stderr", "Boot volume resize failed (continuing with template size): "+rerr.Error()+"\n")
+			}
+		}
+
+	case sizeToMB(boot["size"]) > 0:
+		e.taskProgress(task, 30, "creating_boot_volume")
+		name := stringOr(boot["volume_name"], "boot")
+		bootPath = filepath.Join(workdir, name+".vdi")
+		sparse := true
+		if v, bok := boot["sparse"].(bool); bok {
+			sparse = v
+		}
+		clearStaleMedium(ctx, vboxExe, bootPath, out)
+		out.Write("stdout", fmt.Sprintf("Creating blank boot volume %s (%d MB)\n",
+			bootPath, sizeToMB(boot["size"])))
+		if cerr := vbox.CreateMedium(ctx, vboxExe, bootPath, sizeToMB(boot["size"]), sparse); cerr != nil {
+			rollback()
+			return cerr
+		}
+		media = append(media, bootPath)
+
+	default:
+		out.Write("stdout", "No box, boot path, or boot size — DISKLESS machine (attach media later via modify)\n")
 	}
 
 	e.taskProgress(task, 60, "creating_additional_disks")
@@ -295,6 +377,16 @@ func (e *executors) createStorage(ctx context.Context, task *tasks.Task, out *ta
 	for i, entry := range listOr(disks["additional_disks"]) {
 		disk := mapOr(entry)
 		if len(disk) == 0 {
+			continue
+		}
+		// Existing disk-image file (the base's existing_dataset attach): it
+		// is attached by the config phase, never created or rolled back here.
+		if existing := stringOr(disk["path"], ""); existing != "" {
+			if _, serr := os.Stat(existing); serr != nil {
+				rollback()
+				return fmt.Errorf("additional disk %s does not exist on the agent host: %w", existing, serr)
+			}
+			out.Write("stdout", "Additional disk uses existing medium "+existing+"\n")
 			continue
 		}
 		name := stringOr(disk["volume_name"], fmt.Sprintf("disk%d", i+1))
@@ -523,9 +615,49 @@ func modifyFlags(document MachineConfig, hostOnlyAdapter string, sshForwardPort 
 	if strings.EqualFold(stringOr(settings["firmware_type"], ""), "UEFI") {
 		flags = append(flags, "--firmware=efi")
 	}
-	if autostart, ok := document.Section("zones")["autostart"].(bool); ok && autostart {
+	// Boot order (--boot1..4): settings.boot_order is an ordered list of
+	// floppy|dvd|disk|net|none — the ISO-first install story (attach the ISO,
+	// boot dvd before disk). Unset slots after the list are cleared to none so
+	// the order is exactly what the document says.
+	flags = append(flags, bootOrderFlags(settings["boot_order"])...)
+
+	// The base's zone attrs at CREATE (Mark's proper-tab ruling — the same
+	// named vocabulary the modify executor translates, buildZoneAttributeMap's
+	// set): bootrom→firmware, hostbridge→chipset (i440fx→piix3), vnc→VRDE,
+	// acpi/xhci direct, netif→each DOCUMENT adapter's hardware type (the
+	// reserved NAT adapter keeps VirtualBox's default — vagrant's exact
+	// layout is the provisioning contract). diskif has no modifyvm analog —
+	// it selects the storage CONTROLLER type, consumed by attachStorage.
+	zones := document.Section("zones")
+	if autostart, ok := zones["autostart"].(bool); ok && autostart {
 		flags = append(flags, "--autostart-enabled=on")
 	}
+	if v, ok := zones["bootrom"]; ok {
+		firmware := "bios"
+		if strings.Contains(strings.ToLower(stringOr(v, "")), "efi") {
+			firmware = "efi"
+		}
+		flags = append(flags, "--firmware="+firmware)
+	}
+	if v, ok := zones["hostbridge"]; ok {
+		chipset := strings.ToLower(stringOr(v, ""))
+		if chipset == "i440fx" {
+			chipset = "piix3"
+		}
+		if chipset != "" {
+			flags = append(flags, "--chipset="+chipset)
+		}
+	}
+	if v, ok := zones["vnc"]; ok {
+		flags = append(flags, "--vrde="+onOff(v))
+	}
+	if v, ok := zones["acpi"]; ok {
+		flags = append(flags, "--acpi="+onOff(v))
+	}
+	if v, ok := zones["xhci"]; ok {
+		flags = append(flags, "--usb-xhci="+onOff(v))
+	}
+	nicType := vboxNICType(stringOr(zones["netif"], ""))
 
 	// Document networks from adapter 2 — adapter 1 is the reserved NAT.
 	for i, entry := range document.List("networks") {
@@ -543,6 +675,9 @@ func modifyFlags(document MachineConfig, hostOnlyAdapter string, sshForwardPort 
 				flags = append(flags, "--bridge-adapter"+n+"="+bridge)
 			}
 		}
+		if nicType != "" {
+			flags = append(flags, "--nic-type"+n+"="+nicType)
+		}
 		if mac := stringOr(network["mac"], ""); mac != "" && !strings.EqualFold(mac, "auto") {
 			flags = append(flags, "--mac-address"+n+"="+strings.ReplaceAll(mac, ":", ""))
 		}
@@ -558,17 +693,77 @@ func modifyFlags(document MachineConfig, hostOnlyAdapter string, sshForwardPort 
 	return flags
 }
 
-// attachStorage wires the media: one SATA controller, boot at port 0,
-// additional disks at their declared ports, cdroms as dvddrives after.
+// bootOrderFlags maps a boot_order list onto --boot1..4 (VirtualBox's four
+// boot slots; values floppy|dvd|disk|net|none). Slots past the list clear to
+// none; unknown values are dropped (the flags would 400 the whole modifyvm).
+func bootOrderFlags(value any) []string {
+	entries := listOr(value)
+	if len(entries) == 0 {
+		return nil
+	}
+	flags := []string{}
+	slot := 1
+	for _, entry := range entries {
+		if slot > 4 {
+			break
+		}
+		device := strings.ToLower(stringOr(entry, ""))
+		switch device {
+		case "floppy", "dvd", "disk", "net", "none":
+			flags = append(flags, fmt.Sprintf("--boot%d=%s", slot, device))
+			slot++
+		}
+	}
+	if len(flags) == 0 {
+		return nil
+	}
+	for ; slot <= 4; slot++ {
+		flags = append(flags, fmt.Sprintf("--boot%d=none", slot))
+	}
+	return flags
+}
+
+// storageControllerKind maps the document's diskif vocabulary onto storagectl
+// --add types (yardstick 2: the controller type is the user's choice at
+// create; VirtualBox fixes it once media attach). Default sata.
+func storageControllerKind(diskif string) string {
+	switch strings.ToLower(diskif) {
+	case "ide":
+		return "ide"
+	case "scsi":
+		return "scsi"
+	case "sas":
+		return "sas"
+	case "nvme", "pcie":
+		return "pcie"
+	case "virtio", "virtio-scsi", "virtio-blk":
+		return "virtio"
+	default:
+		return "sata"
+	}
+}
+
+// attachStorage wires the media: one controller (type from zones.diskif,
+// default SATA — the name stays "SATA Controller" as the stable label modify
+// addresses ports through), boot at port 0, additional disks at their
+// declared ports, cdroms as dvddrives after.
 func (e *executors) attachStorage(ctx context.Context, vboxExe, name string,
 	document MachineConfig, output *createExecutionOutput, out *tasks.OutputWriter,
 ) error {
 	const controller = "SATA Controller"
-	if err := vbox.AddStorageController(ctx, vboxExe, name, controller, "sata"); err != nil {
+	kind := storageControllerKind(stringOr(document.Section("zones")["diskif"], ""))
+	if kind != "sata" {
+		out.Write("stdout", "Storage controller type: "+kind+" (zones.diskif)\n")
+	}
+	if err := vbox.AddStorageController(ctx, vboxExe, name, controller, kind); err != nil {
 		return err
 	}
-	if err := vbox.StorageAttach(ctx, vboxExe, name, controller, 0, "hdd", output.BootdiskPath); err != nil {
-		return err
+	// Diskless machines (the base's prepareBootVolume null) have no boot
+	// medium — the controller still exists so modify can attach media later.
+	if output.BootdiskPath != "" {
+		if err := vbox.StorageAttach(ctx, vboxExe, name, controller, 0, "hdd", output.BootdiskPath); err != nil {
+			return err
+		}
 	}
 
 	disks := document.Section("disks")
@@ -579,7 +774,10 @@ func (e *executors) attachStorage(ctx context.Context, vboxExe, name string,
 			continue
 		}
 		diskName := stringOr(disk["volume_name"], fmt.Sprintf("disk%d", i+1))
-		path := filepath.Join(e.machineWorkdir(name), "disks", diskName+".vdi")
+		path := stringOr(disk["path"], "")
+		if path == "" {
+			path = filepath.Join(e.machineWorkdir(name), "disks", diskName+".vdi")
+		}
 		port := int(intOr(disk["port"], int64(nextPort)))
 		out.Write("stdout", fmt.Sprintf("Attaching %s at port %d\n", path, port))
 		if err := vbox.StorageAttach(ctx, vboxExe, name, controller, port, "hdd", path); err != nil {
@@ -741,17 +939,23 @@ func (e *executors) createFinalize(ctx context.Context, task *tasks.Task, out *t
 	}
 	// The rendered document's provisioning half IS the provisioner document
 	// (folders/provisioning/vars/roles) — stored exactly where PUT stores it;
-	// a later PUT overrides it verbatim.
-	provisionerDoc := map[string]any{
-		"provisioner_name":    meta.Spec.Provisioner.Name,
-		"provisioner_version": meta.Spec.Provisioner.Version,
-	}
-	for _, key := range []string{"folders", "provisioning", "vars", "roles", "pre_tasks", "post_tasks"} {
-		if value, ok := document[key]; ok {
-			provisionerDoc[key] = value
+	// a later PUT overrides it verbatim. Package-based creates ONLY: the
+	// base's finalize persists no provisioner (storeInfrastructureConfig
+	// stores settings/zones/networks/disks/metadata and nothing else) —
+	// provisioner-less machines gain a document via PUT when the user wants
+	// one, never here.
+	if meta.Spec.HasProvisioner() {
+		provisionerDoc := map[string]any{
+			"provisioner_name":    meta.Spec.Provisioner.Name,
+			"provisioner_version": meta.Spec.Provisioner.Version,
 		}
+		for _, key := range []string{"folders", "provisioning", "vars", "roles", "pre_tasks", "post_tasks"} {
+			if value, ok := document[key]; ok {
+				provisionerDoc[key] = value
+			}
+		}
+		sections["provisioner"] = provisionerDoc
 	}
-	sections["provisioner"] = provisionerDoc
 	if merr := e.store.MergeConfigurationSections(ctx, task.MachineName, sections); merr != nil {
 		return merr
 	}
@@ -759,6 +963,23 @@ func (e *executors) createFinalize(ctx context.Context, task *tasks.Task, out *t
 	if output.UUID != "" {
 		if uerr := e.store.SetUUID(ctx, task.MachineName, output.UUID); uerr != nil {
 			return uerr
+		}
+	}
+
+	// Notes/tags at create — the base's finalize persists both
+	// (SubTaskExecutors.js: updateFields.notes/tags). Failures narrate; user
+	// metadata never fails a build.
+	if meta.Spec.Notes != "" {
+		notes := meta.Spec.Notes
+		if nerr := e.store.SetNotes(ctx, task.MachineName, &notes); nerr != nil {
+			out.Write("stderr", "Storing notes failed: "+nerr.Error()+"\n")
+		}
+	}
+	if len(meta.Spec.Tags) > 0 {
+		if raw, jerr := json.Marshal(meta.Spec.Tags); jerr == nil {
+			if terr := e.store.SetTags(ctx, task.MachineName, raw); terr != nil {
+				out.Write("stderr", "Storing tags failed: "+terr.Error()+"\n")
+			}
 		}
 	}
 	e.taskProgress(task, 100, "completed")
@@ -771,6 +992,20 @@ func (e *executors) createFinalize(ctx context.Context, task *tasks.Task, out *t
 func DocString(value any, fallback string) string {
 	return stringOr(value, fallback)
 }
+
+// DocInt coerces a document value to int64 (the server's resource validation
+// reads vcpus through it).
+func DocInt(value any, fallback int64) int64 {
+	return intOr(value, fallback)
+}
+
+// MemoryToMB exposes the memory size parser (Hosts.rb's rules) for the
+// server's resource validation.
+func MemoryToMB(value any) int64 { return memoryToMB(value) }
+
+// SizeToMB exposes the disk size parser (Hosts.rb's rules) for the server's
+// resource validation.
+func SizeToMB(value any) int64 { return sizeToMB(value) }
 
 // Generic document-value coercions (the document is YAML/JSON-typed).
 func stringOr(value any, fallback string) string {

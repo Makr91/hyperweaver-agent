@@ -20,6 +20,7 @@ import (
 
 	"github.com/Makr91/hyperweaver-agent/internal/safepath"
 	"github.com/Makr91/hyperweaver-agent/internal/tasks"
+	"github.com/Makr91/hyperweaver-agent/internal/vbox"
 )
 
 // The template registry — zoneweaver's Template model + DownloadExecutor
@@ -31,6 +32,15 @@ import (
 
 // OpTemplateDownload is the template download task operation.
 const OpTemplateDownload = "template_download"
+
+// OpTemplateDelete is the local-template delete task operation (the base's
+// template_delete: destroy the stored artifact, drop the row).
+const OpTemplateDelete = "template_delete"
+
+// OpTemplateMove is the local-template relocation task (the base's
+// template_move: zfs rename / send-recv; here a file move — cross-volume
+// falls back to copy+delete).
+const OpTemplateMove = "template_move"
 
 // TemplateProvider is this agent's provider value in the registry tuple.
 const TemplateProvider = "virtualbox"
@@ -84,6 +94,13 @@ type TemplateSource struct {
 	// AuthToken authenticates private boxes (Bearer); a per-request
 	// auth_token in the task metadata overrides it.
 	AuthToken string `json:"auth_token,omitempty" yaml:"auth_token"`
+	// Username + APIKey enable the BoxVault signin flow (the base's model).
+	Username string `json:"username,omitempty" yaml:"username"`
+	APIKey   string `json:"api_key,omitempty"  yaml:"api_key"`
+	// CAFile adds a PEM CA bundle to the trust store for THIS registry —
+	// the self-signed-registry answer (verification always stays on; the
+	// base's verify_ssl:false has no analog here by design).
+	CAFile string `json:"ca_file,omitempty" yaml:"ca_file"`
 }
 
 const templateColumns = `id, source_name, organization, box_name, version,
@@ -165,6 +182,174 @@ func (s *Store) FindTemplate(ctx context.Context, org, box, version, arch string
 	return template, nil
 }
 
+// GetTemplate returns one registry row by id (ErrTemplateNotFound when
+// absent).
+func (s *Store) GetTemplate(ctx context.Context, id int64) (*Template, error) {
+	template, err := scanTemplate(s.db.QueryRowContext(ctx,
+		`SELECT `+templateColumns+` FROM templates WHERE id = ?`, id))
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrTemplateNotFound
+	}
+	return template, err
+}
+
+// DeleteTemplate removes one registry row.
+func (s *Store) DeleteTemplate(ctx context.Context, id int64) error {
+	_, err := s.db.ExecContext(ctx, `DELETE FROM templates WHERE id = ?`, id)
+	return err
+}
+
+// templateDeleteMetadata is the template_delete task's metadata (the base's
+// {template_id} document).
+type templateDeleteMetadata struct {
+	TemplateID int64 `json:"template_id"`
+}
+
+// templateDelete executes one template_delete task: release the disk image
+// from VirtualBox's media registry and delete it (fallback: plain file
+// removal when it was never registered), prune the now-empty version
+// directory, drop the row — the base's DeleteExecutor with zfs destroy
+// replaced by the disk-image removal this hypervisor stores.
+func (e *executors) templateDelete(ctx context.Context, task *tasks.Task, out *tasks.OutputWriter) error {
+	var meta templateDeleteMetadata
+	if task.Metadata == nil {
+		return errors.New("template_delete task has no metadata")
+	}
+	if err := json.Unmarshal([]byte(*task.Metadata), &meta); err != nil {
+		return fmt.Errorf("parse template_delete metadata: %w", err)
+	}
+
+	template, err := e.store.GetTemplate(ctx, meta.TemplateID)
+	if err != nil {
+		return fmt.Errorf("template %d: %w", meta.TemplateID, err)
+	}
+	out.Write("stdout", fmt.Sprintf("Deleting template %s/%s v%s (%s)\n",
+		template.Organization, template.BoxName, template.Version, template.DiskPath))
+
+	if _, serr := os.Stat(template.DiskPath); serr == nil {
+		vboxExe := VBoxManagePath(ctx)
+		removed := false
+		if vboxExe != "" {
+			if cerr := vbox.CloseMedium(ctx, vboxExe, template.DiskPath, true); cerr == nil {
+				removed = true
+			}
+		}
+		if !removed {
+			if rerr := os.Remove(template.DiskPath); rerr != nil {
+				// The base continues to the DB cleanup when the dataset destroy
+				// fails — same rule here, loudly.
+				out.Write("stderr", "Disk image removal failed (row removed anyway): "+rerr.Error()+"\n")
+			}
+		}
+		// The version directory held only this image (+ the spent .box) —
+		// prune it when empty; failures are cosmetic.
+		if rerr := os.Remove(filepath.Dir(template.DiskPath)); rerr != nil {
+			out.Write("stdout", "Version directory left in place (not empty)\n")
+		}
+	} else {
+		out.Write("stdout", "Disk image already gone — removing the row\n")
+	}
+
+	if derr := e.store.DeleteTemplate(ctx, template.ID); derr != nil {
+		return derr
+	}
+	out.Write("stdout", fmt.Sprintf("Template %s/%s v%s deleted\n",
+		template.Organization, template.BoxName, template.Version))
+	return nil
+}
+
+// SetTemplateDiskPath records a moved template's new disk image location.
+func (s *Store) SetTemplateDiskPath(ctx context.Context, id int64, diskPath string) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE templates SET disk_path = ? WHERE id = ?`,
+		diskPath, id)
+	return err
+}
+
+// templateMoveMetadata is the template_move task's metadata: target_path is
+// the new storage ROOT — the org/box/version layout is recreated beneath it.
+type templateMoveMetadata struct {
+	TemplateID int64  `json:"template_id"`
+	TargetPath string `json:"target_path"`
+}
+
+// templateMove executes one template_move task: relocate the disk image to
+// <target_path>/<org>/<box>/<version>/ and update the row. Same-volume moves
+// are a rename; cross-volume falls back to copy+delete (the base's zfs
+// rename vs send-recv split).
+func (e *executors) templateMove(ctx context.Context, task *tasks.Task, out *tasks.OutputWriter) error {
+	var meta templateMoveMetadata
+	if task.Metadata == nil {
+		return errors.New("template_move task has no metadata")
+	}
+	if err := json.Unmarshal([]byte(*task.Metadata), &meta); err != nil {
+		return fmt.Errorf("parse template_move metadata: %w", err)
+	}
+
+	template, err := e.store.GetTemplate(ctx, meta.TemplateID)
+	if err != nil {
+		return fmt.Errorf("template %d: %w", meta.TemplateID, err)
+	}
+	root, err := safepath.CleanAbs(meta.TargetPath)
+	if err != nil {
+		return fmt.Errorf("target_path is not usable: %w", err)
+	}
+	targetDir, err := safepath.Under(root,
+		filepath.Join(template.Organization, template.BoxName, template.Version))
+	if err != nil {
+		return err
+	}
+	if merr := os.MkdirAll(targetDir, 0o750); merr != nil {
+		return merr
+	}
+	targetPath := filepath.Join(targetDir, filepath.Base(template.DiskPath))
+	if targetPath == template.DiskPath {
+		return errors.New("target path is the same as the current path")
+	}
+	if _, serr := os.Stat(targetPath); serr == nil {
+		return errors.New("a file already exists at the target path: " + targetPath)
+	}
+
+	e.taskProgress(task, 20, "moving_disk_image")
+	out.Write("stdout", "Moving "+template.DiskPath+" → "+targetPath+"\n")
+	if rerr := os.Rename(template.DiskPath, targetPath); rerr != nil {
+		out.Write("stdout", "Rename failed (cross-volume?) — copying instead\n")
+		if cerr := copyFile(template.DiskPath, targetPath); cerr != nil {
+			return cerr
+		}
+		if derr := os.Remove(template.DiskPath); derr != nil {
+			out.Write("stderr", "Source removal after copy failed: "+derr.Error()+"\n")
+		}
+	}
+	// Prune the now-empty old version directory (cosmetic).
+	if rerr := os.Remove(filepath.Dir(template.DiskPath)); rerr != nil {
+		out.Write("stdout", "Old version directory left in place (not empty)\n")
+	}
+
+	e.taskProgress(task, 90, "updating_record")
+	if uerr := e.store.SetTemplateDiskPath(ctx, template.ID, targetPath); uerr != nil {
+		return uerr
+	}
+	e.taskProgress(task, 100, "completed")
+	out.Write("stdout", fmt.Sprintf("Template %s/%s v%s moved to %s\n",
+		template.Organization, template.BoxName, template.Version, targetPath))
+	return nil
+}
+
+// copyFile streams src to dst (the cross-volume move fallback).
+func copyFile(src, dst string) error {
+	source, err := os.Open(filepath.Clean(src))
+	if err != nil {
+		return err
+	}
+	defer func() {
+		_ = source.Close()
+	}()
+	if _, err := safepath.WriteFileFrom(dst, source, 0o600); err != nil {
+		return err
+	}
+	return nil
+}
+
 // createTemplate registers a downloaded template.
 func (s *Store) createTemplate(ctx context.Context, t *Template) error {
 	var metadata any
@@ -235,13 +420,14 @@ func (e *executors) templateDownload(ctx context.Context, task *tasks.Task, out 
 	if err != nil {
 		return err
 	}
-	if source.AuthToken != "" {
-		request.Header.Set("Authorization", "Bearer "+source.AuthToken)
-	}
+	// Registry auth rides the shared ladder (signin JWT when the source
+	// carries username+api_key; verify_ssl honored by the client).
+	client := registryHTTPClient(source)
+	setRegistryAuth(request, registryToken(ctx, client, source))
 
 	out.Write("stdout", "Downloading "+downloadURL+"\n")
 	e.taskProgress(task, 10, "downloading")
-	response, err := http.DefaultClient.Do(request)
+	response, err := client.Do(request)
 	if err != nil {
 		return err
 	}

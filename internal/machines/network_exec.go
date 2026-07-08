@@ -14,11 +14,14 @@ import (
 // The provisioning-network executors — zoneweaver's
 // ProvisioningNetworkController setup/teardown chains (etherstub → host VNIC
 // → static IP → NAT → forwarding → dhcpd) translated: VirtualBox's host-only
-// interface IS the etherstub+VNIC+IP triple, its DHCP server IS dhcpd, and
-// NAT/forwarding drop out (a host-only network reaches the host directly —
-// all the pipeline needs). The base queues its pieces as chained children
-// because its network task families exist independently; here the two
-// operations run whole, serialized by the same category the base uses.
+// interface IS the etherstub+VNIC+IP triple and its DHCP server IS dhcpd.
+// The base's NAT/forwarding pieces (provisioning-NIC egress) translate to
+// the NAT adapter pinned at create (adapter 1, ssh port-forward transport —
+// Mark's architecture 2026-07-07), not to anything here; this host-only
+// machinery stays dormant-but-available for host-type networks[] entries.
+// The base queues its pieces as chained children because its network task
+// families exist independently; here the two operations run whole,
+// serialized by the same category the base uses.
 
 // Provisioning-network operations (the base's exact names).
 const (

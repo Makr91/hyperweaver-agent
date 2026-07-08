@@ -25,9 +25,14 @@ import (
 // AND the hypervisor, resolves the box against the template registry
 // (missing template auto-chains its download), then queues a create
 // ORCHESTRATION — a parent whose chained children build real infrastructure:
-// machine_prepare (render + materialize — the SHI registry layer in the
-// provisioning-content slot) → machine_create_storage →
+// machine_prepare (render + materialize — the SHI registry layer, queued
+// ONLY when the spec names a provisioner package) → machine_create_storage →
 // machine_create_config → machine_create_finalize (+ optional start).
+// The provisioner reference is OPTIONAL — the base's create is
+// provisioner-free (Mark's ruling 2026-07-07: a machine is just a machine;
+// provisioning is optional, never a gate on existence); without one the
+// chain builds straight from the spec and provisioning attaches later via
+// PUT's provisioner store + /provision, the base's exact model.
 // PUT /machines/{name} is the modify mechanism (machines_modify.go) — create
 // DROPS any provisioner config in its body beyond the package reference;
 // provisioning config arrives via PUT's provisioner store or the render.
@@ -36,30 +41,36 @@ import (
 var serverIDPattern = regexp.MustCompile(`^\d{1,8}$`)
 
 // createMachineRequest is the POST /machines body: an optional explicit name
-// plus the creation spec (the package reference + the document inputs the
-// render consumes).
+// plus the creation spec (an OPTIONAL package reference + the document
+// inputs — with a package they feed the render, without one they ARE the
+// document).
 type createMachineRequest struct {
 	Name string `json:"name"`
 	machines.Spec
 }
 
-// validateSpec checks the creation spec: the provisioner version must exist,
-// hostname and domain are required (the name derives from them), role names
-// must be usable, the safe-ID source must exist, sync_method must be valid.
+// validateSpec checks the creation spec: the provisioner reference is
+// OPTIONAL (the base's provisioner-free create — Mark's ruling 2026-07-07)
+// and validated against the registry only when given; hostname and domain are
+// required (the name derives from them), role names must be usable, the
+// safe-ID source must exist, sync_method must be valid.
 func (s *Server) validateSpec(w http.ResponseWriter, spec *machines.Spec) bool {
-	if spec.Provisioner.Name == "" || spec.Provisioner.Version == "" {
-		taskError(w, http.StatusBadRequest, "provisioner {name, version} is required")
+	if (spec.Provisioner.Name == "") != (spec.Provisioner.Version == "") {
+		taskError(w, http.StatusBadRequest,
+			"provisioner needs both name and version — or neither: provisioning is optional")
 		return false
 	}
-	if _, err := s.provisioners.GetVersion(spec.Provisioner.Name, spec.Provisioner.Version); err != nil {
-		if errors.Is(err, provisioner.ErrNotFound) || errors.Is(err, provisioner.ErrVersionNotFound) {
-			taskError(w, http.StatusBadRequest,
-				"provisioner "+spec.Provisioner.Name+"/"+spec.Provisioner.Version+" is not in the registry")
+	if spec.HasProvisioner() {
+		if _, err := s.provisioners.GetVersion(spec.Provisioner.Name, spec.Provisioner.Version); err != nil {
+			if errors.Is(err, provisioner.ErrNotFound) || errors.Is(err, provisioner.ErrVersionNotFound) {
+				taskError(w, http.StatusBadRequest,
+					"provisioner "+spec.Provisioner.Name+"/"+spec.Provisioner.Version+" is not in the registry")
+				return false
+			}
+			slog.Error("resolve provisioner for machine spec", "error", err)
+			taskError(w, http.StatusInternalServerError, "Failed to resolve provisioner")
 			return false
 		}
-		slog.Error("resolve provisioner for machine spec", "error", err)
-		taskError(w, http.StatusInternalServerError, "Failed to resolve provisioner")
-		return false
 	}
 	if spec.Settings == nil {
 		spec.Settings = map[string]any{}
@@ -151,6 +162,21 @@ func (s *Server) resolveMachineName(ctx context.Context, explicit string, spec *
 	return serverID + "--" + base, 0, ""
 }
 
+// resolutionDocument returns the settings document the box resolution reads:
+// the rendered package template when the spec names one (package defaults may
+// supply the whole box tuple), else the spec's own effective settings — the
+// base's model, where the create body IS the document.
+func (s *Server) resolutionDocument(ctx context.Context, spec *machines.Spec) (map[string]any, error) {
+	if spec.HasProvisioner() {
+		return s.renderForResolution(ctx, spec)
+	}
+	return map[string]any{
+		"settings": machines.EffectiveSettings(ctx, spec,
+			s.cfg.Provisioning.DefaultSyncMethod, s.cfg.Provisioning.DefaultNetworkInterface),
+		"networks": spec.Networks,
+	}, nil
+}
+
 // renderForResolution renders the package template once so the handler sees
 // the EFFECTIVE settings (template defaults applied) — the box tuple the
 // template registry resolves may come entirely from package defaults.
@@ -181,25 +207,33 @@ func (s *Server) renderForResolution(ctx context.Context, spec *machines.Spec) (
 func (s *Server) queueCreateOrchestration(ctx context.Context, name string, spec *machines.Spec,
 	document map[string]any, startAfter bool, createdBy string,
 ) (parentID string, subTasks map[string]string, requiresDownload bool, err error) {
+	// settings.box is OPTIONAL — the base's model (resolveBoxToTemplate
+	// returns success with no box): a box-less create builds from a scratch
+	// volume, an existing medium, or DISKLESS (a stub — Mark's ruling).
+	// Template resolution and auto-download engage only when a box is named.
 	settings := machines.MachineConfig(document).Section("settings")
 	box := machines.DocString(settings["box"], "")
-	org, boxName, boxOK := strings.Cut(box, "/")
-	if !boxOK || org == "" || boxName == "" {
-		return "", nil, false, errors.New(`settings.box must be "organization/box-name" (set it in the spec or the package defaults)`)
-	}
-	boxVersion := machines.DocString(settings["box_version"], "latest")
-	boxArch := machines.DocString(settings["box_arch"], "amd64")
-
-	_, terr := s.machines.FindTemplate(ctx, org, boxName, boxVersion, boxArch)
-	switch {
-	case terr == nil:
-	case errors.Is(terr, machines.ErrTemplateNotFound):
-		requiresDownload = true
-		if boxVersion == "" || boxVersion == "latest" {
-			return "", nil, false, errors.New("template " + box + " is not local and box_version is not specific — set settings.box_version to download it")
+	var org, boxName, boxVersion, boxArch string
+	if box != "" {
+		var boxOK bool
+		org, boxName, boxOK = strings.Cut(box, "/")
+		if !boxOK || org == "" || boxName == "" {
+			return "", nil, false, errors.New(`settings.box must be "organization/box-name"`)
 		}
-	default:
-		return "", nil, false, terr
+		boxVersion = machines.DocString(settings["box_version"], "latest")
+		boxArch = machines.DocString(settings["box_arch"], "amd64")
+
+		_, terr := s.machines.FindTemplate(ctx, org, boxName, boxVersion, boxArch)
+		switch {
+		case terr == nil:
+		case errors.Is(terr, machines.ErrTemplateNotFound):
+			requiresDownload = true
+			if boxVersion == "" || boxVersion == "latest" {
+				return "", nil, false, errors.New("template " + box + " is not local and box_version is not specific — set settings.box_version to download it")
+			}
+		default:
+			return "", nil, false, terr
+		}
 	}
 
 	specDoc, err := json.Marshal(map[string]any{"spec": spec})
@@ -257,15 +291,23 @@ func (s *Server) queueCreateOrchestration(ctx context.Context, name string, spec
 		previous = &download.ID
 	}
 
-	for _, step := range []struct {
+	// The prepare (render + materialize) child exists only for package-based
+	// creates — the base's chain has no render step at all (its create body
+	// IS the document); a provisioner-less create goes straight to storage.
+	type chainStep struct {
 		key       string
 		operation string
-	}{
-		{"prepare", machines.OpPrepare},
-		{"storage", machines.OpCreateStorage},
-		{"config", machines.OpCreateConfig},
-		{"finalize", machines.OpCreateFinalize},
-	} {
+	}
+	steps := []chainStep{}
+	if spec.HasProvisioner() {
+		steps = append(steps, chainStep{"prepare", machines.OpPrepare})
+	}
+	steps = append(steps,
+		chainStep{"storage", machines.OpCreateStorage},
+		chainStep{"config", machines.OpCreateConfig},
+		chainStep{"finalize", machines.OpCreateFinalize},
+	)
+	for _, step := range steps {
 		child, cerr := s.createChainTask(ctx, name, step.operation, &metadata, previous, parent.ID, createdBy)
 		if cerr != nil {
 			cancelChain()
@@ -325,9 +367,17 @@ func (s *Server) handleCreateMachine(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	document, err := s.renderForResolution(r.Context(), &body.Spec)
+	document, err := s.resolutionDocument(r.Context(), &body.Spec)
 	if err != nil {
 		taskError(w, http.StatusBadRequest, "Template render failed: "+err.Error())
+		return
+	}
+
+	// Pre-flight resource validation (the base's create hook): failing checks
+	// reject BEFORE anything queues; warnings ride the success response.
+	resourceErrors, resourceWarnings := s.validateCreationResources(r.Context(), document)
+	if len(resourceErrors) > 0 {
+		insufficientResources(w, resourceErrors)
 		return
 	}
 
@@ -339,14 +389,18 @@ func (s *Server) handleCreateMachine(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	provisionerLabel := "none (provisioning is optional)"
+	if body.HasProvisioner() {
+		provisionerLabel = body.Provisioner.Name + "/" + body.Provisioner.Version
+	}
 	slog.Info("machine creation queued", "machine", name,
-		"provisioner", body.Provisioner.Name+"/"+body.Provisioner.Version,
+		"provisioner", provisionerLabel,
 		"requires_download", requiresDownload, "by", createdBy)
 	message := "Machine creation queued"
 	if requiresDownload {
 		message = "Template download and machine creation queued"
 	}
-	writeJSON(w, map[string]any{
+	response := map[string]any{
 		"success":           true,
 		"parent_task_id":    parentID,
 		"machine_name":      name,
@@ -355,7 +409,11 @@ func (s *Server) handleCreateMachine(w http.ResponseWriter, r *http.Request) {
 		"message":           message,
 		"requires_download": requiresDownload,
 		"sub_tasks":         subTasks,
-	})
+	}
+	if len(resourceWarnings) > 0 {
+		response["resource_warnings"] = resourceWarnings
+	}
+	writeJSON(w, response)
 }
 
 // workdirTaken reports whether another machine row claims the working
@@ -391,7 +449,7 @@ func (s *Server) handleCloneMachine(w http.ResponseWriter, r *http.Request) {
 	}
 	if len(source.Spec) == 0 {
 		taskError(w, http.StatusBadRequest,
-			"Only machines created from a provisioner package can be cloned — this machine has no creation spec")
+			"Only machines this agent created can be cloned — this machine has no creation spec (discovered VM)")
 		return
 	}
 	var body struct {
@@ -399,9 +457,24 @@ func (s *Server) handleCloneMachine(w http.ResponseWriter, r *http.Request) {
 		Settings         map[string]any `json:"settings"`
 		Overrides        map[string]any `json:"overrides"`
 		StartAfterCreate bool           `json:"start_after_create"`
+		// Source picks the disk semantics: "template" (default) re-runs the
+		// source SPEC through create — a fresh build from the original
+		// template; "current" copies the source's CURRENT disk state via
+		// VBoxManage clonevm (the base's ZFS-snapshot clone semantics).
+		Source string `json:"source"`
+		// Snapshot/Linked apply to source=current: clone from a named source
+		// snapshot, optionally as a linked (differencing) clone.
+		Snapshot string `json:"snapshot"`
+		Linked   bool   `json:"linked"`
 	}
 	if err := decodeBody(r, &body); err != nil {
 		taskError(w, http.StatusBadRequest, "Invalid JSON body")
+		return
+	}
+	switch body.Source {
+	case "", "template", "current":
+	default:
+		taskError(w, http.StatusBadRequest, `source must be "template" (spec rebuild) or "current" (clonevm of today's disk state)`)
 		return
 	}
 	if hostname, _ := body.Settings["hostname"].(string); hostname == "" {
@@ -460,9 +533,34 @@ func (s *Server) handleCloneMachine(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	document, err := s.renderForResolution(r.Context(), spec)
+	// source=current: one clonevm task copies today's disk state — no create
+	// orchestration (the disks come from the source VM, not the template).
+	// Memory/CPU validate from the spec; storage is skipped (the clone's disk
+	// footprint is the source's CURRENT usage, unknowable from the spec).
+	if body.Source == "current" {
+		if exe := machines.VBoxManagePath(r.Context()); exe != "" {
+			if _, verr := vbox.ShowVMInfo(r.Context(), exe, name); verr == nil {
+				taskError(w, http.StatusConflict, "Machine "+name+" already exists on the system")
+				return
+			}
+		}
+		if resourceErrors, _ := s.validateCreationResources(r.Context(),
+			map[string]any{"settings": spec.Settings}); len(resourceErrors) > 0 {
+			insufficientResources(w, resourceErrors)
+			return
+		}
+		s.queueCloneCurrent(w, r, source, spec, name, body.Snapshot, body.Linked, body.StartAfterCreate)
+		return
+	}
+
+	document, err := s.resolutionDocument(r.Context(), spec)
 	if err != nil {
 		taskError(w, http.StatusBadRequest, "Template render failed: "+err.Error())
+		return
+	}
+	resourceErrors, resourceWarnings := s.validateCreationResources(r.Context(), document)
+	if len(resourceErrors) > 0 {
+		insufficientResources(w, resourceErrors)
 		return
 	}
 	createdBy := auth.FromContext(r.Context()).Name
@@ -473,7 +571,7 @@ func (s *Server) handleCloneMachine(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	slog.Info("machine clone queued", "source", source.Name, "clone", name, "by", createdBy)
-	writeJSON(w, map[string]any{
+	response := map[string]any{
 		"success":           true,
 		"parent_task_id":    parentID,
 		"machine_name":      name,
@@ -483,7 +581,67 @@ func (s *Server) handleCloneMachine(w http.ResponseWriter, r *http.Request) {
 		"message":           "Machine clone creation queued",
 		"requires_download": requiresDownload,
 		"sub_tasks":         subTasks,
+	}
+	if len(resourceWarnings) > 0 {
+		response["resource_warnings"] = resourceWarnings
+	}
+	writeJSON(w, response)
+}
+
+// queueCloneCurrent queues the machine_clone_current task (+ optional chained
+// start): VBoxManage clonevm copies the source's CURRENT disk state, the
+// executor fixes identity (fresh ssh forward, VRDE off) and lands the row
+// with the stripped spec.
+func (s *Server) queueCloneCurrent(w http.ResponseWriter, r *http.Request,
+	source *machines.Machine, spec *machines.Spec, name, snapshot string, linked, startAfter bool,
+) {
+	if linked && snapshot == "" {
+		taskError(w, http.StatusBadRequest, "linked clones require a snapshot to link against")
+		return
+	}
+	raw, err := json.Marshal(map[string]any{
+		"source":   source.Name,
+		"spec":     spec,
+		"snapshot": snapshot,
+		"linked":   linked,
 	})
+	if err != nil {
+		taskError(w, http.StatusInternalServerError, "Failed to clone machine")
+		return
+	}
+	metadata := string(raw)
+	createdBy := auth.FromContext(r.Context()).Name
+	task, err := s.tasks.Store().Create(r.Context(), &tasks.NewTask{
+		MachineName: name,
+		Operation:   machines.OpCloneCurrent,
+		Priority:    tasks.PriorityMedium,
+		CreatedBy:   createdBy,
+		Metadata:    &metadata,
+	})
+	if err != nil {
+		slog.Error("queue clone task", "source", source.Name, "clone", name, "error", err)
+		taskError(w, http.StatusInternalServerError, "Failed to clone machine")
+		return
+	}
+	response := map[string]any{
+		"success":        true,
+		"task_id":        task.ID,
+		"machine_name":   name,
+		"source_machine": source.Name,
+		"operation":      machines.OpCloneCurrent,
+		"status":         tasks.StatusPending,
+		"message":        "Current-state clone task queued (VBoxManage clonevm)",
+	}
+	if startAfter {
+		start, serr := s.createChainTask(r.Context(), name, machines.OpStart, nil, &task.ID, "", createdBy)
+		if serr != nil {
+			slog.Warn("queue clone start task", "clone", name, "error", serr)
+		} else {
+			response["start_task_id"] = start.ID
+		}
+	}
+	slog.Info("current-state clone queued", "source", source.Name, "clone", name, "by", createdBy)
+	writeJSON(w, response)
 }
 
 // stripCloneNetworks removes identity and addressing from cloned network

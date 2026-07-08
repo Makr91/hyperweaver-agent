@@ -324,6 +324,46 @@ func (s *Store) MarkMissing(ctx context.Context, seenNames []string) (int64, err
 	return res.RowsAffected()
 }
 
+// DeleteOrphanedMissing removes registry rows that were ALREADY flagged
+// orphaned on a previous sweep and are STILL absent from VirtualBox — the
+// base's reconciliation hard-delete (Mark's ruling 2026-07-07: an externally
+// deleted VM's entry and table data go away). The one-sweep grace (flag
+// first, delete next sweep) keeps a transiently-unregistered VM alive.
+// Configured-but-never-started rows (no UUID) are never touched. Returns the
+// deleted names.
+func (s *Store) DeleteOrphanedMissing(ctx context.Context, seenNames []string) ([]string, error) {
+	var query strings.Builder
+	query.WriteString(`DELETE FROM machines
+		WHERE is_orphaned = 1 AND uuid IS NOT NULL`)
+	args := []any{}
+	if len(seenNames) > 0 {
+		query.WriteString(" AND name NOT IN (?")
+		query.WriteString(strings.Repeat(", ?", len(seenNames)-1))
+		query.WriteString(")")
+		for _, name := range seenNames {
+			args = append(args, name)
+		}
+	}
+	query.WriteString(" RETURNING name")
+
+	rows, err := s.db.QueryContext(ctx, query.String(), args...)
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		_ = rows.Close()
+	}()
+	deleted := []string{}
+	for rows.Next() {
+		var name string
+		if serr := rows.Scan(&name); serr != nil {
+			return nil, serr
+		}
+		deleted = append(deleted, name)
+	}
+	return deleted, rows.Err()
+}
+
 // SetStatus records a machine's live status (targeted refresh after a
 // lifecycle operation, SHI parity).
 func (s *Store) SetStatus(ctx context.Context, name, status string) error {

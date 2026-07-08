@@ -187,6 +187,10 @@ machines:
   # keepserversrunning). false force-powers-off every machine this agent
   # created on the way out; discovered VMs are never touched.
   keep_running_on_exit: true
+  # Run the full provision pipeline on a machine's VERY FIRST start (stored
+  # provisioner document present, never provisioned) instead of a bare boot.
+  # Later starts, restarts, and document-less machines always boot plainly.
+  provision_on_start: false
 
 provisioning:
   # Directory holding provisioner packages (SHI's on-disk format:
@@ -284,6 +288,11 @@ host_power:
   # uptime, and admin-key-gated shutdown/restart/poweroff/halt of the machine
   # this agent runs on. Set false to remove the surface entirely.
   enabled: true
+  # Keep the host awake while the agent runs, via the OS's native
+  # power-management API (SetThreadExecutionState / IOKit power assertion /
+  # systemd-logind inhibitor). System sleep only — the display may still
+  # sleep and lock.
+  prevent_sleep: false
 `
 
 func ensureDefaultFile(path string) error {

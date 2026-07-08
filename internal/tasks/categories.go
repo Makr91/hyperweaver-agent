@@ -34,6 +34,12 @@ var operationCategories = map[string]string{
 	// same target files (runtime-proven 2026-07-06 — the loser dies at the
 	// rename); the later one then no-ops on the already-exists check.
 	"template_download": CategoryTemplate,
+	// One template delete/export at a time, serialized against downloads:
+	// all mutate the same storage tree.
+	"template_delete": CategoryTemplate,
+	"template_export": CategoryTemplate,
+	"template_upload": CategoryTemplate,
+	"template_move":   CategoryTemplate,
 	// One agent update at a time — it ends with the process exiting.
 	"agent_update": CategorySystem,
 	// One provisioning-network mutation at a time (the base's

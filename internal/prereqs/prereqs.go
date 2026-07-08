@@ -1,7 +1,12 @@
 // Package prereqs detects the external tools the provisioning engine drives
-// (Vagrant, VirtualBox, Git, rsync) — SHI parity: presence + version display.
-// rsync's version also feeds the sync-method platform rule (macOS auto-falls
-// back to SCP when the system rsync is the ancient Apple 2.x build).
+// (Vagrant, VirtualBox, Git, rsync, scp) — SHI parity: presence + version
+// display. rsync's version also feeds the sync-method platform rule (macOS
+// auto-falls back to SCP when the system rsync is the ancient Apple 2.x
+// build). The sync transports probe with the SAME lookup the pipeline uses
+// (sshrun.FindTool: PATH → vagrant's embedded toolchain → Windows OpenSSH),
+// so this surface never claims a tool is missing that the pipeline would
+// happily use — and builtin_sync reports the always-available pure-Go
+// transports (embedded rsync client + SFTP), the reason vagrant is optional.
 package prereqs
 
 import (
@@ -17,6 +22,7 @@ import (
 
 	"github.com/Makr91/hyperweaver-agent/internal/procattr"
 	"github.com/Makr91/hyperweaver-agent/internal/safepath"
+	"github.com/Makr91/hyperweaver-agent/internal/sshrun"
 )
 
 // Tool is one detected prerequisite.
@@ -57,7 +63,11 @@ func Detect(ctx context.Context) []Tool {
 		probePath(probeCtx, "vagrant", lookPath("vagrant"), "--version"),
 		probePath(probeCtx, "virtualbox", lookupVirtualBox(), "--version"),
 		probePath(probeCtx, "git", lookPath("git"), "--version"),
-		probePath(probeCtx, "rsync", lookPath("rsync"), "--version"),
+		probePath(probeCtx, "rsync", lookSyncTool("rsync"), "--version"),
+		// OpenSSH scp has no version flag; a bare invocation proves presence.
+		probePath(probeCtx, "scp", lookSyncTool("scp")),
+		// The embedded pure-Go transports ship inside the agent binary.
+		{Name: "builtin_sync", Installed: true, Version: "embedded rsync client + sftp"},
 	}
 
 	cached = tools
@@ -66,6 +76,17 @@ func Detect(ctx context.Context) []Tool {
 	out := make([]Tool, len(tools))
 	copy(out, tools)
 	return out
+}
+
+// lookSyncTool locates a sync transport with the pipeline's own lookup
+// (sshrun.FindTool) so the reported state matches what a sync task would
+// actually find — the PATH-only probe used to claim rsync was missing while
+// vagrant's embedded rsync carried every sync.
+func lookSyncTool(name string) string {
+	if path, err := sshrun.FindTool(name); err == nil {
+		return path
+	}
+	return ""
 }
 
 func lookPath(binary string) string {

@@ -47,6 +47,8 @@ type Server struct {
 	assets       *assets.Store
 	monitor      *monitoring.Service
 	dbs          []DBHandle
+	wsTickets    *wsTickets
+	sshSessions  *sshSessions
 	httpSrv      *http.Server
 	listener     net.Listener
 	startedAt    time.Time
@@ -80,6 +82,8 @@ func New(cfg *config.Config, keyStore *keys.Store, trayTokens *auth.TrayTokens, 
 		assets:       assetsStore,
 		monitor:      monitor,
 		dbs:          dbs,
+		wsTickets:    newWsTickets(),
+		sshSessions:  newSSHSessions(),
 		startedAt:    time.Now(),
 		restartArgs:  restartArgs,
 		openUI:       openUI,
@@ -183,6 +187,21 @@ func New(cfg *config.Config, keyStore *keys.Store, trayTokens *auth.TrayTokens, 
 	// Task queue (Agent API v1 Task Management group). Literal patterns
 	// (/tasks/stats, /tasks/completed) win over the {taskId} wildcards in
 	// ServeMux precedence.
+	// WebSocket plane (the base's model): the authenticated /ws-ticket mints
+	// a 60s ticket; upgrades authenticate by ?ticket= (browser WebSocket
+	// clients cannot send the API-key headers). /tasks/{id}/stream is the
+	// live task-output push.
+	mux.Handle("GET /ws-ticket", requireKey(http.HandlerFunc(s.handleWsTicket)))
+	mux.HandleFunc("GET /tasks/{taskId}/stream", s.handleTaskStream)
+
+	// SSH terminal sessions (the base's SSHTerminal family): REST lifecycle
+	// behind the key; the /ssh/{sessionId} WebSocket authenticates by ticket.
+	mux.Handle("POST /machines/{machineName}/ssh/start", requireKey(http.HandlerFunc(s.handleStartSSHSession)))
+	mux.Handle("GET /ssh/sessions", requireKey(http.HandlerFunc(s.handleListSSHSessions)))
+	mux.Handle("GET /ssh/sessions/{sessionId}", requireKey(http.HandlerFunc(s.handleSSHSessionInfo)))
+	mux.Handle("DELETE /ssh/sessions/{sessionId}/stop", requireKey(http.HandlerFunc(s.handleStopSSHSession)))
+	mux.HandleFunc("GET /ssh/{sessionId}", s.handleSSHSocket)
+
 	mux.Handle("GET /tasks", requireKey(http.HandlerFunc(s.handleListTasks)))
 	mux.Handle("GET /tasks/stats", requireKey(http.HandlerFunc(s.handleTaskStats)))
 	mux.Handle("GET /tasks/{taskId}", requireKey(http.HandlerFunc(s.handleTaskDetails)))
@@ -195,6 +214,13 @@ func New(cfg *config.Config, keyStore *keys.Store, trayTokens *auth.TrayTokens, 
 	// precedence.
 	mux.Handle("GET /machines", requireKey(http.HandlerFunc(s.handleListMachines)))
 	mux.Handle("POST /machines", requireKey(http.HandlerFunc(s.handleCreateMachine)))
+	// Orchestration family (ordered startup/shutdown by settings.boot_priority
+	// — the base's zones.orchestration).
+	mux.Handle("GET /machines/orchestration/status", requireKey(http.HandlerFunc(s.handleOrchestrationStatus)))
+	mux.Handle("POST /machines/orchestration/enable", requireKey(http.HandlerFunc(s.handleOrchestrationEnable)))
+	mux.Handle("POST /machines/orchestration/disable", requireKey(http.HandlerFunc(s.handleOrchestrationDisable)))
+	mux.Handle("POST /machines/orchestration/test", requireKey(http.HandlerFunc(s.handleOrchestrationTest)))
+	mux.Handle("GET /machines/priorities", requireKey(http.HandlerFunc(s.handleMachinePriorities)))
 	mux.Handle("GET /machines/ids", requireKey(http.HandlerFunc(s.handleServerIDs)))
 	mux.Handle("GET /machines/ids/next", requireKey(http.HandlerFunc(s.handleNextServerID)))
 	mux.Handle("POST /machines/bulk/start", requireKey(http.HandlerFunc(s.handleBulkStart)))
@@ -206,6 +232,19 @@ func New(cfg *config.Config, keyStore *keys.Store, trayTokens *auth.TrayTokens, 
 	mux.Handle("POST /machines/{machineName}/stop", requireKey(http.HandlerFunc(s.handleStopMachine)))
 	mux.Handle("POST /machines/{machineName}/restart", requireKey(http.HandlerFunc(s.handleRestartMachine)))
 	mux.Handle("POST /machines/{machineName}/suspend", requireKey(http.HandlerFunc(s.handleSuspendMachine)))
+	mux.Handle("POST /machines/{machineName}/reset", requireKey(http.HandlerFunc(s.handleResetMachine)))
+	mux.Handle("POST /machines/{machineName}/pause", requireKey(http.HandlerFunc(s.handlePauseMachine)))
+	mux.Handle("POST /machines/{machineName}/resume", requireKey(http.HandlerFunc(s.handleResumeMachine)))
+	// Snapshot family (VBoxManage snapshot — yardstick 2) + the no-session
+	// console screenshot (controlvm screenshotpng).
+	mux.Handle("GET /machines/{machineName}/snapshots", requireKey(http.HandlerFunc(s.handleListSnapshots)))
+	mux.Handle("POST /machines/{machineName}/snapshots", requireKey(http.HandlerFunc(s.handleTakeSnapshot)))
+	mux.Handle("POST /machines/{machineName}/snapshots/{snapshotName}/restore", requireKey(http.HandlerFunc(s.handleRestoreSnapshot)))
+	mux.Handle("DELETE /machines/{machineName}/snapshots/{snapshotName}", requireKey(http.HandlerFunc(s.handleDeleteSnapshot)))
+	mux.Handle("GET /machines/{machineName}/vnc/screenshot", requireKey(http.HandlerFunc(s.handleMachineScreenshot)))
+	mux.Handle("GET /machines/{machineName}/vnc", requireKey(http.HandlerFunc(s.handleVncInfo)))
+	mux.HandleFunc("GET /machines/{machineName}/vnc/websockify", s.handleVncWebsockify)
+	mux.Handle("GET /machines/{machineName}/guest-properties", requireKey(http.HandlerFunc(s.handleGuestProperties)))
 	mux.Handle("POST /machines/{machineName}/clone", requireKey(http.HandlerFunc(s.handleCloneMachine)))
 	mux.Handle("POST /machines/{machineName}/provision", requireKey(http.HandlerFunc(s.handleProvisionMachine)))
 	mux.Handle("GET /machines/{machineName}/provision/status", requireKey(http.HandlerFunc(s.handleProvisionStatus)))
@@ -217,6 +256,16 @@ func New(cfg *config.Config, keyStore *keys.Store, trayTokens *auth.TrayTokens, 
 	// downloaded boxes as clonable disk images).
 	mux.Handle("GET /templates", requireKey(http.HandlerFunc(s.handleListTemplates)))
 	mux.Handle("POST /templates/pull", requireKey(http.HandlerFunc(s.handlePullTemplate)))
+	mux.Handle("POST /templates/export", requireKey(http.HandlerFunc(s.handleExportTemplate)))
+	mux.Handle("POST /templates/publish", requireKey(http.HandlerFunc(s.handlePublishTemplate)))
+	mux.Handle("GET /templates/{templateId}", requireKey(http.HandlerFunc(s.handleGetTemplate)))
+	mux.Handle("DELETE /templates/{templateId}", requireKey(http.HandlerFunc(s.handleDeleteTemplate)))
+	mux.Handle("POST /templates/{templateId}/move", requireKey(http.HandlerFunc(s.handleMoveTemplate)))
+	// Remote-registry discovery (zoneweaver's TemplateSourceController — the
+	// wizard's box-catalog feed).
+	mux.Handle("GET /templates/sources", requireKey(http.HandlerFunc(s.handleListTemplateSources)))
+	mux.Handle("GET /templates/remote/{sourceName}", requireKey(http.HandlerFunc(s.handleRemoteTemplates)))
+	mux.Handle("GET /templates/remote/{sourceName}/{org}/{boxName}", requireKey(http.HandlerFunc(s.handleRemoteTemplateDetails)))
 	mux.Handle("GET /machines/{machineName}/notes", requireKey(http.HandlerFunc(s.handleGetMachineNotes)))
 	mux.Handle("PUT /machines/{machineName}/notes", requireKey(http.HandlerFunc(s.handleUpdateMachineNotes)))
 	mux.Handle("GET /machines/{machineName}/tags", requireKey(http.HandlerFunc(s.handleGetMachineTags)))
@@ -230,6 +279,13 @@ func New(cfg *config.Config, keyStore *keys.Store, trayTokens *auth.TrayTokens, 
 	mux.Handle("GET /provisioning/network/status", requireKey(http.HandlerFunc(s.handleProvisioningNetworkStatus)))
 	mux.Handle("POST /provisioning/network/setup", requireKey(http.HandlerFunc(s.handleProvisioningNetworkSetup)))
 	mux.Handle("DELETE /provisioning/network/teardown", requireKey(http.HandlerFunc(s.handleProvisioningNetworkTeardown)))
+	// Provisioning profiles (the base's reusable credential/folder/playbook
+	// bundles — composed in the UI, applied via PUT /machines/{name}).
+	mux.Handle("GET /provisioning/profiles", requireKey(http.HandlerFunc(s.handleListProfiles)))
+	mux.Handle("POST /provisioning/profiles", requireKey(http.HandlerFunc(s.handleCreateProfile)))
+	mux.Handle("GET /provisioning/profiles/{profileId}", requireKey(http.HandlerFunc(s.handleGetProfile)))
+	mux.Handle("PUT /provisioning/profiles/{profileId}", requireKey(http.HandlerFunc(s.handleUpdateProfile)))
+	mux.Handle("DELETE /provisioning/profiles/{profileId}", requireKey(http.HandlerFunc(s.handleDeleteProfile)))
 	mux.Handle("GET /provisioning/provisioners", requireKey(http.HandlerFunc(s.handleListProvisioners)))
 	mux.Handle("POST /provisioning/provisioners/import", requireKey(http.HandlerFunc(s.handleImportProvisioner)))
 	mux.Handle("GET /provisioning/provisioners/{name}", requireKey(http.HandlerFunc(s.handleProvisionerDetails)))

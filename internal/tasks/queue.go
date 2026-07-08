@@ -54,6 +54,11 @@ type QueueConfig struct {
 	// CleanupInterval is how often the retention cleanup runs — the Node
 	// agent's CleanupService cadence (cleanup.interval).
 	CleanupInterval time.Duration
+	// ResumePendingOnStart keeps pending tasks across an agent restart (the
+	// resumable queue). Default FALSE (Mark's ruling 2026-07-07): pending
+	// rows from a previous run are cancelled at boot — the base's startup
+	// clear — so yesterday's queued stop never fires on today's start.
+	ResumePendingOnStart bool
 }
 
 // runningEntry tracks one in-flight task.
@@ -118,6 +123,14 @@ func (q *Queue) Start() {
 		tlog().Error("task startup recovery failed", "error", err)
 	} else if stale > 0 {
 		tlog().Warn("failed tasks left running by a previous agent process", "count", stale)
+	}
+	if !q.cfg.ResumePendingOnStart {
+		if cancelled, err := q.store.CancelAllPending(context.Background()); err != nil {
+			tlog().Error("cancel leftover pending tasks failed", "error", err)
+		} else if cancelled > 0 {
+			tlog().Warn("cancelled pending tasks from a previous agent process (tasks.resume_pending_on_start re-enables the resumable queue)",
+				"count", cancelled)
+		}
 	}
 
 	q.mu.Lock()

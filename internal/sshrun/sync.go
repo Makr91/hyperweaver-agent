@@ -67,7 +67,10 @@ var defaultRsyncArgs = []string{"--verbose", "--archive", "-z", "--copy-links"}
 // FindTool locates a sync transport binary (rsync | scp): PATH first, then
 // vagrant's embedded toolchain — Mark's rule: a vagrant install carries a
 // working rsync (Windows: <Vagrant>\embedded\usr\bin\rsync.exe; macOS/Linux:
-// /opt/vagrant/embedded/bin), which also sidesteps Apple's ancient rsync.
+// /opt/vagrant/embedded/bin), which also sidesteps Apple's ancient rsync —
+// then Windows' own OpenSSH directory (scp/ssh ship with Windows 10+ even
+// when the service manager keeps them off PATH). Vagrant is OPTIONAL: a
+// miss here drops the caller to the built-in pure-Go transports.
 func FindTool(name string) (string, error) {
 	if path, err := exec.LookPath(name); err == nil {
 		return path, nil
@@ -75,6 +78,7 @@ func FindTool(name string) (string, error) {
 	candidates := []string{
 		`C:\Program Files\Vagrant\embedded\usr\bin\` + name + ".exe",
 		`C:\HashiCorp\Vagrant\embedded\usr\bin\` + name + ".exe",
+		`C:\Windows\System32\OpenSSH\` + name + ".exe",
 		"/opt/vagrant/embedded/bin/" + name,
 		"/opt/vagrant/embedded/usr/bin/" + name,
 	}
@@ -83,7 +87,7 @@ func FindTool(name string) (string, error) {
 			return path, nil
 		}
 	}
-	return "", fmt.Errorf("%s is not available on the agent host (PATH and vagrant's embedded toolchain checked)", name)
+	return "", fmt.Errorf("%s is not available on the agent host (PATH, vagrant's embedded toolchain, and the Windows OpenSSH directory checked)", name)
 }
 
 // SyncOptions carries one folder's rsync modifiers (the folder document's

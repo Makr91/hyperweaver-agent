@@ -5,6 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"path/filepath"
+	"regexp"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/Makr91/hyperweaver-agent/internal/tasks"
@@ -21,6 +25,9 @@ const (
 	OpStop     = "stop"
 	OpRestart  = "restart" // never dispatched: a restart is a stop→start chain
 	OpSuspend  = "suspend"
+	OpReset    = "reset"  // controlvm reset — the hard reboot VirtualBox offers beyond the stop→start chain
+	OpPause    = "pause"  // controlvm pause
+	OpResume   = "resume" // controlvm resume
 	OpDelete   = "delete"
 	OpDiscover = "discover"
 	OpPrepare  = "machine_prepare"
@@ -29,6 +36,13 @@ const (
 // stopMetadata is the stop/delete task metadata document.
 type stopMetadata struct {
 	Force bool `json:"force"`
+}
+
+// deleteMetadata is the delete task's metadata document. CleanupDisks is the
+// base's cleanup_datasets translated: false unregisters the VM but leaves
+// every medium file (and the working directory holding them) on disk.
+type deleteMetadata struct {
+	CleanupDisks bool `json:"cleanup_disks"`
 }
 
 // RegisterExecutors wires the machine operations into the task queue:
@@ -45,8 +59,22 @@ func RegisterExecutors(queue *tasks.Queue, store *Store, reconciler *Reconciler,
 	queue.Register(OpStart, tasks.Executor{Run: e.start, OnCancel: e.cancelStart})
 	queue.Register(OpStop, tasks.Executor{Run: e.stop})
 	queue.Register(OpSuspend, tasks.Executor{Run: e.suspend})
+	queue.Register(OpReset, tasks.Executor{Run: e.controlAction(OpReset, "reset")})
+	queue.Register(OpPause, tasks.Executor{Run: e.controlAction(OpPause, "pause")})
+	queue.Register(OpResume, tasks.Executor{Run: e.controlAction(OpResume, "resume")})
 	queue.Register(OpDelete, tasks.Executor{Run: e.deleteMachine})
 	queue.Register(OpDiscover, tasks.Executor{Run: e.discover})
+
+	// Snapshot family + current-state clone (VBoxManage snapshot/clonevm —
+	// yardstick 2: the whole hypervisor surface, policy-free).
+	queue.Register(OpSnapshotTake, tasks.Executor{Run: e.snapshotTake})
+	queue.Register(OpSnapshotRestore, tasks.Executor{Run: e.snapshotRestore})
+	queue.Register(OpSnapshotDelete, tasks.Executor{Run: e.snapshotDelete})
+	queue.Register(OpCloneCurrent, tasks.Executor{Run: e.cloneCurrent})
+	queue.Register(OpTemplateDelete, tasks.Executor{Run: e.templateDelete})
+	queue.Register(OpTemplateExport, tasks.Executor{Run: e.templateExport})
+	queue.Register(OpTemplatePublish, tasks.Executor{Run: e.templatePublish})
+	queue.Register(OpTemplateMove, tasks.Executor{Run: e.templateMove})
 	// machine_modify — the base's zone_modify (TASK_OBJECT_OPERATIONS +
 	// zone_lifecycle category). Its serialization guard here is the queue's
 	// one-running-task-per-machine rule, so it stays category-unmapped.
@@ -250,13 +278,84 @@ func (e *executors) suspend(ctx context.Context, task *tasks.Task, out *tasks.Ou
 	return nil
 }
 
-// deleteMachine destroys a machine: power off if running, unregister with
-// media deletion, remove the working directory (containment-checked), the
-// registry row, and any leftover pending tasks.
+// controlAction builds a one-verb controlvm executor (reset/pause/resume) —
+// the same shape start/suspend follow, without a bespoke function per verb.
+func (e *executors) controlAction(operation, action string) func(context.Context, *tasks.Task, *tasks.OutputWriter) error {
+	return func(ctx context.Context, task *tasks.Task, out *tasks.OutputWriter) error {
+		machine, vboxExe, err := e.resolve(ctx, task)
+		if err != nil {
+			return err
+		}
+		defer e.refreshStatus(machine.Name, vboxExe)
+
+		out.Write("stdout", "Running "+operation+" on "+machine.Name+" (VBoxManage controlvm "+action+")\n")
+		if serr := vbox.ControlVM(ctx, vboxExe, machine.VBoxTarget(), action); serr != nil {
+			out.Write("stderr", "Failed to "+operation+" machine "+machine.Name+": "+serr.Error()+"\n")
+			return serr
+		}
+		out.Write("stdout", "Machine "+machine.Name+" "+operation+" completed\n")
+		return nil
+	}
+}
+
+// attachmentPattern matches machinereadable storage-attachment keys on ANY
+// controller ("<controller>-<port>-<device>") — the delete safety sweep reads
+// every attached medium path through it.
+var attachmentPattern = regexp.MustCompile(`^(.+)-(\d+)-(\d+)$`)
+
+// detachExternalMedia detaches every attached medium whose file lives OUTSIDE
+// the machine's working directory before an unregister --delete can destroy
+// it: user-supplied disk images (boot.path / additional path attaches) are
+// never the agent's to delete. ISO paths outside the workdir are covered by
+// the same rule.
+func (e *executors) detachExternalMedia(ctx context.Context, vboxExe, target string,
+	info *vbox.Info, workdir string, out *tasks.OutputWriter,
+) {
+	prefix := strings.ToLower(filepath.Clean(workdir)) + string(filepath.Separator)
+	for key, value := range info.Raw {
+		if value == "none" || value == "emptydrive" || value == "" {
+			continue
+		}
+		match := attachmentPattern.FindStringSubmatch(key)
+		if match == nil || strings.Contains(key, "ImageUUID") {
+			continue
+		}
+		if !filepath.IsAbs(value) {
+			continue
+		}
+		if strings.HasPrefix(strings.ToLower(filepath.Clean(value)), prefix) {
+			continue // agent-created medium inside the workdir — deletable
+		}
+		port, perr := strconv.Atoi(match[2])
+		device, derr := strconv.Atoi(match[3])
+		if perr != nil || derr != nil {
+			continue
+		}
+		out.Write("stdout", "Detaching external medium (preserved): "+value+"\n")
+		if uerr := vbox.StorageDetachDevice(ctx, vboxExe, target, match[1], port, device); uerr != nil {
+			out.Write("stderr", "Detach of "+value+" failed — VirtualBox may refuse to delete it anyway: "+uerr.Error()+"\n")
+		}
+	}
+}
+
+// deleteMachine destroys a machine: power off if running, detach every
+// out-of-workdir medium (user files are never deleted), unregister —
+// with media deletion when cleanup_disks (default) — remove the working
+// directory (containment-checked), the registry row, and any leftover pending
+// tasks. cleanup_disks=false leaves all medium files and the working
+// directory on disk (the base's keep-datasets default, available here as the
+// explicit flag).
 func (e *executors) deleteMachine(ctx context.Context, task *tasks.Task, out *tasks.OutputWriter) error {
 	machine, vboxExe, err := e.resolve(ctx, task)
 	if err != nil {
 		return err
+	}
+
+	meta := deleteMetadata{CleanupDisks: true}
+	if task.Metadata != nil {
+		if uerr := json.Unmarshal([]byte(*task.Metadata), &meta); uerr != nil {
+			return fmt.Errorf("parse delete metadata: %w", uerr)
+		}
 	}
 
 	target := machine.VBoxTarget()
@@ -271,15 +370,28 @@ func (e *executors) deleteMachine(ctx context.Context, task *tasks.Task, out *ta
 		// Lease cleanup precedes unregister — the DHCP individual config's
 		// --vm reference stops resolving the moment the VM is gone.
 		e.removeDHCPLeases(ctx, vboxExe, machine, out)
-		out.Write("stdout", "Unregistering "+machine.Name+" from VirtualBox (deleting media)\n")
-		if uerr := vbox.UnregisterVM(ctx, vboxExe, target, true); uerr != nil {
+		workdir := e.machineWorkdir(machine.Name)
+		if machine.Home != nil && *machine.Home != "" {
+			workdir = *machine.Home
+		}
+		if meta.CleanupDisks {
+			e.detachExternalMedia(ctx, vboxExe, target, info, workdir, out)
+			out.Write("stdout", "Unregistering "+machine.Name+" from VirtualBox (deleting media)\n")
+		} else {
+			out.Write("stdout", "Unregistering "+machine.Name+" from VirtualBox (cleanup_disks=false — all medium files preserved)\n")
+		}
+		if uerr := vbox.UnregisterVM(ctx, vboxExe, target, meta.CleanupDisks); uerr != nil {
 			return uerr
 		}
 	} else if !errors.Is(ierr, vbox.ErrNotFound) {
 		return ierr
 	}
 
-	e.removeWorkdir(machine, out)
+	if meta.CleanupDisks {
+		e.removeWorkdir(machine, out)
+	} else {
+		out.Write("stdout", "Working directory preserved (cleanup_disks=false)\n")
+	}
 
 	out.Write("stdout", "Removing "+machine.Name+" from the registry\n")
 	if derr := e.store.Delete(ctx, machine.Name); derr != nil && !errors.Is(derr, ErrNotFound) {

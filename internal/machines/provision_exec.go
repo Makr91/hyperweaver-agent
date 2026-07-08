@@ -102,9 +102,9 @@ func (e *executors) waitSSH(ctx context.Context, task *tasks.Task, out *tasks.Ou
 
 // syncFolder executes machine_sync — ONE folder (executeZoneSyncTask 1:1):
 // skip disabled/virtualbox entries, resolve a relative map against the
-// working directory, pre-create the destination, transport per the folder's
-// type (rsync flags + --rsync-path='sudo rsync' | scp -r), chown to
-// owner:group after.
+// working directory, pre-create the destination, transport over the folder's
+// ladder (runFolderTransport — binary rsync/scp with pure-Go fallbacks),
+// chown to owner:group after.
 func (e *executors) syncFolder(ctx context.Context, task *tasks.Task, out *tasks.OutputWriter) error {
 	meta, err := readProvisionMetadata(task)
 	if err != nil {
@@ -136,31 +136,8 @@ func (e *executors) syncFolder(ctx context.Context, task *tasks.Task, out *tasks
 	}
 
 	e.taskProgress(task, 30, "syncing_files")
-	switch transportFor(folder) {
-	case SyncSCP:
-		scpExe, lerr := sshrun.FindTool("scp")
-		if lerr != nil {
-			return lerr
-		}
-		if serr := sshrun.SCPSync(ctx, scpExe, meta.IP, meta.Port, meta.Credentials,
-			source, folder.To, workdir, e.env.ProvisionKeyPath, out.Write); serr != nil {
-			return fmt.Errorf("%s → %s: %w", folder.Map, folder.To, serr)
-		}
-	default:
-		// PATH first, then vagrant's embedded toolchain (Mark's rule: a
-		// vagrant install carries a working rsync on every platform).
-		rsyncExe, lerr := sshrun.FindTool("rsync")
-		if lerr != nil {
-			return fmt.Errorf("%w — set the folder type to scp or install rsync", lerr)
-		}
-		if serr := sshrun.SyncFiles(ctx, rsyncExe, meta.IP, meta.Port, meta.Credentials,
-			source, folder.To, workdir, e.env.ProvisionKeyPath, &sshrun.SyncOptions{
-				Args:    folder.Args,
-				Exclude: folder.Exclude,
-				Delete:  folder.Delete,
-			}, out.Write); serr != nil {
-			return fmt.Errorf("%s → %s: %w", folder.Map, folder.To, serr)
-		}
+	if terr := e.runFolderTransport(ctx, meta, folder, source, workdir, out); terr != nil {
+		return terr
 	}
 
 	e.taskProgress(task, 85, "setting_ownership")
@@ -189,6 +166,80 @@ func skipReason(folder *Folder) string {
 		return "disabled"
 	}
 	return "virtualbox shared folders are never used"
+}
+
+// runFolderTransport lands one folder over the transport ladder (Mark's
+// vagrant-optional ruling 2026-07-07): the folder's chosen tool first — the
+// runtime-proven binary path — falling to the agent's built-in pure-Go
+// transports ONLY when the tool is ABSENT. A failed run stays a failure:
+// silently switching transports would hide real errors.
+//
+//	rsync: system/vagrant rsync binary → built-in Go rsync client (the
+//	       guest's own rsync serves the remote half, same as the binary path)
+//	scp:   system/vagrant/Windows-OpenSSH scp binary → built-in SFTP
+func (e *executors) runFolderTransport(ctx context.Context, meta *provisionTaskMetadata,
+	folder *Folder, source, workdir string, out *tasks.OutputWriter,
+) error {
+	if transportFor(folder) == SyncSCP {
+		// scp and SFTP write as the SSH user (rsync writes as root through
+		// --rsync-path='sudo rsync') — hand the freshly sudo-created
+		// destination to that user first; the post-sync chown still sets the
+		// folder's final ownership.
+		e.preChownDestination(ctx, meta, folder, workdir, out)
+		if scpExe, lerr := sshrun.FindTool("scp"); lerr == nil {
+			if serr := sshrun.SCPSync(ctx, scpExe, meta.IP, meta.Port, meta.Credentials,
+				source, folder.To, workdir, e.env.ProvisionKeyPath, out.Write); serr != nil {
+				return fmt.Errorf("%s → %s: %w", folder.Map, folder.To, serr)
+			}
+			return nil
+		}
+		out.Write("stdout", "scp binary not found on this host — using the built-in SFTP transport (pure Go, no host tools)\n")
+		if serr := sshrun.SFTPSync(ctx, meta.IP, meta.Port, meta.Credentials,
+			source, folder.To, workdir, e.env.ProvisionKeyPath, out.Write); serr != nil {
+			return fmt.Errorf("%s → %s: %w", folder.Map, folder.To, serr)
+		}
+		return nil
+	}
+
+	options := &sshrun.SyncOptions{
+		Args:    folder.Args,
+		Exclude: folder.Exclude,
+		Delete:  folder.Delete,
+	}
+	// PATH first, then vagrant's embedded toolchain (a vagrant install
+	// carries a working rsync on every platform) — but vagrant is OPTIONAL:
+	// no rsync binary anywhere drops to the embedded Go rsync client.
+	if rsyncExe, lerr := sshrun.FindTool("rsync"); lerr == nil {
+		if serr := sshrun.SyncFiles(ctx, rsyncExe, meta.IP, meta.Port, meta.Credentials,
+			source, folder.To, workdir, e.env.ProvisionKeyPath, options, out.Write); serr != nil {
+			return fmt.Errorf("%s → %s: %w", folder.Map, folder.To, serr)
+		}
+		return nil
+	}
+	out.Write("stdout", "rsync binary not found on this host — using the built-in Go rsync client (the guest's own rsync serves the remote half)\n")
+	if serr := sshrun.BuiltinRsyncSync(ctx, meta.IP, meta.Port, meta.Credentials,
+		source, folder.To, workdir, e.env.ProvisionKeyPath, options, out.Write); serr != nil {
+		return fmt.Errorf("%s → %s: %w", folder.Map, folder.To, serr)
+	}
+	return nil
+}
+
+// preChownDestination hands the destination directory to the SSH user before
+// a user-privileged transport writes into it (sudo mkdir -p left it
+// root-owned). Failures narrate and never fail the sync — the transport's
+// own error tells the real story.
+func (e *executors) preChownDestination(ctx context.Context, meta *provisionTaskMetadata,
+	folder *Folder, workdir string, out *tasks.OutputWriter,
+) {
+	owner := meta.Credentials.Username
+	if owner == "" {
+		owner = "root"
+	}
+	if cerr := sshrun.Run(ctx, meta.IP, meta.Port, meta.Credentials,
+		"sudo chown -R "+owner+":"+owner+" "+folder.To,
+		workdir, e.env.ProvisionKeyPath, time.Minute, out.Write); cerr != nil {
+		out.Write("stderr", "pre-sync chown "+folder.To+" failed: "+cerr.Error()+"\n")
+	}
 }
 
 // transportFor resolves a folder's sync transport: the folder's own type

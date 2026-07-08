@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -77,7 +78,10 @@ type ProvisionerRef struct {
 }
 
 // Spec is the machine-create request document (the Hosts.yml-shaped
-// structure of design §4), stored verbatim on the machine row.
+// structure of design §4), stored verbatim on the machine row. It carries
+// the base's FULL create body (ZoneCreationController's contract): only
+// hostname/domain are required — box, disks, provisioner, everything else is
+// optional, and a three-field spec makes a stub machine (Mark's ruling).
 type Spec struct {
 	Provisioner        ProvisionerRef          `json:"provisioner"`
 	Settings           map[string]any          `json:"settings"`
@@ -85,9 +89,38 @@ type Spec struct {
 	Roles              []provisioner.RoleInput `json:"roles"`
 	Properties         map[string]any          `json:"properties"`
 	AdvancedProperties map[string]any          `json:"advanced_properties"`
-	SyncMethod         string                  `json:"sync_method"`
-	SafeIDPath         string                  `json:"safe_id_path"`
-	StartAfterCreate   bool                    `json:"start_after_create"`
+	// Disks is the document's disks section at create (the base's
+	// disks{boot{...}, additional[]} + cdroms, in the Hosts.yml vocabulary
+	// the executors consume: boot{path|size|sparse|volume_name},
+	// additional_disks[], cdroms[{path}]). Omit entirely for a diskless
+	// machine. With a provisioner package the render's disks win.
+	Disks map[string]any `json:"disks"`
+	// Zones is the document's zones section at create (autostart today; the
+	// base's system attrs land through Vbox below).
+	Zones map[string]any `json:"zones"`
+	// CloudInit is the document's cloud_init section at create
+	// (enabled/dns_domain/password/resolvers/sshkey — the base's vocabulary).
+	CloudInit map[string]any `json:"cloud_init"`
+	// Vbox is the document's vbox section at create — its directives[] list
+	// is the generic modifyvm passthrough (the base's zone attr map analog:
+	// any --flag=value, so hostbridge/netif/acpi/xhci-class fields ride it).
+	Vbox map[string]any `json:"vbox"`
+	// Notes/Tags persist onto the machine row at finalize (the base's
+	// SubTaskExecutors finalize does exactly this).
+	Notes            string   `json:"notes"`
+	Tags             []string `json:"tags"`
+	SyncMethod       string   `json:"sync_method"`
+	SafeIDPath       string   `json:"safe_id_path"`
+	StartAfterCreate bool     `json:"start_after_create"`
+}
+
+// HasProvisioner reports whether the spec references a provisioner package.
+// The base's create is provisioner-FREE (Mark's ruling 2026-07-07: "a machine
+// is just a machine" — provisioning is something you CAN do to it, never a
+// gate on its existence); the SHI render layer engages only when a package is
+// named.
+func (s *Spec) HasProvisioner() bool {
+	return s.Provisioner.Name != "" && s.Provisioner.Version != ""
 }
 
 // ParseSpec reads a machine row's stored spec.
@@ -260,7 +293,8 @@ func WelcomeURL(home string) string {
 // StopAllProvisioned force-powers-off every spec-carrying machine — SHI's
 // keepserversrunning:false on-quit behavior (direct commands, no task queue:
 // the agent is exiting). Machines merely discovered from VirtualBox are the
-// user's own and are never touched.
+// user's own and are never touched. Ordering is the base's shutdown order:
+// lowest boot_priority first (development → applications → infrastructure).
 func StopAllProvisioned(ctx context.Context, store *Store) {
 	exe := VBoxManagePath(ctx)
 	if exe == "" {
@@ -271,6 +305,9 @@ func StopAllProvisioned(ctx context.Context, store *Store) {
 		mlog().Error("stop-on-exit: list machines", "error", err)
 		return
 	}
+	sort.SliceStable(list, func(i, j int) bool {
+		return machinePriority(list[i]) < machinePriority(list[j])
+	})
 	for _, machine := range list {
 		if !machine.Provisioned() || machine.UUID == nil {
 			continue
@@ -284,6 +321,16 @@ func StopAllProvisioned(ctx context.Context, store *Store) {
 			mlog().Error("stop-on-exit: poweroff failed", "machine", machine.Name, "error", perr)
 		}
 	}
+}
+
+// machinePriority reads a machine's boot priority through its spec (default
+// 95 for discovered/spec-less machines).
+func machinePriority(machine *Machine) int {
+	spec, err := ParseSpec(machine)
+	if err != nil {
+		return DefaultPriority
+	}
+	return ExtractPriority(spec)
 }
 
 // removeWorkdir deletes a provisioned machine's working directory — ONLY

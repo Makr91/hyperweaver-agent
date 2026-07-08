@@ -103,6 +103,17 @@ var settingsSchema = map[string]any{
 			},
 		},
 	},
+	"startup": map[string]any{
+		"description":      "How the agent itself starts (desktop login; headless installs boot via their service manager)",
+		"requires_restart": true,
+		"properties": map[string]any{
+			"start_at_login": map[string]any{
+				"type":        "boolean",
+				"description": "Register the agent with the OS's native login-item mechanism (Windows Run key, macOS LaunchAgent, Linux XDG autostart); converged at every agent boot — false removes the registration",
+				"default":     false,
+			},
+		},
+	},
 	"browser": map[string]any{
 		"description":      "Browser launching (tray Open and the startup open; desktop mode only)",
 		"requires_restart": false,
@@ -340,6 +351,11 @@ var settingsSchema = map[string]any{
 				"min":         1,
 				"max":         3650,
 			},
+			"resume_pending_on_start": map[string]any{
+				"type":        "boolean",
+				"description": "Keep pending tasks across an agent restart (the resumable queue). Off (default), pending tasks from a previous run are cancelled at boot — a queued stop from yesterday never fires on today's start",
+				"default":     false,
+			},
 			"output": map[string]any{
 				"type":        "object",
 				"description": "Task output capture (live streaming + persistence)",
@@ -421,6 +437,127 @@ var settingsSchema = map[string]any{
 				"type":        "boolean",
 				"description": "Keep provisioned machines running when the agent exits (SHI's keepserversrunning); false force-powers-off every machine this agent created on the way out",
 				"default":     true,
+			},
+			"provision_on_start": map[string]any{
+				"type":        "boolean",
+				"description": "Run the full provision pipeline on a machine's VERY FIRST start (stored provisioner document, never provisioned) instead of a bare boot; later starts, restarts, and document-less machines always boot plainly (SHI's provisionserversonstart)",
+				"default":     false,
+			},
+			"orchestration": map[string]any{
+				"type":        "object",
+				"description": "Ordered machine startup/shutdown by settings.boot_priority (1-100, default 95): at agent startup, autostart machines boot highest-priority first; at agent exit with keep_running_on_exit false, machines stop lowest-first",
+				"properties": map[string]any{
+					"enabled": map[string]any{
+						"type":        "boolean",
+						"description": "Boot autostart machines in priority order at agent startup (also togglable via POST /machines/orchestration/enable|disable)",
+						"default":     false,
+					},
+					"strategy": map[string]any{
+						"type":        "string",
+						"description": "Shapes the shutdown/test plan",
+						"default":     "parallel_by_priority",
+						"enum":        []string{"sequential", "parallel_by_priority", "staggered"},
+					},
+					"priority_delay": map[string]any{
+						"type":        "integer",
+						"description": "Seconds between priority groups (staggered strategy and the test plan's duration estimate)",
+						"default":     30,
+						"min":         0,
+						"max":         300,
+					},
+				},
+			},
+			"resource_validation": map[string]any{
+				"type":        "object",
+				"description": "Pre-flight resource checks on machine create/clone/modify: failing checks answer 400 Insufficient resources before anything queues; passing checks may annotate resource_warnings",
+				"properties": map[string]any{
+					"enabled": map[string]any{
+						"type":        "boolean",
+						"description": "Master switch for all resource validation",
+						"default":     true,
+					},
+					"storage": map[string]any{
+						"type":        "object",
+						"description": "Disk space validation on the volume holding the machine working directories",
+						"properties": map[string]any{
+							"enabled": map[string]any{
+								"type":        "boolean",
+								"description": "Validate requested disk sizes",
+								"default":     true,
+							},
+							"strategy": map[string]any{
+								"type":        "string",
+								"description": "actual checks against current free space; committed projects the sum of every machine's configured disk allocations (VirtualBox media are sparse — committed over-rejects on desktop hosts)",
+								"default":     "actual",
+								"enum":        []string{"actual", "committed"},
+							},
+							"thresholds": map[string]any{
+								"type":        "object",
+								"description": "Utilization percentages that annotate warnings (never block)",
+								"properties": map[string]any{
+									"warning":  map[string]any{"type": "number", "description": "Warning threshold percent", "default": 70, "min": 0, "max": 100},
+									"critical": map[string]any{"type": "number", "description": "Critical threshold percent", "default": 80, "min": 0, "max": 100},
+								},
+							},
+						},
+					},
+					"memory": map[string]any{
+						"type":        "object",
+						"description": "Host RAM validation",
+						"properties": map[string]any{
+							"enabled": map[string]any{
+								"type":        "boolean",
+								"description": "Validate requested memory",
+								"default":     true,
+							},
+							"strategy": map[string]any{
+								"type":        "string",
+								"description": "committed projects the sum of every machine's configured memory against host RAM; actual checks against currently free RAM",
+								"default":     "committed",
+								"enum":        []string{"committed", "actual"},
+							},
+							"thresholds": map[string]any{
+								"type":        "object",
+								"description": "Utilization percentages that annotate warnings (never block)",
+								"properties": map[string]any{
+									"warning":  map[string]any{"type": "number", "description": "Warning threshold percent", "default": 80, "min": 0, "max": 100},
+									"critical": map[string]any{"type": "number", "description": "Critical threshold percent", "default": 90, "min": 0, "max": 100},
+								},
+							},
+						},
+					},
+					"cpu": map[string]any{
+						"type":        "object",
+						"description": "vCPU overcommit validation against physical cores",
+						"properties": map[string]any{
+							"enabled": map[string]any{
+								"type":        "boolean",
+								"description": "Validate requested vCPUs",
+								"default":     true,
+							},
+							"strategy": map[string]any{
+								"type":        "string",
+								"description": "committed sums every machine's configured vCPUs; actual sums running machines only",
+								"default":     "committed",
+								"enum":        []string{"committed", "actual"},
+							},
+							"hard_limit": map[string]any{
+								"type":        "number",
+								"description": "Overcommit ceiling as a percentage of physical cores — requests projecting past it are rejected",
+								"default":     400,
+								"min":         100,
+							},
+							"thresholds": map[string]any{
+								"type":        "object",
+								"description": "Utilization percentages that annotate warnings (never block)",
+								"properties": map[string]any{
+									"warning":  map[string]any{"type": "number", "description": "Warning threshold percent", "default": 150, "min": 0},
+									"critical": map[string]any{"type": "number", "description": "Critical threshold percent", "default": 300, "min": 0},
+								},
+							},
+						},
+					},
+				},
 			},
 		},
 	},
@@ -539,8 +676,8 @@ var settingsSchema = map[string]any{
 			"sources": map[string]any{
 				"type":        "array",
 				"items":       "object",
-				"description": "Configured Vagrant/BoxVault-compatible registries: {name, url, enabled, default, auth_token}. The entry named \"Default Registry\" (or flagged default) serves requests that name no source; auth_token authenticates private boxes",
-				"default":     []map[string]any{{"name": "Default Registry", "url": "https://boxvault.startcloud.com", "enabled": true, "default": true, "auth_token": ""}},
+				"description": "Configured Vagrant/BoxVault-compatible registries: {name, url, enabled, default, auth_token, username, api_key, ca_file}. The entry named \"Default Registry\" (or flagged default) serves requests that name no source. Auth ladder: a JWT auth_token or api_key is used directly; username+api_key signs in for a JWT; else the raw token rides as Bearer. ca_file adds a PEM CA bundle to the trust store for self-signed registries (verification always stays on)",
+				"default":     []map[string]any{{"name": "Default Registry", "url": "https://boxvault.startcloud.com", "enabled": true, "default": true, "auth_token": "", "username": "", "api_key": "", "ca_file": ""}},
 			},
 		},
 	},
@@ -606,13 +743,18 @@ var settingsSchema = map[string]any{
 		},
 	},
 	"host_power": map[string]any{
-		"description":      "Host power management (/system/host endpoints and the host-power capability token)",
+		"description":      "Host power management (/system/host endpoints, the host-power capability token, and sleep prevention)",
 		"requires_restart": true,
 		"properties": map[string]any{
 			"enabled": map[string]any{
 				"type":        "boolean",
 				"description": "Serve the host power endpoints: status/uptime plus admin-only shutdown, restart, poweroff, and halt of the machine this agent runs on",
 				"default":     true,
+			},
+			"prevent_sleep": map[string]any{
+				"type":        "boolean",
+				"description": "Keep the host awake while the agent runs, via the OS's native power-management API (SetThreadExecutionState / IOKit power assertion / systemd-logind inhibitor); system sleep only — the display may still sleep and lock (SHI's preventsystemfromsleep)",
+				"default":     false,
 			},
 		},
 	},

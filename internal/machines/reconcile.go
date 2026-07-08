@@ -241,16 +241,57 @@ func (r *Reconciler) RunOnce(ctx context.Context, out *tasks.OutputWriter) {
 		}
 	}
 
+	// Hard-delete rows orphaned on a PREVIOUS sweep and still missing (the
+	// base's reconciliation delete — Mark's ruling 2026-07-07: an externally
+	// deleted VM's entry goes away; the one-sweep grace covers transient
+	// unregisters). Their leftover pending tasks are cancelled. Working
+	// directories stay on disk — table data only, never user files.
+	deleted, err := r.store.DeleteOrphanedMissing(sweepCtx, seen)
+	if err != nil {
+		narrate("stderr", "orphan removal failed: "+err.Error())
+		mlog().Error("machine reconciliation: delete orphaned failed", "error", err)
+	}
+	for _, name := range deleted {
+		narrate("stderr", name+": VM gone from VirtualBox since the previous sweep — registry entry removed")
+		mlog().Warn("orphaned machine removed from the registry", "machine", name)
+		r.cancelPendingTasks(sweepCtx, name, narrate)
+	}
+
 	orphaned, err := r.store.MarkMissing(sweepCtx, seen)
 	if err != nil {
 		narrate("stderr", "orphan check failed: "+err.Error())
 		mlog().Error("machine reconciliation: mark missing failed", "error", err)
 	} else if orphaned > 0 {
-		narrate("stderr", strconv.FormatInt(orphaned, 10)+" registry machine(s) no longer present in VirtualBox — marked orphaned")
+		narrate("stderr", strconv.FormatInt(orphaned, 10)+" registry machine(s) no longer present in VirtualBox — marked orphaned (removed next sweep if still missing)")
 		mlog().Warn("machines no longer present in VirtualBox marked orphaned", "count", orphaned)
 	}
 
 	// The Node agent's discover completion line.
 	narrate("stdout", "Discovery completed: "+strconv.Itoa(discovered)+" new machines discovered, "+
-		strconv.Itoa(updated)+" updated, "+strconv.FormatInt(orphaned, 10)+" machines orphaned")
+		strconv.Itoa(updated)+" updated, "+strconv.FormatInt(orphaned, 10)+" machines orphaned, "+
+		strconv.Itoa(len(deleted))+" removed")
+}
+
+// cancelPendingTasks cancels a deleted machine's leftover pending tasks —
+// they target something that no longer exists.
+func (r *Reconciler) cancelPendingTasks(ctx context.Context, machineName string,
+	narrate func(stream, line string),
+) {
+	filter := tasks.ListFilter{
+		MachineName: machineName,
+		Status:      tasks.StatusPending,
+		Limit:       100,
+	}
+	pending, err := r.taskStore.List(ctx, &filter)
+	if err != nil {
+		narrate("stderr", machineName+": listing leftover pending tasks failed: "+err.Error())
+		return
+	}
+	for _, t := range pending {
+		if _, cerr := r.taskStore.CancelPending(ctx, t.ID); cerr != nil {
+			narrate("stderr", machineName+": cancel leftover task "+t.ID+" failed: "+cerr.Error())
+		} else {
+			narrate("stdout", machineName+": cancelled leftover pending task "+t.ID+" ("+t.Operation+")")
+		}
+	}
 }

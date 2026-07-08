@@ -104,6 +104,15 @@ type UIConfig struct {
 	Path string `yaml:"path" json:"path"`
 }
 
+// StartupConfig controls how the agent itself starts (the desktop login
+// story; headless installs boot via their service manager).
+type StartupConfig struct {
+	// StartAtLogin registers the agent with the OS's native login-item
+	// mechanism (HKCU Run key / LaunchAgent plist / XDG autostart entry).
+	// Converged at every boot: false removes the registration.
+	StartAtLogin bool `yaml:"start_at_login" json:"start_at_login"`
+}
+
 // BrowserConfig controls how the agent launches a browser (the tray "Open"
 // action and the startup open).
 type BrowserConfig struct {
@@ -194,8 +203,13 @@ type TasksConfig struct {
 	DefaultPaginationLimit int `yaml:"default_pagination_limit" json:"default_pagination_limit"`
 	// RetentionDays: finished tasks older than this are deleted by the
 	// periodic cleanup (Node: host_monitoring.retention.tasks).
-	RetentionDays int              `yaml:"retention_days" json:"retention_days"`
-	Output        TaskOutputConfig `yaml:"output"         json:"output"`
+	RetentionDays int `yaml:"retention_days" json:"retention_days"`
+	// ResumePendingOnStart keeps pending tasks across an agent restart (the
+	// resumable queue). Default false: pending rows from a previous run are
+	// CANCELLED at boot — the base's startup clear (Mark's ruling 2026-07-07:
+	// yesterday's queued stop must never fire on today's start).
+	ResumePendingOnStart bool             `yaml:"resume_pending_on_start" json:"resume_pending_on_start"`
+	Output               TaskOutputConfig `yaml:"output"                  json:"output"`
 }
 
 // MonitoringConfig controls the host telemetry surface (/monitoring/*, the
@@ -224,6 +238,65 @@ type MonitoringConfig struct {
 // obvious kill-switch candidate on a desktop.
 type HostPowerConfig struct {
 	Enabled bool `yaml:"enabled" json:"enabled"`
+	// PreventSleep keeps the host awake while the agent runs (SHI's
+	// preventsystemfromsleep, default false) using each OS's native
+	// power-management API — SetThreadExecutionState / IOKit power assertion /
+	// systemd-logind inhibitor. System sleep only; the display may still
+	// sleep and lock.
+	PreventSleep bool `yaml:"prevent_sleep" json:"prevent_sleep"`
+}
+
+// ResourceThresholdsConfig are the warn/critical utilization percentages a
+// validator annotates (warnings never block; the hard checks do).
+type ResourceThresholdsConfig struct {
+	Warning  float64 `yaml:"warning"  json:"warning"`
+	Critical float64 `yaml:"critical" json:"critical"`
+}
+
+// ResourceCheckConfig is one validator's knobs (the base's
+// zones.resource_validation.storage/memory blocks). Strategy: "committed"
+// projects against the sum of every machine's CONFIGURED allocation;
+// "actual" checks against the host's current free amount.
+type ResourceCheckConfig struct {
+	Enabled    bool                     `yaml:"enabled"    json:"enabled"`
+	Strategy   string                   `yaml:"strategy"   json:"strategy"`
+	Thresholds ResourceThresholdsConfig `yaml:"thresholds" json:"thresholds"`
+}
+
+// CPUValidationConfig adds the overcommit hard limit (vCPUs may legitimately
+// exceed physical cores — the limit is a percentage of them).
+type CPUValidationConfig struct {
+	Enabled    bool                     `yaml:"enabled"    json:"enabled"`
+	Strategy   string                   `yaml:"strategy"   json:"strategy"`
+	HardLimit  float64                  `yaml:"hard_limit" json:"hard_limit"`
+	Thresholds ResourceThresholdsConfig `yaml:"thresholds" json:"thresholds"`
+}
+
+// ResourceValidationConfig gates the pre-flight resource checks on create,
+// clone, and modify (the base's zones.resource_validation, VirtualBox terms:
+// disk free where the media land, host RAM, CPU overcommit). Failing checks
+// answer 400 {error: "Insufficient resources", details[]}; passing checks may
+// still annotate resource_warnings[].
+type ResourceValidationConfig struct {
+	Enabled bool                `yaml:"enabled" json:"enabled"`
+	Storage ResourceCheckConfig `yaml:"storage" json:"storage"`
+	Memory  ResourceCheckConfig `yaml:"memory"  json:"memory"`
+	CPU     CPUValidationConfig `yaml:"cpu"     json:"cpu"`
+}
+
+// OrchestrationConfig controls ordered machine startup/shutdown (the base's
+// zones.orchestration): machines carry settings.boot_priority (1-100, default
+// 95, the base's zonecfg attr in this agent's spec vocabulary); at agent
+// startup, autostart machines boot highest-priority first; at agent exit
+// (keep_running_on_exit false) machines stop lowest-first.
+type OrchestrationConfig struct {
+	Enabled bool `yaml:"enabled" json:"enabled"`
+	// Strategy shapes the shutdown/test plan: sequential |
+	// parallel_by_priority | staggered.
+	Strategy string `yaml:"strategy" json:"strategy"`
+	// PriorityDelay is seconds between priority groups (staggered strategy,
+	// and the test plan's duration estimate).
+	PriorityDelay int `yaml:"priority_delay" json:"priority_delay"`
 }
 
 // MachinesConfig controls the machine registry (the Node agent's zones.*
@@ -253,6 +326,18 @@ type MachinesConfig struct {
 	// every spec-carrying machine at shutdown — machines discovered from
 	// VirtualBox are never touched.
 	KeepRunningOnExit bool `yaml:"keep_running_on_exit" json:"keep_running_on_exit"`
+	// ResourceValidation are the pre-flight resource checks on
+	// create/clone/modify.
+	ResourceValidation ResourceValidationConfig `yaml:"resource_validation" json:"resource_validation"`
+	// Orchestration is ordered startup/shutdown by settings.boot_priority.
+	Orchestration OrchestrationConfig `yaml:"orchestration" json:"orchestration"`
+	// ProvisionOnStart makes a machine's VERY FIRST start (a stored
+	// provisioner document, never provisioned) run the full provision
+	// pipeline instead of a bare boot — SHI's dormant provisionserversonstart
+	// preference, Mark's semantics 2026-07-07. Later starts, document-less
+	// machines, restarts, and provision-chain boot children are never
+	// affected. Default false.
+	ProvisionOnStart bool `yaml:"provision_on_start" json:"provision_on_start"`
 }
 
 // ProvisioningNetworkConfig controls the dedicated provisioning network (the
@@ -260,9 +345,12 @@ type MachinesConfig struct {
 // dhcpd on illumos). VirtualBox collapses that triple into ONE host-only
 // interface, identified by host_ip because VirtualBox assigns interface names
 // itself; its own DHCP server carries the base's dhcpd role, so the base's
-// etherstub_name/host_vnic_name fields have no analog here. NAT/forwarding
-// are deliberately absent too: a host-only network reaches the host directly,
-// which is everything wait_ssh/sync/ansible-local need.
+// etherstub_name/host_vnic_name fields have no analog here. The base's
+// NAT/forwarding pieces (provisioning-NIC egress) live elsewhere on
+// VirtualBox: the provisioning NIC is the NAT adapter pinned at create
+// (adapter 1, ssh port-forward transport — Mark's architecture 2026-07-07).
+// This host-only machinery stays dormant-but-available for host-type
+// networks[] entries and build-it-yourself setups.
 type ProvisioningNetworkConfig struct {
 	Enabled bool `yaml:"enabled" json:"enabled"`
 	// Subnet is the provisioning network in CIDR form.
@@ -339,6 +427,15 @@ type TemplateSourceConfig struct {
 	// AuthToken authenticates private boxes (Bearer); a per-request
 	// auth token overrides it.
 	AuthToken string `yaml:"auth_token" json:"auth_token"`
+	// Username + APIKey enable the BoxVault signin flow (the base's model):
+	// when APIKey is not already a JWT, the pair exchanges for one at
+	// /api/auth/signin. AuthToken wins when set.
+	Username string `yaml:"username" json:"username"`
+	APIKey   string `yaml:"api_key"  json:"api_key"`
+	// CAFile adds a PEM CA bundle to the trust store for this registry —
+	// the self-signed-registry answer. Verification always stays on (the
+	// base's verify_ssl:false is deliberately not ported).
+	CAFile string `yaml:"ca_file" json:"ca_file"`
 }
 
 // TemplateSourcesConfig controls the box-template registry (the base's
@@ -376,6 +473,7 @@ type Config struct {
 	SSL             SSLConfig             `yaml:"ssl"              json:"ssl"`
 	CORS            CORSConfig            `yaml:"cors"             json:"cors"`
 	UI              UIConfig              `yaml:"ui"               json:"ui"`
+	Startup         StartupConfig         `yaml:"startup"          json:"startup"`
 	Browser         BrowserConfig         `yaml:"browser"          json:"browser"`
 	Logging         LoggingConfig         `yaml:"logging"          json:"logging"`
 	APIKeys         APIKeysConfig         `yaml:"api_keys"         json:"api_keys"`
@@ -459,6 +557,33 @@ func Default() *Config {
 			PrefixMachineNames: false,
 			ShutdownTimeout:    120,
 			KeepRunningOnExit:  true,
+			ResourceValidation: ResourceValidationConfig{
+				Enabled: true,
+				// Storage defaults to "actual" here (the base defaults
+				// committed): VirtualBox media are sparse files, so committed
+				// sums against disk capacity over-reject on desktop hosts.
+				Storage: ResourceCheckConfig{
+					Enabled:    true,
+					Strategy:   "actual",
+					Thresholds: ResourceThresholdsConfig{Warning: 70, Critical: 80},
+				},
+				Memory: ResourceCheckConfig{
+					Enabled:    true,
+					Strategy:   "committed",
+					Thresholds: ResourceThresholdsConfig{Warning: 80, Critical: 90},
+				},
+				CPU: CPUValidationConfig{
+					Enabled:    true,
+					Strategy:   "committed",
+					HardLimit:  400,
+					Thresholds: ResourceThresholdsConfig{Warning: 150, Critical: 300},
+				},
+			},
+			Orchestration: OrchestrationConfig{
+				Enabled:       false,
+				Strategy:      "parallel_by_priority",
+				PriorityDelay: 30,
+			},
 		},
 		Provisioning: ProvisioningConfig{
 			DefaultSyncMethod:            "rsync",

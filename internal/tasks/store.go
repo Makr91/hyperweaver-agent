@@ -66,6 +66,16 @@ const taskColumns = `id, machine_name, operation, status, priority, created_by,
 	depends_on, parent_task_id, error_message, created_at, started_at,
 	completed_at, updated_at, metadata, progress_percent, progress_info, output`
 
+// listColumns is taskColumns with the output blob nulled: GET /tasks is the
+// UI's polling list, and a provision run's output is hundreds of KB per row —
+// megabytes per poll for data the list never renders (Mark's ruling
+// 2026-07-07, the joint W1 fix). The detail endpoint, /tasks/{id}/output, and
+// the WebSocket stream keep serving output in full.
+const listColumns = `id, machine_name, operation, status, priority, created_by,
+	depends_on, parent_task_id, error_message, created_at, started_at,
+	completed_at, updated_at, metadata, progress_percent, progress_info,
+	NULL AS output`
+
 // scanTask reads one task row from any row scanner.
 func scanTask(row interface{ Scan(...any) error }) (*Task, error) {
 	var t Task
@@ -229,7 +239,7 @@ func (s *Store) List(ctx context.Context, f *ListFilter) ([]*Task, error) {
 
 	var query strings.Builder
 	query.WriteString("SELECT ")
-	query.WriteString(taskColumns)
+	query.WriteString(listColumns)
 	query.WriteString(" FROM tasks")
 	args := f.where(&query)
 	query.WriteString(" ORDER BY ")
@@ -495,6 +505,24 @@ func (s *Store) DeleteFinishedBefore(ctx context.Context, cutoff time.Time) (int
 	res, err := s.db.ExecContext(ctx, `DELETE FROM tasks
 		WHERE status IN ('completed', 'completed_with_errors', 'failed', 'cancelled')
 		  AND created_at < ?`, formatTime(cutoff))
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
+// CancelAllPending cancels every pending task — startup recovery's second
+// half (Mark's ruling 2026-07-07, default behavior): a queued operation from
+// a previous agent run must not fire on boot (yesterday's pending stop taking
+// a machine down at startup). tasks.resume_pending_on_start re-enables the
+// resumable queue.
+func (s *Store) CancelAllPending(ctx context.Context) (int64, error) {
+	now := formatTime(time.Now())
+	res, err := s.db.ExecContext(ctx, `UPDATE tasks
+		SET status = 'cancelled',
+		    error_message = 'Agent restarted before task ran',
+		    completed_at = ?, updated_at = ?
+		WHERE status = 'pending'`, now, now)
 	if err != nil {
 		return 0, err
 	}

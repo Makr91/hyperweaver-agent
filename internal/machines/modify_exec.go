@@ -358,7 +358,23 @@ func modifyAttributeFlags(metadata map[string]any, info *vbox.Info) (flags, note
 		}
 	}
 	if _, ok := metadata["diskif"]; ok {
-		notes = append(notes, "diskif has no VirtualBox modifyvm analog (the controller type is fixed at attach) — skipped")
+		notes = append(notes, "diskif selects the storage controller type at CREATE only — VirtualBox fixes it once media attach; skipped")
+	}
+	if v, ok := metadata["boot_order"]; ok {
+		if bootFlags := bootOrderFlags(v); len(bootFlags) > 0 {
+			flags = append(flags, bootFlags...)
+		} else {
+			notes = append(notes, "boot_order carries no usable entries (floppy|dvd|disk|net|none) — skipped")
+		}
+	}
+	// The vbox.directives passthrough at MODIFY — the same generic modifyvm
+	// attribute list create accepts (the zonecfg attr-map analog): any
+	// --flag=value the Edit surface wants to reach.
+	for _, entry := range listOr(mapOr(metadata["vbox"])["directives"]) {
+		directive := mapOr(entry)
+		if name := stringOr(directive["directive"], ""); name != "" {
+			flags = append(flags, "--"+name+"="+stringOr(directive["value"], ""))
+		}
 	}
 	return flags, notes
 }

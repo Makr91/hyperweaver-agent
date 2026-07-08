@@ -3,8 +3,10 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
+	"strconv"
 
 	"github.com/Makr91/hyperweaver-agent/internal/auth"
 	"github.com/Makr91/hyperweaver-agent/internal/machines"
@@ -30,6 +32,9 @@ func (s *Server) templateSources() []machines.TemplateSource {
 			Enabled:   source.Enabled,
 			Default:   source.Default,
 			AuthToken: source.AuthToken,
+			Username:  source.Username,
+			APIKey:    source.APIKey,
+			CAFile:    source.CAFile,
 		})
 	}
 	return sources
@@ -142,8 +147,10 @@ func (s *Server) buildProvisionChain(ctx context.Context, machine *machines.Mach
 
 	// Extract slot: re-render + re-materialize the working copy from the
 	// registry package (SHI regenerates before every provision; zoneweaver
-	// extracts its artifact here).
-	if len(machine.Spec) > 0 {
+	// extracts its artifact here). Only when the spec NAMES a package —
+	// provisioner-less machines have nothing to render (their document
+	// arrived via PUT and is consumed as stored, the base's model).
+	if spec, serr := machines.ParseSpec(machine); serr == nil && spec.HasProvisioner() {
 		specMeta, err := json.Marshal(map[string]any{"spec": machine.Spec})
 		if err != nil {
 			return nil, err
@@ -269,6 +276,79 @@ func (s *Server) buildProvisionChain(ctx context.Context, machine *machines.Mach
 	return chain, nil
 }
 
+// startProvisionPipeline creates the provision orchestration parent and its
+// chain — handleProvisionMachine's core, shared with the provision-on-start
+// hook (machines.provision_on_start). A chain-build failure cancels the
+// half-built parent before the error returns.
+func (s *Server) startProvisionPipeline(ctx context.Context, machine *machines.Machine,
+	validation *provisionValidation, skipBoot bool, createdBy string,
+) (parentID string, chain []map[string]any, err error) {
+	metadata, err := json.Marshal(map[string]any{
+		"ip": validation.ip, "port": validation.port,
+	})
+	if err != nil {
+		return "", nil, err
+	}
+	metadataStr := string(metadata)
+	parent, err := s.tasks.Store().Create(ctx, &tasks.NewTask{
+		MachineName: machine.Name,
+		Operation:   machines.OpProvisionOrchestration,
+		Priority:    tasks.PriorityMedium,
+		CreatedBy:   createdBy,
+		Metadata:    &metadataStr,
+		Parent:      true,
+	})
+	if err != nil {
+		return "", nil, err
+	}
+
+	chain, err = s.buildProvisionChain(ctx, machine, validation, skipBoot, parent.ID, createdBy)
+	if err != nil {
+		if _, cerr := s.tasks.Cancel(ctx, parent.ID); cerr != nil {
+			slog.Warn("cancel half-built provision chain", "task_id", parent.ID, "error", cerr)
+		}
+		return "", nil, err
+	}
+	return parent.ID, chain, nil
+}
+
+// provisionOnStartPipeline queues the full provision pipeline for a start
+// request when machines.provision_on_start applies — the machine's VERY
+// FIRST start only (Mark's semantics 2026-07-07): a stored provisioner
+// document, never provisioned. Anything that disqualifies the machine (no
+// document, already provisioned, no transport, chain failure) answers false
+// and the caller boots plainly — auto-provisioning must never block a start.
+func (s *Server) provisionOnStartPipeline(ctx context.Context, machine *machines.Machine,
+	createdBy string,
+) (parentID string, ok bool) {
+	if !s.cfg.Machines.ProvisionOnStart {
+		return "", false
+	}
+	validation, problem := validateProvisionRequest(machine)
+	if problem != "" {
+		slog.Info("provision_on_start skipped — plain start queued",
+			"machine", machine.Name, "reason", problem)
+		return "", false
+	}
+	if machines.HasProvisionedBefore(validation.config) {
+		return "", false
+	}
+	if problem := resolveTransport(ctx, machine, validation); problem != "" {
+		slog.Info("provision_on_start skipped — plain start queued",
+			"machine", machine.Name, "reason", problem)
+		return "", false
+	}
+	parent, _, err := s.startProvisionPipeline(ctx, machine, validation, false, createdBy)
+	if err != nil {
+		slog.Error("provision_on_start pipeline failed — plain start queued",
+			"machine", machine.Name, "error", err)
+		return "", false
+	}
+	slog.Info("provision_on_start: first start runs the provision pipeline",
+		"machine", machine.Name, "parent_task_id", parent)
+	return parent, true
+}
+
 // handleProvisionMachine starts the provisioning pipeline (provisionZone).
 func (s *Server) handleProvisionMachine(w http.ResponseWriter, r *http.Request) {
 	machine := s.findMachine(w, r)
@@ -295,35 +375,10 @@ func (s *Server) handleProvisionMachine(w http.ResponseWriter, r *http.Request) 
 	}
 
 	createdBy := auth.FromContext(r.Context()).Name
-	metadata, err := json.Marshal(map[string]any{
-		"ip": validation.ip, "port": validation.port,
-	})
+	parentID, chain, err := s.startProvisionPipeline(r.Context(), machine, validation,
+		body.SkipBoot, createdBy)
 	if err != nil {
-		taskError(w, http.StatusInternalServerError, "Failed to start provisioning pipeline")
-		return
-	}
-	metadataStr := string(metadata)
-	parent, err := s.tasks.Store().Create(r.Context(), &tasks.NewTask{
-		MachineName: machine.Name,
-		Operation:   machines.OpProvisionOrchestration,
-		Priority:    tasks.PriorityMedium,
-		CreatedBy:   createdBy,
-		Metadata:    &metadataStr,
-		Parent:      true,
-	})
-	if err != nil {
-		slog.Error("create provision parent", "machine", machine.Name, "error", err)
-		taskError(w, http.StatusInternalServerError, "Failed to start provisioning pipeline")
-		return
-	}
-
-	chain, err := s.buildProvisionChain(r.Context(), machine, validation,
-		body.SkipBoot, parent.ID, createdBy)
-	if err != nil {
-		slog.Error("build provision chain", "machine", machine.Name, "error", err)
-		if _, cerr := s.tasks.Cancel(r.Context(), parent.ID); cerr != nil {
-			slog.Warn("cancel half-built provision chain", "task_id", parent.ID, "error", cerr)
-		}
+		slog.Error("start provision pipeline", "machine", machine.Name, "error", err)
 		taskError(w, http.StatusInternalServerError, "Failed to start provisioning pipeline")
 		return
 	}
@@ -332,7 +387,7 @@ func (s *Server) handleProvisionMachine(w http.ResponseWriter, r *http.Request) 
 		"success":        true,
 		"message":        "Provisioning pipeline started for " + machine.Name,
 		"machine_name":   machine.Name,
-		"parent_task_id": parent.ID,
+		"parent_task_id": parentID,
 		"steps":          len(chain),
 		"task_chain":     chain,
 	})
@@ -544,6 +599,240 @@ func (s *Server) handleListTemplates(w http.ResponseWriter, r *http.Request) {
 		"templates": list,
 		"total":     len(list),
 	})
+}
+
+// handleGetTemplate serves one local template row (the base's GET
+// /templates/local/{id}).
+func (s *Server) handleGetTemplate(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(r.PathValue("templateId"), 10, 64)
+	if err != nil {
+		taskError(w, http.StatusNotFound, "Template not found")
+		return
+	}
+	template, err := s.machines.GetTemplate(r.Context(), id)
+	if errors.Is(err, machines.ErrTemplateNotFound) {
+		taskError(w, http.StatusNotFound, "Template not found")
+		return
+	}
+	if err != nil {
+		slog.Error("get template", "id", id, "error", err)
+		taskError(w, http.StatusInternalServerError, "Failed to retrieve template details")
+		return
+	}
+	writeJSON(w, template)
+}
+
+// handleDeleteTemplate queues a template_delete task (the base's DELETE
+// /templates/local/{id}: remove the stored artifact + the row, async).
+func (s *Server) handleDeleteTemplate(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(r.PathValue("templateId"), 10, 64)
+	if err != nil {
+		taskError(w, http.StatusNotFound, "Template not found")
+		return
+	}
+	template, err := s.machines.GetTemplate(r.Context(), id)
+	if errors.Is(err, machines.ErrTemplateNotFound) {
+		taskError(w, http.StatusNotFound, "Template not found")
+		return
+	}
+	if err != nil {
+		slog.Error("get template for delete", "id", id, "error", err)
+		taskError(w, http.StatusInternalServerError, "Failed to create delete task")
+		return
+	}
+
+	raw, err := json.Marshal(map[string]int64{"template_id": template.ID})
+	if err != nil {
+		taskError(w, http.StatusInternalServerError, "Failed to create delete task")
+		return
+	}
+	metadata := string(raw)
+	task, err := s.tasks.Store().Create(r.Context(), &tasks.NewTask{
+		MachineName: "system",
+		Operation:   machines.OpTemplateDelete,
+		Priority:    tasks.PriorityMedium,
+		CreatedBy:   auth.FromContext(r.Context()).Name,
+		Metadata:    &metadata,
+	})
+	if err != nil {
+		slog.Error("queue template delete", "id", id, "error", err)
+		taskError(w, http.StatusInternalServerError, "Failed to create delete task")
+		return
+	}
+	acceptedTask(w, task.ID, "Delete task created for template "+template.BoxName)
+}
+
+// handleExportTemplate queues a template_export task (the base's POST
+// /templates/export: machine → local .box; here VBoxManage export + tar.gz →
+// a standard Vagrant virtualbox box under <templates root>/exports).
+func (s *Server) handleExportTemplate(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		MachineName string `json:"machine_name"`
+		Filename    string `json:"filename"`
+	}
+	if err := decodeBody(r, &body); err != nil {
+		taskError(w, http.StatusBadRequest, "Invalid JSON body")
+		return
+	}
+	if body.MachineName == "" {
+		taskError(w, http.StatusBadRequest, "machine_name is required")
+		return
+	}
+	machine, err := s.machines.Get(r.Context(), body.MachineName)
+	if errors.Is(err, machines.ErrNotFound) {
+		taskError(w, http.StatusNotFound, "Machine not found")
+		return
+	}
+	if err != nil {
+		slog.Error("load machine for export", "machine", body.MachineName, "error", err)
+		taskError(w, http.StatusInternalServerError, "Failed to create export task")
+		return
+	}
+
+	raw, err := json.Marshal(map[string]string{"filename": body.Filename})
+	if err != nil {
+		taskError(w, http.StatusInternalServerError, "Failed to create export task")
+		return
+	}
+	metadata := string(raw)
+	task, err := s.tasks.Store().Create(r.Context(), &tasks.NewTask{
+		MachineName: machine.Name,
+		Operation:   machines.OpTemplateExport,
+		Priority:    tasks.PriorityMedium,
+		CreatedBy:   auth.FromContext(r.Context()).Name,
+		Metadata:    &metadata,
+	})
+	if err != nil {
+		slog.Error("queue template export", "machine", machine.Name, "error", err)
+		taskError(w, http.StatusInternalServerError, "Failed to create export task")
+		return
+	}
+	acceptedTask(w, task.ID, "Export task created for machine "+machine.Name)
+}
+
+// handlePublishTemplate queues a template_upload task (the base's POST
+// /templates/publish: machine export OR existing .box → chunked registry
+// upload → release). Registry credentials live on the configured source only
+// — the base's per-request auth_token has no analog here (tokens never ride
+// task metadata).
+func (s *Server) handlePublishTemplate(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		MachineName  string `json:"machine_name"`
+		BoxPath      string `json:"box_path"`
+		SourceName   string `json:"source_name"`
+		Organization string `json:"organization"`
+		BoxName      string `json:"box_name"`
+		Version      string `json:"version"`
+		Description  string `json:"description"`
+		Architecture string `json:"architecture"`
+	}
+	if err := decodeBody(r, &body); err != nil {
+		taskError(w, http.StatusBadRequest, "Invalid JSON body")
+		return
+	}
+	if (body.MachineName == "" && body.BoxPath == "") || body.SourceName == "" ||
+		body.Organization == "" || body.BoxName == "" || body.Version == "" {
+		taskError(w, http.StatusBadRequest, "Missing required fields")
+		return
+	}
+	taskMachine := "system"
+	if body.MachineName != "" {
+		machine, err := s.machines.Get(r.Context(), body.MachineName)
+		if errors.Is(err, machines.ErrNotFound) {
+			taskError(w, http.StatusNotFound, "Machine not found")
+			return
+		}
+		if err != nil {
+			slog.Error("load machine for publish", "machine", body.MachineName, "error", err)
+			taskError(w, http.StatusInternalServerError, "Failed to create publish task")
+			return
+		}
+		taskMachine = machine.Name
+	}
+
+	raw, err := json.Marshal(map[string]string{
+		"machine_name": body.MachineName,
+		"box_path":     body.BoxPath,
+		"source_name":  body.SourceName,
+		"organization": body.Organization,
+		"box_name":     body.BoxName,
+		"version":      body.Version,
+		"description":  body.Description,
+		"architecture": body.Architecture,
+	})
+	if err != nil {
+		taskError(w, http.StatusInternalServerError, "Failed to create publish task")
+		return
+	}
+	metadata := string(raw)
+	task, err := s.tasks.Store().Create(r.Context(), &tasks.NewTask{
+		MachineName: taskMachine,
+		Operation:   machines.OpTemplatePublish,
+		Priority:    tasks.PriorityMedium,
+		CreatedBy:   auth.FromContext(r.Context()).Name,
+		Metadata:    &metadata,
+	})
+	if err != nil {
+		slog.Error("queue template publish", "error", err)
+		taskError(w, http.StatusInternalServerError, "Failed to create publish task")
+		return
+	}
+	acceptedTask(w, task.ID, "Publish task created for "+body.Organization+"/"+body.BoxName)
+}
+
+// handleMoveTemplate queues a template_move task (the base's POST
+// /templates/local/{id}/move: relocate the stored artifact — file move here,
+// zfs rename/send-recv there).
+func (s *Server) handleMoveTemplate(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(r.PathValue("templateId"), 10, 64)
+	if err != nil {
+		taskError(w, http.StatusNotFound, "Template not found")
+		return
+	}
+	var body struct {
+		TargetPath string `json:"target_path"`
+	}
+	if derr := decodeBody(r, &body); derr != nil {
+		taskError(w, http.StatusBadRequest, "Invalid JSON body")
+		return
+	}
+	if body.TargetPath == "" {
+		taskError(w, http.StatusBadRequest, "target_path is required")
+		return
+	}
+	template, err := s.machines.GetTemplate(r.Context(), id)
+	if errors.Is(err, machines.ErrTemplateNotFound) {
+		taskError(w, http.StatusNotFound, "Template not found")
+		return
+	}
+	if err != nil {
+		slog.Error("get template for move", "id", id, "error", err)
+		taskError(w, http.StatusInternalServerError, "Failed to create move task")
+		return
+	}
+
+	raw, err := json.Marshal(map[string]any{
+		"template_id": template.ID,
+		"target_path": body.TargetPath,
+	})
+	if err != nil {
+		taskError(w, http.StatusInternalServerError, "Failed to create move task")
+		return
+	}
+	metadata := string(raw)
+	task, err := s.tasks.Store().Create(r.Context(), &tasks.NewTask{
+		MachineName: "system",
+		Operation:   machines.OpTemplateMove,
+		Priority:    tasks.PriorityMedium,
+		CreatedBy:   auth.FromContext(r.Context()).Name,
+		Metadata:    &metadata,
+	})
+	if err != nil {
+		slog.Error("queue template move", "id", id, "error", err)
+		taskError(w, http.StatusInternalServerError, "Failed to create move task")
+		return
+	}
+	acceptedTask(w, task.ID, "Move task created for template "+template.BoxName)
 }
 
 // handlePullTemplate queues a template_download task (the base's
