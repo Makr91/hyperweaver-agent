@@ -102,6 +102,11 @@ type UIConfig struct {
 	// Path optionally serves the UI from a directory on disk instead of the
 	// artifact embedded in the binary (dev override, mirrors the Node agent).
 	Path string `yaml:"path" json:"path"`
+	// SHIMode turns on the "I Can't Believe it's not Super.Human.Installer"
+	// presentation (Mark's ruling 2026-07-07): the agent just carries and
+	// advertises the flag (shi_mode on GET /api/status); the SPA renders the
+	// opinionated SHI-style theme/flow from it in Direct mode.
+	SHIMode bool `yaml:"shi_mode" json:"shi_mode"`
 }
 
 // StartupConfig controls how the agent itself starts (the desktop login

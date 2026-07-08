@@ -27,7 +27,11 @@ type statusPayload struct {
 	BootstrapAvailable bool     `json:"bootstrapAvailable"`
 	Console            []string `json:"console"`
 	Features           []string `json:"features"`
-	Uptime             int64    `json:"uptime"`
+	// SHIMode advertises the "I Can't Believe it's not Super.Human.Installer"
+	// presentation toggle (ui.shi_mode) — Direct-mode UI theming; absent/false
+	// on agents without the concept.
+	SHIMode bool  `json:"shi_mode"`
+	Uptime  int64 `json:"uptime"`
 }
 
 // platformFeatures are the capability tokens this agent always advertises
@@ -140,6 +144,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		// VRDE port).
 		Console:  s.consoles(r.Context()),
 		Features: s.features(),
+		SHIMode:  s.cfg.UI.SHIMode,
 		Uptime:   int64(time.Since(s.startedAt).Seconds()),
 	}
 

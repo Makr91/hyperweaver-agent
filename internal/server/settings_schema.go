@@ -101,6 +101,11 @@ var settingsSchema = map[string]any{
 				"description": "Serve the UI from this directory instead of the embedded copy (empty = embedded)",
 				"default":     "",
 			},
+			"shi_mode": map[string]any{
+				"type":        "boolean",
+				"description": "\"I Can't Believe it's not Super.Human.Installer\" mode: the UI renders the opinionated SHI-style theme/flow in Direct mode (the agent only carries the flag, advertised as shi_mode on GET /api/status)",
+				"default":     false,
+			},
 		},
 	},
 	"startup": map[string]any{
