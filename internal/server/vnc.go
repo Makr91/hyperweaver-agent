@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -99,13 +100,41 @@ func (s *Server) handleVncInfo(w http.ResponseWriter, r *http.Request) {
 	}
 	enabled, port := vrdePort(info)
 	writeJSON(w, map[string]any{
-		"machine_name":  machine.Name,
-		"vrde_enabled":  enabled,
-		"vrde_port":     port,
-		"vnc_capable":   vncConsoleAvailable(r.Context()),
-		"running":       machines.MapVBoxState(info.State) == machines.StatusRunning,
-		"websocket_url": "/machines/" + machine.Name + "/vnc/websockify",
+		"machine_name": machine.Name,
+		"vrde_enabled": enabled,
+		"vrde_port":    port,
+		"vnc_capable":  vncConsoleAvailable(r.Context()),
+		"running":      machines.MapVBoxState(info.State) == machines.StatusRunning,
+		// Console-details facts (the UI AI's third ask, 2026-07-10).
+		"video_mode":          videoMode(info),
+		"additions_run_level": additionsRunLevel(info),
+		"websocket_url":       "/machines/" + machine.Name + "/vnc/websockify",
 	})
+}
+
+// videoMode renders the machinereadable VideoMode value ("1024,768,32"@0,0 1
+// — width,height,depth plus origin/monitor) as the familiar WxHxD string
+// ("" when unknown).
+func videoMode(info *vbox.Info) string {
+	raw, ok := info.Raw["VideoMode"]
+	if !ok {
+		return ""
+	}
+	if at := strings.IndexByte(raw, '@'); at >= 0 {
+		raw = raw[:at]
+	}
+	return strings.ReplaceAll(strings.Trim(raw, `"`), ",", "x")
+}
+
+// additionsRunLevel reads the Guest Additions run level (0 = none/not
+// running, 1 = system, 2 = userland, 3 = desktop).
+func additionsRunLevel(info *vbox.Info) int {
+	if raw, ok := info.Raw["GuestAdditionsRunLevel"]; ok {
+		if n, err := strconv.Atoi(raw); err == nil {
+			return n
+		}
+	}
+	return 0
 }
 
 // handleVncWebsockify bridges the browser's WebSocket onto the machine's

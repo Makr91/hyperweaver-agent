@@ -120,29 +120,39 @@ func ModifyVM(ctx context.Context, vboxManage, name string, flags []string) erro
 	return runConfig(ctx, vboxManage, append([]string{"modifyvm", name}, flags...)...)
 }
 
-// AddStorageController attaches a named controller (the device bus the
-// bootdisk/additional disks/cdroms hang off).
-func AddStorageController(ctx context.Context, vboxManage, name, controller, kind string) error {
+// AddStorageController attaches a named controller (the device bus media
+// hang off) — the full storagectl surface: kind is the bus type
+// (ide|sata|scsi|sas|usb|pcie|virtio|floppy), ports overrides the
+// controller's port count when > 0, bootable marks it BIOS-bootable.
+func AddStorageController(ctx context.Context, vboxManage, name, controller, kind string, ports int, bootable bool) error {
+	args := []string{"storagectl", name, "--name=" + controller, "--add=" + kind}
+	if ports > 0 {
+		args = append(args, "--portcount="+strconv.Itoa(ports))
+	}
+	if bootable {
+		args = append(args, "--bootable=on")
+	} else {
+		args = append(args, "--bootable=off")
+	}
+	return runConfig(ctx, vboxManage, args...)
+}
+
+// RemoveStorageController deletes a named controller (storagectl --remove).
+// VirtualBox refuses while media are attached — that error passes through
+// honestly (detach first).
+func RemoveStorageController(ctx context.Context, vboxManage, name, controller string) error {
 	return runConfig(ctx, vboxManage, "storagectl", name,
-		"--name="+controller, "--add="+kind, "--bootable=on")
+		"--name="+controller, "--remove")
 }
 
-// StorageAttach attaches one medium (disk image or ISO) to a controller port
-// (the base's add device / add fs blocks).
-func StorageAttach(ctx context.Context, vboxManage, name, controller string, port int, kind, medium string) error {
+// StorageAttach attaches one medium (disk image or ISO) to a controller
+// port+device (the base's add device / add fs blocks). device matters on IDE
+// (two devices per port); every other bus uses device 0.
+func StorageAttach(ctx context.Context, vboxManage, name, controller string, port, device int, kind, medium string) error {
 	return runConfig(ctx, vboxManage, "storageattach", name,
 		"--storagectl="+controller,
-		"--port="+strconv.Itoa(port), "--device=0",
+		"--port="+strconv.Itoa(port), "--device="+strconv.Itoa(device),
 		"--type="+kind, "--medium="+medium)
-}
-
-// StorageDetach removes the medium at a controller port (the modify path's
-// remove device / remove fs — the file itself is preserved, matching the
-// base's rule that removal never destroys the volume).
-func StorageDetach(ctx context.Context, vboxManage, name, controller string, port int) error {
-	return runConfig(ctx, vboxManage, "storageattach", name,
-		"--storagectl="+controller,
-		"--port="+strconv.Itoa(port), "--device=0", "--medium=none")
 }
 
 // SetGuestProperty records one key/value on the machine (the cloud-init

@@ -273,10 +273,12 @@ Lowest auto-assigned server_id, 1-99999999 (default: 1)
 Boolean deriving created machines' names as
 <server_id>--<hostname>.<domain> when the create/clone request carries no
 explicit name (the partition-id convention). An explicit name always wins —
-machine names stay free-form (default: false).
+machine names stay free-form. When on, settings.server_id is required at
+create; GET /machines/ids/next feeds it (default: true).
 .It Cm shutdown_timeout
-Seconds a graceful stop waits for the guest to power off after the ACPI
-signal before forcing poweroff, 5-3600 (default: 120)
+Seconds a graceful stop waits for the guest to power off after the graceful
+signal — the QEMU guest-agent's own shutdown when the channel answers, the
+ACPI power button otherwise — before forcing poweroff, 5-3600 (default: 120)
 .It Cm keep_running_on_exit
 Boolean keeping provisioned machines running when the agent exits (SHI's
 keepserversrunning). false force-powers-off every machine this agent created
@@ -376,29 +378,183 @@ Empty selects
 under
 .Cm data.dir .
 .It Cm sources
-List of registries: name, url, enabled, default, auth_token. The entry
-named "Default Registry" (or flagged default) serves requests that name no
-source; auth_token authenticates private boxes and never enters task
-metadata (default: the STARTcloud BoxVault registry).
+List of registries: name, url, enabled, default, auth_token, ca_file. The
+entry flagged default serves requests that name no source; names are
+display-only. auth_token is the registry API key (a BoxVault
+service-account token, sent as Bearer on every call) — the only credential;
+it authenticates private boxes and never enters task metadata. ca_file adds
+a PEM CA bundle to the trust store for self-signed registries; certificate
+verification always stays on (default: the STARTcloud BoxVault registry).
 .El
-.Ss assets
-Installer file cache (the artifacts capability token): hash-verified
-installer/fixpack/hotfix files that machines mount at start. A file that is
-absent, unhashed, or failing SHA-256 verification never reaches a machine.
+.Ss artifact_storage
+The merged artifact system (the artifacts capability token): typed storage
+locations — iso, image, installer, fixpack, hotfix — with one scan, one
+SHA-256 checksum store, one /artifacts surface. Installer-family files are
+hash-verified; a file that is absent, unhashed, or failing verification
+never reaches a machine. Five built-in locations always exist under
+.Cm dir
+(isos, images, installers, fixpacks, hotfixes); installer-family locations
+store files per role
+.Pa ( <location>/<role>/<file> ) ,
+iso/image locations are flat and extension-filtered.
 .Bl -tag -width "max_upload_gb"
 .It Cm enabled
-Boolean serving the /artifacts surface and enforcing cache verification at
+Boolean serving the /artifacts surface and enforcing hash verification at
 machine prepare time; disabled skips mounting and verification entirely,
 with a loud warning in the task output (default: true).
 .It Cm dir
-Cache root, laid out
-.Pa <dir>/<role>/{installers,fixpacks,hotfixes}/<file> .
-Empty selects
-.Pa file-cache
+Parent of the built-in locations. Empty selects
+.Pa artifacts
 under
 .Cm data.dir .
 .It Cm max_upload_gb
 Upload size cap in GiB, 1-1024 (default: 50)
+.It Cm download.timeout_seconds
+Timeout for one URL download, minimum 60 (default: 3600)
+.It Cm scanning.periodic_scan_interval
+Seconds between automatic location scans, 30-86400; 0 disables — the
+startup scan always runs (default: 300)
+.It Cm scanning.supported_extensions
+Map of type to extension list the iso/image scans register. Empty selects
+the defaults: iso .iso; image .vmdk .raw .vdi .qcow2 .img .ova .ovf.
+.It Cm paths
+List of additional storage locations beyond the built-ins: name, path, type
+(iso | image | installer | fixpack | hotfix), enabled. The storage-path API
+(POST /artifacts/storage/paths) persists its entries here too
+(default: empty).
+.El
+.Ss file_browser
+Host file browser (the /filesystem surface and the file-browser capability
+token): directory listing plus the mutate family — create/rename/move/copy/
+delete, text content read/write, upload/download, archives, permissions —
+for the UI's path pickers and file manager. Every operation passes the same
+security bounds; move/copy and archive operations run as file_move,
+file_copy, file_archive_create, and file_archive_extract task rows.
+.Bl -tag -width "security.max_directory_entries"
+.It Cm enabled
+Boolean serving the /filesystem surface. When false every endpoint answers
+503 and the token disappears from GET /api/status (default: true).
+.It Cm root
+Confine the surface to this directory: the "/" request maps here and anything
+outside answers 403. Empty means unrestricted — "/" lists the host's drive
+letters on Windows and the real filesystem root elsewhere (default: empty).
+.It Cm upload_size_limit_gb
+Size cap for one POST /filesystem/upload body in GiB, 1-1024 (default: 50)
+.It Cm security.prevent_traversal
+Boolean rejecting paths carrying ".." or "~" (default: true)
+.It Cm security.max_directory_entries
+Refuse listing directories larger than this, 1-100000 (default: 1000)
+.It Cm security.max_edit_size_mb
+Files larger than this many megabytes are refused by the text content
+read/write endpoints; download/upload stream without this bound, 1-10240
+(default: 100)
+.It Cm security.forbidden_paths
+List of path prefixes; anything underneath them answers 403
+(default: /dev, /proc, /sys)
+.It Cm security.forbidden_patterns
+List of glob-style patterns (* matches anything) that forbid matching paths
+(default: empty)
+.It Cm archive.enabled
+Boolean serving the /filesystem/archive endpoints (default: true)
+.It Cm archive.max_archive_size_mb
+A created archive larger than this many megabytes is deleted and the task
+fails, minimum 1 (default: 10240)
+.It Cm archive.supported_formats
+Formats POST /filesystem/archive/create accepts. The agent creates zip, tar,
+and tar.gz natively (Go's bzip2 is decompress-only); extraction additionally
+handles tar.bz2 and .gz regardless of this list (default: zip, tar, tar.gz).
+.El
+.Ss guest_agent
+QEMU guest-agent channel (the guest-agent capability token).
+.Bl -tag -width "enabled"
+.It Cm enabled
+Boolean MASTER gate for the guest-agent channel: serves
+/machines/{name}/guest/* — the credential-less guest channel (live IPs,
+exec, clean shutdown) for guests running qemu-ga, no SSH or Guest Additions
+required. The COM2 UART itself is a per-machine option: creates wire it
+only when the machine document sets zones.guest_agent true (default false —
+the Proxmox model, shared vocabulary with zoneweaver), and
+POST /machines/{name}/guest-agent/setup opts existing machines in. When
+false no UART is ever added and the surface answers 503 (default: true).
+.El
+.Ss snapshots
+Scheduled machine snapshot rotation — zoneweaver's snapshots vocabulary on
+VBoxManage snapshots. The default policy applies to every machine unless the
+machine overrides it (the PUT /machines/{name}
+.Cm snapshots
+field, stored at configuration.snapshots; type none disables per machine,
+null clears back to the agent default). Defaults are deliberately
+conservative for VirtualBox: snapshot creation is CoW-thin, but pruning is a
+physical disk merge and snapshots of running machines carry RAM state.
+Scheduled work runs as visible snapshot_take task rows (created_by
+snapshot_rotation).
+.Bl -tag -width "default_policy.max_age_days"
+.It Cm enabled
+Boolean running the snapshot rotation service (default: false)
+.It Cm interval_minutes
+Cadence for simple/age policies in minutes, 5-10080; rotation ignores it and
+rides the fixed schedule — hourly at :00 of hours 1-23, daily at 00:00
+Sun-Fri, weekly at 00:00 Saturday (default: 60)
+.It Cm default_policy.type
+Retention type: "none" (scheduled snapshots off), "simple" (keep the newest
+.Cm keep
+auto-* snapshots on the interval cadence), "age" (delete auto-* snapshots
+older than
+.Cm max_age_days ) ,
+or "rotation" (hourly/daily/weekly tiers, Snapshoter.sh's schedule)
+(default: "none")
+.It Cm default_policy.quiesce
+Boolean running qga fsfreeze around each snapshot when the guest agent
+answers — application-consistent; crash-consistent otherwise, never blocking
+(default: false)
+.It Cm default_policy.keep
+simple: newest N auto snapshots to keep, minimum 1 (default: 3)
+.It Cm default_policy.max_age_days
+age: delete auto snapshots older than this many days, minimum 1 (default: 7)
+.It Cm default_policy.tiers
+rotation: per-tier keep counts as
+.Cm hourly.keep ,
+.Cm daily.keep ,
+.Cm weekly.keep ,
+each minimum 1 (defaults: 2 / 3 / 2)
+.El
+.Ss applications
+External launcher applications (GET /applications and the host-launchers
+capability token): user-chosen desktop tools the agent launches on its own
+host against a machine (SHI's per-server app buttons, generalized).
+.Bl -tag -width "applications"
+.It Cm applications
+List of entries, each
+.Cm name
+(display + the URL path segment; no slashes),
+.Cm path
+(the executable on the agent host), and
+.Cm args
+(the argument template). Args entries carry the placeholders
+.Cm {host} ,
+.Cm {port} ,
+.Cm {user} ,
+.Cm {password}
+\(em resolved per machine through the SSH transport ladder and stored
+credentials \(em and
+.Cm {machine}
+(the machine name). Substitution is per-argument, so spaces need no quoting.
+A launch against a missing executable is refused, never spawned. Default:
+empty.
+.El
+.Ss ticket_system
+Help & Support link in the UI's profile dropdown, served publicly at
+GET /api/config/ticket. The link renders only when enabled AND base_url are
+set.
+.Bl -tag -width "base_url"
+.It Cm enabled
+Boolean enabling the ticket/support link (default: true)
+.It Cm base_url
+Base URL for the ticket system
+.It Cm req_type
+Default request type parameter (default: "sso")
+.It Cm context
+Context URL for the ticket system, usually the repository URL
 .El
 .Ss cleanup
 Periodic cleanup service.

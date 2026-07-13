@@ -130,6 +130,9 @@ func (s *Store) Create(ctx context.Context, nt *NewTask) (*Task, error) {
 		status = StatusRunning
 		startedAt = now
 	}
+	if nt.Prepared {
+		status = StatusPrepared
+	}
 	priority := nt.Priority
 	if priority == 0 {
 		priority = PriorityMedium
@@ -434,6 +437,20 @@ func requireTaskRow(res sql.Result) error {
 	return nil
 }
 
+// Requeue flips a prepared task to pending (the artifact-upload handshake's
+// second half — the file has landed, the executor may run). False when the
+// task was not in prepared state.
+func (s *Store) Requeue(ctx context.Context, id string) (bool, error) {
+	res, err := s.db.ExecContext(ctx, `UPDATE tasks
+		SET status = 'pending', updated_at = ?
+		WHERE id = ? AND status = 'prepared'`, formatTime(time.Now()), id)
+	if err != nil {
+		return false, err
+	}
+	n, err := res.RowsAffected()
+	return n > 0, err
+}
+
 // CancelPending cancels a still-pending task (the DELETE /tasks/{id} fast
 // path). False when the task was no longer pending by the time of the update.
 func (s *Store) CancelPending(ctx context.Context, id string) (bool, error) {
@@ -518,11 +535,12 @@ func (s *Store) DeleteFinishedBefore(ctx context.Context, cutoff time.Time) (int
 // resumable queue.
 func (s *Store) CancelAllPending(ctx context.Context) (int64, error) {
 	now := formatTime(time.Now())
+	// prepared rows cancel too: an upload handshake cannot survive a restart.
 	res, err := s.db.ExecContext(ctx, `UPDATE tasks
 		SET status = 'cancelled',
 		    error_message = 'Agent restarted before task ran',
 		    completed_at = ?, updated_at = ?
-		WHERE status = 'pending'`, now, now)
+		WHERE status IN ('pending', 'prepared')`, now, now)
 	if err != nil {
 		return 0, err
 	}

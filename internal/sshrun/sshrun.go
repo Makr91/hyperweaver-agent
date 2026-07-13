@@ -119,21 +119,30 @@ func clientConfig(credentials Credentials, basePath, defaultKeyPath string) (*ss
 // phase: handshake, session open, and the running operation (runtime-proven
 // 2026-07-07 — a frozen guest wedged machine_sync past its timeout). The
 // returned closer is idempotent and releases the watchdog with the client.
+// disarm releases ONLY the watchdog: callers whose connection must OUTLIVE
+// the connect context (the interactive shell — its 20s connect bound was
+// killing the live terminal the moment it was cancelled, runtime-found
+// 2026-07-09) disarm after a successful connect and own the lifetime through
+// the closer.
 func connectSSH(ctx context.Context, ip string, port int, credentials Credentials,
 	basePath, defaultKeyPath string,
-) (*ssh.Client, func(), error) {
+) (client *ssh.Client, closer, disarm func(), err error) {
 	config, err := clientConfig(credentials, basePath, defaultKeyPath)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
 	dialer := net.Dialer{Timeout: config.Timeout}
 	conn, err := dialer.DialContext(ctx, "tcp", net.JoinHostPort(ip, strconv.Itoa(port)))
 	if err != nil {
-		return nil, nil, fmt.Errorf("dial %s:%d: %w", ip, port, err)
+		return nil, nil, nil, fmt.Errorf("dial %s:%d: %w", ip, port, err)
 	}
 
 	watchdogDone := make(chan struct{})
+	var watchdogOnce sync.Once
+	disarm = func() {
+		watchdogOnce.Do(func() { close(watchdogDone) })
+	}
 	go func() {
 		select {
 		case <-ctx.Done():
@@ -144,23 +153,23 @@ func connectSSH(ctx context.Context, ip string, port int, credentials Credential
 
 	sshConn, channels, requests, err := ssh.NewClientConn(conn, ip, config)
 	if err != nil {
-		close(watchdogDone)
+		disarm()
 		_ = conn.Close()
 		if ctx.Err() != nil {
-			return nil, nil, fmt.Errorf("ssh handshake %s: %w", ip, ctx.Err())
+			return nil, nil, nil, fmt.Errorf("ssh handshake %s: %w", ip, ctx.Err())
 		}
-		return nil, nil, fmt.Errorf("ssh handshake %s: %w", ip, err)
+		return nil, nil, nil, fmt.Errorf("ssh handshake %s: %w", ip, err)
 	}
-	client := ssh.NewClient(sshConn, channels, requests)
+	client = ssh.NewClient(sshConn, channels, requests)
 
 	var once sync.Once
-	closer := func() {
+	closer = func() {
 		once.Do(func() {
 			_ = client.Close()
-			close(watchdogDone)
+			disarm()
 		})
 	}
-	return client, closer, nil
+	return client, closer, disarm, nil
 }
 
 // Run executes one command on the machine, streaming its output. The context
@@ -175,7 +184,7 @@ func Run(ctx context.Context, ip string, port int, credentials Credentials,
 		defer cancel()
 	}
 
-	client, closeClient, err := connectSSH(runCtx, ip, port, credentials, basePath, defaultKeyPath)
+	client, closeClient, _, err := connectSSH(runCtx, ip, port, credentials, basePath, defaultKeyPath)
 	if err != nil {
 		return err
 	}

@@ -141,6 +141,13 @@ func (s *Server) handleBulk(w http.ResponseWriter, r *http.Request, operationLab
 			Priority:    priority,
 			CreatedBy:   createdBy,
 		}
+		// The accrue-changes contract rides bulk operations too: starts apply
+		// pending changes first, stops chain the apply after the power-off.
+		if operation == machines.OpStart {
+			if applyTask := s.queuePendingApply(r.Context(), machine, nil, createdBy); applyTask != nil {
+				nt.DependsOn = &applyTask.ID
+			}
+		}
 		if operation == machines.OpStop {
 			s.cancelPendingStarts(r.Context(), machine.Name)
 			metadata, merr := stopMetadataJSON(false)
@@ -155,6 +162,9 @@ func (s *Server) handleBulk(w http.ResponseWriter, r *http.Request, operationLab
 			slog.Error("queue bulk task", "machine", machine.Name, "error", cerr)
 			skipped = append(skipped, map[string]string{"machine": machine.Name, "reason": "queue_failed"})
 			continue
+		}
+		if operation == machines.OpStop {
+			s.queuePendingApply(r.Context(), machine, &task.ID, createdBy)
 		}
 		taskIDs = append(taskIDs, task.ID)
 	}

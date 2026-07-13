@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Makr91/hyperweaver-agent/internal/qga"
 	"github.com/Makr91/hyperweaver-agent/internal/tasks"
 	"github.com/Makr91/hyperweaver-agent/internal/vbox"
 )
@@ -64,6 +65,9 @@ func RegisterExecutors(queue *tasks.Queue, store *Store, reconciler *Reconciler,
 	queue.Register(OpResume, tasks.Executor{Run: e.controlAction(OpResume, "resume")})
 	queue.Register(OpDelete, tasks.Executor{Run: e.deleteMachine})
 	queue.Register(OpDiscover, tasks.Executor{Run: e.discover})
+	queue.Register(OpImport, tasks.Executor{Run: e.importAppliance})
+	queue.Register(OpMove, tasks.Executor{Run: e.moveMachine})
+	queue.Register(OpUnattended, tasks.Executor{Run: e.unattendedInstall})
 
 	// Snapshot family + current-state clone (VBoxManage snapshot/clonevm —
 	// yardstick 2: the whole hypervisor surface, policy-free).
@@ -99,6 +103,10 @@ func RegisterExecutors(queue *tasks.Queue, store *Store, reconciler *Reconciler,
 	queue.Register(OpSyncFolder, tasks.Executor{Run: e.syncFolder})
 	queue.Register(OpProvisionParent, tasks.Executor{Run: e.parentAnchor})
 	queue.Register(OpProvisionPlaybook, tasks.Executor{Run: e.provisionPlaybook})
+	// Syncback (folders[].syncback — guest→host pulls after the provision
+	// phase, and ad-hoc via POST /machines/{name}/sync {"syncback": true}).
+	queue.Register(OpSyncbackParent, tasks.Executor{Run: e.parentAnchor})
+	queue.Register(OpSyncbackFolder, tasks.Executor{Run: e.syncbackFolder})
 }
 
 type executors struct {
@@ -216,8 +224,21 @@ func (e *executors) stop(ctx context.Context, task *tasks.Task, out *tasks.Outpu
 
 	target := machine.VBoxTarget()
 	if !meta.Force {
-		out.Write("stdout", "Stopping "+machine.Name+" gracefully (ACPI power button)\n")
-		if aerr := vbox.ControlVM(ctx, vboxExe, target, "acpipowerbutton"); aerr == nil {
+		// The graceful ladder (Mark's go 2026-07-12): the guest agent's OWN
+		// orderly shutdown first — the guest OS acting on itself, honored
+		// regardless of session state (a locked Windows console ignores
+		// ACPI's power button; qemu-ga does not) — ACPI when the channel is
+		// silent, hard poweroff last. A DELIVERED guest-shutdown that still
+		// times out goes straight to poweroff: the guest already ignored its
+		// own OS shutdown, the ACPI button adds nothing but a second wait.
+		if e.guestShutdown(ctx, machine, out) {
+			if e.waitForPowerOff(ctx, vboxExe, target, out) {
+				out.Write("stdout", "Machine "+machine.Name+" stopped successfully\n")
+				return nil
+			}
+			out.Write("stderr", "Guest shutdown did not complete; forcing power off\n")
+		} else if aerr := vbox.ControlVM(ctx, vboxExe, target, "acpipowerbutton"); aerr == nil {
+			out.Write("stdout", "Stopping "+machine.Name+" gracefully (ACPI power button)\n")
 			if e.waitForPowerOff(ctx, vboxExe, target, out) {
 				out.Write("stdout", "Machine "+machine.Name+" stopped successfully\n")
 				return nil
@@ -238,9 +259,35 @@ func (e *executors) stop(ctx context.Context, task *tasks.Task, out *tasks.Outpu
 	return nil
 }
 
-// waitForPowerOff polls until an ACPI-signalled machine leaves the running
-// state, bounded by machines.shutdown_timeout. False on timeout — the caller
-// falls back to a hard poweroff.
+// guestShutdown asks the guest agent for an orderly powerdown — the stop
+// ladder's first rung (true = delivered; silence after delivery is the
+// NORMAL exit, the guest dies before replying). False on any channel
+// failure — no UART, no qemu-ga, master gate off — and the ACPI rung takes
+// over. 5s bound: qemu-ga answers in milliseconds; the timeout only bites
+// channels nothing listens on.
+func (e *executors) guestShutdown(ctx context.Context, machine *Machine, out *tasks.OutputWriter) bool {
+	if !e.env.GuestAgentEnabled {
+		return false
+	}
+	workdir := e.machineWorkdir(machine.Name)
+	if machine.Home != nil && *machine.Home != "" {
+		workdir = *machine.Home
+	}
+	pipe := qga.PipePath(workdir, machine.Name)
+	callCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	if _, err := qga.Do(callCtx, pipe, "guest-shutdown", map[string]any{"mode": "powerdown"}); err != nil &&
+		!errors.Is(err, qga.ErrNoReply) {
+		out.Write("stdout", "Guest agent unavailable — falling back to ACPI ("+err.Error()+")\n")
+		return false
+	}
+	out.Write("stdout", "Stopping "+machine.Name+" gracefully (guest-agent shutdown)\n")
+	return true
+}
+
+// waitForPowerOff polls until a gracefully-signalled machine leaves the
+// running state, bounded by machines.shutdown_timeout. False on timeout —
+// the caller falls back to a hard poweroff.
 func (e *executors) waitForPowerOff(ctx context.Context, vboxExe, target string, out *tasks.OutputWriter) bool {
 	deadline := time.Now().Add(e.shutdownTimeout)
 	for time.Now().Before(deadline) {

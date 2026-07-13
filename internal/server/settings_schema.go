@@ -428,12 +428,12 @@ var settingsSchema = map[string]any{
 			},
 			"prefix_machine_names": map[string]any{
 				"type":        "boolean",
-				"description": "Derive created machines' names as <server_id>--<hostname>.<domain> when no explicit name is given; explicit names always win (machine names stay free-form)",
-				"default":     false,
+				"description": "Derive created machines' names as <server_id>--<hostname>.<domain> when no explicit name is given; explicit names always win (machine names stay free-form). When on, settings.server_id is required at create (GET /machines/ids/next feeds it)",
+				"default":     true,
 			},
 			"shutdown_timeout": map[string]any{
 				"type":        "integer",
-				"description": "Seconds a graceful stop waits for the guest to power off after the ACPI signal before forcing poweroff",
+				"description": "Seconds a graceful stop waits for the guest to power off after the graceful signal (guest-agent shutdown when the channel answers, else the ACPI power button) before forcing poweroff",
 				"default":     120,
 				"min":         5,
 				"max":         3600,
@@ -681,23 +681,23 @@ var settingsSchema = map[string]any{
 			"sources": map[string]any{
 				"type":        "array",
 				"items":       "object",
-				"description": "Configured Vagrant/BoxVault-compatible registries: {name, url, enabled, default, auth_token, username, api_key, ca_file}. The entry named \"Default Registry\" (or flagged default) serves requests that name no source. Auth ladder: a JWT auth_token or api_key is used directly; username+api_key signs in for a JWT; else the raw token rides as Bearer. ca_file adds a PEM CA bundle to the trust store for self-signed registries (verification always stays on)",
-				"default":     []map[string]any{{"name": "Default Registry", "url": "https://boxvault.startcloud.com", "enabled": true, "default": true, "auth_token": "", "username": "", "api_key": "", "ca_file": ""}},
+				"description": "Configured Vagrant/BoxVault-compatible registries: {name, url, enabled, default, auth_token, ca_file}. The entry flagged default serves requests that name no source; names are display-only. auth_token is the registry API key (a BoxVault service-account token), sent as Bearer on every call — the ONLY credential. ca_file adds a PEM CA bundle to the trust store for self-signed registries (verification always stays on)",
+				"default":     []map[string]any{{"name": "STARTcloud BoxVault", "url": "https://boxvault.startcloud.com", "enabled": true, "default": true, "auth_token": "", "ca_file": ""}},
 			},
 		},
 	},
-	"assets": map[string]any{
-		"description":      "Installer file cache (the artifacts capability token): hash-verified installer/fixpack/hotfix files machines mount at start",
+	"artifact_storage": map[string]any{
+		"description":      "Merged artifact system (the artifacts capability token): typed storage locations — iso, image, installer, fixpack, hotfix — with one scan, one SHA-256 checksum store, one /artifacts surface",
 		"requires_restart": true,
 		"properties": map[string]any{
 			"enabled": map[string]any{
 				"type":        "boolean",
-				"description": "Serve the /artifacts surface and enforce cache verification at machine prepare; disabled skips mounting and verification with a loud warning",
+				"description": "Serve the /artifacts surface and enforce hash verification at machine prepare; disabled skips mounting and verification with a loud warning",
 				"default":     true,
 			},
 			"dir": map[string]any{
 				"type":        "string",
-				"description": "Cache root, <dir>/<role>/{installers,fixpacks,hotfixes}/<file> (empty = <data dir>/file-cache)",
+				"description": "Parent of the built-in locations: <dir>/isos, images, installers, fixpacks, hotfixes (empty = <data dir>/artifacts)",
 				"default":     "",
 			},
 			"max_upload_gb": map[string]any{
@@ -706,6 +706,244 @@ var settingsSchema = map[string]any{
 				"default":     50,
 				"min":         1,
 				"max":         1024,
+			},
+			"download": map[string]any{
+				"type":        "object",
+				"description": "URL download tuning",
+				"properties": map[string]any{
+					"timeout_seconds": map[string]any{
+						"type":        "integer",
+						"description": "Timeout for one URL download",
+						"default":     3600,
+						"min":         60,
+					},
+				},
+			},
+			"scanning": map[string]any{
+				"type":        "object",
+				"description": "Location scan tuning",
+				"properties": map[string]any{
+					"periodic_scan_interval": map[string]any{
+						"type":        "integer",
+						"description": "Seconds between automatic location scans (0 disables; startup always scans once)",
+						"default":     300,
+						"min":         0,
+						"max":         86400,
+					},
+					"supported_extensions": map[string]any{
+						"type":        "object",
+						"description": "Extensions the iso/image scans register, per type (empty = defaults: iso .iso; image .vmdk .raw .vdi .qcow2 .img .ova .ovf)",
+						"keys":        []string{"iso", "image"},
+						"values":      []string{},
+					},
+				},
+			},
+			"paths": map[string]any{
+				"type":        "array",
+				"items":       "object",
+				"description": "Additional storage locations beyond the built-ins: {name, path, type, enabled} with type one of iso, image, installer, fixpack, hotfix. The storage-path API persists its entries here",
+				"default":     []map[string]any{},
+			},
+		},
+	},
+	"file_browser": map[string]any{
+		"description":      "Host file browser (/filesystem, the file-browser capability token): directory listing plus the mutate family — create/rename/move/copy/delete, text content read/write, upload/download, archives, permissions (the UI's path pickers and file manager)",
+		"requires_restart": true,
+		"properties": map[string]any{
+			"enabled": map[string]any{
+				"type":        "boolean",
+				"description": "Serve the /filesystem surface and advertise the file-browser token; false removes the surface entirely",
+				"default":     true,
+			},
+			"root": map[string]any{
+				"type":        "string",
+				"description": "Confine the surface to this directory: \"/\" maps here and anything outside answers 403. Empty = unrestricted — \"/\" lists the host's drive letters on Windows and the real filesystem root elsewhere",
+				"default":     "",
+			},
+			"upload_size_limit_gb": map[string]any{
+				"type":        "integer",
+				"description": "Size cap for one POST /filesystem/upload body, in GiB",
+				"default":     50,
+				"min":         1,
+				"max":         1024,
+			},
+			"security": map[string]any{
+				"type":        "object",
+				"description": "Path bounds applied to every /filesystem operation",
+				"properties": map[string]any{
+					"prevent_traversal": map[string]any{
+						"type":        "boolean",
+						"description": "Reject paths carrying \"..\" or \"~\"",
+						"default":     true,
+					},
+					"max_directory_entries": map[string]any{
+						"type":        "integer",
+						"description": "Refuse listing directories larger than this",
+						"default":     1000,
+						"min":         1,
+						"max":         100000,
+					},
+					"max_edit_size_mb": map[string]any{
+						"type":        "integer",
+						"description": "Files larger than this are refused by the text content read/write endpoints (download/upload stream without this bound)",
+						"default":     100,
+						"min":         1,
+						"max":         10240,
+					},
+					"forbidden_paths": map[string]any{
+						"type":        "array",
+						"items":       "string",
+						"description": "Any path underneath these prefixes is forbidden",
+						"default":     []string{"/dev", "/proc", "/sys"},
+					},
+					"forbidden_patterns": map[string]any{
+						"type":        "array",
+						"items":       "string",
+						"description": "Glob-style patterns (* matches anything) that forbid matching paths",
+						"default":     []string{},
+					},
+				},
+			},
+			"archive": map[string]any{
+				"type":        "object",
+				"description": "Archive creation/extraction (task-queued)",
+				"properties": map[string]any{
+					"enabled": map[string]any{
+						"type":        "boolean",
+						"description": "Serve the /filesystem/archive endpoints",
+						"default":     true,
+					},
+					"max_archive_size_mb": map[string]any{
+						"type":        "integer",
+						"description": "A created archive larger than this is deleted and the task fails",
+						"default":     10240,
+						"min":         1,
+					},
+					"supported_formats": map[string]any{
+						"type":        "array",
+						"items":       "string",
+						"description": "Formats archive creation accepts — this agent creates zip, tar, and tar.gz natively (Go's bzip2 is decompress-only); extraction additionally handles tar.bz2 and .gz regardless",
+						"default":     []string{"zip", "tar", "tar.gz"},
+					},
+				},
+			},
+		},
+	},
+	"guest_agent": map[string]any{
+		"description":      "QEMU guest-agent channel (/machines/{name}/guest/*, the guest-agent capability token): guests run qemu-ga on a COM2 UART → host pipe — credential-less live IPs, exec, and clean shutdown without SSH or Guest Additions. The UART is a per-machine option: zones.guest_agent at create (default false — the Proxmox model, shared with zoneweaver) or POST /machines/{name}/guest-agent/setup",
+		"requires_restart": true,
+		"properties": map[string]any{
+			"enabled": map[string]any{
+				"type":        "boolean",
+				"description": "MASTER gate: allow per-machine UART wiring (zones.guest_agent / the setup endpoint), serve /machines/{name}/guest/*, and advertise the guest-agent token; false disables wiring and removes the surface entirely",
+				"default":     true,
+			},
+		},
+	},
+	"snapshots": map[string]any{
+		"description":      "Scheduled machine snapshot rotation (zoneweaver's snapshots vocabulary on VBoxManage snapshots). Defaults are deliberately CONSERVATIVE for VirtualBox: creation is CoW-thin, but pruning is a physical disk merge and snapshots of running machines carry RAM state",
+		"requires_restart": true,
+		"properties": map[string]any{
+			"enabled": map[string]any{
+				"type":        "boolean",
+				"description": "Run the snapshot rotation service",
+				"default":     false,
+			},
+			"interval_minutes": map[string]any{
+				"type":        "integer",
+				"description": "Cadence for simple/age default policies (rotation uses the fixed hourly/daily/weekly schedule)",
+				"default":     60,
+				"min":         5,
+				"max":         10080,
+			},
+			"default_policy": map[string]any{
+				"type":        "object",
+				"description": "Retention policy applied to EVERY machine unless the machine overrides it (the PUT /machines/{name} `snapshots` field — configuration.snapshots; type none disables per machine, null clears back to this default). Types: none | simple (keep newest N) | age (delete older than max_age_days) | rotation (hourly/daily/weekly tiers, Snapshoter.sh schedule: hourly :00 hours 1-23, daily 00:00 Sun-Fri, weekly 00:00 Sat). quiesce runs qga fsfreeze around each snapshot when the guest agent answers",
+				"properties": map[string]any{
+					"type": map[string]any{
+						"type":        "string",
+						"description": "Retention type",
+						"default":     "none",
+						"enum":        []string{"none", "simple", "age", "rotation"},
+					},
+					"quiesce": map[string]any{
+						"type":        "boolean",
+						"description": "qga fsfreeze around snapshots (application-consistent when available; crash-consistent otherwise, never blocking)",
+						"default":     false,
+					},
+					"keep": map[string]any{
+						"type":        "integer",
+						"description": "simple: newest N auto snapshots to keep",
+						"default":     3,
+						"min":         1,
+					},
+					"max_age_days": map[string]any{
+						"type":        "integer",
+						"description": "age: delete auto snapshots older than this",
+						"default":     7,
+						"min":         1,
+					},
+					"tiers": map[string]any{
+						"type":        "object",
+						"description": "rotation: per-tier keep counts",
+						"properties": map[string]any{
+							"hourly": map[string]any{
+								"type":        "object",
+								"description": "Hourly tier",
+								"properties": map[string]any{
+									"keep": map[string]any{"type": "integer", "description": "Snapshots to keep", "default": 2, "min": 1},
+								},
+							},
+							"daily": map[string]any{
+								"type":        "object",
+								"description": "Daily tier",
+								"properties": map[string]any{
+									"keep": map[string]any{"type": "integer", "description": "Snapshots to keep", "default": 3, "min": 1},
+								},
+							},
+							"weekly": map[string]any{
+								"type":        "object",
+								"description": "Weekly tier",
+								"properties": map[string]any{
+									"keep": map[string]any{"type": "integer", "description": "Snapshots to keep", "default": 2, "min": 1},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	},
+	"applications": map[string]any{
+		"description":      "External launcher applications (GET /applications, the host-launchers token): user-chosen desktop tools (PuTTY, WinSCP, mstsc, ...) the agent launches on its own host against a machine — SHI's per-server app buttons generalized (the UI's per-machine launch menu, POST /machines/{name}/applications/{appName}/launch). Each entry: {name, path, args[]}. args placeholders {host}/{port}/{user}/{password} resolve per machine through the SSH transport ladder and stored credentials, {machine} is the machine name; substitution is per-argument (no quoting). A missing executable is refused, never spawned. Direct-mode desktop contract; a headless service opens them on the service host's desktop",
+		"requires_restart": true,
+		"type":             "array",
+		"items":            "object",
+		"default":          []map[string]any{},
+	},
+	"ticket_system": map[string]any{
+		"description":      "Help & Support link in the UI's profile dropdown (BoxVault's ticket_system pattern; served publicly at GET /api/config/ticket)",
+		"requires_restart": true,
+		"properties": map[string]any{
+			"enabled": map[string]any{
+				"type":        "boolean",
+				"description": "Enable the ticket/support link (renders only when base_url is also set)",
+				"default":     true,
+			},
+			"base_url": map[string]any{
+				"type":        "string",
+				"description": "Base URL for the ticket system",
+				"default":     "https://xd.prominic.net/app/apprequest.nsf/router?openagent",
+			},
+			"req_type": map[string]any{
+				"type":        "string",
+				"description": "Default request type parameter",
+				"default":     "sso",
+			},
+			"context": map[string]any{
+				"type":        "string",
+				"description": "Context URL for the ticket system (usually the repository URL)",
+				"default":     "https://github.com/Makr91/hyperweaver-agent",
 			},
 		},
 	},

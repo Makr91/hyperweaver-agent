@@ -122,6 +122,13 @@ func (s *Server) handleServerRestart(w http.ResponseWriter, r *http.Request) {
 	go s.restartSelf(context.WithoutCancel(r.Context()))
 }
 
+// Restart restarts the agent process — /server/restart's exact mechanism
+// without the HTTP wrapper (the tray's Troubleshooting action).
+func (s *Server) Restart() {
+	slog.Warn("server restart requested from the tray")
+	go s.restartSelf(context.Background())
+}
+
 // restartSelf restarts the agent process. Under systemd the unit's
 // Restart=always brings it back after a clean exit; everywhere else a
 // detached copy of this executable is spawned (with a bind-retry handshake so

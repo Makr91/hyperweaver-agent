@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"net"
+	"path/filepath"
 	"strings"
 )
 
@@ -82,8 +83,26 @@ func (c *Config) validate() error {
 	if c.Monitoring.RetentionDays < 1 || c.Monitoring.RetentionDays > 365 {
 		return fmt.Errorf("monitoring.retention_days %d out of range 1-365", c.Monitoring.RetentionDays)
 	}
-	if c.Assets.MaxUploadGB < 1 || c.Assets.MaxUploadGB > 1024 {
-		return fmt.Errorf("assets.max_upload_gb %d out of range 1-1024", c.Assets.MaxUploadGB)
+	if c.ArtifactStorage.MaxUploadGB < 1 || c.ArtifactStorage.MaxUploadGB > 1024 {
+		return fmt.Errorf("artifact_storage.max_upload_gb %d out of range 1-1024", c.ArtifactStorage.MaxUploadGB)
+	}
+	if c.ArtifactStorage.Download.TimeoutSeconds < 60 {
+		return fmt.Errorf("artifact_storage.download.timeout_seconds %d must be at least 60",
+			c.ArtifactStorage.Download.TimeoutSeconds)
+	}
+	if v := c.ArtifactStorage.Scanning.PeriodicScanInterval; v != 0 && (v < 30 || v > 86400) {
+		return fmt.Errorf("artifact_storage.scanning.periodic_scan_interval %d out of range 30-86400 (0 disables)", v)
+	}
+	for i := range c.ArtifactStorage.Paths {
+		entry := &c.ArtifactStorage.Paths[i]
+		if entry.Name == "" || entry.Path == "" {
+			return fmt.Errorf("artifact_storage.paths[%d] needs both name and path", i)
+		}
+		switch entry.Type {
+		case "iso", "image", "installer", "fixpack", "hotfix":
+		default:
+			return fmt.Errorf("artifact_storage.paths[%d].type %q must be one of iso, image, installer, fixpack, hotfix", i, entry.Type)
+		}
 	}
 	switch c.Provisioning.DefaultSyncMethod {
 	case "rsync", "scp":
@@ -128,7 +147,75 @@ func (c *Config) validate() error {
 			return fmt.Errorf("template_sources.sources[%d] needs both name and url", i)
 		}
 	}
+	if v := c.FileBrowser.Security.MaxDirectoryEntries; v < 1 || v > 100000 {
+		return fmt.Errorf("file_browser.security.max_directory_entries %d out of range 1-100000", v)
+	}
+	if v := c.FileBrowser.Security.MaxEditSizeMB; v < 1 || v > 10240 {
+		return fmt.Errorf("file_browser.security.max_edit_size_mb %d out of range 1-10240", v)
+	}
+	if v := c.FileBrowser.UploadSizeLimitGB; v < 1 || v > 1024 {
+		return fmt.Errorf("file_browser.upload_size_limit_gb %d out of range 1-1024", v)
+	}
+	if v := c.FileBrowser.Archive.MaxArchiveSizeMB; v < 1 {
+		return fmt.Errorf("file_browser.archive.max_archive_size_mb %d must be at least 1", v)
+	}
+	for _, format := range c.FileBrowser.Archive.SupportedFormats {
+		switch format {
+		case "zip", "tar", "tar.gz":
+		default:
+			return fmt.Errorf("file_browser.archive.supported_formats entry %q is not creatable on this agent (zip, tar, tar.gz — Go's bzip2 is decompress-only)", format)
+		}
+	}
+	// Existence is a runtime concern (a detached drive must not kill boot);
+	// only the form is validated here.
+	if root := c.FileBrowser.Root; root != "" && !filepath.IsAbs(filepath.FromSlash(root)) {
+		return fmt.Errorf("file_browser.root %q must be an absolute path", root)
+	}
+	for i := range c.Applications {
+		entry := &c.Applications[i]
+		if entry.Name == "" || entry.Path == "" {
+			return fmt.Errorf("applications[%d] needs both name and path", i)
+		}
+		// Names ride URL path segments (POST .../applications/{appName}/launch).
+		if strings.ContainsAny(entry.Name, `/\`) {
+			return fmt.Errorf("applications[%d].name %q must not contain slashes", i, entry.Name)
+		}
+	}
+	if c.Snapshots.IntervalMinutes < 5 || c.Snapshots.IntervalMinutes > 10080 {
+		return fmt.Errorf("snapshots.interval_minutes %d out of range 5-10080", c.Snapshots.IntervalMinutes)
+	}
+	if err := c.Snapshots.DefaultPolicy.validate("snapshots.default_policy"); err != nil {
+		return err
+	}
 	return c.Database.SQLiteOptions.validate()
+}
+
+// validate checks one snapshot retention policy (the shared zoneweaver
+// vocabulary: type enum + per-type numeric floors; unknown tier names are
+// rejected here — the schedule only ever fires hourly/daily/weekly).
+func (p *SnapshotPolicyConfig) validate(prefix string) error {
+	switch p.Type {
+	case "none", "simple", "age", "rotation":
+	default:
+		return fmt.Errorf("%s.type %q must be one of none, simple, age, rotation", prefix, p.Type)
+	}
+	if p.Keep < 1 {
+		return fmt.Errorf("%s.keep %d must be at least 1", prefix, p.Keep)
+	}
+	if p.MaxAgeDays < 1 {
+		return fmt.Errorf("%s.max_age_days %d must be at least 1", prefix, p.MaxAgeDays)
+	}
+	for tier, entry := range p.Tiers {
+		switch tier {
+		case "hourly", "daily", "weekly":
+		default:
+			return fmt.Errorf("%s.tiers.%s is not a tier (hourly, daily, weekly)", prefix, tier)
+		}
+		if entry.Keep < 1 {
+			return fmt.Errorf("%s.tiers.%s.keep %d must be at least 1", prefix, tier, entry.Keep)
+		}
+	}
+	return nil
 }
 
 // validate checks the SQLite tuning values against SQLite's own vocabularies.

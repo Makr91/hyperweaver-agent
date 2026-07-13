@@ -429,14 +429,11 @@ type TemplateSourceConfig struct {
 	URL     string `yaml:"url"     json:"url"`
 	Enabled bool   `yaml:"enabled" json:"enabled"`
 	Default bool   `yaml:"default" json:"default"`
-	// AuthToken authenticates private boxes (Bearer); a per-request
-	// auth token overrides it.
+	// AuthToken is the registry API key — a BoxVault service-account token,
+	// sent raw as Bearer on every call (vagrant's own model; Mark's ruling
+	// 2026-07-09: "API keys, PERIOD"). The ONLY credential: the base's
+	// username/JWT signin ladder is deliberately dead.
 	AuthToken string `yaml:"auth_token" json:"auth_token"`
-	// Username + APIKey enable the BoxVault signin flow (the base's model):
-	// when APIKey is not already a JWT, the pair exchanges for one at
-	// /api/auth/signin. AuthToken wins when set.
-	Username string `yaml:"username" json:"username"`
-	APIKey   string `yaml:"api_key"  json:"api_key"`
 	// CAFile adds a PEM CA bundle to the trust store for this registry —
 	// the self-signed-registry answer. Verification always stays on (the
 	// base's verify_ssl:false is deliberately not ported).
@@ -451,25 +448,174 @@ type TemplateSourcesConfig struct {
 	// (<root>/<org>/<box>/<version>/). Empty selects templates under the
 	// data root.
 	LocalStoragePath string `yaml:"local_storage_path" json:"local_storage_path"`
-	// Sources are the configured registries; the entry named "Default
-	// Registry" (or flagged default) serves requests that name no source.
+	// Sources are the configured registries; the entry flagged default
+	// serves requests that name no source (names are display-only).
 	Sources []TemplateSourceConfig `yaml:"sources" json:"sources"`
 }
 
-// AssetsConfig controls the installer file cache (the `artifacts` capability
-// token — SHI's file cache with hash verification, implemented in full per
-// Mark's 2026-07-06 ruling).
-type AssetsConfig struct {
+// ArtifactPathConfig is one artifact_storage.paths[] entry — an
+// operator-added storage location (zoneweaver's paths[] shape).
+type ArtifactPathConfig struct {
+	Name    string `yaml:"name"    json:"name"`
+	Path    string `yaml:"path"    json:"path"`
+	Type    string `yaml:"type"    json:"type"`
+	Enabled bool   `yaml:"enabled" json:"enabled"`
+}
+
+// ArtifactDownloadConfig tunes URL downloads (zoneweaver's download block;
+// progress cadence is informational — the executor reports about once per
+// second regardless).
+type ArtifactDownloadConfig struct {
+	TimeoutSeconds int `yaml:"timeout_seconds" json:"timeout_seconds"`
+}
+
+// ArtifactScanningConfig tunes location scans.
+type ArtifactScanningConfig struct {
+	// PeriodicScanInterval is seconds between automatic direct scans
+	// (0 disables; startup always scans once).
+	PeriodicScanInterval int `yaml:"periodic_scan_interval" json:"periodic_scan_interval"`
+	// SupportedExtensions filter iso/image scans per type. Empty selects the
+	// defaults (iso: .iso; image: .vmdk .raw .vdi .qcow2 .img .ova .ovf).
+	SupportedExtensions map[string][]string `yaml:"supported_extensions" json:"supported_extensions"`
+}
+
+// ArtifactStorageConfig controls the merged artifact system (the `artifacts`
+// capability token — Mark's ruling 2026-07-09: ONE zoneweaver-shaped system
+// where iso, image, installer, fixpack, and hotfix are all location types,
+// with SHI's hash verification in full).
+type ArtifactStorageConfig struct {
 	// Enabled serves the /artifacts surface and enforces cache verification
 	// at machine prepare time. Disabled, installer references pass through
 	// un-mounted with a loud warning.
 	Enabled bool `yaml:"enabled" json:"enabled"`
-	// Dir is the cache root (SHI layout:
-	// <dir>/<role>/{installers,fixpacks,hotfixes}/<file>). Empty selects
-	// file-cache under the data root.
+	// Dir hosts the built-in locations (<dir>/isos, images, installers,
+	// fixpacks, hotfixes). Empty selects artifacts under the data root.
 	Dir string `yaml:"dir" json:"dir"`
 	// MaxUploadGB caps one artifact upload's size.
-	MaxUploadGB int `yaml:"max_upload_gb" json:"max_upload_gb"`
+	MaxUploadGB int                    `yaml:"max_upload_gb" json:"max_upload_gb"`
+	Download    ArtifactDownloadConfig `yaml:"download"      json:"download"`
+	Scanning    ArtifactScanningConfig `yaml:"scanning"      json:"scanning"`
+	// Paths are additional storage locations beyond the built-ins; the API's
+	// storage-path CRUD persists here.
+	Paths []ArtifactPathConfig `yaml:"paths" json:"paths"`
+}
+
+// FileBrowserSecurityConfig bounds the file browser (zoneweaver's
+// file_browser.security block).
+type FileBrowserSecurityConfig struct {
+	// PreventTraversal rejects paths carrying ".." or "~".
+	PreventTraversal bool `yaml:"prevent_traversal" json:"prevent_traversal"`
+	// MaxDirectoryEntries refuses listing directories larger than this.
+	MaxDirectoryEntries int `yaml:"max_directory_entries" json:"max_directory_entries"`
+	// MaxEditSizeMB caps files the content read/write endpoints handle (the
+	// text-editor path; download/upload stream without this bound).
+	MaxEditSizeMB int `yaml:"max_edit_size_mb" json:"max_edit_size_mb"`
+	// ForbiddenPaths rejects any path underneath these prefixes.
+	ForbiddenPaths []string `yaml:"forbidden_paths" json:"forbidden_paths"`
+	// ForbiddenPatterns rejects paths matching these glob-style patterns
+	// (* matches anything).
+	ForbiddenPatterns []string `yaml:"forbidden_patterns" json:"forbidden_patterns"`
+}
+
+// FileBrowserArchiveConfig gates the archive operations (zoneweaver's
+// file_browser.archive block). Creation formats this agent speaks natively:
+// zip, tar, tar.gz (Go's bzip2 is decompress-only — tar.bz2 EXTRACTS fine but
+// cannot be created here, an honest platform divergence from the base's shell
+// tar).
+type FileBrowserArchiveConfig struct {
+	Enabled bool `yaml:"enabled" json:"enabled"`
+	// SupportedFormats limits what POST /filesystem/archive/create accepts.
+	SupportedFormats []string `yaml:"supported_formats" json:"supported_formats"`
+	// MaxArchiveSizeMB deletes a created archive that lands larger than this.
+	MaxArchiveSizeMB int `yaml:"max_archive_size_mb" json:"max_archive_size_mb"`
+}
+
+// FileBrowserConfig gates the host file-browser surface (/filesystem, the
+// `file-browser` capability token — zoneweaver's file_browser block: browse
+// plus the full mutate/archive family, Mark's 1:1 ruling 2026-07-12).
+type FileBrowserConfig struct {
+	Enabled bool `yaml:"enabled" json:"enabled"`
+	// Root confines browsing to one directory: "/" maps here and paths
+	// outside answer 403. Empty means unrestricted — "/" lists the host's
+	// drive letters on Windows and the real root elsewhere. (The base never
+	// needed this: its "/" IS the illumos root.)
+	Root string `yaml:"root" json:"root"`
+	// UploadSizeLimitGB caps one POST /filesystem/upload body.
+	UploadSizeLimitGB int                       `yaml:"upload_size_limit_gb" json:"upload_size_limit_gb"`
+	Security          FileBrowserSecurityConfig `yaml:"security" json:"security"`
+	Archive           FileBrowserArchiveConfig  `yaml:"archive"  json:"archive"`
+}
+
+// GuestAgentConfig gates the QEMU guest-agent channel (the `guest-agent`
+// capability token — Mark's go 2026-07-10): the MASTER gate over the
+// per-machine UART option (zones.guest_agent at create, the PUT toggle, the
+// setup endpoint) and the /machines/{name}/guest/* surface — credential-less
+// live IPs, exec, clean shutdown with no SSH and no Guest Additions.
+type GuestAgentConfig struct {
+	Enabled bool `yaml:"enabled" json:"enabled"`
+}
+
+// ApplicationConfig is one external application the agent can launch on its
+// own desktop against a machine (Mark's go 2026-07-12 — the Direct-mode
+// launcher registry: open-in-PuTTY/WinSCP-style actions). Args entries may
+// carry the placeholders {host}, {port}, {user}, {password} — resolved per
+// machine through the SSH transport ladder and stored credentials — and
+// {machine} (the machine name).
+type ApplicationConfig struct {
+	Name string   `yaml:"name" json:"name"`
+	Path string   `yaml:"path" json:"path"`
+	Args []string `yaml:"args" json:"args"`
+}
+
+// SnapshotTierConfig is one rotation tier's keep count.
+type SnapshotTierConfig struct {
+	Keep int `yaml:"keep" json:"keep"`
+}
+
+// SnapshotPolicyConfig is one snapshot retention policy — the shared
+// vocabulary with zoneweaver (its snapshots.default_policy and the per-zone
+// configuration.snapshots override; Mark's ruling 2026-07-12: same shape on
+// both agents, VBox-tuned CONSERVATIVE defaults here — VirtualBox snapshot
+// creation is CoW-thin but prune is a physical merge and online snapshots
+// carry RAM state).
+type SnapshotPolicyConfig struct {
+	// Type: none | simple (keep newest N auto-*) | age (delete auto-* older
+	// than max_age_days) | rotation (hourly/daily/weekly tiers, Snapshoter.sh
+	// schedule).
+	Type string `yaml:"type" json:"type"`
+	// Quiesce runs qga fsfreeze around each snapshot when the guest agent
+	// answers (application-consistent; crash-consistent otherwise).
+	Quiesce bool `yaml:"quiesce" json:"quiesce"`
+	// Keep is simple's newest-N count.
+	Keep int `yaml:"keep" json:"keep"`
+	// MaxAgeDays is age's cutoff.
+	MaxAgeDays int `yaml:"max_age_days" json:"max_age_days"`
+	// Tiers are rotation's per-tier keep counts (hourly/daily/weekly).
+	Tiers map[string]SnapshotTierConfig `yaml:"tiers" json:"tiers"`
+}
+
+// SnapshotsConfig controls the scheduled snapshot rotation service —
+// zoneweaver's snapshots block (its Snapshoter.sh replacement) on this
+// hypervisor's VBoxManage snapshot family. Per-machine override: the PUT
+// /machines/{name} `snapshots` field (configuration.snapshots; type none
+// disables per machine, null clears back to this default).
+type SnapshotsConfig struct {
+	Enabled bool `yaml:"enabled" json:"enabled"`
+	// IntervalMinutes is the simple/age cadence (rotation rides the fixed
+	// hourly/daily/weekly wall-clock schedule).
+	IntervalMinutes int                  `yaml:"interval_minutes" json:"interval_minutes"`
+	DefaultPolicy   SnapshotPolicyConfig `yaml:"default_policy"   json:"default_policy"`
+}
+
+// TicketSystemConfig feeds the UI's Help & Support link (the profile
+// dropdown; BoxVault's ticket_system pattern). Served publicly at
+// GET /api/config/ticket in the {value}-wrapped shape the UI consumes; the
+// link renders only when enabled AND base_url is set.
+type TicketSystemConfig struct {
+	Enabled bool   `yaml:"enabled"  json:"enabled"`
+	BaseURL string `yaml:"base_url" json:"base_url"`
+	ReqType string `yaml:"req_type" json:"req_type"`
+	Context string `yaml:"context"  json:"context"`
 }
 
 // Config is the root of config.yaml.
@@ -491,7 +637,12 @@ type Config struct {
 	Machines        MachinesConfig        `yaml:"machines"         json:"machines"`
 	Provisioning    ProvisioningConfig    `yaml:"provisioning"     json:"provisioning"`
 	TemplateSources TemplateSourcesConfig `yaml:"template_sources" json:"template_sources"`
-	Assets          AssetsConfig          `yaml:"assets"           json:"assets"`
+	ArtifactStorage ArtifactStorageConfig `yaml:"artifact_storage" json:"artifact_storage"`
+	FileBrowser     FileBrowserConfig     `yaml:"file_browser"     json:"file_browser"`
+	GuestAgent      GuestAgentConfig      `yaml:"guest_agent"      json:"guest_agent"`
+	Snapshots       SnapshotsConfig       `yaml:"snapshots"        json:"snapshots"`
+	Applications    []ApplicationConfig   `yaml:"applications"     json:"applications"`
+	TicketSystem    TicketSystemConfig    `yaml:"ticket_system"    json:"ticket_system"`
 	Cleanup         CleanupConfig         `yaml:"cleanup"          json:"cleanup"`
 	Monitoring      MonitoringConfig      `yaml:"monitoring"       json:"monitoring"`
 	HostPower       HostPowerConfig       `yaml:"host_power"       json:"host_power"`
@@ -556,10 +707,13 @@ func Default() *Config {
 			},
 		},
 		Machines: MachinesConfig{
-			AutoDiscovery:      true,
-			DiscoveryInterval:  300,
-			ServerIDStart:      1,
-			PrefixMachineNames: false,
+			AutoDiscovery:     true,
+			DiscoveryInterval: 300,
+			ServerIDStart:     1,
+			// Default true (Mark's ruling 2026-07-08): derived names carry the
+			// partition-id prefix out of the box — the base's prefix_zone_names
+			// default; the audit's B9 flip is closed.
+			PrefixMachineNames: true,
 			ShutdownTimeout:    120,
 			KeepRunningOnExit:  true,
 			ResourceValidation: ResourceValidationConfig{
@@ -609,14 +763,67 @@ func Default() *Config {
 			},
 		},
 		TemplateSources: TemplateSourcesConfig{
+			// The seed carries the registry's REAL name (Mark's ask 2026-07-09
+			// — "Default Registry" was a placeholder the UI printed verbatim);
+			// the default flag, not the name, selects the default source.
 			Sources: []TemplateSourceConfig{{
-				Name:    "Default Registry",
+				Name:    "STARTcloud BoxVault",
 				URL:     "https://boxvault.startcloud.com",
 				Enabled: true,
 				Default: true,
 			}},
 		},
-		Assets:  AssetsConfig{Enabled: true, MaxUploadGB: 50},
+		ArtifactStorage: ArtifactStorageConfig{
+			Enabled:     true,
+			MaxUploadGB: 50,
+			Download:    ArtifactDownloadConfig{TimeoutSeconds: 3600},
+			Scanning:    ArtifactScanningConfig{PeriodicScanInterval: 300},
+			Paths:       []ArtifactPathConfig{},
+		},
+		FileBrowser: FileBrowserConfig{
+			Enabled:           true,
+			UploadSizeLimitGB: 50,
+			Security: FileBrowserSecurityConfig{
+				PreventTraversal:    true,
+				MaxDirectoryEntries: 1000,
+				MaxEditSizeMB:       100,
+				// The base's device-tree guards, minus illumos-only paths —
+				// harmless no-ops on Windows.
+				ForbiddenPaths:    []string{"/dev", "/proc", "/sys"},
+				ForbiddenPatterns: []string{},
+			},
+			Archive: FileBrowserArchiveConfig{
+				Enabled:          true,
+				SupportedFormats: []string{"zip", "tar", "tar.gz"},
+				MaxArchiveSizeMB: 10240,
+			},
+		},
+		GuestAgent: GuestAgentConfig{Enabled: true},
+		// VBox-conservative retention defaults (Mark's ruling 2026-07-12):
+		// zoneweaver's vocabulary with LOW keeps and off-by-default — prune is
+		// a physical disk merge and online snapshots carry RAM state here,
+		// unlike ZFS's free destroys.
+		Snapshots: SnapshotsConfig{
+			Enabled:         false,
+			IntervalMinutes: 60,
+			DefaultPolicy: SnapshotPolicyConfig{
+				Type:       "none",
+				Keep:       3,
+				MaxAgeDays: 7,
+				Tiers: map[string]SnapshotTierConfig{
+					"hourly": {Keep: 2},
+					"daily":  {Keep: 3},
+					"weekly": {Keep: 2},
+				},
+			},
+		},
+		Applications: []ApplicationConfig{},
+		TicketSystem: TicketSystemConfig{
+			Enabled: true,
+			BaseURL: "https://xd.prominic.net/app/apprequest.nsf/router?openagent",
+			ReqType: "sso",
+			Context: "https://github.com/Makr91/hyperweaver-agent",
+		},
 		Cleanup: CleanupConfig{Interval: 300},
 		Monitoring: MonitoringConfig{
 			StorageEnabled:     false,

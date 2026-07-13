@@ -25,15 +25,17 @@
     { "name": "System", "description": "Version, update checking, prerequisite detection" },
     { "name": "Task Management", "description": "The task queue: every machine operation runs as a prioritized, dependency-chained task with streamed output" },
     { "name": "Machine Management", "description": "VirtualBox machines, built and provisioned natively by the agent (the zoneweaver mechanism: create orchestration → SSH/ansible pipeline; vagrant is never executed — externally-created vagrant projects are still discovered read-only), operated through queued tasks" },
-    { "name": "Console", "description": "Machine consoles: SSH terminal sessions (interactive shell over the provisioning transport), the VNC websockify bridge onto the machine's VRDE port (requires a usable VBoxVNC extpack — the console list in /api/status advertises vnc only then), no-session framebuffer screenshots, and the WebSocket ticket every upgrade requires. WebSocket upgrades authenticate by ?ticket= (minted at GET /ws-ticket), never by API-key headers — browser WebSocket clients cannot send them." },
+    { "name": "Console", "description": "Machine consoles: SSH terminal sessions (interactive shell over the provisioning transport), the VNC websockify bridge onto the machine's VRDE port (requires a usable VBoxVNC extpack — the console list in /api/status advertises vnc only then), the browser-RDP bridge (the IronRDP web client's RDCleanPath transport onto the VRDE port — base VRDP, no extpack; advertised as rdp), the turnkey VRDE TLS setup that path demands, no-session framebuffer screenshots, and the WebSocket ticket every upgrade requires. WebSocket upgrades authenticate by ?ticket= (minted at GET /ws-ticket), never by API-key headers — browser WebSocket clients cannot send them." },
     { "name": "Provisioning", "description": "Provisioner package registry (the provisioner-registry capability token — finer than the cross-agent provisioning token, which any provisioning-capable agent advertises regardless of wire shape): packages in SHI's on-disk format — <name>/provisioner-collection.yml with <version>/provisioner.yml trees — listed, imported (folder, archive, or git clone; task-queued), and deleted only while no machine references them. One system for every package family; installer-bundled packages seed on startup without ever overwriting existing versions. Hosts.template.yml renders with TRUE Jinja2 semantics (gonja): parenthesized filter args, loop.*, is defined; undefined variables render empty; includes resolve inside the package's templates/ dir only." },
-    { "name": "Artifacts", "description": "Installer file cache (the artifacts capability token, config-gated by assets.enabled — SHI's file cache with hash verification implemented in FULL, Mark's 2026-07-06 ruling): SHA-256-hashed installer/fixpack/hotfix files under <cache>/<role>/{installers,fixpacks,hotfixes}/, with hash EXPECTATIONS (bundled registry seed + the HCL catalog's authoritative hashes), on-demand scans, verified URL/HCL-portal downloads with live progress, streaming uploads, and local-path registration. Machine prepare REFUSES any referenced file that is absent, unhashed, or hash-mismatched; mounts are hard links or hash-verified copies." },
+    { "name": "Artifacts", "description": "The merged artifact system (the artifacts capability token, config-gated by artifact_storage.enabled — Mark's 2026-07-09 ruling: ONE zoneweaver-shaped system): typed storage locations where iso, image, installer, fixpack, and hotfix are ALL location types — one scan, one SHA-256 checksum store (the ONLY algorithm; md5/sha1 are rejected everywhere), one surface. Five BUILT-IN locations always exist under artifact_storage.dir (isos, images, installers, fixpacks, hotfixes; source builtin, never deletable — disable instead); operator locations come from artifact_storage.paths[] and the storage-path API (which persists into config.yaml). Installer-family locations store per role (<location>/<role>/<file>); iso/image locations are flat and extension-filtered. SHI's hash-expectation model rides on top: bundled registry seeds + the HCL catalog's authoritative hashes; machine prepare REFUSES any referenced file that is absent, unhashed, or hash-mismatched. Automatic scans (startup + artifact_storage.scanning.periodic_scan_interval) run agent-side without task rows; user-triggered scans are tasks. cdroms[] entries reference cached ISOs by filename ({iso}) alongside raw paths." },
+    { "name": "File System", "description": "Host file browser (the file-browser capability token, config-gated by file_browser.enabled — zoneweaver's FULL surface, 1:1 where the platform allows): GET /filesystem lists agent-host directories, and the mutate family edits them — create folder, text content read/write (bounded by security.max_edit_size_mb), upload/download, rename, move/copy (task-queued: file_move/file_copy), delete, archives (task-queued create/extract under file_browser.archive), permissions. Every path passes the same security bounds (traversal guard, browse-root containment, forbidden paths/patterns); the whole surface is operator-gated by the central policy. Platform honesty: uid/gid ownership applies on Unix hosts only (Windows answers 400 where it matters and mode toggles the read-only attribute); archive CREATION speaks zip/tar/tar.gz (Go's bzip2 is decompress-only), extraction adds tar.bz2 and .gz. Mutations are native Go file operations — the base's pfexec shell-outs have no analog." },
+    { "name": "Guest Agent", "description": "The QEMU guest-agent channel (the guest-agent capability token, config-gated by guest_agent.enabled — Mark's go 2026-07-10): credential-less structured guest control with NO SSH and NO Guest Additions. The UART is a PER-MACHINE create option (zones.guest_agent: true, default false, under the guest_agent.enabled master gate — Mark's Proxmox-model ruling 2026-07-12, shared with zoneweaver): opted-in creates wire a COM2 UART onto a host pipe (\\\\.\\pipe\\hyperweaver-qga-<machine> on Windows hosts, qga.sock under the machine's working directory elsewhere); the box templates run qemu-ga on that port (isa-serial — auto-transport images pick virtio on bhyve, serial here); the agent opens the pipe per request (the channel takes ONE client), resyncs via guest-sync-delimited, and runs one command. The guest's live IPs also feed the RDP guest-target and SSH transport ladders as the live-truth rung. The DISCOVERY SWEEP additionally probes every running machine (QGA channel first, Guest Additions properties as fallback) and STORES the observation on the machine row (configuration.guest_info: {ips[], source, agent_responding, checked_at}) — the machine list the UI already polls carries the direct-connect gate, so per-machine polling of these endpoints is never needed for gating. Channel access is SERIALIZED per machine agent-side: concurrent commands queue on the single-client pipe instead of colliding." },
     { "name": "Swap Management", "description": "Read-only swap information (the swap capability token); add/remove are OmniOS semantics and not implemented on this agent" },
     { "name": "Host Monitoring", "description": "Host telemetry (the monitoring capability token): always-on realtime sampling via gopsutil; monitoring.storage_enabled adds stored time series in per-datatype database files. Illumos-only families (ZFS pools/datasets/ARC, zpool-iostat disk IO, netstat routes) have no analog on this host and are absent." },
     { "name": "Processes", "description": "Host process listing and control (the processes capability token). The zone concept does not exist here: the zone field is absent and ?zone= filters are ignored. Absent by platform: /{pid}/stack, /{pid}/limits (pstack/plimit are illumos tools) and trace/start (DTrace)." },
     { "name": "System Host Management", "description": "Host power management (the host-power capability token, config-gated by host_power.enabled — every endpoint answers 503 and the token disappears from /api/status when disabled). Absent by platform: runlevels, single-user/multi-user transitions, fast reboot, reboot-required tracking (init semantics with no cross-platform analog)." },
     { "name": "Host Configuration", "description": "System hosts-file control on all three platforms (Windows System32\\drivers\\etc\\hosts, /etc/hosts elsewhere). /system/dns is absent by platform: resolv.conf is Unix-only and Windows/macOS manage DNS elsewhere." },
-    { "name": "Database Management", "description": "SQLite statistics and maintenance across every open database file (tasks.sqlite, agent.sqlite, and the monitoring files when storage is enabled)" },
+    { "name": "Database Management", "description": "SQLite statistics and maintenance across every open database file (tasks.sqlite, agent.sqlite, and the monitoring files when storage is enabled), plus the read-only explorer drill-down (tables with row counts and indexes, then paged rows — zoneweaver's contract, shared wire; no arbitrary SQL, every table and order_by column verified against the database's own catalog)" },
     { "name": "Settings", "description": "Agent configuration over the API (admin only)" },
     { "name": "Secrets", "description": "Global secrets store (the secrets capability token; admin only): SHI's six categories in secrets.yaml beside the config — kept OUT of /settings so that surface stays a pure configuration document. Values are plain text by design (it is the user's local machine; the generated Hosts.yml carries them as SECRETS_* template vars). Independently, Hosts.rb merges the working copy's secrets.yml/.secrets.yml at vagrant runtime — both mechanisms coexist." }
   ],
@@ -85,9 +87,9 @@
           "hostname": { "type": "string", "example": "desktop-01" },
           "auth": { "type": "array", "items": { "type": "string" }, "example": ["apikey"] },
           "bootstrapAvailable": { "type": "boolean", "example": true },
-          "console": { "type": "array", "items": { "type": "string" }, "description": "ssh always (SSH terminal sessions); vnc only when a USABLE VBoxVNC VRDE module is installed (the websockify bridge needs RFB on the VRDE port)", "example": ["ssh", "vnc"] },
+          "console": { "type": "array", "items": { "type": "string" }, "description": "EMERGENCY consoles only (Mark's placement ruling 2026-07-12 — hypervisor-level surfaces that work with zero guest cooperation): rdp always (base VRDP ships in VirtualBox 7.2 — the IronRDP web client rides the /machines/{name}/rdp-bridge RDCleanPath WebSocket); vnc only when a USABLE VBoxVNC VRDE module is installed (the websockify bridge needs RFB on the VRDE port). The machine SSH terminal is guest-network access and advertises as features 'ssh' instead.", "example": ["rdp"] },
           "shi_mode": { "type": "boolean", "description": "\"I Can't Believe it's not Super.Human.Installer\" presentation toggle (ui.shi_mode): the SPA renders the opinionated SHI-style theme/flow in Direct mode when true. Absent/false on agents without the concept.", "example": false },
-          "features": { "type": "array", "items": { "type": "string" }, "description": "Capability tokens (platform support ∧ config state): host-power is absent when host_power.enabled is false, artifacts when assets.enabled is false. provisioner-registry names the SHI-format package registry surface and secrets the global secrets store — finer than the cross-agent provisioning/machine-create tokens, which are true on every provisioning-capable agent regardless of wire shape (Mark's gating ruling, 2026-07-06). machine-modify names PUT's infrastructure-modify surface (the base's zone_modify contract).", "example": ["tasks", "machines", "machine-suspend", "machine-create", "machine-modify", "machine-snapshots", "machine-screenshot", "swap", "monitoring", "processes", "provisioning", "provisioner-registry", "secrets", "templates", "host-power", "artifacts"] },
+          "features": { "type": "array", "items": { "type": "string" }, "description": "Capability tokens (platform support ∧ config state): host-power is absent when host_power.enabled is false, artifacts when artifact_storage.enabled is false, file-browser when file_browser.enabled is false, guest-agent when guest_agent.enabled is false. provisioner-registry names the SHI-format package registry surface and secrets the global secrets store — finer than the cross-agent provisioning/machine-create tokens, which are true on every provisioning-capable agent regardless of wire shape (Mark's gating ruling, 2026-07-06). machine-modify names PUT's infrastructure-modify surface (the base's zone_modify contract). ssh names the machine SSH-terminal family (POST /machines/{name}/ssh/start + the /ssh/{id} WebSocket) — a FEATURE, not a console, per Mark's placement ruling 2026-07-12: console[] carries emergency consoles only.", "example": ["tasks", "machines", "machine-suspend", "machine-create", "machine-modify", "machine-snapshots", "machine-screenshot", "swap", "monitoring", "processes", "provisioning", "provisioner-registry", "secrets", "ssh", "templates", "host-launchers", "host-terminal", "host-power", "artifacts", "file-browser", "guest-agent"] },
           "uptime": { "type": "integer", "description": "Seconds since the agent started", "example": 86400 }
         }
       },
@@ -140,11 +142,11 @@
         "properties": {
           "id": { "type": "string", "format": "uuid", "example": "123e4567-e89b-12d3-a456-426614174000" },
           "machine_name": { "type": "string", "description": "Target machine name", "example": "domino-01" },
-          "operation": { "type": "string", "description": "Operation kind. Vocabulary: start, stop, suspend, delete, discover, machine_modify (PUT's infrastructure changes), restart (never dispatched — a restart is a stop→start chain); create orchestration: machine_create_orchestration (parent), machine_prepare, machine_create_storage, machine_create_config, machine_create_finalize, template_download; provisioning pipeline: machine_provision_orchestration (parent), machine_wait_ssh, machine_sync_parent, machine_sync (one per folder), machine_provision_parent, machine_provision (one per playbook); network: provisioning_network_setup, provisioning_network_teardown; consoles/snapshots: reset, pause, resume, snapshot_take, snapshot_restore, snapshot_delete, machine_clone_current (clonevm current-state clone); templates: template_download, template_delete, template_export, template_upload (publish), template_move; registry/cache/system: provisioner_import, artifact_scan, artifact_download, hcl_download, agent_update.", "example": "start" },
+          "operation": { "type": "string", "description": "Operation kind. Vocabulary: start, stop, suspend, delete, discover, machine_modify (PUT's infrastructure changes), machine_import (OVA/OVF appliance import), machine_move (movevm relocation), machine_unattended_install (VBoxManage answer-file install), restart (never dispatched — a restart is a stop→start chain); create orchestration: machine_create_orchestration (parent), machine_prepare, machine_create_storage, machine_create_config, machine_create_finalize, template_download; provisioning pipeline: machine_provision_orchestration (parent), machine_wait_ssh, machine_sync_parent, machine_sync (one per folder), machine_provision_parent, machine_provision (one per playbook), machine_syncback_parent, machine_syncback (one per syncback-flagged folder — the post-provision guest→host pull); network: provisioning_network_setup, provisioning_network_teardown; consoles/snapshots: reset, pause, resume, snapshot_take (user takes AND the rotation service's scheduled rows — created_by snapshot_rotation), snapshot_restore, snapshot_delete, machine_clone_current (clonevm current-state clone); templates: template_download, template_delete, template_export, template_upload (publish), template_move; filesystem (machine_name \"filesystem\"): file_move, file_copy, file_archive_create, file_archive_extract; registry/artifacts/system: provisioner_import, artifact_scan, artifact_download, artifact_upload, artifact_move, artifact_copy, artifact_delete_file, artifact_delete_folder, hcl_download, agent_update.", "example": "start" },
           "status": {
             "type": "string",
-            "enum": ["pending", "running", "completed", "failed", "cancelled", "completed_with_errors"],
-            "description": "completed_with_errors is a parent-task terminal state: some children failed, some completed",
+            "enum": ["pending", "prepared", "running", "completed", "failed", "cancelled", "completed_with_errors"],
+            "description": "completed_with_errors is a parent-task terminal state: some children failed, some completed. prepared is the artifact-upload handshake's holding state (never dispatched; the upload landing at POST /artifacts/upload/{taskId} flips it to pending; agent restart cancels it).",
             "example": "pending"
           },
           "priority": { "type": "integer", "description": "Higher runs first: 100 critical, 80 high, 60 medium, 50 service, 40 low, 20 background", "example": 60 },
@@ -158,7 +160,7 @@
           "updatedAt": { "type": "string", "format": "date-time", "description": "Last modification — the since query parameter compares against this" },
           "metadata": { "type": "string", "nullable": true, "description": "JSON-encoded execution parameters" },
           "progress_percent": { "type": "number", "example": 42.5 },
-          "progress_info": { "type": "object", "nullable": true, "description": "Freeform progress detail; parent tasks carry {completed_tasks, failed_tasks, total_tasks, status}" },
+          "progress_info": { "type": "object", "nullable": true, "description": "Freeform progress detail; parent tasks carry {completed_tasks, failed_tasks, total_tasks, status}. machine_provision tasks carry {status} at the coarse phases and — while the playbook runs — the STARTcloud progress callback's live reports as {status: \"running_playbook\", ansible_percent, message} (the guest's own 0-100% and role label, parsed from the packages' PROGRESS::{json} stdout marker; progress_percent maps it into this task's 40→90 window). Playbooks without the callback simply keep the coarse phases." },
           "output": { "type": "string", "nullable": true, "description": "JSON-encoded array of output entries as last flushed — ALWAYS null on GET /tasks (the list never carries output blobs); GET /tasks/{taskId} (detail), GET /tasks/{taskId}/output, and the /tasks/{taskId}/stream WebSocket serve it in full" }
         }
       },
@@ -188,7 +190,7 @@
           "last_seen": { "type": "string", "format": "date-time", "nullable": true },
           "notes": { "type": "string", "nullable": true },
           "tags": { "type": "array", "nullable": true, "items": { "type": "string" } },
-          "configuration": { "type": "object", "nullable": true, "description": "Live machine configuration (VBoxManage showvminfo --machinereadable key/value map on this agent)" },
+          "configuration": { "type": "object", "nullable": true, "description": "Live machine configuration (VBoxManage showvminfo --machinereadable key/value map on this agent). RUNNING machines additionally carry guest_info — the discovery sweep's stored LIVE-IP observation {ips: [\"192.168.1.50\"], source: \"guest-agent\"|\"additions\"|\"\", agent_responding: bool, checked_at}: QGA channel first, Guest Additions properties as fallback, NEVER the provisioning-plan control IP. The UI gates direct RDP/SSH/connect buttons on a non-empty ips[] straight from this LIST data (never query per machine); non-running machines lose the section. Refreshed every machines.discovery_interval sweep; connect-time target resolution stays live." },
           "spec": { "$ref": "#/components/schemas/MachineSpec", "nullable": true, "description": "The creation document (machines this agent created; discovered VMs have none) — the user's intent, never overwritten by discovery" },
           "created_at": { "type": "string", "format": "date-time" },
           "updatedAt": { "type": "string", "format": "date-time" }
@@ -210,16 +212,18 @@
           "networks": { "type": "array", "items": { "type": "object" } },
           "disks": {
             "type": "object",
-            "description": "OPTIONAL disks section at create (the base's contract — omit entirely for a DISKLESS stub; attach media later via modify). boot: {path: attach an existing disk-image file} | {size, sparse?, volume_name?: create a blank scratch volume} | omitted with settings.box: template clone | omitted without box: no boot medium. additional_disks[]: {volume_name, size, sparse?, port?} to create, or {path, port?} to attach existing. cdroms[]: [{path: agent-host ISO path}] — the attach-an-ISO-and-install-yourself flow. With a provisioner package the render's disks win.",
+            "description": "OPTIONAL disks section at create (the base's contract — omit entirely for a DISKLESS stub; attach media later via modify). THE DEVICE MODEL (VirtualBox's real storage surface): controllers[] declares the storage controllers ({name?, type: ide|sata|scsi|sas|nvme|virtio|usb|floppy, ports?, bootable?} — name defaults per type, e.g. \"NVMe Controller\"); every media entry may address one by `controller` name plus `port`/`device` (device matters on IDE — two devices per port). Omitting controllers[] creates ONE controller named \"SATA Controller\" of zones.diskif's type — the original shape. boot: {path: attach an existing disk-image file} | {size, sparse?, volume_name?: create a blank scratch volume} | omitted with settings.box: template clone | omitted without box: no boot medium; boot lands on the FIRST controller port 0 unless it names its own controller/port/device. additional_disks[]: {volume_name, size, sparse?, controller?, port?, device?} to create, or {path, controller?, port?, device?} to attach existing. cdroms[]: [{path: agent-host ISO path | iso: a cached-ISO FILENAME resolved through the artifact registry (GET /artifacts/iso lists them; the file must exist in an enabled location), controller?, port?, device?}] — the attach-an-ISO-and-install-yourself flow. With a provisioner package the render's disks win.",
             "properties": {
+              "controllers": { "type": "array", "items": { "type": "object", "properties": { "name": { "type": "string", "example": "NVMe Controller" }, "type": { "type": "string", "enum": ["ide", "sata", "scsi", "sas", "nvme", "virtio", "usb", "floppy"] }, "ports": { "type": "integer", "description": "Port count override (0/omitted = the bus default)" }, "bootable": { "type": "boolean", "default": true } } } },
               "boot": { "type": "object" },
               "additional_disks": { "type": "array", "items": { "type": "object" } },
-              "cdroms": { "type": "array", "items": { "type": "object", "properties": { "path": { "type": "string" } } } }
+              "cdroms": { "type": "array", "items": { "type": "object", "properties": { "path": { "type": "string", "description": "Raw agent-host ISO path" }, "iso": { "type": "string", "description": "Cached-ISO filename from the artifact registry (used when path is absent)", "example": "debian-13.0.0-amd64-netinst.iso" } } } }
             }
           },
-          "zones": { "type": "object", "description": "OPTIONAL zones section at create — the base's named system fields, translated exactly like modify: autostart (host-startup), bootrom (efi|bios → firmware), hostbridge (i440fx→piix3 → chipset), vnc (on/off → VRDE; settings.consoleport sets the port), acpi, xhci, netif (virtio|e1000 → every document adapter's hardware type; the reserved NAT adapter keeps the default). diskif selects the STORAGE CONTROLLER type at create: ide|sata(default)|scsi|sas|nvme|virtio — VirtualBox fixes it once media attach, so modify refuses it." },
+          "zones": { "type": "object", "description": "OPTIONAL zones section at create — the base's named system fields, translated exactly like modify: autostart (host-startup), bootrom (efi|bios → firmware), hostbridge (i440fx→piix3 → chipset), vnc (on/off → VRDE; settings.consoleport sets the port), acpi, xhci, netif (virtio|e1000 → every document adapter's hardware type; the reserved NAT adapter keeps the default). diskif selects the STORAGE CONTROLLER type at create: ide|sata(default)|scsi|sas|nvme|virtio — VirtualBox fixes it once media attach, so modify refuses it. guest_agent (boolean, default false): opt this machine into the QEMU guest-agent UART (per-machine under the guest_agent.enabled master gate — the Proxmox model, shared vocabulary with zoneweaver); a document claiming serial port 2 itself always wins." },
           "cloud_init": { "type": "object", "description": "OPTIONAL cloud-init section at create (enabled/dns_domain/password/resolvers/sshkey — set as guest properties under /Hyperweaver/CloudInit/)" },
           "vbox": { "type": "object", "description": "OPTIONAL vbox section at create: directives[] = [{directive, value}] — the generic modifyvm passthrough (any --flag=value: acpi, chipset, usb-xhci, nic hardware types...), the base's zone attr-map analog" },
+          "hardware": { "type": "object", "description": "OPTIONAL first-class VBoxManage knob vocabulary (Mark's ALL-knobs ruling 2026-07-09), hardware.<section>.<key> grouped by VBoxManage's own usage sections: cpu (hotplug, execution_cap, profile, pae, long_mode, hwvirtex, nested_paging, large_pages, nested_hw_virt, virt_vmsave_vmload, vtx_vpid, vtx_ux, apic, x2apic, hpet, spec_ctrl, ibpb_on_vm_exit/entry, l1d_flush_on_sched/vm_entry, mds_clear_on_sched/vm_entry, arm_gic_its, cpuid_portability_level) · memory (vram, page_fusion, balloon) · graphics (controller, monitor_count, accelerate_3d) · audio (enabled, driver, controller, codec, in, out) · usb (ohci, ehci, xhci, card_reader) · integration (clipboard_mode, clipboard_file_transfers, drag_and_drop, mouse, keyboard) · platform (chipset, iommu, tpm_type, tpm_location, rtc_use_utc, paravirt_provider, ioapic, triple_fault_reset, hardware_uuid, system_uuid_le, snapshot_folder, description, groups, icon_file, default_frontend, vm_process_priority, vm_execution_engine) · firmware (boot_menu, apic, logo_fade_in/out, logo_display_time, logo_image_path, system_time_offset, pxe_debug) · recording (enabled, screens, file, max_size_mb, max_time_seconds, opts, video_fps, video_rate, video_res) · vrde (enabled, port — range strings allowed, extpack, address, auth_type, auth_library, multi_con, reuse_con, video_channel, video_channel_quality) · autostart (enabled, delay) · serial[] ({port 1-4, io_base|\"off\", irq, mode, type}) · parallel[] ({port 1-2, io_base|\"off\", irq, device}). Values pass to VirtualBox UNVALIDATED — its own errors answer; unknown sections/keys fail the task honestly. Emitted after the legacy zones/settings flags (a hardware twin of the same knob wins); vbox.directives stays the final word. networks[] entries additionally take per-adapter cable_connected, promisc (deny|allow-vms|allow-all), speed (kbps), boot_prio (0-4), bandwidth_group, nic_type (raw VirtualBox adapter type, overrides zones.netif). Passthrough-only by design (vbox.directives): teleporter, cpuid-set, tracing/testing, guest-debug, pci-attach, plug/unplug-cpu." },
           "notes": { "type": "string", "description": "Free-form notes, persisted onto the machine row at finalize (the base's create contract)" },
           "tags": { "type": "array", "items": { "type": "string" }, "description": "Tags, persisted at finalize" },
           "roles": {
@@ -231,7 +235,7 @@
                 "enabled": { "type": "boolean" },
                 "files": {
                   "type": "object",
-                  "description": "Installer assignments, resolved against the file cache at every prepare (assets.enabled): the named file must exist in the cache and pass SHA-256 verification or the start FAILS; hashes are auto-filled from the cache into the template vars, and a spec-supplied hash must match the cached one. Files mount into the working copy's installers/<role>/ tree as hard links or hash-verified copies.",
+                  "description": "Installer assignments, resolved against the artifact registry at every prepare (artifact_storage.enabled): the named file must exist under (role, type, filename) and pass SHA-256 verification or the start FAILS; hashes are auto-filled from the registry into the template vars, and a spec-supplied hash must match the stored one. Files mount into the working copy's installers/<role>/ tree as hard links or hash-verified copies.",
                   "properties": {
                     "installer": { "type": "string" },
                     "installer_hash": { "type": "string" },
@@ -318,14 +322,15 @@
       },
       "ProvisionerVersion": {
         "type": "object",
-        "description": "One provisioner package version. metadata is the full provisioner.yml — metadata.roles and configuration.basicFields/advancedFields drive the machine-create forms exactly as in SHI's custom-provisioner stack.",
+        "description": "One provisioner package version. metadata is the full provisioner.yml — metadata.roles and configuration.basicFields/advancedFields drive the machine-create forms exactly as in SHI's custom-provisioner stack. The VERSION-DETAIL read additionally carries role_specs (Mark's argument-specs ruling 2026-07-12, shared wire with zoneweaver): every shipped role's meta/argument_specs.yml folded into role_specs.roles[<name>] = {collection, short_description, options} — derived into a role-specs.yml cache beside provisioner.yml at import (self-healing at read for hand-dropped packages; POST /provisioning/provisioners/refresh-specs re-derives everything). The UI builds its per-role knob FORMS from options; absent when the package ships no specs.",
         "properties": {
           "version": { "type": "string", "description": "The manifest's version field (falls back to the directory name)", "example": "0.1.24" },
           "dir": { "type": "string", "description": "Version directory name — the URL segment", "example": "0.1.24" },
           "name": { "type": "string", "example": "hcl_domino_standalone_provisioner" },
           "description": { "type": "string" },
           "root": { "type": "string", "description": "Absolute path of the version directory on the agent host" },
-          "metadata": { "type": "object", "description": "provisioner.yml, verbatim" }
+          "metadata": { "type": "object", "description": "provisioner.yml, verbatim" },
+          "role_specs": { "type": "object", "description": "Version-detail read only: {roles: {<role>: {collection, short_description, options}}} — the cached argument specs; absent in listings and when the package ships none", "properties": { "roles": { "type": "object", "additionalProperties": { "type": "object", "properties": { "collection": { "type": "string", "example": "startcloud.startcloud_roles" }, "short_description": { "type": "string" }, "options": { "type": "object", "description": "ansible argument_specs option schemas (types/defaults/descriptions)" } } } } } }
         }
       },
       "ProvisionerCollection": {
@@ -341,22 +346,64 @@
       },
       "Artifact": {
         "type": "object",
-        "description": "One file-cache row. sha256 is what the file actually hashed to when last verified; expected_sha256 is the recorded expectation (bundled registry seed, caller-supplied, or the HCL catalog). exists:false rows are expectations awaiting their binary (SHI's model).",
+        "description": "One artifact registry row (zoneweaver's Artifact shape with the SHI extras alongside). checksum is what the file actually hashed to when last verified; expected_sha256 is the recorded expectation (bundled registry seed, caller-supplied, or the HCL catalog). file_exists:false rows are expectations awaiting their binary (SHI's model).",
         "properties": {
           "id": { "type": "integer" },
-          "role": { "type": "string", "example": "domino" },
-          "kind": { "type": "string", "enum": ["installer", "fixpack", "hotfix"] },
+          "storage_location_id": { "type": "string", "format": "uuid" },
+          "file_type": { "type": "string", "enum": ["iso", "image", "installer", "fixpack", "hotfix"] },
+          "role": { "type": "string", "description": "Installer-family rows only — the role directory", "example": "domino" },
           "filename": { "type": "string", "example": "Domino_14.5_Linux_English.tar" },
-          "path": { "type": "string", "description": "Cache location (empty on expectation-only rows)" },
-          "sha256": { "type": "string" },
-          "expected_sha256": { "type": "string" },
+          "path": { "type": "string", "description": "File location (empty on expectation-only rows)" },
           "size": { "type": "integer", "format": "int64" },
+          "extension": { "type": "string", "example": ".tar" },
+          "mime_type": { "type": "string", "example": "application/x-iso9660-image" },
+          "checksum": { "type": "string", "description": "The file's actual SHA-256" },
+          "checksum_algorithm": { "type": "string", "enum": ["sha256"], "description": "Always sha256 — the system's one algorithm" },
+          "checksum_verified": { "type": "boolean", "nullable": true, "description": "true = matches the recorded expectation, false = MISMATCH, null = no expectation to verify against" },
+          "expected_sha256": { "type": "string" },
           "version": { "type": "string" },
-          "exists": { "type": "boolean" },
-          "verified_at": { "type": "string", "format": "date-time", "nullable": true },
+          "file_exists": { "type": "boolean" },
+          "verified": { "type": "boolean", "description": "The mount gate: exists ∧ hashed ∧ (no expectation ∨ matching)" },
           "source_url": { "type": "string" },
+          "discovered_at": { "type": "string", "format": "date-time" },
+          "last_verified": { "type": "string", "format": "date-time", "nullable": true },
+          "updatedAt": { "type": "string", "format": "date-time" },
+          "storage_location": { "type": "object", "description": "Embedded location summary", "properties": { "id": { "type": "string" }, "name": { "type": "string" }, "path": { "type": "string" }, "type": { "type": "string" } } }
+        }
+      },
+      "ArtifactStorageLocation": {
+        "type": "object",
+        "description": "One typed storage location (zoneweaver's artifact_storage_locations shape). source builtin = the five always-present locations under artifact_storage.dir (never deletable — disable instead); source config = artifact_storage.paths[] entries, which the storage-path API also creates and persists.",
+        "properties": {
+          "id": { "type": "string", "format": "uuid" },
+          "name": { "type": "string", "example": "ISO Storage" },
+          "path": { "type": "string" },
+          "type": { "type": "string", "enum": ["iso", "image", "installer", "fixpack", "hotfix"] },
+          "enabled": { "type": "boolean" },
+          "source": { "type": "string", "enum": ["builtin", "config"] },
+          "config_hash": { "type": "string" },
+          "file_count": { "type": "integer" },
+          "total_size": { "type": "integer", "format": "int64" },
+          "last_scan_at": { "type": "string", "format": "date-time", "nullable": true },
+          "scan_errors": { "type": "integer", "description": "Consecutive scan failures" },
+          "last_error_message": { "type": "string" },
           "created_at": { "type": "string", "format": "date-time" },
-          "updatedAt": { "type": "string", "format": "date-time" }
+          "updated_at": { "type": "string", "format": "date-time" }
+        }
+      },
+      "FileSystemItem": {
+        "type": "object",
+        "description": "One directory-listing entry (zoneweaver's FileSystemItem, minus the platform-absent fields: uid/gid/atime/ctime have no cross-platform analog on this agent — mtime and the permission summary survive).",
+        "properties": {
+          "name": { "type": "string", "example": "config.yaml" },
+          "path": { "type": "string", "description": "Absolute agent-host path, FORWARD-SLASH on every platform (C:/Users/... on Windows — the base contract; the agent accepts forward-slash input back)" },
+          "isDirectory": { "type": "boolean" },
+          "size": { "type": "integer", "format": "int64", "nullable": true, "description": "null for directories" },
+          "mimeType": { "type": "string", "nullable": true, "example": "text/yaml" },
+          "isBinary": { "type": "boolean", "description": "8KB head-sample judgment (null-byte/control-character density); unreadable files count as binary" },
+          "syntax": { "type": "string", "nullable": true, "description": "Editor syntax hint for text files", "example": "yaml" },
+          "permissions": { "type": "object", "properties": { "octal": { "type": "string", "example": "644" }, "readable": { "type": "boolean" }, "writable": { "type": "boolean" }, "executable": { "type": "boolean" } }, "description": "Unix-permission summary (Windows reports Go's synthesized mode: 666, or 444 when the read-only attribute is set)" },
+          "mtime": { "type": "string", "format": "date-time" }
         }
       },
       "SecretsDocument": {
@@ -493,6 +540,20 @@
           "200": {
             "description": "Agent identity and capabilities",
             "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Status" } } }
+          }
+        }
+      }
+    },
+    "/api/config/ticket": {
+      "get": {
+        "tags": ["Status"],
+        "summary": "Ticket-system configuration (public)",
+        "description": "The Help & Support link's config feed (the Server's /api/config/ticket served on this agent too, so Direct mode renders the same profile-dropdown link). No authentication. Fields ride BoxVault's {value}-wrapped shape; the UI renders the link only when enabled AND base_url are set, building base_url&req=<req_type>&customerId=&user=&email=&context=<context>.",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Ticket-system configuration",
+            "content": { "application/json": { "schema": { "type": "object", "properties": { "ticket_system": { "type": "object", "properties": { "enabled": { "type": "object", "properties": { "value": { "type": "boolean" } } }, "base_url": { "type": "object", "properties": { "value": { "type": "string", "example": "https://xd.prominic.net/app/apprequest.nsf/router?openagent" } } }, "req_type": { "type": "object", "properties": { "value": { "type": "string", "example": "sso" } } }, "context": { "type": "object", "properties": { "value": { "type": "string", "example": "https://github.com/Makr91/hyperweaver-agent" } } } } } } } } }
           }
         }
       }
@@ -964,7 +1025,7 @@
         "summary": "List tasks",
         "description": "Minimum role: viewer. Filterable and sortable; the total count is computed only when include_count=true.",
         "parameters": [
-          { "name": "status", "in": "query", "schema": { "type": "string", "enum": ["pending", "running", "completed", "failed", "cancelled", "completed_with_errors"] } },
+          { "name": "status", "in": "query", "schema": { "type": "string", "enum": ["pending", "prepared", "running", "completed", "failed", "cancelled", "completed_with_errors"] } },
           { "name": "machine_name", "in": "query", "schema": { "type": "string" }, "description": "Filter by machine name" },
           { "name": "operation", "in": "query", "schema": { "type": "string" } },
           { "name": "operation_ne", "in": "query", "schema": { "type": "string" }, "description": "Exclude one operation kind" },
@@ -1212,6 +1273,33 @@
         }
       }
     },
+    "/machines/defaults": {
+      "get": {
+        "tags": ["Machine Management"],
+        "summary": "Create-time defaults",
+        "description": "Minimum role: viewer. What a create spec that OMITS each field actually gets — the wizard's \"(default: …)\" labels. Two classes, both listed: the agent's own fallbacks (settings.vcpus/memory/os_type) and VirtualBox's own defaults the agent passes no flag for (zones.bootrom/hostbridge/vnc/acpi/xhci/netif). knob_values is the ENUM-DROPDOWN FEED (Mark's ruling 2026-07-09): every closed-vocabulary knob's allowed values as FLAT DOTTED KEYS mapping to string arrays — the ONE wire shape, shared with zoneweaver (the 2026-07-12 one-wire ruling); never nested objects. Keys: knob_values[\"hardware.<section>.<key>\"] (all on|off knobs list [\"on\",\"off\"]; the usage dump's enums e.g. hardware.graphics.controller none|vboxvga|vmsvga|vboxsvga|qemuramfb, hardware.integration.clipboard_mode disabled|hosttoguest|guesttohost|bidirectional, hardware.audio.driver, hardware.platform.chipset/iommu/tpm_type/paravirt_provider/vm_process_priority/vm_execution_engine, hardware.firmware.boot_menu/apic, hardware.vrde.auth_type, hardware.cpu.profile, hardware.serial.type), knob_values[\"zones.<key>\"] (bootrom/hostbridge/vnc/acpi/xhci/netif/diskif), knob_values[\"nics.<key>\"] (promisc/nic_type/cable_connected), knob_values[\"disks.controller_type\"], knob_values[\"boot_order\"] (entry values), knob_values[\"settings.sync_method\"]. A knob present there renders a dropdown; absent means free-form or numeric. Values still pass to VirtualBox unvalidated. notes carries the per-section caveats.",
+        "responses": {
+          "200": {
+            "description": "Defaults document",
+            "content": { "application/json": { "schema": { "type": "object", "properties": { "settings": { "type": "object", "example": { "vcpus": 2, "memory": "2048M", "os_type": "Debian_64", "box_arch": "amd64", "box_version": "latest", "boot_priority": 95, "sync_method": "rsync" } }, "zones": { "type": "object", "example": { "bootrom": "bios", "hostbridge": "piix3", "vnc": "off", "acpi": "on", "xhci": "off", "netif": "e1000", "diskif": "sata", "autostart": false } }, "disks": { "type": "object", "example": { "sparse": true, "controller": "SATA Controller" } }, "knob_values": { "type": "object", "additionalProperties": { "type": "array", "items": { "type": "string" } }, "description": "Enum vocabularies — FLAT DOTTED keys mapping to string arrays (one wire shape with zoneweaver): \"hardware.<section>.<key>\", \"zones.<key>\", \"nics.<key>\", \"disks.controller_type\", \"boot_order\", \"settings.sync_method\". Never nested objects.", "example": { "hardware.graphics.controller": ["none", "vboxvga", "vmsvga", "vboxsvga", "qemuramfb"], "hardware.graphics.accelerate_3d": ["on", "off"], "hardware.serial.type": ["16450", "16550A", "16750"], "zones.vnc": ["on", "off"], "zones.diskif": ["ide", "sata", "scsi", "sas", "nvme", "virtio", "usb", "floppy"], "nics.promisc": ["deny", "allow-vms", "allow-all"], "disks.controller_type": ["ide", "sata", "scsi", "sas", "nvme", "virtio", "usb", "floppy"], "boot_order": ["floppy", "dvd", "disk", "net", "none"], "settings.sync_method": ["rsync", "scp"] } }, "notes": { "type": "object" } } } } }
+          }
+        }
+      }
+    },
+    "/machines/ostypes": {
+      "get": {
+        "tags": ["Machine Management"],
+        "summary": "Guest OS type vocabulary",
+        "description": "Minimum role: viewer. Live VBoxManage list ostypes enumeration — every guest OS type THIS VirtualBox build supports (the settings.os_type vocabulary; the wizard's searchable dropdown feed). family groups the picker (\"Windows\", \"Linux / Debian\", \"BSD / FreeBSD\", ...); architecture is VirtualBox's own vocabulary (x86, x86 (64-bit), ARMv8 (64-bit)).",
+        "responses": {
+          "200": {
+            "description": "OS types",
+            "content": { "application/json": { "schema": { "type": "object", "properties": { "ostypes": { "type": "array", "items": { "type": "object", "properties": { "id": { "type": "string", "example": "Debian12_64" }, "description": { "type": "string", "example": "Debian 12 Bookworm (64-bit)" }, "family": { "type": "string", "example": "Linux / Debian" }, "family_description": { "type": "string", "example": "Linux" }, "architecture": { "type": "string", "example": "x86 (64-bit)" } } } }, "total": { "type": "integer", "example": 190 } } } } }
+          },
+          "503": { "description": "VirtualBox is not installed" }
+        }
+      }
+    },
     "/machines/ids": {
       "get": {
         "tags": ["Machine Management"],
@@ -1268,7 +1356,7 @@
       "get": {
         "tags": ["Machine Management"],
         "summary": "Machine details",
-        "description": "Minimum role: viewer. Live-checks VirtualBox (updating the registry on drift) and returns the record, its live configuration, and pending tasks.",
+        "description": "Minimum role: viewer. Live-checks VirtualBox (updating the registry on drift) and returns the record, its live configuration, pending tasks, and knob_current — the current values in PUT's own vocabulary (the Edit-surface prefill).",
         "parameters": [
           { "name": "machineName", "in": "path", "required": true, "schema": { "type": "string" } }
         ],
@@ -1281,11 +1369,13 @@
                   "type": "object",
                   "properties": {
                     "machine_info": { "$ref": "#/components/schemas/Machine" },
-                    "configuration": { "type": "object", "description": "The stored document sections (settings/zones/networks/disks/metadata) plus provisioner (the Hosts.yml host-entry document PUT stores and the render auto-fills) and provisioner_state ({last_provisioned_at} — drives the playbooks' run directives), MERGED with the live VirtualBox machinereadable view. Discovery refreshes the live half and never clobbers the stored sections." },
+                    "configuration": { "type": "object", "description": "The stored document sections (settings/zones/networks/disks/metadata) plus provisioner (the Hosts.yml host-entry document PUT stores and the render auto-fills), provisioner_state ({last_provisioned_at} — drives the playbooks' run directives), and snapshots (the per-machine retention override the PUT snapshots field stores — absent = no override, the agent default applies; the retention editor prefills from this key, identical on both agents), MERGED with the live VirtualBox machinereadable view. Discovery refreshes the live half and never clobbers the stored sections." },
                     "active_vnc_session": { "nullable": true },
                     "pending_tasks": { "type": "array", "items": { "$ref": "#/components/schemas/Task" } },
                     "system_status": { "type": "string", "description": "Live VirtualBox state; the stored status for created-but-never-started machines", "example": "running" },
-                    "web_address": { "type": "string", "nullable": true, "description": "Post-provision welcome URL read from the working copy's results.yml — null unless something writes one (the native pipeline does not; the document's control IP is authoritative addressing)" }
+                    "web_address": { "type": "string", "nullable": true, "description": "Post-provision welcome URL read from the working copy's results.yml — null unless something writes one (the native pipeline does not; the document's control IP is authoritative addressing)" },
+                    "pending_changes": { "type": "object", "nullable": true, "description": "The accrued changes waiting for the next agent-driven power cycle (the accrue-changes contract — PUT against a non-powered-off machine stores here). Null when none. Badge on key count; DELETE /machines/{name}/pending-changes cancels." },
+                    "knob_current": { "type": "object", "description": "The machine's CURRENT values in PUT /machines/{name}'s EXACT vocabulary — the Edit surface prefills from this and PUTs only changed keys (the UI never reverse-maps the raw showvminfo view itself). Built from the showvminfo machinereadable emitter (VBoxManageInfo.cpp, VirtualBox 7.2 source) read backwards against the forward flag map. Keys: the top-level zones-vocabulary fields (ram MB int, vcpus, bootrom bios|efi — EFI32/EFI64/EFIDUAL collapse to efi, hostbridge, diskif — the FIRST controller's type reverse-mapped e.g. IntelAhci→sata, netif — only when EVERY enabled adapter carries the type netif would set (82540EM→e1000, virtio), os_type — the ID PUT takes, resolved from showvminfo's description through this build's ostypes feed (GuestOSType fallback; omitted when unresolvable), vnc/acpi/xhci on|off, autoboot BOOLEAN (PUT's own type), boot_order — omitted whole when any slot boots a device PUT cannot express (usb/sharedfolder), boot_priority from the spec, guest_agent BOOLEAN — the QGA UART's live presence, always reported: uart2 in server mode onto the machine's QGA pipe/socket (the Proxmox-style checkbox prefill)), hardware.<section>.<key> (each in PUT's value words: graphicscontroller null→none, clipboard_file_transfers on|off→enabled|disabled, hidpointing/hidkeyboard device names→--mouse/--keyboard bus words, audio=\"none\"→{enabled: off}, vrde.port = the configured vrdeports string), hardware.serial[]/parallel[] (enabled ports only — {port, io_base, irq, mode, type|device}; the emitter's \"kind,path\" modes become PUT's \"kind path\" words), nics[] per enabled adapter ({adapter, cable_connected, nic_type, mac, speed}), and credentials ({vagrant_user, vagrant_user_pass, vagrant_user_private_key_path} from the stored settings — the full triple, password included, so the Edit surface prefills and can reveal it). The knobs showvminfo never emits are read from the machine's .vbox settings file (VirtualBox's persisted XML, where ABSENCE = the constructor default — so these arrive as real values, not blanks): cpu hotplug + the mitigation family (spec_ctrl, ibpb_*, l1d_flush_* — sched defaults on, mds_clear_* — sched defaults on), arm_gic_its (ARM machines only), audio controller/codec (with VirtualBox's per-controller codec defaults), usb card_reader, per-NIC promisc/boot_prio/bandwidth_group (bandwidth_group omitted when none), platform tpm_type/tpm_location/system_uuid_le/vm_execution_engine, the firmware logo family + pxe_debug, vrde auth_library/extpack (the word \"default\" when unset — modifyvm's own word for it), recording max_time_seconds/max_size_mb. UNSET AND UNKNOWABLE KEYS ARE OMITTED: disabled serial/parallel ports, a disabled VRDE server's showvminfo sub-keys, platform.icon_file (the .vbox stores the icon as a base64 blob, the source path is unrecoverable), recording.screens, and the whole .vbox-derived set when the file is unreadable (encrypted machines, mid-rewrite race). Machines with no VM behind them carry only the DB-held keys (credentials, boot_priority)." }
                   }
                 }
               }
@@ -1297,7 +1387,7 @@
       "put": {
         "tags": ["Machine Management"],
         "summary": "Modify machine configuration",
-        "description": "Minimum role: operator (the machine-modify capability token). The zoneweaver modify mechanism, changed-fields-only body with three change classes. (1) notes/tags: immediate registry-only updates. (2) provisioner: the PROVISIONER DOCUMENT stored verbatim into configuration.provisioner — a Hosts.yml host entry (folders[], provisioning.ansible.playbooks in object or list form, vars, roles[], secrets, pre_tasks/post_tasks, ssh_port); an immediate DB-only update the next /provision consumes; create's finalize auto-fills it from the rendered package template and PUT overrides it whole. (3) every infrastructure field queues a machine_modify task and the answer carries requires_restart: true — VirtualBox applies configuration only to a POWERED-OFF machine, so the task fails with guidance while the machine runs; stop it and re-run. Translations from the base vocabulary: ram→memory, vcpus→cpus, os_type→ostype, vnc→VRDE on/off, acpi/xhci→--acpi/--usb-xhci, autoboot→autostart, bootrom→firmware (efi when the value names EFI, else bios), hostbridge→chipset (i440fx→piix3), netif (virtio|e1000)→every configured adapter's hardware type. diskif and complex CPU topology have no modifyvm analog — reported as skipped in task output, never silently accepted. add_nics land on the first free adapters (bridged; global_nic = the bridge interface, mac_addr honored; vlan_id/allowed_address have no analog and are noted); remove_nics name adapter numbers 1-8 — on agent-created machines adapter 1 is the reserved NAT (egress) and document networks sit on 2+, so removing adapter 1 cuts the guest's internet. add_disks create media under the machine's working directory (volume_name/size/sparse) or attach an existing file by path, at the next free SATA port; add_cdroms attach ISOs by path. remove_disks/remove_cdroms name SATA PORT numbers 1 and up — port 0 is the boot medium and is refused; detached files are PRESERVED (the base never destroys the volume). cloud_init keys update the machine's guest properties. When only DB-immediate fields changed, the answer is status completed with requires_restart: false and no task.",
+        "description": "Minimum role: operator (the machine-modify capability token). The zoneweaver modify mechanism, changed-fields-only body with three change classes. (1) DB-immediate: notes/tags (registry-only), boot_priority (spec settings), and the SSH CREDENTIALS family — vagrant_user/vagrant_user_pass/vagrant_user_private_key_path merge key-by-key into configuration.settings (the rest of settings survives; empty string or null DELETES a key), instantly live for the SSH terminal, SFTP, and provisioning pipeline — the way to give any machine (wizard-less creates, discovered VMs) working SSH. Credential values never enter task metadata. (2) provisioner: the PROVISIONER DOCUMENT stored verbatim into configuration.provisioner — a Hosts.yml host entry (folders[], provisioning.ansible.playbooks in object or list form, vars, roles[], secrets, pre_tasks/post_tasks, ssh_port); an immediate DB-only update the next /provision consumes; create's finalize auto-fills it from the rendered package template and PUT overrides it whole. (3) infrastructure fields: against a POWERED-OFF machine they queue a machine_modify task (requires_restart: true) exactly as before; against ANYTHING ELSE (running/paused/saved/transitioning — VirtualBox only modifies powered-off machines) the ACCRUE-CHANGES contract applies: the fields are DRY-VALIDATED (unknown hardware knobs and malformed serial/parallel entries reject at the PUT), merged into the machine's pending set (per top-level key the last edit wins; hardware merges per section.key so successive edits of different knobs coexist), and the answer is status pending_power_cycle with the merged pending_changes document and NO task_id. Pending changes apply automatically at the next agent-driven power transition — stop chains the modify after the power-off, start runs it FIRST (start depends on it: a bad pending value fails the boot honestly rather than silently skipping), restart slots it between stop and start, and bulk start/stop chain the same way. A successful apply clears the set; a failed one keeps it pending. DELETE /machines/{name}/pending-changes cancels the whole set. Pure-GUI stop+start never passes through the agent, so pending changes wait for the next agent-driven transition. Translations from the base vocabulary: ram→memory, vcpus→cpus, os_type→ostype, vnc→VRDE on/off, acpi/xhci→--acpi/--usb-xhci, autoboot→autostart, bootrom→firmware (efi when the value names EFI, else bios), hostbridge→chipset (i440fx→piix3), netif (virtio|e1000)→every configured adapter's hardware type. diskif and complex CPU topology have no modifyvm analog — reported as skipped in task output, never silently accepted. add_nics land on the first free adapters (bridged; global_nic = the bridge interface, mac_addr honored; vlan_id/allowed_address have no analog and are noted); remove_nics name adapter numbers 1-8 — on agent-created machines adapter 1 is the reserved NAT (egress) and document networks sit on 2+, so removing adapter 1 cuts the guest's internet. add_disks create media under the machine's working directory (volume_name/size/sparse) or attach an existing file by path, at the next free SATA port; add_cdroms attach ISOs by raw path or by cached-ISO filename (iso — resolved through the artifact registry). remove_disks/remove_cdroms name SATA PORT numbers 1 and up — port 0 is the boot medium and is refused; detached files are PRESERVED (the base never destroys the volume). cloud_init keys update the machine's guest properties. When only DB-immediate fields changed, the answer is status completed with requires_restart: false and no task.",
         "parameters": [
           { "name": "machineName", "in": "path", "required": true, "schema": { "type": "string" } }
         ],
@@ -1316,23 +1406,32 @@
                   "diskif": { "type": "string", "description": "Storage controller type is fixed once media attach — accepted, reported as skipped (set it at CREATE via zones.diskif)" },
                   "boot_order": { "type": "array", "items": { "type": "string", "enum": ["floppy", "dvd", "disk", "net", "none"] }, "description": "Ordered boot devices → --boot1..4; remaining slots cleared", "example": ["dvd", "disk"] },
                   "vbox": { "type": "object", "description": "The generic modifyvm passthrough at MODIFY too (same shape as create): {directives: [{directive, value}]} — any --flag=value", "properties": { "directives": { "type": "array", "items": { "type": "object", "properties": { "directive": { "type": "string" }, "value": { "type": "string" } } } } } },
+                  "hardware": { "type": "object", "description": "The full first-class knob vocabulary at MODIFY — the same hardware.<section>.<key> shape as create (see MachineSpec.hardware): cpu, memory, graphics, audio, usb, integration, platform, firmware, recording, vrde, autostart, serial[], parallel[]. Unknown sections/keys fail the task; VirtualBox validates values." },
+                  "nics": { "type": "array", "description": "Per-adapter tuning: [{adapter (1-8), cable_connected?, promisc?, speed?, boot_prio?, bandwidth_group?, nic_type? (raw adapter type), mac?}] — the knobs beyond add_nics/remove_nics", "items": { "type": "object", "properties": { "adapter": { "type": "integer" }, "cable_connected": { "type": "boolean" }, "promisc": { "type": "string" }, "speed": { "type": "integer" }, "boot_prio": { "type": "integer" }, "bandwidth_group": { "type": "string" }, "nic_type": { "type": "string" }, "mac": { "type": "string" } } } },
                   "netif": { "type": "string", "description": "Adapter hardware type for every configured NIC", "enum": ["virtio", "e1000"] },
                   "os_type": { "type": "string", "example": "Debian_64" },
                   "vnc": { "type": "string", "description": "VRDE remote display on/off", "example": "on" },
                   "acpi": { "type": "string", "example": "on" },
                   "xhci": { "type": "string", "description": "xHCI USB controller on/off", "example": "on" },
                   "autoboot": { "type": "boolean", "description": "Host-startup autostart" },
-                  "add_nics": { "type": "array", "items": { "type": "object", "properties": { "global_nic": { "type": "string", "description": "Bridge interface for the new adapter" }, "mac_addr": { "type": "string" } } } },
+                  "guest_agent": { "type": "boolean", "description": "The QEMU guest-agent UART as a toggle (the Proxmox model, Mark's ruling 2026-07-12): true wires COM2 onto the machine's deterministic QGA pipe, false removes the device — rides the accrue-changes contract like every infrastructure field (pending_power_cycle on a non-off machine; the sweep's guest_info probe then polls the channel until the guest answers). knob_current.guest_agent prefills the checkbox from the live wire state. hardware.serial claiming port 2 in the same request wins. Requires the guest_agent.enabled master gate for the /guest/* surface to serve." },
+                  "add_nics": { "type": "array", "description": "New bridged adapters on the first free slots. Each entry also accepts the nics[] tuning keys INLINE (cable_connected, promisc, speed, boot_prio, bandwidth_group, nic_type) — the agent assigns the slot, so a new adapter's tuning rides the same operation.", "items": { "type": "object", "properties": { "global_nic": { "type": "string", "description": "Bridge interface for the new adapter" }, "mac_addr": { "type": "string" }, "cable_connected": { "type": "boolean" }, "promisc": { "type": "string" }, "speed": { "type": "integer" }, "boot_prio": { "type": "integer" }, "bandwidth_group": { "type": "string" }, "nic_type": { "type": "string" } } } },
                   "remove_nics": { "type": "array", "description": "Adapter numbers (1-8) to disable", "items": { "type": "integer" }, "example": [2] },
-                  "add_disks": { "type": "array", "items": { "type": "object", "properties": { "volume_name": { "type": "string" }, "size": { "type": "string", "example": "100G" }, "sparse": { "type": "boolean", "default": true }, "path": { "type": "string", "description": "Existing medium to attach instead of creating one" } } } },
-                  "remove_disks": { "type": "array", "description": "SATA port numbers (1+; port 0 is the boot medium and refused). Files are preserved.", "items": { "type": "integer" }, "example": [1] },
-                  "add_cdroms": { "type": "array", "items": { "type": "object", "required": ["path"], "properties": { "path": { "type": "string", "example": "C:\\iso\\install.iso" } } } },
-                  "remove_cdroms": { "type": "array", "description": "SATA port numbers (1+)", "items": { "type": "integer" } },
+                  "add_controllers": { "type": "array", "description": "Storage controllers to add (storagectl): {name?, type: ide|sata|scsi|sas|nvme|virtio|usb|floppy, ports?, bootable?} — name defaults per type (e.g. \"NVMe Controller\")", "items": { "type": "object", "properties": { "name": { "type": "string" }, "type": { "type": "string" }, "ports": { "type": "integer" }, "bootable": { "type": "boolean", "default": true } } } },
+                  "remove_controllers": { "type": "array", "description": "Controller NAMES to remove — refused (honest VirtualBox error) while media are attached; detach them first", "items": { "type": "string" }, "example": ["NVMe Controller"] },
+                  "add_disks": { "type": "array", "items": { "type": "object", "properties": { "volume_name": { "type": "string" }, "size": { "type": "string", "example": "100G" }, "sparse": { "type": "boolean", "default": true }, "path": { "type": "string", "description": "Existing medium to attach instead of creating one" }, "controller": { "type": "string", "description": "Target controller name (default \"SATA Controller\")" }, "port": { "type": "integer", "description": "Explicit port (default: the controller's next free)" }, "device": { "type": "integer", "description": "Device on the port (IDE has two; default 0)" } } } },
+                  "remove_disks": { "type": "array", "description": "Bare numbers = \"SATA Controller\" port (1+; port 0 is the boot medium and refused), or {controller, port, device?} objects addressing any controller. Files are preserved.", "items": {}, "example": [1, { "controller": "NVMe Controller", "port": 0 }] },
+                  "add_cdroms": { "type": "array", "description": "Each entry needs path (raw agent-host ISO) OR iso (a cached-ISO filename resolved through the artifact registry)", "items": { "type": "object", "properties": { "path": { "type": "string", "example": "C:\\iso\\install.iso" }, "iso": { "type": "string", "example": "debian-13.0.0-amd64-netinst.iso" }, "controller": { "type": "string" }, "port": { "type": "integer" }, "device": { "type": "integer" } } } },
+                  "remove_cdroms": { "type": "array", "description": "Bare numbers = \"SATA Controller\" port (1+), or {controller, port, device?} objects", "items": {} },
                   "cloud_init": { "type": "object", "description": "Guest-property updates (enabled/dns_domain/password/resolvers/sshkey vocabulary)" },
                   "provisioner": { "type": "object", "description": "The Hosts.yml host-entry document, stored verbatim (DB-immediate)" },
                   "notes": { "type": "string", "nullable": true, "description": "Registry-only, applied immediately" },
                   "tags": { "type": "array", "nullable": true, "items": { "type": "string" }, "description": "Registry-only, applied immediately" },
-                  "boot_priority": { "type": "integer", "minimum": 1, "maximum": 100, "description": "Orchestration boot priority (stored in the spec's settings, DB-immediate — VirtualBox never sees it; the base's zonecfg attr analog)" }
+                  "boot_priority": { "type": "integer", "minimum": 1, "maximum": 100, "description": "Orchestration boot priority (stored in the spec's settings, DB-immediate — VirtualBox never sees it; the base's zonecfg attr analog)" },
+                  "vagrant_user": { "type": "string", "nullable": true, "description": "SSH username — merges into configuration.settings (DB-immediate; empty string or null deletes the key). The SSH terminal, SFTP info/launcher, and provisioning pipeline authenticate with this family." },
+                  "vagrant_user_pass": { "type": "string", "nullable": true, "description": "SSH password (DB-immediate settings merge; an explicit key path wins over the password at connect time)" },
+                  "vagrant_user_private_key_path": { "type": "string", "nullable": true, "description": "SSH private key path (DB-immediate settings merge); relative paths resolve against the machine's working directory" },
+                  "snapshots": { "type": "object", "nullable": true, "description": "Per-machine snapshot retention override (DB-immediate — stored verbatim at configuration.snapshots; the rotation service reads it live each tick; the SHARED zoneweaver vocabulary): {type: none|simple|age|rotation (required), quiesce?, keep? (simple), max_age_days? (age), tiers? (rotation: {hourly|daily|weekly: {keep}})}. null or a typeless object CLEARS the override back to the agent default (config snapshots.default_policy); type none disables scheduled snapshots for this machine. Unknown extra keys ride along ignored.", "properties": { "type": { "type": "string", "enum": ["none", "simple", "age", "rotation"] }, "quiesce": { "type": "boolean", "default": false }, "keep": { "type": "integer", "minimum": 1 }, "max_age_days": { "type": "integer", "minimum": 1 }, "tiers": { "type": "object", "properties": { "hourly": { "type": "object", "properties": { "keep": { "type": "integer", "minimum": 1 } } }, "daily": { "type": "object", "properties": { "keep": { "type": "integer", "minimum": 1 } } }, "weekly": { "type": "object", "properties": { "keep": { "type": "integer", "minimum": 1 } } } } } } }
                 }
               }
             }
@@ -1347,12 +1446,13 @@
                   "type": "object",
                   "properties": {
                     "success": { "type": "boolean" },
-                    "task_id": { "type": "string", "format": "uuid", "description": "Present when a machine_modify task was queued" },
+                    "task_id": { "type": "string", "format": "uuid", "description": "Present when a machine_modify task was queued (powered-off machine)" },
                     "machine_name": { "type": "string" },
                     "operation": { "type": "string", "example": "machine_modify" },
-                    "status": { "type": "string", "description": "pending (task queued) or completed (DB-immediate only)", "example": "pending" },
+                    "status": { "type": "string", "description": "pending (task queued), completed (DB-immediate only), or pending_power_cycle (accrued — machine not powered off)", "example": "pending" },
                     "message": { "type": "string" },
-                    "requires_restart": { "type": "boolean", "description": "true when infrastructure changes were queued — they apply to a powered-off machine and take effect on next boot" },
+                    "requires_restart": { "type": "boolean", "description": "true when infrastructure changes were queued or accrued — they apply to a powered-off machine and take effect on next boot" },
+                    "pending_changes": { "type": "object", "description": "status pending_power_cycle only: the machine's FULL accrued pending set after this merge — badge on key count, list the keys/values" },
                     "resource_warnings": { "type": "array", "items": { "type": "object" }, "description": "Present when resource validation passed with threshold warnings" }
                   }
                 }
@@ -1398,6 +1498,34 @@
         }
       }
     },
+    "/machines/{machineName}/pending-changes": {
+      "delete": {
+        "tags": ["Machine Management"],
+        "summary": "Cancel accrued pending changes",
+        "description": "Minimum role: operator. Clears the machine's WHOLE pending set (the accrue-changes contract's cancel path — there is no per-key cancel; re-PUT the old value instead). Idempotent: clearing an empty set succeeds with an empty cleared_keys.",
+        "parameters": [ { "name": "machineName", "in": "path", "required": true, "schema": { "type": "string" } } ],
+        "responses": {
+          "200": {
+            "description": "Pending changes cleared",
+            "content": { "application/json": { "schema": { "type": "object", "properties": { "success": { "type": "boolean" }, "machine_name": { "type": "string" }, "cleared_keys": { "type": "array", "items": { "type": "string" }, "description": "The top-level keys that were pending" }, "message": { "type": "string" } } } } }
+          },
+          "404": { "description": "Machine not found" }
+        }
+      }
+    },
+    "/machines/{machineName}/pending-changes/apply": {
+      "post": {
+        "tags": ["Machine Management"],
+        "summary": "Apply accrued pending changes now",
+        "description": "Minimum role: operator. Queues the machine_modify apply immediately, WITHOUT a power transition — for a machine that accrued changes while running and then got shut down outside the agent (inside the guest, or the VirtualBox GUI). The machine must be powered off; anything else answers 400 (the changes apply automatically at the next agent-driven power cycle anyway). Success clears the pending set.",
+        "parameters": [ { "name": "machineName", "in": "path", "required": true, "schema": { "type": "string" } } ],
+        "responses": {
+          "200": { "description": "Apply task queued", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/QueuedOperation" } } } },
+          "400": { "description": "No pending changes, or machine is not powered off" },
+          "404": { "description": "Machine not found" }
+        }
+      }
+    },
     "/machines/{machineName}/config": {
       "get": {
         "tags": ["Machine Management"],
@@ -1429,7 +1557,7 @@
       "post": {
         "tags": ["Machine Management"],
         "summary": "Start a machine",
-        "description": "Minimum role: operator. One native start task for EVERY machine (VBoxManage startvm --type headless) — the provision pipeline queues this same operation as its boot child. Idempotent: already-running machines answer already_running; an existing pending/running start task is reused. With machines.provision_on_start enabled, a machine's VERY FIRST start (stored provisioner document, never provisioned) queues the full provision pipeline instead — the answer carries operation machine_provision_orchestration and the parent task id; later starts, restarts, and document-less machines always boot plainly.",
+        "description": "Minimum role: operator. One native start task for EVERY machine (VBoxManage startvm --type headless) — the provision pipeline queues this same operation as its boot child. Idempotent: already-running machines answer already_running; an existing pending/running start task is reused. Accrued pending changes (the accrue-changes contract) apply FIRST — a machine_modify task is chained ahead and the start DEPENDS on it, so a bad pending value fails the boot honestly (clear via DELETE /machines/{name}/pending-changes or re-PUT the value). With machines.provision_on_start enabled, a machine's VERY FIRST start (stored provisioner document, never provisioned) queues the full provision pipeline instead — the answer carries operation machine_provision_orchestration and the parent task id; later starts, restarts, and document-less machines always boot plainly.",
         "parameters": [
           { "name": "machineName", "in": "path", "required": true, "schema": { "type": "string" } }
         ],
@@ -1446,7 +1574,7 @@
       "post": {
         "tags": ["Machine Management"],
         "summary": "Stop a machine",
-        "description": "Minimum role: operator. Queues a stop task and cancels pending starts: ACPI power button (graceful), falling back to hard poweroff when the guest ignores it — or straight poweroff with force=true.",
+        "description": "Minimum role: operator. Queues a stop task and cancels pending starts. The graceful ladder (Mark's ruling 2026-07-12): QEMU guest-agent shutdown first (the guest OS acting on itself — honored even by a locked Windows console that ignores ACPI; channels with no qemu-ga fall through in <5s) → ACPI power button → hard poweroff when the guest ignores both (each graceful rung waits machines.shutdown_timeout once, never twice). force=true goes straight to poweroff. Accrued pending changes (the accrue-changes contract) apply right after the power-off via a chained machine_modify task.",
         "parameters": [
           { "name": "machineName", "in": "path", "required": true, "schema": { "type": "string" } },
           { "name": "force", "in": "query", "schema": { "type": "boolean", "default": false } }
@@ -1464,7 +1592,7 @@
       "post": {
         "tags": ["Machine Management"],
         "summary": "Restart a machine",
-        "description": "Minimum role: operator. Queues a HIGH-priority stop and a MEDIUM-priority start chained on it.",
+        "description": "Minimum role: operator. Queues a HIGH-priority stop and a MEDIUM-priority start chained on it. Accrued pending changes (the accrue-changes contract) slot between the two — the power cycle that applies them.",
         "parameters": [
           { "name": "machineName", "in": "path", "required": true, "schema": { "type": "string" } }
         ],
@@ -1519,7 +1647,7 @@
       "post": {
         "tags": ["Machine Management"],
         "summary": "Start the provisioning pipeline",
-        "description": "Minimum role: operator. Orchestrates the full pipeline against the STORED provisioner document (the zoneweaver mechanism): machine_prepare (re-render + refresh the working copy — regenerated before every provision) → boot (the plain start operation as a child, skipped when running or skip_boot) → machine_wait_ssh (credentials = settings.vagrant_user/vagrant_user_pass/vagrant_user_private_key_path, agent provisioning key as last-resort fallback; transport = the provisioning NIC's NAT ssh port-forward at 127.0.0.1 when the machine carries one — vagrant's model, immune to guest network reconfiguration — else the control IP from networks[] is_control → provisional → first; neither existing is a 400) → machine_sync_parent + one machine_sync per folders[] entry (transport per folder.type: rsync | scp, each with a pure-Go fallback when the binary is absent — embedded rsync client / SFTP, loudly narrated in the task output; vagrant is optional; virtualbox/disabled skipped) → machine_provision_parent + one machine_provision per playbook, RUN-FILTERED first (always = every run; not_first = only after a prior success; once/unset = only when never provisioned — judged by configuration.provisioner_state.last_provisioned_at, stamped only when the run's FINAL playbook succeeds: a partial run never marks the machine provisioned, Hosts.rb's results.yml semantics). The extra_vars networks[] carry each adapter's LIVE MAC when the document leaves mac auto/empty (adapter = network index + 2; resolved into the run's variable document only — the stored document is never modified). Prerequisites: provisioner config stored (create auto-fills it; PUT overrides) and a control IP in networks[].",
+        "description": "Minimum role: operator. Orchestrates the full pipeline against the STORED provisioner document (the zoneweaver mechanism): machine_prepare (re-render + refresh the working copy — regenerated before every provision) → boot (the plain start operation as a child, skipped when running or skip_boot) → machine_wait_ssh (credentials = settings.vagrant_user/vagrant_user_pass/vagrant_user_private_key_path, agent provisioning key as last-resort fallback; transport = the provisioning NIC's NAT ssh port-forward at 127.0.0.1 when the machine carries one — vagrant's model, immune to guest network reconfiguration — else the control IP from networks[] is_control → provisional → first; neither existing is a 400) → machine_sync_parent + one machine_sync per folders[] entry (transport per folder.type: rsync | scp, each with a pure-Go fallback when the binary is absent — embedded rsync client / SFTP, loudly narrated in the task output; vagrant is optional; disabled entries skipped; type virtualbox registers a REAL VirtualBox shared folder instead of copying — hot-added with automount, guest-mounted via vboxsf when Guest Additions run, a failed guest mount narrates and never fails the pipeline) → machine_provision_parent + one machine_provision per playbook, RUN-FILTERED first (always = every run; not_first = only after a prior success; once/unset = only when never provisioned — judged by configuration.provisioner_state.last_provisioned_at, stamped only when the run's FINAL playbook succeeds: a partial run never marks the machine provisioned, Hosts.rb's results.yml semantics) → when any folder carries syncback: true, a SYNCBACK phase (machine_syncback_parent + one machine_syncback per flagged folder, gated on the last playbook child) pulls those folders guest→host — the post-provision results landing (folder.to → folder.map reversed; delete never honored on a pull, no chown). The extra_vars networks[] carry each adapter's LIVE MAC when the document leaves mac auto/empty (adapter = network index + 2; resolved into the run's variable document only — the stored document is never modified). Prerequisites: provisioner config stored (create auto-fills it; PUT overrides) and a control IP in networks[].",
         "parameters": [
           { "name": "machineName", "in": "path", "required": true, "schema": { "type": "string" } }
         ],
@@ -1576,16 +1704,20 @@
       "post": {
         "tags": ["Machine Management"],
         "summary": "Sync folders to a machine ad-hoc",
-        "description": "Minimum role: operator. Creates the parentless sync chain: one machine_sync per folders[] entry from the stored document (transport per folder.type), independent of the full pipeline — the machine must be running with SSH reachable.",
+        "description": "Minimum role: operator. Creates the parentless sync chain: one machine_sync per folders[] entry from the stored document (transport per folder.type), independent of the full pipeline — the machine must be running with SSH reachable. Body {\"syncback\": true} REVERSES it (folders[].syncback — the on-demand half of the syncback contract): ONLY the syncback-flagged folders pull guest→host (guest folder.to → host folder.map, one machine_syncback per folder; folder.delete is never honored on a pull, no chown, args/exclude apply on the rsync path; the remote sender runs sudo rsync so root-owned results are readable). The provision pipeline runs the same syncback phase automatically AFTER its provision phase when any folder carries the flag.",
         "parameters": [
           { "name": "machineName", "in": "path", "required": true, "schema": { "type": "string" } }
         ],
+        "requestBody": {
+          "required": false,
+          "content": { "application/json": { "schema": { "type": "object", "properties": { "syncback": { "type": "boolean", "default": false, "description": "true pulls ONLY the syncback-flagged folders guest→host instead of the host→guest push" } } } } }
+        },
         "responses": {
           "200": {
-            "description": "Sync chain created",
+            "description": "Sync (or syncback) chain created",
             "content": { "application/json": { "schema": { "type": "object", "properties": { "success": { "type": "boolean" }, "message": { "type": "string" }, "machine_name": { "type": "string" }, "parent_task_id": { "type": "string" }, "folder_count": { "type": "integer" } } } } }
           },
-          "400": { "description": "No provisioner config or no folders configured" },
+          "400": { "description": "No provisioner config, no folders configured, or (syncback) no folders flagged syncback: true" },
           "404": { "description": "Machine not found" }
         }
       }
@@ -1607,14 +1739,15 @@
       "post": {
         "tags": ["Machine Management"],
         "summary": "Download a box template",
-        "description": "Minimum role: operator. Queues a template_download task: the .box streams from the named source (or the default registry), its disk image lands in the template storage, and the registry row is created. Private-box credentials live on the configured source (template_sources.sources[].auth_token) — never in task metadata.",
+        "description": "Minimum role: operator. Queues a template_download task: the .box streams from the named source (or the default registry), its disk image lands in the template storage, and the registry row is created. An already-local tuple answers an honest 409 with the existing row's id instead of queueing a no-op download (the shared already-exists pre-check; a row whose disk image vanished self-heals, so re-pull after manual cleanup works). Private-box credentials live on the configured source (template_sources.sources[].auth_token) — never in task metadata.",
         "requestBody": {
           "required": true,
           "content": { "application/json": { "schema": { "type": "object", "required": ["organization", "box_name", "version"], "properties": { "source_name": { "type": "string", "description": "A configured template source; empty = the default registry" }, "organization": { "type": "string", "example": "STARTcloud" }, "box_name": { "type": "string", "example": "debian13-server" }, "version": { "type": "string", "description": "A SPECIFIC version — latest is refused", "example": "2025.8.22" }, "architecture": { "type": "string", "default": "amd64" } } } } }
         },
         "responses": {
           "202": { "description": "Template download task queued" },
-          "400": { "description": "Missing tuple fields, non-specific version, or no usable source" }
+          "400": { "description": "Missing tuple fields, non-specific version, or no usable source" },
+          "409": { "description": "Template already exists locally", "content": { "application/json": { "schema": { "type": "object", "properties": { "error": { "type": "string", "example": "Template already exists locally" }, "template_id": { "type": "integer" } } } } } }
         }
       }
     },
@@ -1632,7 +1765,7 @@
       "get": {
         "tags": ["Machine Management"],
         "summary": "List a source's remote box catalog",
-        "description": "Minimum role: viewer. Proxies the registry's discovery endpoint (BoxVault's /api/discover): every available box with its versions, providers, and architectures — the machine wizard's box-picker feed. An x-registry-token request header overrides the source's configured auth token (never returned). The base's GET /templates/remote/{sourceName}.",
+        "description": "Minimum role: viewer. The registry's discovery catalog — the machine wizard's box-picker feed. ONE /api/discover call: public boxes for everyone, and when the source carries an API key (a BoxVault service-account token, sent as Bearer) the registry additionally answers the key's own organization's boxes. FILTERED to what this agent can consume: only versions carrying a virtualbox provider in the host's architecture survive (foreign providers/architectures are pruned; boxes left with no versions are dropped) — a zone/docker/aws/utm-only or foreign-arch box never reaches the picker. An x-registry-token request header overrides the source's configured key (never returned). The base's GET /templates/remote/{sourceName}.",
         "parameters": [ { "name": "sourceName", "in": "path", "required": true, "schema": { "type": "string" } } ],
         "responses": {
           "200": { "description": "The registry's catalog document, relayed verbatim" },
@@ -1645,7 +1778,7 @@
       "get": {
         "tags": ["Machine Management"],
         "summary": "Get one remote box's metadata",
-        "description": "Minimum role: viewer. Proxies the registry's Vagrant-compatible /{org}/{box} metadata document: versions with providers and download URLs. The base's GET /templates/remote/{sourceName}/{org}/{boxName}.",
+        "description": "Minimum role: viewer. The registry's Vagrant-compatible /{org}/{box} metadata document: versions with providers and download URLs, FILTERED to what this agent can consume (virtualbox provider, host architecture). A box that exists upstream but carries nothing downloadable here answers 404, same as absent. The base's GET /templates/remote/{sourceName}/{org}/{boxName}.",
         "parameters": [
           { "name": "sourceName", "in": "path", "required": true, "schema": { "type": "string" } },
           { "name": "org", "in": "path", "required": true, "schema": { "type": "string" } },
@@ -1824,7 +1957,7 @@
       "post": {
         "tags": ["Machine Management"],
         "summary": "Bulk start machines",
-        "description": "Minimum role: operator. machines is \"all\" (every stopped, non-orphaned machine) or a name array; already-running machines are skipped with a reason.",
+        "description": "Minimum role: operator. machines is \"all\" (every stopped, non-orphaned machine) or a name array; already-running machines are skipped with a reason. Per machine, accrued pending changes apply first (start chained on the modify), same as the single start.",
         "requestBody": {
           "required": true,
           "content": {
@@ -1863,7 +1996,7 @@
       "post": {
         "tags": ["Machine Management"],
         "summary": "Bulk stop machines",
-        "description": "Minimum role: operator. machines is \"all\" (every running, non-orphaned machine) or a name array; already-stopped machines are skipped with a reason. Pending starts for targeted machines are cancelled.",
+        "description": "Minimum role: operator. machines is \"all\" (every running, non-orphaned machine) or a name array; already-stopped machines are skipped with a reason. Pending starts for targeted machines are cancelled. Per machine, accrued pending changes apply after the power-off, same as the single stop.",
         "requestBody": {
           "required": true,
           "content": {
@@ -1898,58 +2031,229 @@
         }
       }
     },
-    "/artifacts": {
+    "/artifacts/storage/paths": {
       "get": {
         "tags": ["Artifacts"],
-        "summary": "List the file cache",
-        "description": "Minimum role: viewer. Every cache row — present files and expectation-only entries. 503 when assets.enabled is false.",
+        "summary": "List storage locations",
+        "description": "Minimum role: viewer. Every storage location — the five built-ins plus config/API-added paths. 503 when artifact_storage.enabled is false (every /artifacts endpoint shares this gate).",
         "parameters": [
-          { "name": "role", "in": "query", "schema": { "type": "string" } },
-          { "name": "kind", "in": "query", "schema": { "type": "string", "enum": ["installer", "fixpack", "hotfix"] } },
-          { "name": "exists", "in": "query", "schema": { "type": "boolean" } }
+          { "name": "type", "in": "query", "schema": { "type": "string", "enum": ["iso", "image", "installer", "fixpack", "hotfix"] } },
+          { "name": "enabled", "in": "query", "schema": { "type": "boolean" } }
         ],
         "responses": {
           "200": {
-            "description": "Cache rows",
-            "content": { "application/json": { "schema": { "type": "object", "properties": { "artifacts": { "type": "array", "items": { "$ref": "#/components/schemas/Artifact" } }, "total": { "type": "integer" } } } } }
+            "description": "Storage locations",
+            "content": { "application/json": { "schema": { "type": "object", "properties": { "paths": { "type": "array", "items": { "$ref": "#/components/schemas/ArtifactStorageLocation" } }, "total_paths": { "type": "integer" } } } } }
           },
-          "503": { "description": "Assets subsystem is disabled" }
+          "503": { "description": "Artifact storage is disabled" }
+        }
+      },
+      "post": {
+        "tags": ["Artifacts"],
+        "summary": "Add a storage location",
+        "description": "Minimum role: operator. Creates the directory (when absent), the location row, persists the entry into config.yaml artifact_storage.paths[] (so it survives restarts), and queues an initial scan.",
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "type": "object", "required": ["name", "path", "type"], "properties": { "name": { "type": "string", "example": "Big ISO Shelf" }, "path": { "type": "string", "example": "D:\\isos" }, "type": { "type": "string", "enum": ["iso", "image", "installer", "fixpack", "hotfix"] }, "enabled": { "type": "boolean", "default": true } } } } }
+        },
+        "responses": {
+          "201": {
+            "description": "Location created",
+            "content": { "application/json": { "schema": { "type": "object", "properties": { "success": { "type": "boolean" }, "message": { "type": "string" }, "storage_location": { "$ref": "#/components/schemas/ArtifactStorageLocation" } } } } }
+          },
+          "400": { "description": "Missing name/path/type, invalid type, or directory not creatable" },
+          "409": { "description": "Path already registered ({error, existing_location})" },
+          "503": { "description": "Artifact storage is disabled" }
         }
       }
     },
-    "/artifacts/scan": {
-      "post": {
+    "/artifacts/storage/paths/{id}": {
+      "put": {
         "tags": ["Artifacts"],
-        "summary": "Scan the cache",
-        "description": "Minimum role: operator. Queues an artifact_scan task: new files hashed and registered, vanished files marked missing (expectations survive), and with verify_checksums every present file re-hashed — the task FAILS when any file mismatches its expectation.",
+        "summary": "Update a storage location",
+        "description": "Minimum role: operator. name and enabled only (zoneweaver's contract — path/type are identity). Mirrored into the config.yaml entry.",
+        "parameters": [ { "name": "id", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } } ],
         "requestBody": {
-          "required": false,
-          "content": { "application/json": { "schema": { "type": "object", "properties": { "verify_checksums": { "type": "boolean", "default": false } } } } }
+          "required": true,
+          "content": { "application/json": { "schema": { "type": "object", "properties": { "name": { "type": "string" }, "enabled": { "type": "boolean" } } } } }
         },
         "responses": {
-          "202": { "description": "Scan task queued" },
-          "503": { "description": "Assets subsystem is disabled" }
+          "200": { "description": "Location updated", "content": { "application/json": { "schema": { "type": "object", "properties": { "success": { "type": "boolean" }, "message": { "type": "string" }, "storage_location": { "$ref": "#/components/schemas/ArtifactStorageLocation" } } } } } },
+          "404": { "description": "Storage path not found" },
+          "503": { "description": "Artifact storage is disabled" }
+        }
+      },
+      "delete": {
+        "tags": ["Artifacts"],
+        "summary": "Delete a storage location",
+        "description": "Minimum role: operator. Drops the config entry immediately and queues an artifact_delete_folder task: contents removed (recursive, the folder itself stays), rows removed, then the location row. Built-in locations are REFUSED (the startup sync would recreate them — disable instead).",
+        "parameters": [ { "name": "id", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } } ],
+        "requestBody": {
+          "required": false,
+          "content": { "application/json": { "schema": { "type": "object", "properties": { "recursive": { "type": "boolean", "default": true, "description": "Delete the folder's contents" }, "remove_db_records": { "type": "boolean", "default": true }, "force": { "type": "boolean", "default": false, "description": "Keep going past individual removal errors" } } } } }
+        },
+        "responses": {
+          "202": { "description": "Deletion task queued ({success, task_id, status, message})" },
+          "400": { "description": "Built-in location" },
+          "404": { "description": "Storage path not found" },
+          "503": { "description": "Artifact storage is disabled" }
+        }
+      }
+    },
+    "/artifacts": {
+      "get": {
+        "tags": ["Artifacts"],
+        "summary": "List artifacts",
+        "description": "Minimum role: viewer. Every registry row — present files and expectation-only entries — with zoneweaver's filtering and paging.",
+        "parameters": [
+          { "name": "type", "in": "query", "schema": { "type": "string", "enum": ["iso", "image", "installer", "fixpack", "hotfix"] } },
+          { "name": "storage_path_id", "in": "query", "schema": { "type": "string", "format": "uuid" } },
+          { "name": "role", "in": "query", "schema": { "type": "string" }, "description": "Installer-family role filter" },
+          { "name": "search", "in": "query", "schema": { "type": "string" }, "description": "Filename substring" },
+          { "name": "exists", "in": "query", "schema": { "type": "boolean" }, "description": "file_exists filter" },
+          { "name": "limit", "in": "query", "schema": { "type": "integer", "default": 50 } },
+          { "name": "offset", "in": "query", "schema": { "type": "integer", "default": 0 } },
+          { "name": "sort_by", "in": "query", "schema": { "type": "string", "enum": ["filename", "size", "discovered_at"], "default": "filename" } },
+          { "name": "sort_order", "in": "query", "schema": { "type": "string", "enum": ["asc", "desc"], "default": "asc" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "Artifacts with pagination",
+            "content": { "application/json": { "schema": { "type": "object", "properties": { "artifacts": { "type": "array", "items": { "$ref": "#/components/schemas/Artifact" } }, "pagination": { "type": "object", "properties": { "total": { "type": "integer" }, "limit": { "type": "integer" }, "offset": { "type": "integer" }, "has_more": { "type": "boolean" } } } } } } }
+          },
+          "503": { "description": "Artifact storage is disabled" }
+        }
+      }
+    },
+    "/artifacts/iso": {
+      "get": {
+        "tags": ["Artifacts"],
+        "summary": "List ISO artifacts",
+        "description": "Minimum role: viewer. GET /artifacts pinned to type=iso — the create wizard's ISO-picker feed (cdroms[].iso names entries by filename). Same query parameters minus type.",
+        "responses": {
+          "200": { "description": "ISO artifacts (the /artifacts list shape)" },
+          "503": { "description": "Artifact storage is disabled" }
+        }
+      }
+    },
+    "/artifacts/image": {
+      "get": {
+        "tags": ["Artifacts"],
+        "summary": "List image artifacts",
+        "description": "Minimum role: viewer. GET /artifacts pinned to type=image. Same query parameters minus type.",
+        "responses": {
+          "200": { "description": "Image artifacts (the /artifacts list shape)" },
+          "503": { "description": "Artifact storage is disabled" }
+        }
+      }
+    },
+    "/artifacts/stats": {
+      "get": {
+        "tags": ["Artifacts"],
+        "summary": "Artifact statistics",
+        "description": "Minimum role: viewer. Totals per type, per-location summaries, and 24h task activity.",
+        "responses": {
+          "200": {
+            "description": "Statistics",
+            "content": { "application/json": { "schema": { "type": "object", "properties": { "by_type": { "type": "object", "additionalProperties": { "type": "object", "properties": { "count": { "type": "integer" }, "total_size": { "type": "integer", "format": "int64" }, "locations": { "type": "integer" } } } }, "storage_locations": { "type": "array", "items": { "type": "object" } }, "totals": { "type": "object", "properties": { "locations": { "type": "integer" }, "enabled_locations": { "type": "integer" }, "total_artifacts": { "type": "integer" }, "total_size": { "type": "integer", "format": "int64" } } }, "recent_activity": { "type": "object", "properties": { "downloads_last_24h": { "type": "integer" }, "uploads_last_24h": { "type": "integer" }, "failed_operations_last_24h": { "type": "integer" } } } } } } }
+          },
+          "503": { "description": "Artifact storage is disabled" }
+        }
+      }
+    },
+    "/artifacts/service/status": {
+      "get": {
+        "tags": ["Artifacts"],
+        "summary": "Storage service status",
+        "description": "Minimum role: viewer. The scan service's state (zoneweaver's getStatus shape): running/initialized/scanning flags, config summary, scan-run stats, active intervals.",
+        "responses": {
+          "200": { "description": "Service status", "content": { "application/json": { "schema": { "type": "object", "properties": { "isRunning": { "type": "boolean" }, "isInitialized": { "type": "boolean" }, "isScanning": { "type": "boolean" }, "config": { "type": "object" }, "stats": { "type": "object" }, "activeIntervals": { "type": "object" } } } } } },
+          "503": { "description": "Artifact storage is disabled" }
+        }
+      }
+    },
+    "/artifacts/{id}": {
+      "get": {
+        "tags": ["Artifacts"],
+        "summary": "Artifact details",
+        "description": "Minimum role: viewer.",
+        "parameters": [ { "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } } ],
+        "responses": {
+          "200": { "description": "The artifact", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Artifact" } } } },
+          "404": { "description": "Artifact not found" },
+          "503": { "description": "Artifact storage is disabled" }
+        }
+      }
+    },
+    "/artifacts/{id}/download": {
+      "get": {
+        "tags": ["Artifacts"],
+        "summary": "Download an artifact file",
+        "description": "Minimum role: viewer. Streams the file (Content-Disposition attachment); refreshes last_verified.",
+        "parameters": [ { "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } } ],
+        "responses": {
+          "200": { "description": "The file", "content": { "application/octet-stream": { "schema": { "type": "string", "format": "binary" } } } },
+          "404": { "description": "Artifact not found, expectation-only, or file gone from disk" },
+          "503": { "description": "Artifact storage is disabled" }
+        }
+      }
+    },
+    "/artifacts/{id}/move": {
+      "post": {
+        "tags": ["Artifacts"],
+        "summary": "Move an artifact to another location",
+        "description": "Minimum role: operator. Queues artifact_move: rename (copy+delete across volumes) into a SAME-TYPE destination; the row's location and path rewrite; both locations' stats refresh.",
+        "parameters": [ { "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } } ],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "type": "object", "required": ["destination_storage_location_id"], "properties": { "destination_storage_location_id": { "type": "string", "format": "uuid" } } } } }
+        },
+        "responses": {
+          "202": { "description": "Move task queued" },
+          "400": { "description": "Missing destination" },
+          "404": { "description": "Artifact or storage location not found" },
+          "503": { "description": "Artifact storage is disabled" }
+        }
+      }
+    },
+    "/artifacts/{id}/copy": {
+      "post": {
+        "tags": ["Artifacts"],
+        "summary": "Copy an artifact to another location",
+        "description": "Minimum role: operator. Queues artifact_copy: duplicates the file into a SAME-TYPE destination and registers the copy as a new row.",
+        "parameters": [ { "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } } ],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "type": "object", "required": ["destination_storage_location_id"], "properties": { "destination_storage_location_id": { "type": "string", "format": "uuid" } } } } }
+        },
+        "responses": {
+          "202": { "description": "Copy task queued" },
+          "400": { "description": "Missing destination" },
+          "404": { "description": "Artifact or storage location not found" },
+          "503": { "description": "Artifact storage is disabled" }
         }
       }
     },
     "/artifacts/download": {
       "post": {
         "tags": ["Artifacts"],
-        "summary": "Download a file into the cache",
-        "description": "Minimum role: operator. Queues an artifact_download task: streamed with live progress ({downloaded_mb, total_mb, speed_mbps, eta_seconds} in progress_info), hashed DURING the stream, verified against expected_sha256 when given (mismatch discards the file — never promoted, no auto-retry). resource_name names a custom_resource_url secret whose Basic-auth pair authenticates the fetch.",
+        "summary": "Download a URL into a storage location",
+        "description": "Minimum role: operator. Queues artifact_download: streamed with live progress ({downloaded_mb, total_mb, speed_mbps, eta_seconds} in progress_info), hashed DURING the stream, verified against checksum when given (mismatch discards the file — never promoted, no auto-retry). role is REQUIRED when the destination is an installer-family location. resource_name names a custom_resource_url secret whose Basic-auth pair authenticates the fetch.",
         "requestBody": {
           "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": ["url", "role", "kind"],
+                "required": ["url", "storage_path_id"],
                 "properties": {
-                  "url": { "type": "string" },
-                  "role": { "type": "string" },
-                  "kind": { "type": "string", "enum": ["installer", "fixpack", "hotfix"] },
+                  "url": { "type": "string", "format": "uri" },
+                  "storage_path_id": { "type": "string", "format": "uuid" },
                   "filename": { "type": "string", "description": "Defaults from the URL path" },
-                  "expected_sha256": { "type": "string" },
+                  "role": { "type": "string", "description": "Installer-family destinations only" },
+                  "checksum": { "type": "string", "description": "Expected SHA-256 (64 hex chars)" },
+                  "checksum_algorithm": { "type": "string", "enum": ["sha256"], "description": "sha256 only — anything else is a 400" },
+                  "overwrite_existing": { "type": "boolean", "default": false },
                   "resource_name": { "type": "string", "description": "custom_resource_url secret for HTTP Basic auth" }
                 }
               }
@@ -1958,8 +2262,99 @@
         },
         "responses": {
           "202": { "description": "Download task queued" },
-          "400": { "description": "Invalid url/role/kind/filename/hash" },
-          "503": { "description": "Assets subsystem is disabled" }
+          "400": { "description": "Invalid url/filename/checksum, missing role, disabled location, or non-sha256 algorithm" },
+          "404": { "description": "Storage location not found" },
+          "503": { "description": "Artifact storage is disabled" }
+        }
+      }
+    },
+    "/artifacts/upload/prepare": {
+      "post": {
+        "tags": ["Artifacts"],
+        "summary": "Prepare an artifact upload",
+        "description": "Minimum role: operator. Mints an artifact_upload task in PREPARED status (the queue never dispatches it) and returns the upload URL — zoneweaver's two-step upload for large files. The prepared task dies on agent restart; size is capped by artifact_storage.max_upload_gb.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["filename", "size", "storage_path_id"],
+                "properties": {
+                  "filename": { "type": "string" },
+                  "size": { "type": "integer", "format": "int64" },
+                  "storage_path_id": { "type": "string", "format": "uuid" },
+                  "role": { "type": "string", "description": "Installer-family destinations only" },
+                  "checksum": { "type": "string", "description": "Expected SHA-256 — a mismatch fails the processing task and deletes the file" },
+                  "checksum_algorithm": { "type": "string", "enum": ["sha256"] },
+                  "overwrite_existing": { "type": "boolean", "default": false }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Upload prepared",
+            "content": { "application/json": { "schema": { "type": "object", "properties": { "success": { "type": "boolean" }, "task_id": { "type": "string", "format": "uuid" }, "upload_url": { "type": "string", "example": "/artifacts/upload/123e4567-e89b-12d3-a456-426614174000" }, "expires_at": { "type": "string", "format": "date-time" }, "storage_location": { "type": "object" } } } } }
+          },
+          "400": { "description": "Missing fields, unusable filename, over the size cap, disabled location, or missing role" },
+          "404": { "description": "Storage location not found" },
+          "503": { "description": "Artifact storage is disabled" }
+        }
+      }
+    },
+    "/artifacts/upload/{taskId}": {
+      "post": {
+        "tags": ["Artifacts"],
+        "summary": "Upload the file to a prepared task",
+        "description": "Minimum role: operator. Streams the multipart \"file\" part to its final location path and flips the prepared task to pending — the artifact_upload executor then hashes, verifies the prepare's checksum (mismatch deletes the file and fails the task), and registers the row. Body capped by artifact_storage.max_upload_gb.",
+        "parameters": [ { "name": "taskId", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } } ],
+        "requestBody": {
+          "required": true,
+          "content": { "multipart/form-data": { "schema": { "type": "object", "required": ["file"], "properties": { "file": { "type": "string", "format": "binary" } } } } }
+        },
+        "responses": {
+          "202": {
+            "description": "File landed; processing task queued",
+            "content": { "application/json": { "schema": { "type": "object", "properties": { "success": { "type": "boolean" }, "message": { "type": "string" }, "task_id": { "type": "string" }, "file": { "type": "object", "properties": { "name": { "type": "string" }, "size": { "type": "integer", "format": "int64" }, "final_location": { "type": "string" } } } } } } }
+          },
+          "400": { "description": "Task not prepared, wrong task type, malformed multipart body, file already exists, or no file part" },
+          "404": { "description": "Upload task or storage location not found" },
+          "503": { "description": "Artifact storage is disabled" }
+        }
+      }
+    },
+    "/artifacts/scan": {
+      "post": {
+        "tags": ["Artifacts"],
+        "summary": "Scan storage locations",
+        "description": "Minimum role: operator. Queues artifact_scan over one location (storage_path_id), one type, or every enabled location: new files hashed and registered, vanished files marked missing (expectation rows always survive as file_exists:false; remove_orphaned deletes expectation-less rows), verify_checksums re-hashes every present file — the task FAILS when any file mismatches its expectation. Automatic startup/periodic scans run agent-side without task rows.",
+        "requestBody": {
+          "required": false,
+          "content": { "application/json": { "schema": { "type": "object", "properties": { "type": { "type": "string", "enum": ["iso", "image", "installer", "fixpack", "hotfix"] }, "storage_path_id": { "type": "string", "format": "uuid" }, "verify_checksums": { "type": "boolean", "default": false }, "remove_orphaned": { "type": "boolean", "default": false } } } } }
+        },
+        "responses": {
+          "202": { "description": "Scan task queued" },
+          "400": { "description": "Invalid type" },
+          "404": { "description": "Storage location not found" },
+          "503": { "description": "Artifact storage is disabled" }
+        }
+      }
+    },
+    "/artifacts/files": {
+      "delete": {
+        "tags": ["Artifacts"],
+        "summary": "Delete artifacts (batch)",
+        "description": "Minimum role: operator. Queues artifact_delete_file over the named rows; delete_files (default true) removes the files from disk too; force keeps going past individual file errors. Location stats refresh.",
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "type": "object", "required": ["artifact_ids"], "properties": { "artifact_ids": { "type": "array", "items": { "type": "integer" } }, "delete_files": { "type": "boolean", "default": true }, "force": { "type": "boolean", "default": false } } } } }
+        },
+        "responses": {
+          "202": { "description": "Deletion task queued" },
+          "400": { "description": "Empty artifact_ids" },
+          "503": { "description": "Artifact storage is disabled" }
         }
       }
     },
@@ -1967,7 +2362,7 @@
       "post": {
         "tags": ["Artifacts"],
         "summary": "Download a file from the HCL portal",
-        "description": "Minimum role: operator. Queues an hcl_download task (SHI's HCLDownloader flow): exchanges the named hcl_download_portal_api_keys secret's refresh token (the ROTATED token is persisted back immediately — SHI's critical rule), looks the file up in the HCL catalog by EXACT name (the catalog's sha256 is authoritative and overwrites the expectation), streams the verified download into the cache. Failures carry contextual guidance (expired key vs un-accepted HCL license); no auto-retry.",
+        "description": "Minimum role: operator. Queues an hcl_download task (SHI's HCLDownloader flow): exchanges the named hcl_download_portal_api_keys secret's refresh token (the ROTATED token is persisted back immediately — SHI's critical rule), looks the file up in the HCL catalog by EXACT name (the catalog's sha256 is authoritative and overwrites the expectation), streams the verified download into the kind's DEFAULT location (the built-in cache). Failures carry contextual guidance (expired key vs un-accepted HCL license); no auto-retry.",
         "requestBody": {
           "required": true,
           "content": {
@@ -1988,45 +2383,27 @@
         "responses": {
           "202": { "description": "HCL download task queued" },
           "400": { "description": "Invalid key_name/role/kind/filename" },
-          "503": { "description": "Assets subsystem is disabled" }
-        }
-      }
-    },
-    "/artifacts/upload": {
-      "post": {
-        "tags": ["Artifacts"],
-        "summary": "Upload a file into the cache",
-        "description": "Minimum role: operator. Streaming multipart/form-data: fields role + kind (+ optional filename) MUST precede the \"file\" part (single-pass stream). The upload is hashed on arrival; the response's verified flag reports the expectation check. Body capped by assets.max_upload_gb.",
-        "requestBody": {
-          "required": true,
-          "content": { "multipart/form-data": { "schema": { "type": "object", "required": ["role", "kind", "file"], "properties": { "role": { "type": "string" }, "kind": { "type": "string", "enum": ["installer", "fixpack", "hotfix"] }, "filename": { "type": "string" }, "file": { "type": "string", "format": "binary" } } } } }
-        },
-        "responses": {
-          "201": {
-            "description": "File uploaded and hashed",
-            "content": { "application/json": { "schema": { "type": "object", "properties": { "success": { "type": "boolean" }, "artifact": { "$ref": "#/components/schemas/Artifact" }, "verified": { "type": "boolean" }, "message": { "type": "string" } } } } }
-          },
-          "400": { "description": "Malformed multipart body or unusable role/kind/filename" },
-          "503": { "description": "Assets subsystem is disabled" }
+          "503": { "description": "Artifact storage is disabled" }
         }
       }
     },
     "/artifacts/register": {
       "post": {
         "tags": ["Artifacts"],
-        "summary": "Register an agent-host file into the cache",
-        "description": "Minimum role: operator. SHI's add-file picker flow for Direct-mode installs: copies (move: true moves) the named agent-host file into the cache and hashes it.",
+        "summary": "Register an agent-host file",
+        "description": "Minimum role: operator. SHI's add-file picker flow for Direct-mode installs: copies (move: true moves) the named agent-host file into a storage location — by id, or the type's default location — and hashes it. Synchronous.",
         "requestBody": {
           "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": ["path", "role", "kind"],
+                "required": ["path"],
                 "properties": {
                   "path": { "type": "string", "description": "Agent-host file path" },
-                  "role": { "type": "string" },
-                  "kind": { "type": "string", "enum": ["installer", "fixpack", "hotfix"] },
+                  "storage_path_id": { "type": "string", "format": "uuid", "description": "Target location (or use type)" },
+                  "type": { "type": "string", "enum": ["iso", "image", "installer", "fixpack", "hotfix"], "description": "Lands in this type's default location when storage_path_id is absent" },
+                  "role": { "type": "string", "description": "Installer-family destinations only" },
                   "filename": { "type": "string", "description": "Defaults from the path's base name" },
                   "move": { "type": "boolean", "default": false }
                 }
@@ -2035,25 +2412,10 @@
           }
         },
         "responses": {
-          "201": { "description": "File registered and hashed" },
-          "400": { "description": "Unusable path/role/kind/filename" },
-          "503": { "description": "Assets subsystem is disabled" }
-        }
-      }
-    },
-    "/artifacts/{id}": {
-      "delete": {
-        "tags": ["Artifacts"],
-        "summary": "Delete a cache row",
-        "description": "Minimum role: operator. delete_file=true also removes the cached file (only from its canonical cache location).",
-        "parameters": [
-          { "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } },
-          { "name": "delete_file", "in": "query", "schema": { "type": "boolean", "default": false } }
-        ],
-        "responses": {
-          "200": { "description": "Row deleted" },
-          "404": { "description": "Artifact not found" },
-          "503": { "description": "Assets subsystem is disabled" }
+          "201": { "description": "File registered and hashed ({success, artifact, message})" },
+          "400": { "description": "Unusable path/filename, missing role, disabled location, or neither storage_path_id nor a valid type" },
+          "404": { "description": "Storage location not found" },
+          "503": { "description": "Artifact storage is disabled" }
         }
       }
     },
@@ -2181,6 +2543,17 @@
               }
             }
           }
+        }
+      }
+    },
+    "/provisioning/provisioners/refresh-specs": {
+      "post": {
+        "tags": ["Provisioning"],
+        "summary": "Re-derive every version's role-specs cache",
+        "description": "Minimum role: operator. Walks each registry version's shipped roles and rebuilds role-specs.yml from their meta/argument_specs.yml — the manual refresh for hand-dropped packages and updated specs (imports rebuild it automatically). Synchronous.",
+        "responses": {
+          "200": { "description": "Per-version refresh summary", "content": { "application/json": { "schema": { "type": "object", "properties": { "success": { "type": "boolean" }, "refreshed": { "type": "array", "items": { "type": "object", "properties": { "name": { "type": "string" }, "version": { "type": "string" }, "roles": { "type": "integer" } } } }, "total": { "type": "integer" } } } } } },
+          "500": { "description": "Registry scan failed" }
         }
       }
     },
@@ -3528,6 +3901,334 @@
         }
       }
     },
+    "/database/{db}/tables": {
+      "get": {
+        "tags": ["Database Management"],
+        "summary": "List a database's tables",
+        "description": "Minimum role: viewer. The read-only explorer drill-down (zoneweaver's contract, same wire on both agents): one open database's tables with row counts and index names. {db} is a GET /database/stats databases[].name value. SQLite internals (sqlite_*) and auto-indexes are excluded.",
+        "parameters": [
+          { "name": "db", "in": "path", "required": true, "schema": { "type": "string" }, "description": "Database name from GET /database/stats databases[].name" }
+        ],
+        "responses": {
+          "200": {
+            "description": "Tables retrieved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": { "type": "boolean" },
+                    "message": { "type": "string" },
+                    "timestamp": { "type": "string", "format": "date-time" },
+                    "database": { "type": "string" },
+                    "tables": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "name": { "type": "string", "example": "tasks" },
+                          "rows": { "type": "integer", "format": "int64" },
+                          "indexes": { "type": "array", "items": { "type": "string" }, "example": ["idx_tasks_created_at", "task_status_priority_idx"] }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown database (the message names the legal values)",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/WrappedError" } } }
+          },
+          "500": {
+            "description": "Failed to list database tables",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/WrappedError" } } }
+          }
+        }
+      }
+    },
+    "/database/{db}/tables/{table}/rows": {
+      "get": {
+        "tags": ["Database Management"],
+        "summary": "Browse a table's rows (read-only, paged)",
+        "description": "Minimum role: viewer. The explorer's row browser — NO arbitrary SQL. The table must exist in the named database and order_by must name one of ITS columns; both are looked up in the database's own catalog and quoted as identifiers, never interpolated raw, and limit/offset ride as bind parameters. order_by takes a column name optionally suffixed :desc (e.g. created_at:desc); without it rows come in the table's natural rowid order. rows[] are VALUE ARRAYS in columns[] order.",
+        "parameters": [
+          { "name": "db", "in": "path", "required": true, "schema": { "type": "string" } },
+          { "name": "table", "in": "path", "required": true, "schema": { "type": "string" } },
+          { "name": "limit", "in": "query", "schema": { "type": "integer", "default": 50, "maximum": 500 } },
+          { "name": "offset", "in": "query", "schema": { "type": "integer", "default": 0 } },
+          { "name": "order_by", "in": "query", "schema": { "type": "string" }, "description": "Column name, optionally with :desc", "example": "created_at:desc" }
+        ],
+        "responses": {
+          "200": {
+            "description": "Rows retrieved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": { "type": "boolean" },
+                    "message": { "type": "string" },
+                    "timestamp": { "type": "string", "format": "date-time" },
+                    "database": { "type": "string" },
+                    "table": { "type": "string" },
+                    "columns": { "type": "array", "items": { "type": "string" } },
+                    "rows": { "type": "array", "items": { "type": "array", "items": {} }, "description": "One array per row, values in columns[] order (TEXT/BLOB render as strings, NULL as null)" },
+                    "total": { "type": "integer", "format": "int64", "description": "Total rows in the table (not the page)" },
+                    "pagination": {
+                      "type": "object",
+                      "properties": {
+                        "limit": { "type": "integer" },
+                        "offset": { "type": "integer" },
+                        "hasMore": { "type": "boolean" }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "order_by does not name a column of the table",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/WrappedError" } } }
+          },
+          "404": {
+            "description": "Unknown database or unknown table",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/WrappedError" } } }
+          },
+          "500": {
+            "description": "Failed to browse database table",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/WrappedError" } } }
+          }
+        }
+      }
+    },
+    "/filesystem": {
+      "get": {
+        "tags": ["File System"],
+        "summary": "Browse directory contents",
+        "description": "Minimum role: operator (the file-browser capability token; the whole /filesystem surface is operator-gated by the central policy). Lists one agent-host directory — zoneweaver's browseDirectory: hidden-file filter, sortable, parent-path navigation. THE \"/\" REQUEST (the browse top): with file_browser.root configured, \"/\" maps to that directory and any path outside it answers 403 (the containment check rides every request); unconfined (root empty, the default), \"/\" answers the DRIVE-LETTER LISTING on Windows (one directory item per mounted drive — C:/, D:/, ... — current_path \"/\", parent_path null; drive roots' parent_path points back to \"/\") and the real filesystem root elsewhere. Security bounds from file_browser.security: traversal guard (\"..\"/\"~\" rejected), forbidden path prefixes and glob patterns answer 403, directories over max_directory_entries answer 500 with details. 503 when file_browser.enabled is false (the token disappears with it).",
+        "parameters": [
+          { "name": "path", "in": "query", "schema": { "type": "string", "default": "/" }, "description": "Directory path to browse. \"/\" is the browse top: the configured file_browser.root when set, the Windows drive listing or the real root when not" },
+          { "name": "show_hidden", "in": "query", "schema": { "type": "boolean", "default": false }, "description": "Include dot-prefixed entries" },
+          { "name": "sort_by", "in": "query", "schema": { "type": "string", "enum": ["name", "size", "modified", "type"], "default": "name" } },
+          { "name": "sort_order", "in": "query", "schema": { "type": "string", "enum": ["asc", "desc"], "default": "asc" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "Directory contents",
+            "content": { "application/json": { "schema": { "type": "object", "properties": { "items": { "type": "array", "items": { "$ref": "#/components/schemas/FileSystemItem" } }, "current_path": { "type": "string", "description": "Forward-slash absolute path on every platform (\"/\" itself on the drive listing)" }, "parent_path": { "type": "string", "nullable": true, "description": "null at the browse top (the configured root, the drive listing, a filesystem root); a Windows drive root answers \"/\" when unconfined — navigation back to the drive listing. Forward-slash" }, "total_items": { "type": "integer" }, "hidden_items_filtered": { "type": "integer" } } } } }
+          },
+          "403": { "description": "Path forbidden (traversal, outside the configured browse root, forbidden prefix, or pattern match)" },
+          "404": { "description": "Directory not found" },
+          "500": { "description": "Listing failure ({error, details} — includes the over-the-entry-cap refusal)" },
+          "503": { "description": "File browser is disabled" }
+        }
+      },
+      "delete": {
+        "tags": ["File System"],
+        "summary": "Delete a file or directory",
+        "description": "Minimum role: operator. The base's deleteFileItem: directories need recursive (a non-empty directory without it fails honestly); force tolerates already-absent paths. Synchronous.",
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "type": "object", "required": ["path"], "properties": { "path": { "type": "string" }, "recursive": { "type": "boolean", "default": false }, "force": { "type": "boolean", "default": false } } } } }
+        },
+        "responses": {
+          "200": { "description": "Item deleted ({success, message, deleted_item})" },
+          "400": { "description": "Missing path or invalid body" },
+          "403": { "description": "Path forbidden" },
+          "404": { "description": "Item not found" },
+          "503": { "description": "File browser is disabled" }
+        }
+      }
+    },
+    "/filesystem/folder": {
+      "post": {
+        "tags": ["File System"],
+        "summary": "Create a directory",
+        "description": "Minimum role: operator. {path, name, mode?, uid?, gid?} — mode is octal (\"755\"); uid/gid apply on Unix hosts (failures narrate to the log, never block — the base's tolerance). Synchronous.",
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "type": "object", "required": ["path", "name"], "properties": { "path": { "type": "string", "description": "Parent directory" }, "name": { "type": "string" }, "mode": { "type": "string", "example": "755" }, "uid": { "type": "integer" }, "gid": { "type": "integer" } } } } }
+        },
+        "responses": {
+          "201": { "description": "Directory created ({success, message, item})" },
+          "400": { "description": "Missing fields, bad mode, or directory already exists" },
+          "403": { "description": "Path forbidden" },
+          "503": { "description": "File browser is disabled" }
+        }
+      }
+    },
+    "/filesystem/content": {
+      "get": {
+        "tags": ["File System"],
+        "summary": "Read text file content",
+        "description": "Minimum role: operator. Text files only (the 8KB binary sample refuses binaries) bounded by security.max_edit_size_mb — the file-manager editor's read.",
+        "parameters": [ { "name": "path", "in": "query", "required": true, "schema": { "type": "string" } } ],
+        "responses": {
+          "200": { "description": "File content", "content": { "application/json": { "schema": { "type": "object", "properties": { "content": { "type": "string" }, "file_info": { "$ref": "#/components/schemas/FileSystemItem" }, "encoding": { "type": "string", "example": "utf8" }, "size_bytes": { "type": "integer" } } } } } },
+          "400": { "description": "Binary file, over the edit limit, or a directory" },
+          "403": { "description": "Path forbidden" },
+          "404": { "description": "File not found" },
+          "503": { "description": "File browser is disabled" }
+        }
+      },
+      "put": {
+        "tags": ["File System"],
+        "summary": "Write text file content",
+        "description": "Minimum role: operator. {path, content, backup?, uid?, gid?, mode?} bounded by security.max_edit_size_mb; backup copies the existing file to <path>.backup.<unix-ms> first (failure narrates, never blocks). Synchronous.",
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "type": "object", "required": ["path", "content"], "properties": { "path": { "type": "string" }, "content": { "type": "string" }, "backup": { "type": "boolean", "default": false }, "mode": { "type": "string", "example": "644" }, "uid": { "type": "integer" }, "gid": { "type": "integer" } } } } }
+        },
+        "responses": {
+          "200": { "description": "File written ({success, message, file_info, content_size})" },
+          "400": { "description": "Missing fields, bad mode, or content over the edit limit" },
+          "403": { "description": "Path forbidden" },
+          "503": { "description": "File browser is disabled" }
+        }
+      }
+    },
+    "/filesystem/download": {
+      "get": {
+        "tags": ["File System"],
+        "summary": "Download a file",
+        "description": "Minimum role: operator. Streams the file as an attachment (range requests honored); directories are refused — archive them instead.",
+        "parameters": [ { "name": "path", "in": "query", "required": true, "schema": { "type": "string" } } ],
+        "responses": {
+          "200": { "description": "The file", "content": { "application/octet-stream": { "schema": { "type": "string", "format": "binary" } } } },
+          "400": { "description": "Missing path, or path is a directory" },
+          "403": { "description": "Path forbidden" },
+          "404": { "description": "File not found" },
+          "503": { "description": "File browser is disabled" }
+        }
+      }
+    },
+    "/filesystem/upload": {
+      "post": {
+        "tags": ["File System"],
+        "summary": "Upload a file",
+        "description": "Minimum role: operator. multipart/form-data with the metadata fields BEFORE the file part (multipart streams in order — the base's multer has the same rule): uploadPath (required), overwrite (\"true\"), mode (octal string). The filename is sanitized to [a-zA-Z0-9._-]; the body is capped by file_browser.upload_size_limit_gb and streams to the destination through a temp file.",
+        "requestBody": {
+          "required": true,
+          "content": { "multipart/form-data": { "schema": { "type": "object", "required": ["uploadPath", "file"], "properties": { "uploadPath": { "type": "string", "description": "Destination directory (must precede the file part)" }, "overwrite": { "type": "string", "enum": ["true", "false"] }, "mode": { "type": "string", "example": "644" }, "file": { "type": "string", "format": "binary" } } } } }
+        },
+        "responses": {
+          "201": { "description": "File uploaded ({success, message, file})" },
+          "400": { "description": "Not multipart, no file part, uploadPath missing or after the file part" },
+          "403": { "description": "Path forbidden" },
+          "409": { "description": "File already exists (set overwrite)" },
+          "413": { "description": "Body exceeds file_browser.upload_size_limit_gb" },
+          "503": { "description": "File browser is disabled" }
+        }
+      }
+    },
+    "/filesystem/rename": {
+      "patch": {
+        "tags": ["File System"],
+        "summary": "Rename an item",
+        "description": "Minimum role: operator. {path, new_name} — the new name is sanitized to [a-zA-Z0-9._-] and stays in the same directory. Synchronous.",
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "type": "object", "required": ["path", "new_name"], "properties": { "path": { "type": "string" }, "new_name": { "type": "string" } } } } }
+        },
+        "responses": {
+          "200": { "description": "Item renamed ({success, message, item, old_path, new_path})" },
+          "400": { "description": "Missing fields" },
+          "403": { "description": "Path forbidden" },
+          "404": { "description": "Item not found" },
+          "409": { "description": "Target name already exists" },
+          "503": { "description": "File browser is disabled" }
+        }
+      }
+    },
+    "/filesystem/move": {
+      "put": {
+        "tags": ["File System"],
+        "summary": "Move an item (task)",
+        "description": "Minimum role: operator. {source, destination} → 202 file_move task (async — trees can be huge). Rename first; a cross-volume move copies then deletes the source.",
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "type": "object", "required": ["source", "destination"], "properties": { "source": { "type": "string" }, "destination": { "type": "string" } } } } }
+        },
+        "responses": {
+          "202": { "description": "Move task created ({success, message, task_id, source, destination})" },
+          "400": { "description": "Missing fields" },
+          "403": { "description": "Path forbidden" },
+          "503": { "description": "File browser is disabled" }
+        }
+      }
+    },
+    "/filesystem/copy": {
+      "post": {
+        "tags": ["File System"],
+        "summary": "Copy an item (task)",
+        "description": "Minimum role: operator. {source, destination} → 202 file_copy task. Directories copy recursively; symlinks and specials are skipped, never followed.",
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "type": "object", "required": ["source", "destination"], "properties": { "source": { "type": "string" }, "destination": { "type": "string" } } } } }
+        },
+        "responses": {
+          "202": { "description": "Copy task created ({success, message, task_id, source, destination})" },
+          "400": { "description": "Missing fields" },
+          "403": { "description": "Path forbidden" },
+          "503": { "description": "File browser is disabled" }
+        }
+      }
+    },
+    "/filesystem/archive/create": {
+      "post": {
+        "tags": ["File System"],
+        "summary": "Create an archive (task)",
+        "description": "Minimum role: operator. {sources[], archive_path, format} → 202 file_archive_create task. format must sit in file_browser.archive.supported_formats — this agent CREATES zip, tar, and tar.gz (Go's bzip2 is decompress-only; the base's shell tar also spoke tar.bz2). Entries are rooted at each source's basename. An archive landing over max_archive_size_mb is deleted and the task fails. Gated by file_browser.archive.enabled.",
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "type": "object", "required": ["sources", "archive_path", "format"], "properties": { "sources": { "type": "array", "items": { "type": "string" } }, "archive_path": { "type": "string" }, "format": { "type": "string", "enum": ["zip", "tar", "tar.gz"] } } } } }
+        },
+        "responses": {
+          "202": { "description": "Archive creation task created ({success, message, task_id, sources, archive_path, format})" },
+          "400": { "description": "Missing fields or unsupported format" },
+          "403": { "description": "Path forbidden" },
+          "503": { "description": "File browser or archive operations disabled" }
+        }
+      }
+    },
+    "/filesystem/archive/extract": {
+      "post": {
+        "tags": ["File System"],
+        "summary": "Extract an archive (task)",
+        "description": "Minimum role: operator. {archive_path, extract_path} → 202 file_archive_extract task. Format by extension: .zip, .tar, .tar.gz, .tar.bz2, bare .gz. Entries escaping the extraction directory are rejected (zip-slip guard); links and specials are skipped, never materialized. Gated by file_browser.archive.enabled.",
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "type": "object", "required": ["archive_path", "extract_path"], "properties": { "archive_path": { "type": "string" }, "extract_path": { "type": "string" } } } } }
+        },
+        "responses": {
+          "202": { "description": "Extraction task created ({success, message, task_id, archive_path, extract_path})" },
+          "400": { "description": "Missing fields" },
+          "403": { "description": "Path forbidden" },
+          "503": { "description": "File browser or archive operations disabled" }
+        }
+      }
+    },
+    "/filesystem/permissions": {
+      "patch": {
+        "tags": ["File System"],
+        "summary": "Change permissions or ownership",
+        "description": "Minimum role: operator. {path, uid?, gid?, mode?, recursive?} — at least one of uid/gid/mode. mode chmods (on Windows that is Go's honest mapping: the read-only attribute); uid/gid chown on Unix hosts — a Windows host answers 400 (no analog, never a silent no-op). Synchronous.",
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "type": "object", "required": ["path"], "properties": { "path": { "type": "string" }, "uid": { "type": "integer" }, "gid": { "type": "integer" }, "mode": { "type": "string", "example": "644" }, "recursive": { "type": "boolean", "default": false } } } } }
+        },
+        "responses": {
+          "200": { "description": "Permissions updated ({success, message, item, changes_applied})" },
+          "400": { "description": "Missing path, nothing to change, bad mode, or uid/gid on a Windows host" },
+          "403": { "description": "Path forbidden" },
+          "404": { "description": "Item not found" },
+          "503": { "description": "File browser is disabled" }
+        }
+      }
+    },
     "/secrets": {
       "get": {
         "tags": ["Secrets"],
@@ -3837,6 +4538,234 @@
         }
       }
     },
+    "/machines/import": {
+      "post": {
+        "tags": ["Machine Management"],
+        "summary": "Import an OVA/OVF appliance",
+        "description": "Minimum role: operator. Queues machine_import: VBoxManage import of an agent-host .ova/.ovf into the machines root (--vsys 0; name overrides the appliance's suggested machine name), followed by a reconciliation sweep that lands the registry row (auto_discovered, spec-less — like any machine built outside the agent). Export's pair.",
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "type": "object", "required": ["path"], "properties": { "path": { "type": "string", "description": "Agent-host .ova/.ovf file", "example": "C:\\exports\\appliance.ova" }, "name": { "type": "string", "description": "Machine name override (must not collide with an existing machine)" } } } } }
+        },
+        "responses": {
+          "202": { "description": "Import task queued ({success, task_id, path, operation, status, message})" },
+          "400": { "description": "Missing/invalid path, not .ova/.ovf, file absent, or invalid name" },
+          "409": { "description": "A machine with that name already exists" }
+        }
+      }
+    },
+    "/machines/unattended/detect": {
+      "get": {
+        "tags": ["Machine Management"],
+        "summary": "Probe an installer ISO",
+        "description": "Minimum role: viewer. Synchronous VBoxManage unattended detect — what the ISO contains and whether VirtualBox can install it unattended. iso is an agent-host path (cached ISOs carry theirs in GET /artifacts/iso's path field). detected keys are VBoxManage's own fields snake_cased (os_typeid, os_version, os_flavor, os_languages, os_hints, unattended_installation_supported).",
+        "parameters": [ { "name": "iso", "in": "query", "required": true, "schema": { "type": "string" }, "description": "Agent-host ISO path" } ],
+        "responses": {
+          "200": { "description": "Detection result", "content": { "application/json": { "schema": { "type": "object", "properties": { "iso": { "type": "string" }, "detected": { "type": "object", "additionalProperties": { "type": "string" }, "example": { "os_typeid": "Debian12_64", "os_version": "12.5", "unattended_installation_supported": "yes" } } } } } } },
+          "400": { "description": "Missing iso, or file absent" },
+          "500": { "description": "Detection failed" },
+          "503": { "description": "VirtualBox is not installed" }
+        }
+      }
+    },
+    "/machines/{machineName}/unattended": {
+      "post": {
+        "tags": ["Machine Management"],
+        "summary": "Start an unattended OS install",
+        "description": "Minimum role: operator. Queues machine_unattended_install — VBoxManage's own answer-file machinery onto an EXISTING powered-off machine (create a diskless/scratch-disk machine first; probe the ISO via GET /machines/unattended/detect). The ISO comes as path (agent-host file) or iso (cached-ISO filename, cdroms[]'s vocabulary — resolved through the artifact registry). VirtualBox prepares the distro-appropriate unattended script and — with start (default true) — boots the machine headless straight into the installer; watch progress on the console or screenshot. user/password are the account the installer creates; image_index picks the Windows edition; install_additions slipstreams Guest Additions. The password rides task metadata (stored credentials are never redacted — Mark's visibility ruling).",
+        "parameters": [ { "name": "machineName", "in": "path", "required": true, "schema": { "type": "string" } } ],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "type": "object", "required": ["user", "password"], "properties": { "path": { "type": "string", "description": "Agent-host installer ISO (or use iso)" }, "iso": { "type": "string", "description": "Cached-ISO filename from the artifact registry" }, "user": { "type": "string" }, "password": { "type": "string" }, "full_name": { "type": "string" }, "product_key": { "type": "string" }, "hostname": { "type": "string", "description": "FQDN for the guest" }, "locale": { "type": "string", "example": "en_US" }, "country": { "type": "string", "example": "US" }, "time_zone": { "type": "string", "example": "UTC" }, "language": { "type": "string" }, "image_index": { "type": "integer", "description": "Windows: which image in install.wim" }, "install_additions": { "type": "boolean", "default": false }, "additions_iso": { "type": "string", "description": "Custom Guest Additions ISO path" }, "post_install_command": { "type": "string" }, "package_selection_adjustment": { "type": "string", "example": "minimal" }, "start": { "type": "boolean", "default": true, "description": "Boot headless into the installer immediately" } } } } }
+        },
+        "responses": {
+          "200": { "description": "Unattended install task queued", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/QueuedOperation" } } } },
+          "400": { "description": "Missing ISO reference or credentials, or machine not powered off" },
+          "404": { "description": "Machine not found" }
+        }
+      }
+    },
+    "/machines/{machineName}/move": {
+      "post": {
+        "tags": ["Machine Management"],
+        "summary": "Relocate a machine's VirtualBox files",
+        "description": "Minimum role: operator. Queues machine_move (VBoxManage movevm --type basic): the .vbox, snapshots, and machine-stored media land under target_path. Powered-off machines only. The agent's working directory (provisioner documents, installers) does NOT move.",
+        "parameters": [ { "name": "machineName", "in": "path", "required": true, "schema": { "type": "string" } } ],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "type": "object", "required": ["target_path"], "properties": { "target_path": { "type": "string", "description": "Destination directory on the agent host" } } } } }
+        },
+        "responses": {
+          "200": { "description": "Move task queued", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/QueuedOperation" } } } },
+          "400": { "description": "Missing target_path, or machine is not powered off" },
+          "404": { "description": "Machine not found" }
+        }
+      }
+    },
+    "/machines/{machineName}/display": {
+      "post": {
+        "tags": ["Machine Management"],
+        "summary": "Resize the guest display",
+        "description": "Minimum role: operator. Synchronous VBoxManage controlvm setvideomodehint — asks the running guest to resize its display; honored by guests running Guest Additions (a guest without them ignores the hint, honestly).",
+        "parameters": [ { "name": "machineName", "in": "path", "required": true, "schema": { "type": "string" } } ],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "type": "object", "required": ["width", "height"], "properties": { "width": { "type": "integer", "example": 1920 }, "height": { "type": "integer", "example": 1080 }, "depth": { "type": "integer", "default": 32 }, "display": { "type": "integer", "description": "Multi-monitor guests: which display (0-based; omitted = the primary)" } } } } }
+        },
+        "responses": {
+          "200": { "description": "Hint sent ({success, machine_name, message})" },
+          "400": { "description": "Missing width/height, or machine is not running" },
+          "404": { "description": "Machine not found" },
+          "503": { "description": "VirtualBox is not installed" }
+        }
+      }
+    },
+    "/system/usb": {
+      "get": {
+        "tags": ["Machine Management"],
+        "summary": "List the host's USB devices",
+        "description": "Minimum role: viewer. VBoxManage list usbhost — the attach and filter pickers' feed. state carries VirtualBox's capture view (Busy/Available/Captured/Unavailable).",
+        "responses": {
+          "200": { "description": "Host USB devices", "content": { "application/json": { "schema": { "type": "object", "properties": { "devices": { "type": "array", "items": { "type": "object", "properties": { "uuid": { "type": "string" }, "vendor_id": { "type": "string", "example": "0x046d (046D)" }, "product_id": { "type": "string" }, "revision": { "type": "string" }, "manufacturer": { "type": "string" }, "product": { "type": "string" }, "serial_number": { "type": "string" }, "address": { "type": "string" }, "state": { "type": "string" } } } }, "total": { "type": "integer" } } } } } },
+          "503": { "description": "VirtualBox is not installed" }
+        }
+      }
+    },
+    "/machines/{machineName}/usb/attach": {
+      "post": {
+        "tags": ["Machine Management"],
+        "summary": "Attach a host USB device",
+        "description": "Minimum role: operator. Synchronous controlvm usbattach — hot-plug a host device (by UUID or address from GET /system/usb) into the RUNNING machine. The machine needs a USB controller (hardware.usb.ohci/ehci/xhci at create or modify); VirtualBox's own error answers when it lacks one.",
+        "parameters": [ { "name": "machineName", "in": "path", "required": true, "schema": { "type": "string" } } ],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "type": "object", "required": ["device"], "properties": { "device": { "type": "string", "description": "Device UUID or address" } } } } }
+        },
+        "responses": {
+          "200": { "description": "Device attached ({success, machine_name, device, message})" },
+          "400": { "description": "Missing device, or machine not running" },
+          "404": { "description": "Machine not found" },
+          "503": { "description": "VirtualBox is not installed" }
+        }
+      }
+    },
+    "/machines/{machineName}/usb/detach": {
+      "post": {
+        "tags": ["Machine Management"],
+        "summary": "Detach a USB device",
+        "description": "Minimum role: operator. Synchronous controlvm usbdetach from the running machine.",
+        "parameters": [ { "name": "machineName", "in": "path", "required": true, "schema": { "type": "string" } } ],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "type": "object", "required": ["device"], "properties": { "device": { "type": "string" } } } } }
+        },
+        "responses": {
+          "200": { "description": "Device detached" },
+          "400": { "description": "Missing device, or machine not running" },
+          "404": { "description": "Machine not found" },
+          "503": { "description": "VirtualBox is not installed" }
+        }
+      }
+    },
+    "/machines/{machineName}/usb/filters": {
+      "get": {
+        "tags": ["Machine Management"],
+        "summary": "List USB capture filters",
+        "description": "Minimum role: viewer. The machine's persistent filters from the live machinereadable view. index is usbfilter remove's 0-based position.",
+        "parameters": [ { "name": "machineName", "in": "path", "required": true, "schema": { "type": "string" } } ],
+        "responses": {
+          "200": { "description": "Filters", "content": { "application/json": { "schema": { "type": "object", "properties": { "machine_name": { "type": "string" }, "filters": { "type": "array", "items": { "type": "object", "properties": { "index": { "type": "integer" }, "name": { "type": "string" }, "active": { "type": "boolean" }, "vendor_id": { "type": "string" }, "product_id": { "type": "string" }, "manufacturer": { "type": "string" }, "product": { "type": "string" }, "serial_number": { "type": "string" } } } }, "total": { "type": "integer" } } } } } },
+          "404": { "description": "Machine not found, or no VM exists behind it yet" },
+          "503": { "description": "VirtualBox is not installed" }
+        }
+      },
+      "post": {
+        "tags": ["Machine Management"],
+        "summary": "Add a USB capture filter",
+        "description": "Minimum role: operator. Appends a persistent filter (usbfilter add): matching devices auto-capture into the machine at plug-in/boot. Empty match fields match anything. Works on running and powered-off machines.",
+        "parameters": [ { "name": "machineName", "in": "path", "required": true, "schema": { "type": "string" } } ],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "type": "object", "required": ["name"], "properties": { "name": { "type": "string" }, "vendor_id": { "type": "string", "example": "046d" }, "product_id": { "type": "string" }, "manufacturer": { "type": "string" }, "product": { "type": "string" }, "serial_number": { "type": "string" } } } } }
+        },
+        "responses": {
+          "201": { "description": "Filter added ({success, machine_name, index, name, message})" },
+          "400": { "description": "Missing name" },
+          "404": { "description": "Machine not found, or no VM exists behind it yet" },
+          "503": { "description": "VirtualBox is not installed" }
+        }
+      }
+    },
+    "/machines/{machineName}/usb/filters/{filterIndex}": {
+      "delete": {
+        "tags": ["Machine Management"],
+        "summary": "Remove a USB capture filter",
+        "description": "Minimum role: operator. usbfilter remove by 0-based index (GET /usb/filters reports it).",
+        "parameters": [
+          { "name": "machineName", "in": "path", "required": true, "schema": { "type": "string" } },
+          { "name": "filterIndex", "in": "path", "required": true, "schema": { "type": "integer" } }
+        ],
+        "responses": {
+          "200": { "description": "Filter removed" },
+          "400": { "description": "Invalid index" },
+          "404": { "description": "Machine not found" },
+          "503": { "description": "VirtualBox is not installed" }
+        }
+      }
+    },
+    "/machines/{machineName}/nvram/secureboot": {
+      "post": {
+        "tags": ["Machine Management"],
+        "summary": "Configure UEFI Secure Boot",
+        "description": "Minimum role: operator. The Secure Boot lifecycle on an EFI-firmware machine (bootrom efi), POWERED OFF, synchronous modifynvram sequence: optional init_var_store (DESTRUCTIVE — recreates the UEFI variable store, wiping enrolled keys and firmware boot entries; needed once on machines whose store never existed), then — when enrolling (enroll_default_keys, defaults to the enabled value) — Oracle's platform key + Microsoft's DB/KEK signatures (what stock Windows and shim-signed Linux distros validate against), then the secureboot enable/disable toggle. UI story: a Secure Boot toggle with an 'enroll standard keys' checkbox; a BIOS-firmware machine answers VirtualBox's own error — switch bootrom to efi first.",
+        "parameters": [ { "name": "machineName", "in": "path", "required": true, "schema": { "type": "string" } } ],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "type": "object", "required": ["enabled"], "properties": { "enabled": { "type": "boolean" }, "enroll_default_keys": { "type": "boolean", "description": "Enroll Oracle PK + Microsoft signatures (default: the enabled value)" }, "init_var_store": { "type": "boolean", "default": false, "description": "DESTRUCTIVE: recreate the UEFI variable store first" } } } } }
+        },
+        "responses": {
+          "200": { "description": "Applied ({success, machine_name, enabled, steps[], message})" },
+          "400": { "description": "Machine is not powered off" },
+          "404": { "description": "Machine not found" },
+          "500": { "description": "A modifynvram step failed (BIOS firmware, missing var store, ...)" },
+          "503": { "description": "VirtualBox is not installed" }
+        }
+      }
+    },
+    "/machines/{machineName}/guestcontrol/run": {
+      "post": {
+        "tags": ["Machine Management"],
+        "summary": "Run a command via Guest Additions",
+        "description": "Minimum role: operator. Synchronous guestcontrol run against the RUNNING guest — the credentialed sibling of the QGA exec channel (use /guest/exec when qemu-ga is wired; this one needs Guest Additions running in the guest). path is the guest executable (absolute); args pass after VBoxManage's -- separator (some guests want the program name repeated as the first argument — VirtualBox quirk). Credentials: Guest Additions take PASSWORD auth only — body username/password, defaulting from the stored settings.vagrant_user family; no password anywhere answers 400. timeout_seconds bounds the guest process (default 60, max 3600). exit_code is VBoxManage's own — guest exit codes ride through for plain runs.",
+        "parameters": [ { "name": "machineName", "in": "path", "required": true, "schema": { "type": "string" } } ],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "type": "object", "required": ["path"], "properties": { "path": { "type": "string", "example": "/usr/bin/uname" }, "args": { "type": "array", "items": { "type": "string" }, "example": ["-a"] }, "username": { "type": "string" }, "password": { "type": "string" }, "timeout_seconds": { "type": "integer", "default": 60, "maximum": 3600 } } } } }
+        },
+        "responses": {
+          "200": { "description": "Run finished ({success, machine_name, exit_code, stdout, stderr})" },
+          "400": { "description": "Missing path, no password available, or machine not running" },
+          "404": { "description": "Machine not found" },
+          "502": { "description": "guestcontrol failed to start (Guest Additions absent?)" },
+          "503": { "description": "VirtualBox is not installed" }
+        }
+      }
+    },
+    "/machines/{machineName}/nmi": {
+      "post": {
+        "tags": ["Machine Management"],
+        "summary": "Inject an NMI into a running machine",
+        "description": "Minimum role: operator. VBoxManage debugvm injectnmi — a non-maskable interrupt into the running guest: the diagnostic trigger for guest crash dumps and kernel debuggers (zoneweaver's bhyvectl --inject-nmi, same wire on both agents). SYNCHRONOUS — the injection is instantaneous, no task row. What happens next is the guest's own policy (Windows: crash dump when configured; Linux: kernel NMI handler/panic per sysctl).",
+        "parameters": [ { "name": "machineName", "in": "path", "required": true, "schema": { "type": "string" } } ],
+        "responses": {
+          "200": { "description": "NMI injected", "content": { "application/json": { "schema": { "type": "object", "properties": { "success": { "type": "boolean", "example": true }, "machine_name": { "type": "string" }, "message": { "type": "string", "example": "NMI injected" } } } } } },
+          "400": { "description": "Machine is not running" },
+          "404": { "description": "Machine not found" },
+          "500": { "description": "VBoxManage debugvm failed" },
+          "503": { "description": "VirtualBox is not installed" }
+        }
+      }
+    },
     "/machines/{machineName}/snapshots": {
       "get": {
         "tags": ["Machine Management"],
@@ -3855,15 +4784,15 @@
       "post": {
         "tags": ["Machine Management"],
         "summary": "Take a snapshot",
-        "description": "Minimum role: operator. Queues snapshot_take (VBoxManage snapshot take). Works on running and stopped machines; live=true avoids pausing a running machine.",
+        "description": "Minimum role: operator. Queues snapshot_take (VBoxManage snapshot take). Works on running and stopped machines; live=true avoids pausing a running machine. Body carries a literal name, OR prefix (+ retention) — the Snapshoter-style rotation contract shared with zoneweaver: the snapshot is named <prefix>-YYYYMMDD-HHMM and retention keeps the newest N <prefix>-* snapshots after the take (0 = keep all; on this hypervisor pruning is a physical disk merge — keep retention low). quiesce runs qga fsfreeze around the take when the guest agent answers (application-consistent; a silent channel narrates and the snapshot proceeds crash-consistent). The scheduled rotation service (config snapshots.*, per-machine override via the PUT snapshots field) queues this same operation.",
         "parameters": [ { "name": "machineName", "in": "path", "required": true, "schema": { "type": "string" } } ],
         "requestBody": {
           "required": true,
-          "content": { "application/json": { "schema": { "type": "object", "required": ["name"], "properties": { "name": { "type": "string", "example": "before-upgrade" }, "description": { "type": "string" }, "live": { "type": "boolean", "default": false } } } } }
+          "content": { "application/json": { "schema": { "type": "object", "properties": { "name": { "type": "string", "description": "Literal snapshot name (name or prefix is required; both match ^[A-Za-z0-9][A-Za-z0-9_.:-]{0,255}$)", "example": "before-upgrade" }, "prefix": { "type": "string", "description": "Rotation prefix — the snapshot is named prefix-YYYYMMDD-HHMM (used when name is absent)", "example": "auto" }, "retention": { "type": "integer", "default": 0, "description": "With prefix: keep the newest N prefix-* snapshots (0 = keep all)" }, "description": { "type": "string" }, "quiesce": { "type": "boolean", "default": false, "description": "qga fsfreeze around the take when the guest agent answers" }, "live": { "type": "boolean", "default": false } } } } }
         },
         "responses": {
           "200": { "description": "Snapshot task queued", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/QueuedOperation" } } } },
-          "400": { "description": "Missing name" },
+          "400": { "description": "Missing name/prefix, or unsupported characters" },
           "404": { "description": "Machine not found" }
         }
       }
@@ -3895,6 +4824,112 @@
         "responses": {
           "200": { "description": "Snapshot delete task queued", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/QueuedOperation" } } } },
           "404": { "description": "Machine not found" }
+        }
+      }
+    },
+    "/machines/{machineName}/ftp": {
+      "get": {
+        "tags": ["Machine Management"],
+        "summary": "SFTP connection info",
+        "description": "Minimum role: viewer (the host-launchers capability token). The machine's SFTP target built from the stored credentials (settings.vagrant_user) and the SSH transport ladder (NAT ssh port-forward at 127.0.0.1 first, control IP fallback). A remote-mode UI hands sftp_url to the USER'S own OS handler (window.open) — the FileZilla-style flow without an agent-side launch; note a NAT-forward target (127.0.0.1) only resolves ON the agent host.",
+        "parameters": [ { "name": "machineName", "in": "path", "required": true, "schema": { "type": "string" } } ],
+        "responses": {
+          "200": {
+            "description": "SFTP target",
+            "content": { "application/json": { "schema": { "type": "object", "properties": { "machine_name": { "type": "string" }, "sftp_url": { "type": "string", "example": "sftp://startcloud@127.0.0.1:2222/" }, "host": { "type": "string" }, "port": { "type": "integer" }, "username": { "type": "string" } } } } }
+          },
+          "400": { "description": "Machine not running, no credentials configured, or no SSH transport" },
+          "404": { "description": "Machine not found" }
+        }
+      }
+    },
+    "/machines/{machineName}/open-ftp": {
+      "post": {
+        "tags": ["Machine Management"],
+        "summary": "Open an SFTP client on the agent host",
+        "description": "Minimum role: operator (the host-launchers capability token — SHI's Open FTP Client button). Hands the machine's sftp:// URL to the AGENT HOST'S default handler (FileZilla and friends register sftp://). The Direct-mode desktop contract: the browser and the agent share the machine. Fire-and-forget — a missing handler surfaces on the host's own desktop.",
+        "parameters": [ { "name": "machineName", "in": "path", "required": true, "schema": { "type": "string" } } ],
+        "responses": {
+          "200": { "description": "Launch requested", "content": { "application/json": { "schema": { "type": "object", "properties": { "success": { "type": "boolean" }, "machine_name": { "type": "string" }, "sftp_url": { "type": "string" }, "message": { "type": "string" } } } } } },
+          "400": { "description": "Machine not running, no credentials configured, or no SSH transport" },
+          "404": { "description": "Machine not found" }
+        }
+      }
+    },
+    "/machines/{machineName}/open-directory": {
+      "post": {
+        "tags": ["Machine Management"],
+        "summary": "Open the machine's working directory on the agent host",
+        "description": "Minimum role: operator (the host-launchers capability token — SHI's Open Directory button). Opens the machine's working directory in the AGENT HOST'S file manager (Explorer / Finder / the xdg default). Direct-mode desktop contract; fire-and-forget.",
+        "parameters": [ { "name": "machineName", "in": "path", "required": true, "schema": { "type": "string" } } ],
+        "responses": {
+          "200": { "description": "Launch requested", "content": { "application/json": { "schema": { "type": "object", "properties": { "success": { "type": "boolean" }, "machine_name": { "type": "string" }, "directory": { "type": "string" }, "message": { "type": "string" } } } } } },
+          "400": { "description": "Machine has no working directory" },
+          "404": { "description": "Machine not found, or the directory no longer exists" }
+        }
+      }
+    },
+    "/machines/{machineName}/rdp": {
+      "get": {
+        "tags": ["Machine Management"],
+        "summary": "RDP connection info",
+        "description": "Minimum role: viewer (the host-launchers capability token). The machine's resolvable RDP targets — TWO kinds (Mark's settled design 2026-07-09): `console` = the VRDE hypervisor console at 127.0.0.1:<vrde port> (base VRDP ships in VirtualBox 7.2, NO extpack needed; EFI/boot screens, any guest OS; set the port via settings.consoleport at create or hardware.vrde.port — avoid 3389, it collides with a Windows host's own Remote Desktop; resolves ON the agent host only), and `guest` = a guest's OWN RDP service (Windows guests) at a host-reachable IP — the QEMU guest agent's live view first (the QGA channel, no Guest Additions needed), the Guest Additions' /VirtualBox/GuestInfo/Net/*/V4/IP properties second (the provisioning NAT's 10.0.2.x excluded either way), the document's control IP as fallback, port 3389. NO port-forwards are created; a machine with neither target answers 400 — the capability is honestly absent. rdp_url uses the rdp://full%20address=s:<host>:<port> handler vocabulary.",
+        "parameters": [ { "name": "machineName", "in": "path", "required": true, "schema": { "type": "string" } } ],
+        "responses": {
+          "200": {
+            "description": "Resolvable RDP targets",
+            "content": { "application/json": { "schema": { "type": "object", "properties": { "machine_name": { "type": "string" }, "targets": { "type": "array", "items": { "type": "object", "properties": { "type": { "type": "string", "enum": ["console", "guest"] }, "host": { "type": "string" }, "port": { "type": "integer" }, "rdp_url": { "type": "string", "example": "rdp://full%20address=s:127.0.0.1:5940" }, "description": { "type": "string" } } } } } } } }
+          },
+          "400": { "description": "Machine not running, or no RDP target resolves (VRDE off and no host-reachable guest IP)" },
+          "404": { "description": "Machine not found, or no VM exists behind it yet" },
+          "503": { "description": "VirtualBox is not installed" }
+        }
+      }
+    },
+    "/machines/{machineName}/open-rdp": {
+      "post": {
+        "tags": ["Machine Management"],
+        "summary": "Open an RDP client on the agent host",
+        "description": "Minimum role: operator (the host-launchers capability token — the launcher pattern, open-ftp's shape). Launches the AGENT HOST'S RDP client at the chosen target: mstsc /v:<host>:<port> on Windows, the OS rdp:// handler elsewhere (Microsoft Remote Desktop, Remmina). Body optionally picks the target; default = console when VRDE is live, else guest. Direct-mode desktop contract; fire-and-forget.",
+        "parameters": [ { "name": "machineName", "in": "path", "required": true, "schema": { "type": "string" } } ],
+        "requestBody": {
+          "required": false,
+          "content": { "application/json": { "schema": { "type": "object", "properties": { "target": { "type": "string", "enum": ["console", "guest"], "description": "Which resolved target to open (default: console if resolvable, else guest)" } } } } }
+        },
+        "responses": {
+          "200": { "description": "Launch requested", "content": { "application/json": { "schema": { "type": "object", "properties": { "success": { "type": "boolean" }, "machine_name": { "type": "string" }, "target": { "type": "object" }, "message": { "type": "string" } } } } } },
+          "400": { "description": "Machine not running, requested target unresolvable, or no target at all" },
+          "404": { "description": "Machine not found, or no VM exists behind it yet" },
+          "503": { "description": "VirtualBox is not installed" }
+        }
+      }
+    },
+    "/applications": {
+      "get": {
+        "tags": ["Machine Management"],
+        "summary": "List external launcher applications",
+        "description": "Minimum role: viewer (the host-launchers capability token). The configured applications[] registry — user-chosen desktop tools (PuTTY, WinSCP, mstsc, ...) the agent can launch on its OWN host against a machine (SHI's per-server app buttons, generalized from its single hardcoded FileZilla entry). Each entry carries name, path (the executable), args (the argument template with {host}/{port}/{user}/{password}/{machine} placeholders), and exists — whether the executable is actually present on the agent host, so the UI greys out what cannot launch. The list lives in config applications[]; edit it through PUT /settings.",
+        "responses": {
+          "200": {
+            "description": "Configured applications",
+            "content": { "application/json": { "schema": { "type": "object", "properties": { "applications": { "type": "array", "items": { "type": "object", "properties": { "name": { "type": "string", "example": "PuTTY" }, "path": { "type": "string", "example": "C:\\Program Files\\PuTTY\\putty.exe" }, "args": { "type": "array", "items": { "type": "string" }, "example": ["-ssh", "{user}@{host}", "-P", "{port}"] }, "exists": { "type": "boolean", "description": "The executable is present on the agent host" } } } }, "total": { "type": "integer" } } } } }
+          }
+        }
+      }
+    },
+    "/machines/{machineName}/applications/{appName}/launch": {
+      "post": {
+        "tags": ["Machine Management"],
+        "summary": "Launch an external application against a machine",
+        "description": "Minimum role: operator (the host-launchers capability token). Spawns the named applications[] entry on the AGENT host (the Direct-mode desktop contract — the browser and agent share the machine; elsewhere it opens on the agent's own desktop) with the argument template resolved for this machine: {host}/{port} from the SSH transport ladder (NAT ssh port-forward first, guest-agent IP, control IP), {user}/{password} from the stored credentials (settings.vagrant_user family), {machine} the machine name. Substitution is per-argument (never a shell string), so spaces in a path or password stay one argv word. A missing executable is REFUSED (400), never spawned (SHI's exists rule). Fire-and-forget: the process detaches and the answer only reports the launch was requested.",
+        "parameters": [
+          { "name": "machineName", "in": "path", "required": true, "schema": { "type": "string" } },
+          { "name": "appName", "in": "path", "required": true, "schema": { "type": "string" }, "description": "The applications[] entry name (GET /applications lists them)" }
+        ],
+        "responses": {
+          "200": { "description": "Launch requested", "content": { "application/json": { "schema": { "type": "object", "properties": { "success": { "type": "boolean" }, "machine_name": { "type": "string" }, "application": { "type": "string" }, "host": { "type": "string" }, "port": { "type": "integer" }, "message": { "type": "string" } } } } } },
+          "400": { "description": "Machine not running, executable missing on the agent host, or no transport to the machine" },
+          "404": { "description": "Machine not found, or no application by that name is configured" }
         }
       }
     },
@@ -3941,6 +4976,70 @@
           "101": { "description": "Switching Protocols — the stream begins" },
           "401": { "description": "Missing or invalid ticket" },
           "404": { "description": "Task not found" }
+        }
+      }
+    },
+    "/term/start": {
+      "post": {
+        "tags": ["Console"],
+        "summary": "Start a host terminal session",
+        "description": "Minimum role: ADMIN (the host-terminal capability token — every /term REST verb is admin-only: a shell on the agent host as the agent's own user is full host access). Mints a session; connect the terminal at the /term/{sessionId} WebSocket, where the shell actually opens (PowerShell/cmd via ConPTY on Windows, $SHELL login shell via a real PTY elsewhere). Sessions are in-memory — an agent restart closes them all.",
+        "responses": {
+          "200": {
+            "description": "Session created",
+            "content": { "application/json": { "schema": { "type": "object", "properties": { "id": { "type": "string" }, "status": { "type": "string", "enum": ["connecting", "active", "closed", "failed"] }, "shell": { "type": "string", "description": "Shell executable — set once the WebSocket opens it", "example": "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" }, "created_at": { "type": "string", "format": "date-time" }, "last_activity": { "type": "string", "format": "date-time" } } } } }
+          }
+        }
+      }
+    },
+    "/term/sessions": {
+      "get": {
+        "tags": ["Console"],
+        "summary": "List host terminal sessions",
+        "description": "Minimum role: admin. Newest first.",
+        "responses": {
+          "200": { "description": "Sessions", "content": { "application/json": { "schema": { "type": "array", "items": { "type": "object" } } } } }
+        }
+      }
+    },
+    "/term/sessions/{sessionId}": {
+      "get": {
+        "tags": ["Console"],
+        "summary": "Host terminal session information",
+        "description": "Minimum role: admin.",
+        "parameters": [ { "name": "sessionId", "in": "path", "required": true, "schema": { "type": "string" } } ],
+        "responses": {
+          "200": { "description": "The session" },
+          "404": { "description": "Terminal session not found" }
+        }
+      }
+    },
+    "/term/sessions/{sessionId}/stop": {
+      "delete": {
+        "tags": ["Console"],
+        "summary": "Stop a host terminal session",
+        "description": "Minimum role: admin. Closes the shell and marks the session closed.",
+        "parameters": [ { "name": "sessionId", "in": "path", "required": true, "schema": { "type": "string" } } ],
+        "responses": {
+          "200": { "description": "Session stopped" },
+          "404": { "description": "Terminal session not found" }
+        }
+      }
+    },
+    "/term/{sessionId}": {
+      "get": {
+        "tags": ["Console"],
+        "summary": "Host terminal (WebSocket)",
+        "description": "WEBSOCKET upgrade — authenticate with ?ticket= (GET /ws-ticket); the session id itself is mintable only by an admin at POST /term/start. Opens the host shell for the session. Wire = the SSH terminal's exactly: raw text frames both ways, {\"type\": \"resize\", \"cols\": N, \"rows\": N} JSON frames resize the PTY, \"Terminal session closed.\" marks shell exit — one xterm.js component serves both terminals.",
+        "security": [],
+        "parameters": [
+          { "name": "sessionId", "in": "path", "required": true, "schema": { "type": "string" } },
+          { "name": "ticket", "in": "query", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "101": { "description": "Switching Protocols — the terminal begins" },
+          "401": { "description": "Missing or invalid ticket" },
+          "404": { "description": "Terminal session not found" }
         }
       }
     },
@@ -4015,12 +5114,12 @@
       "get": {
         "tags": ["Console"],
         "summary": "VNC console state",
-        "description": "Minimum role: viewer. The machine's live VRDE console state — everything the UI needs before connecting: whether VRDE is on and its port, whether the host can actually speak VNC on it (vnc_capable: a usable VBoxVNC extpack module; without it the VRDE port speaks RDP, which noVNC cannot), and the websockify URL.",
+        "description": "Minimum role: viewer. The machine's live VRDE console state — everything the UI needs before connecting: whether VRDE is on and its port, whether the host can actually speak VNC on it (vnc_capable: a usable VBoxVNC extpack module; without it the VRDE port speaks RDP, which noVNC cannot), the websockify URL, plus the console-details facts (the UI AI's third ask, 2026-07-10): video_mode (the guest display's WxHxD, e.g. 1024x768x32; empty when unknown) and additions_run_level (0 = no Guest Additions running, 1 = system, 2 = userland, 3 = desktop).",
         "parameters": [ { "name": "machineName", "in": "path", "required": true, "schema": { "type": "string" } } ],
         "responses": {
           "200": {
             "description": "Console state",
-            "content": { "application/json": { "schema": { "type": "object", "properties": { "machine_name": { "type": "string" }, "vrde_enabled": { "type": "boolean" }, "vrde_port": { "type": "integer" }, "vnc_capable": { "type": "boolean" }, "running": { "type": "boolean" }, "websocket_url": { "type": "string" } } } } }
+            "content": { "application/json": { "schema": { "type": "object", "properties": { "machine_name": { "type": "string" }, "vrde_enabled": { "type": "boolean" }, "vrde_port": { "type": "integer" }, "vnc_capable": { "type": "boolean" }, "running": { "type": "boolean" }, "video_mode": { "type": "string", "example": "1024x768x32" }, "additions_run_level": { "type": "integer", "example": 0 }, "websocket_url": { "type": "string" } } } } }
           },
           "404": { "description": "Machine not found, or no VM exists behind it yet" },
           "503": { "description": "VirtualBox is not installed" }
@@ -4057,6 +5156,158 @@
           "401": { "description": "Missing or invalid ticket" },
           "404": { "description": "Machine not found" },
           "502": { "description": "Console server connection failed" }
+        }
+      }
+    },
+    "/machines/{machineName}/rdp-bridge": {
+      "get": {
+        "tags": ["Console"],
+        "summary": "Browser-RDP bridge (WebSocket)",
+        "description": "WEBSOCKET upgrade — authenticate with ?ticket= (GET /ws-ticket). The IronRDP web client's transport (iron-remote-desktop-rdp, proxyAddress = this URL): the client cannot open TCP or TLS from a browser, so its wire is the RDCleanPath contract — the bridge reads the client's DER-encoded RDCleanPath request (first binary frames), relays the embedded X.224 connection request to the chosen RDP server, performs the TLS handshake toward that server ITSELF, answers the RDCleanPath response (X.224 confirm + the server certificate chain the client pins), and then pipes raw bytes both ways. TWO targets via ?target= (GET /machines/{name}/rdp's same vocabulary): console (default) = the machine's VRDE port at 127.0.0.1, TLS VERIFIED against the AGENT CA; guest = a Windows guest's OWN RDP service at its host-reachable IP:3389 (resolved like the rdp launcher: guest agent → Guest Additions → control IP) — the guest presents its OWN certificate (self-signed or domain-issued), so the bridge forwards the chain UNVERIFIED and the client's pin of it is the trust anchor (Devolutions Gateway's model; Mark's ruling 2026-07-11). The PDU's destination field is advisory: both targets resolve server-side, never from the client. SELF-HEALING (console target, Mark's zero-click ruling 2026-07-11): a VRDE server answering without TLS gets the whole VRDE TLS setup applied LIVE — certificate minted from the agent CA, Security properties set via controlvm vrdeproperty (the VRDP server reads them per connection; no power cycle) — and the relay retries once, so the first browser connect to an unconfigured machine (vagrant-up, GUI-created, anything) just works. Persistent negotiation failures ride through as RDCleanPath errors (guest target on Standard security = the guest's own RDP settings disable TLS — unhealable from the host).",
+        "security": [],
+        "parameters": [
+          { "name": "machineName", "in": "path", "required": true, "schema": { "type": "string" } },
+          { "name": "ticket", "in": "query", "required": true, "schema": { "type": "string" } },
+          { "name": "target", "in": "query", "schema": { "type": "string", "enum": ["console", "guest"], "default": "console" }, "description": "console = the VRDE hypervisor console (agent-CA-verified TLS); guest = the guest's own RDP service at its host-reachable IP (chain forwarded unverified — the client pin is the trust)" }
+        ],
+        "responses": {
+          "101": { "description": "Switching Protocols — RDCleanPath handshake, then raw RDP flows" },
+          "400": { "description": "Machine not running, unknown target, no active VRDE console (console target), or no host-reachable guest IP (guest target)" },
+          "401": { "description": "Missing or invalid ticket" },
+          "404": { "description": "Machine not found, or no VM exists behind it yet" },
+          "503": { "description": "VirtualBox is not installed, or the agent CA is unavailable (console target)" }
+        }
+      }
+    },
+    "/machines/{machineName}/vrde-tls": {
+      "post": {
+        "tags": ["Console"],
+        "summary": "Set up VRDE TLS (Enhanced RDP Security)",
+        "description": "Minimum role: operator. Explicit VRDE TLS prep — NEAR-OBSOLETE since machine creation mints the TLS material from birth and the rdp-bridge SELF-HEALS unconfigured machines live at first connect (Mark's zero-click ruling 2026-07-11); kept as the manual prep path. Mints the machine's VRDE certificate signed by the AGENT CA (loopback SANs; files under <config dir>/ssl/vrde/<machine>/ — reused, never regenerated) and applies Security/Method=Negotiate + the certificate/key/CA paths. RUNNING machines: applied LIVE via controlvm vrdeproperty (status applied_live, requires_restart false — the VRDP server reads Security/* per connection; the VRDE listener restarts, dropping active RDP sessions, VM untouched), with the modifyvm-bound console extras (multi-con, reuse-con, usbtablet, usb keyboard, xHCI, clipboard) accrued for the next power cycle (pending_changes in the answer). POWERED-OFF machines: everything as one queued machine_modify. Negotiate keeps native clients (mstsc) connecting however they like; the bridge always asks for TLS and gets it.",
+        "parameters": [
+          { "name": "machineName", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "TLS applied live (running), setup queued (powered off), or accrued (live apply failed)",
+            "content": { "application/json": { "schema": { "type": "object", "properties": { "success": { "type": "boolean" }, "task_id": { "type": "string", "description": "Present when queued against a powered-off machine" }, "machine_name": { "type": "string" }, "operation": { "type": "string", "example": "machine_modify" }, "status": { "type": "string", "description": "applied_live (running — TLS active NOW, console extras accrued), pending (queued), or pending_power_cycle (accrued fallback)" }, "requires_restart": { "type": "boolean", "description": "false on applied_live — TLS needs no cycle; the accrued extras ride the next one" }, "pending_changes": { "type": "object", "description": "The machine's accrued set (the console extras on applied_live; everything on the fallback)" }, "certificate": { "type": "string", "description": "The minted VRDE certificate's path" }, "message": { "type": "string" } } } } }
+          },
+          "404": { "description": "Machine not found, or no VM exists behind it yet" },
+          "503": { "description": "VirtualBox is not installed" }
+        }
+      }
+    },
+    "/machines/{machineName}/guest/ping": {
+      "get": {
+        "tags": ["Guest Agent"],
+        "summary": "Probe the guest agent",
+        "description": "Minimum role: viewer. guest-ping over the machine's QGA channel — the readiness probe (UI gates the guest panel on it per machine). 502 with guidance when the channel or qemu-ga is absent.",
+        "parameters": [ { "name": "machineName", "in": "path", "required": true, "schema": { "type": "string" } } ],
+        "responses": {
+          "200": { "description": "Guest agent is responding", "content": { "application/json": { "schema": { "type": "object", "properties": { "success": { "type": "boolean" }, "machine_name": { "type": "string" }, "message": { "type": "string" } } } } } },
+          "400": { "description": "Machine is not running" },
+          "404": { "description": "Machine not found" },
+          "502": { "description": "Guest agent did not answer (no UART wired, or qemu-ga not running in the guest)" },
+          "503": { "description": "Guest agent channel is disabled (guest_agent.enabled)" }
+        }
+      }
+    },
+    "/machines/{machineName}/guest/osinfo": {
+      "get": {
+        "tags": ["Guest Agent"],
+        "summary": "Guest OS identity",
+        "description": "Minimum role: viewer. guest-get-osinfo verbatim: {id, name, pretty-name, version, kernel-release, machine, ...} — the guest's OWN self-report.",
+        "parameters": [ { "name": "machineName", "in": "path", "required": true, "schema": { "type": "string" } } ],
+        "responses": {
+          "200": { "description": "OS info", "content": { "application/json": { "schema": { "type": "object", "properties": { "machine_name": { "type": "string" }, "osinfo": { "type": "object" } } } } } },
+          "400": { "description": "Machine is not running" },
+          "404": { "description": "Machine not found" },
+          "502": { "description": "Guest agent did not answer" },
+          "503": { "description": "Guest agent channel is disabled" }
+        }
+      }
+    },
+    "/machines/{machineName}/guest/network": {
+      "get": {
+        "tags": ["Guest Agent"],
+        "summary": "Guest live network interfaces",
+        "description": "Minimum role: viewer. guest-network-get-interfaces verbatim: per-interface name, hardware-address, and live ip-addresses — REAL guest addressing with no Guest Additions (the same data feeding the RDP/SSH target ladders).",
+        "parameters": [ { "name": "machineName", "in": "path", "required": true, "schema": { "type": "string" } } ],
+        "responses": {
+          "200": { "description": "Interfaces", "content": { "application/json": { "schema": { "type": "object", "properties": { "machine_name": { "type": "string" }, "interfaces": { "type": "array", "items": { "type": "object" } } } } } } },
+          "400": { "description": "Machine is not running" },
+          "404": { "description": "Machine not found" },
+          "502": { "description": "Guest agent did not answer" },
+          "503": { "description": "Guest agent channel is disabled" }
+        }
+      }
+    },
+    "/machines/{machineName}/guest/exec": {
+      "post": {
+        "tags": ["Guest Agent"],
+        "summary": "Run a command in the guest",
+        "description": "Minimum role: operator. guest-exec with capture-output: path is the guest executable (absolute; no shell — wrap in /bin/sh -c or cmd.exe /c yourself for shell syntax), args[] its arguments. wait (default true) polls guest-exec-status until exit or timeout_seconds (default 30, max 600) and answers {exitcode, stdout, stderr} (base64 decoded); wait:false answers {pid} immediately for GET /machines/{name}/guest/exec/{pid}. Credential-less by design — the channel itself is the authority (operator role + the machine's own host).",
+        "parameters": [ { "name": "machineName", "in": "path", "required": true, "schema": { "type": "string" } } ],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "type": "object", "required": ["path"], "properties": { "path": { "type": "string", "example": "/usr/bin/uname" }, "args": { "type": "array", "items": { "type": "string" }, "example": ["-a"] }, "wait": { "type": "boolean", "default": true }, "timeout_seconds": { "type": "integer", "default": 30, "maximum": 600 } } } } }
+        },
+        "responses": {
+          "200": { "description": "Exit status with decoded output (wait), the pid (wait:false), or a still-running notice past the timeout", "content": { "application/json": { "schema": { "type": "object", "properties": { "success": { "type": "boolean" }, "machine_name": { "type": "string" }, "pid": { "type": "integer" }, "exited": { "type": "boolean" }, "exitcode": { "type": "integer" }, "stdout": { "type": "string" }, "stderr": { "type": "string" }, "message": { "type": "string" } } } } } },
+          "400": { "description": "Missing path, or machine is not running" },
+          "404": { "description": "Machine not found" },
+          "502": { "description": "Guest agent did not answer" },
+          "503": { "description": "Guest agent channel is disabled" }
+        }
+      }
+    },
+    "/machines/{machineName}/guest/exec/{pid}": {
+      "get": {
+        "tags": ["Guest Agent"],
+        "summary": "Poll a guest command",
+        "description": "Minimum role: viewer. guest-exec-status for a pid from POST /guest/exec: {exited, exitcode?, stdout?, stderr?} — output arrives once the process exits.",
+        "parameters": [
+          { "name": "machineName", "in": "path", "required": true, "schema": { "type": "string" } },
+          { "name": "pid", "in": "path", "required": true, "schema": { "type": "integer" } }
+        ],
+        "responses": {
+          "200": { "description": "Process status" },
+          "400": { "description": "Invalid pid, or machine is not running" },
+          "404": { "description": "Machine not found" },
+          "502": { "description": "Guest agent did not answer" },
+          "503": { "description": "Guest agent channel is disabled" }
+        }
+      }
+    },
+    "/machines/{machineName}/guest/shutdown": {
+      "post": {
+        "tags": ["Guest Agent"],
+        "summary": "Clean in-guest shutdown",
+        "description": "Minimum role: operator. guest-shutdown {mode: powerdown (default) | reboot | halt} — the guest's OWN orderly shutdown, cleaner than ACPI guessing. The guest may power off before replying; silence after delivery counts as success. The registry catches the resulting state change on its normal refresh — this is the GUEST acting, not a queued agent task.",
+        "parameters": [ { "name": "machineName", "in": "path", "required": true, "schema": { "type": "string" } } ],
+        "requestBody": {
+          "required": false,
+          "content": { "application/json": { "schema": { "type": "object", "properties": { "mode": { "type": "string", "enum": ["powerdown", "reboot", "halt"], "default": "powerdown" } } } } }
+        },
+        "responses": {
+          "200": { "description": "Shutdown requested through the guest agent" },
+          "400": { "description": "Invalid mode, or machine is not running" },
+          "404": { "description": "Machine not found" },
+          "502": { "description": "Guest agent did not answer" },
+          "503": { "description": "Guest agent channel is disabled" }
+        }
+      }
+    },
+    "/machines/{machineName}/guest-agent/setup": {
+      "post": {
+        "tags": ["Guest Agent"],
+        "summary": "Wire the guest-agent UART onto an existing machine",
+        "description": "Minimum role: operator. Machines created with zones.guest_agent: true get the UART at build — this opts in everything else (existing machines, discovered VMs, creates that omitted the flag): hardware.serial port 2 (0x2F8/IRQ3, uart-mode server onto the machine's deterministic pipe) rides the ordinary modify machinery — a machine_modify task against a powered-off machine, the accrue-changes contract (pending_power_cycle) otherwise. The GUEST half must run qemu-ga on its COM2 (current box templates bake the auto-transport config in; older guests need it added). A document that claims serial port 2 itself is never overridden at create; this endpoint is the explicit override.",
+        "parameters": [ { "name": "machineName", "in": "path", "required": true, "schema": { "type": "string" } } ],
+        "responses": {
+          "200": { "description": "Setup queued (powered off) or accrued (pending_power_cycle)", "content": { "application/json": { "schema": { "type": "object", "properties": { "success": { "type": "boolean" }, "task_id": { "type": "string" }, "machine_name": { "type": "string" }, "status": { "type": "string" }, "requires_restart": { "type": "boolean" }, "pending_changes": { "type": "object" }, "pipe": { "type": "string", "description": "The host-side channel address the UART serves" }, "message": { "type": "string" } } } } } },
+          "404": { "description": "Machine not found, or no VM exists behind it yet" },
+          "503": { "description": "VirtualBox is not installed, or the guest agent channel is disabled" }
         }
       }
     },
@@ -4119,7 +5370,7 @@
       "post": {
         "tags": ["Machine Management"],
         "summary": "Publish a template to a registry",
-        "description": "Minimum role: operator. Queues template_upload (the base's publish): exports the machine (or takes an existing .box by path), ensures the registry structure (box → version → provider virtualbox → architecture; duplicates tolerated), chunk-uploads the artifact (100MB chunks, three retries with backoff), and releases the box. Registry credentials live on the configured source ONLY (auth_token, or username+api_key exchanged for a JWT at signin; ca_file trusts self-signed registries) — tokens never ride task metadata, so the base's per-request auth_token has no analog.",
+        "description": "Minimum role: operator. Queues template_upload (the base's publish): exports the machine (or takes an existing .box by path), ensures the registry structure (box → version → provider virtualbox → architecture; duplicates tolerated), chunk-uploads the artifact (100MB chunks, three retries with backoff), and releases the box. Registry credentials live on the configured source ONLY (auth_token — the registry API key, a BoxVault service-account token sent as Bearer; ca_file trusts self-signed registries) — tokens never ride task metadata, so the base's per-request auth_token has no analog.",
         "requestBody": {
           "required": true,
           "content": { "application/json": { "schema": { "type": "object", "required": ["source_name", "organization", "box_name", "version"], "properties": { "machine_name": { "type": "string", "description": "Machine to export and publish (required unless box_path)" }, "box_path": { "type": "string", "description": "Existing .box file to publish (required unless machine_name)" }, "source_name": { "type": "string" }, "organization": { "type": "string" }, "box_name": { "type": "string" }, "version": { "type": "string" }, "description": { "type": "string" }, "architecture": { "type": "string", "default": "amd64" } } } } }

@@ -32,8 +32,6 @@ func (s *Server) templateSources() []machines.TemplateSource {
 			Enabled:   source.Enabled,
 			Default:   source.Default,
 			AuthToken: source.AuthToken,
-			Username:  source.Username,
-			APIKey:    source.APIKey,
 			CAFile:    source.CAFile,
 		})
 	}
@@ -272,6 +270,59 @@ func (s *Server) buildProvisionChain(ctx context.Context, machine *machines.Mach
 			}
 			childPrevious = &child.ID
 		}
+		previous = childPrevious
+	}
+
+	// The syncback phase (folders[].syncback — Mark's ruling 2026-07-12,
+	// replacing his Hosts.rb results hack): flagged folders pull guest→host
+	// AFTER the provision phase — one machine_syncback per flagged folder
+	// under a syncback parent, gated on the LAST playbook child (the same
+	// last-child rule the provision phase rides).
+	if syncbackChain, serr := s.buildSyncbackChain(ctx, machine.Name, v,
+		previous, parentID, createdBy); serr != nil {
+		return nil, serr
+	} else if syncbackChain != nil {
+		chain = append(chain, syncbackChain...)
+	}
+	return chain, nil
+}
+
+// buildSyncbackChain queues the syncback parent + one machine_syncback child
+// per flagged folder (nil when the document flags none). Shared by the
+// provision pipeline's post-provision phase and the ad-hoc sync handler.
+func (s *Server) buildSyncbackChain(ctx context.Context, machineName string,
+	v *provisionValidation, previous *string, parentID, createdBy string,
+) ([]map[string]any, error) {
+	syncbackFolders := machines.SyncbackFolders(machines.ProvisionerFolders(v.provisioner))
+	if len(syncbackFolders) == 0 {
+		return nil, nil
+	}
+	parentMeta, err := json.Marshal(map[string]any{"total_folders": len(syncbackFolders)})
+	if err != nil {
+		return nil, err
+	}
+	metadata := string(parentMeta)
+	syncbackParent, err := s.createChainTask(ctx, machineName, machines.OpSyncbackParent,
+		&metadata, previous, parentID, createdBy)
+	if err != nil {
+		return nil, err
+	}
+	chain := []map[string]any{{
+		"step": "syncback_parent", "task_id": syncbackParent.ID,
+		"folder_count": len(syncbackFolders),
+	}}
+	childPrevious := &syncbackParent.ID
+	for i := range syncbackFolders {
+		folderMeta, ferr := childMetadata(v, map[string]any{"folder": syncbackFolders[i]})
+		if ferr != nil {
+			return nil, ferr
+		}
+		child, cerr := s.createChainTask(ctx, machineName, machines.OpSyncbackFolder,
+			folderMeta, childPrevious, syncbackParent.ID, createdBy)
+		if cerr != nil {
+			return nil, cerr
+		}
+		childPrevious = &child.ID
 	}
 	return chain, nil
 }
@@ -394,10 +445,22 @@ func (s *Server) handleProvisionMachine(w http.ResponseWriter, r *http.Request) 
 }
 
 // handleSyncMachine creates the ad-hoc parentless sync chain (syncZone).
+// Body {"syncback": true} reverses it: ONLY the syncback-flagged folders
+// pull guest→host (folders[].syncback — the on-demand half of Mark's ruling
+// 2026-07-12; the plain call stays host→guest for every folder).
 func (s *Server) handleSyncMachine(w http.ResponseWriter, r *http.Request) {
 	machine := s.findMachine(w, r)
 	if machine == nil {
 		return
+	}
+	var body struct {
+		Syncback bool `json:"syncback"`
+	}
+	if r.ContentLength > 0 {
+		if err := decodeBody(r, &body); err != nil {
+			taskError(w, http.StatusBadRequest, "Invalid JSON body")
+			return
+		}
 	}
 	validation, problem := validateProvisionRequest(machine)
 	if problem != "" {
@@ -406,6 +469,29 @@ func (s *Server) handleSyncMachine(w http.ResponseWriter, r *http.Request) {
 	}
 	if problem := resolveTransport(r.Context(), machine, validation); problem != "" {
 		taskError(w, http.StatusBadRequest, problem)
+		return
+	}
+	if body.Syncback {
+		createdBy := auth.FromContext(r.Context()).Name
+		chain, serr := s.buildSyncbackChain(r.Context(), machine.Name, validation,
+			nil, "", createdBy)
+		if serr != nil {
+			slog.Error("create syncback chain", "machine", machine.Name, "error", serr)
+			taskError(w, http.StatusInternalServerError, "Failed to create syncback task chain")
+			return
+		}
+		if chain == nil {
+			taskError(w, http.StatusBadRequest,
+				"No folders are flagged syncback: true in provisioner metadata")
+			return
+		}
+		writeJSON(w, map[string]any{
+			"success":        true,
+			"message":        "Machine syncback task chain created for " + machine.Name,
+			"machine_name":   machine.Name,
+			"parent_task_id": chain[0]["task_id"],
+			"folder_count":   chain[0]["folder_count"],
+		})
 		return
 	}
 	folders := machines.ProvisionerFolders(validation.provisioner)
@@ -859,6 +945,28 @@ func (s *Server) handlePullTemplate(w http.ResponseWriter, r *http.Request) {
 		meta.SourceName = source.Name
 	}
 	meta.Provider = machines.TemplateProvider
+	// Already-exists pre-check (the base's rule, mirrored 2026-07-12): answer
+	// an honest 409 with the existing row instead of queueing a download the
+	// executor would no-op. FindTemplate self-heals stale rows (disk image
+	// deleted by hand), so a re-pull after manual cleanup still works.
+	existing, ferr := s.machines.FindTemplate(r.Context(), meta.Organization,
+		meta.BoxName, meta.Version, meta.Architecture)
+	switch {
+	case ferr == nil:
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusConflict)
+		if werr := json.NewEncoder(w).Encode(map[string]any{
+			"error":       "Template already exists locally",
+			"template_id": existing.ID,
+		}); werr != nil {
+			slog.Error("write template conflict response", "error", werr)
+		}
+		return
+	case !errors.Is(ferr, machines.ErrTemplateNotFound):
+		slog.Error("check existing template", "error", ferr)
+		taskError(w, http.StatusInternalServerError, "Failed to queue template download")
+		return
+	}
 	raw, err := json.Marshal(&meta)
 	if err != nil {
 		taskError(w, http.StatusInternalServerError, "Failed to queue template download")

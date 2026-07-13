@@ -60,11 +60,23 @@ type statusPayload struct {
 // source=current); machine-screenshot with the no-session framebuffer PNG
 // (GET /machines/{name}/vnc/screenshot — zoneweaver serves the same endpoint
 // from the bhyve framebuffer and gains the token in its own session).
+// host-launchers shipped with the SHI open-directory/open-FTP parity (Mark's
+// both-ways ruling 2026-07-07): agent-host launch endpoints + the /ftp info
+// endpoint — meaningful UI only in Direct desktop mode, but always truthful.
+// host-terminal shipped with the /term family (Mark's go 2026-07-07): a
+// shell on the agent host itself, admin-only, over the platform PTY
+// (creack/pty on Unix, ConPTY on Windows).
+// ssh is a FEATURE, not a console (Mark's placement ruling 2026-07-12):
+// console[] carries EMERGENCY consoles only — hypervisor-level surfaces that
+// work with zero guest cooperation (VRDE rdp here; vnc/zlogin on bhyve). The
+// machine SSH terminal rides the guest's own network and credentials, so it
+// advertises as features:ssh — zoneweaver's home, now shared.
 var platformFeatures = []string{
 	"tasks", "machines", "machine-suspend", "machine-create",
 	"machine-modify", "machine-snapshots", "machine-screenshot",
 	"swap", "monitoring", "processes", "provisioning",
-	"provisioner-registry", "secrets", "templates",
+	"provisioner-registry", "secrets", "ssh", "templates",
+	"host-launchers", "host-terminal",
 }
 
 // features derives the advertised token list: platform tokens plus the
@@ -76,8 +88,14 @@ func (s *Server) features() []string {
 	if s.cfg.HostPower.Enabled {
 		tokens = append(tokens, "host-power")
 	}
-	if s.cfg.Assets.Enabled {
+	if s.cfg.ArtifactStorage.Enabled {
 		tokens = append(tokens, "artifacts")
+	}
+	if s.cfg.FileBrowser.Enabled {
+		tokens = append(tokens, "file-browser")
+	}
+	if s.cfg.GuestAgent.Enabled {
+		tokens = append(tokens, "guest-agent")
 	}
 	return tokens
 }
@@ -94,10 +112,13 @@ func archName() string {
 	}
 }
 
-// consoles derives the advertised console list: ssh always (the terminal
-// surface has no extra requirement), vnc when a usable VBoxVNC module exists.
+// consoles derives the advertised console list — EMERGENCY consoles only
+// (Mark's placement ruling 2026-07-12): rdp always (base VRDP ships in
+// VirtualBox 7.2 and the RDCleanPath bridge is built in — the IronRDP web
+// client's transport), vnc when a usable VBoxVNC module exists. The SSH
+// terminal is guest-network access and advertises as features:ssh.
 func (s *Server) consoles(ctx context.Context) []string {
-	list := []string{"ssh"}
+	list := []string{"rdp"}
 	if vncConsoleAvailable(ctx) {
 		list = append(list, "vnc")
 	}
@@ -127,21 +148,13 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		// accepts API keys ('apikey', never 'local' — different login form).
 		Auth:               []string{"apikey"},
 		BootstrapAvailable: bootstrapAvailable,
-		// Console stays empty until the console phase ships. VNC-capability
-		// detection when it does (Mark's recipe, 2026-07-06): parse
+		// VNC-capability detection (Mark's recipe, 2026-07-06): parse
 		// `VBoxManage list extpacks` — each pack block's "VRDE Module:" line
 		// names its remote-display backend (VBoxVNC = VNC extpack, VBoxVRDP =
 		// Oracle RDP) and must pair with "Usable: true". The mere presence of
 		// a pack proves nothing: Mark's Oracle pack 7.2.12 reports an EMPTY
-		// VRDE Module. `VBoxManage list systemproperties` → "Default VRDE ext
-		// pack" says which module VMs use (set: VBoxManage setproperty
-		// vrdeextpack VNC); per-VM it's `modifyvm --vrde on` + VNC properties.
-		// Advertise ["vnc"] only when a usable VBoxVNC module exists.
-		// ssh shipped with the SSH terminal sessions (POST
-		// /machines/{name}/ssh/start + the /ssh/{id} WebSocket); vnc
-		// advertises only when a usable VBoxVNC VRDE module exists (the
-		// detection recipe above — the websockify bridge needs RFB on the
-		// VRDE port).
+		// VRDE Module. Advertise vnc only when a usable VBoxVNC module exists
+		// (the websockify bridge needs RFB on the VRDE port).
 		Console:  s.consoles(r.Context()),
 		Features: s.features(),
 		SHIMode:  s.cfg.UI.SHIMode,

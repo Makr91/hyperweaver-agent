@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os/exec"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/Makr91/hyperweaver-agent/internal/procattr"
@@ -227,4 +228,60 @@ func EnumerateGuestProperties(ctx context.Context, vboxManage, name string) ([]G
 // (`controlvm screenshotpng`) — no console session needed.
 func Screenshot(ctx context.Context, vboxManage, name, pngPath string) error {
 	return runSimple(ctx, vboxManage, "controlvm", name, "screenshotpng", pngPath)
+}
+
+// InjectNMI injects a non-maskable interrupt into a running machine
+// (`debugvm injectnmi`) — the diagnostic trigger for guest crash dumps and
+// kernel debuggers; zoneweaver's `bhyvectl --inject-nmi` analog.
+func InjectNMI(ctx context.Context, vboxManage, name string) error {
+	return runSimple(ctx, vboxManage, "debugvm", name, "injectnmi")
+}
+
+// SharedFolderAdd registers a shared folder on a machine (`sharedfolder add`
+// — works on running machines too; VirtualBox hot-adds through the session).
+// automount + an auto-mount-point let Guest Additions mount it without any
+// guest command.
+func SharedFolderAdd(ctx context.Context, vboxManage, name, shareName, hostPath, autoMountPoint string) error {
+	args := []string{
+		"sharedfolder", "add", name,
+		"--name=" + shareName, "--hostpath=" + hostPath, "--automount",
+	}
+	if autoMountPoint != "" {
+		args = append(args, "--auto-mount-point="+autoMountPoint)
+	}
+	return runConfig(ctx, vboxManage, args...)
+}
+
+// ImportAppliance imports an OVA/OVF into VirtualBox (`import --vsys 0`) —
+// export's missing pair. vmName and baseFolder override the appliance's own
+// suggestions when set.
+func ImportAppliance(ctx context.Context, vboxManage, path, vmName, baseFolder string) error {
+	args := []string{"import", path, "--vsys", "0"}
+	if vmName != "" {
+		args = append(args, "--vmname", vmName)
+	}
+	if baseFolder != "" {
+		args = append(args, "--basefolder", baseFolder)
+	}
+	return runSimple(ctx, vboxManage, args...)
+}
+
+// MoveVM relocates a machine's VirtualBox files (`movevm --type basic`) —
+// the .vbox, snapshots, and every medium stored with the machine land under
+// folder. Powered-off machines only (VirtualBox refuses otherwise).
+func MoveVM(ctx context.Context, vboxManage, name, folder string) error {
+	return runSimple(ctx, vboxManage, "movevm", name, "--type", "basic", "--folder", folder)
+}
+
+// SetVideoModeHint asks the guest to resize its display
+// (`controlvm setvideomodehint`) — honored by guests running Guest Additions.
+func SetVideoModeHint(ctx context.Context, vboxManage, name string, width, height, depth, display int) error {
+	args := []string{
+		"controlvm", name, "setvideomodehint",
+		strconv.Itoa(width), strconv.Itoa(height), strconv.Itoa(depth),
+	}
+	if display > 0 {
+		args = append(args, strconv.Itoa(display))
+	}
+	return runSimple(ctx, vboxManage, args...)
 }

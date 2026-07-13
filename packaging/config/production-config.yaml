@@ -159,10 +159,12 @@ machines:
   server_id_start: 1
   # When machine-create/clone requests carry no explicit name, derive it as
   # <server_id>--<hostname>.<domain> (the partition-id convention). Explicit
-  # names always win — machine names stay free-form.
-  prefix_machine_names: false
-  # Seconds a graceful stop waits for the guest to power off after the ACPI
-  # signal before forcing poweroff.
+  # names always win — machine names stay free-form. With this on,
+  # settings.server_id is REQUIRED at create (GET /machines/ids/next feeds it).
+  prefix_machine_names: true
+  # Seconds a graceful stop waits for the guest to power off after the
+  # graceful signal (the QEMU guest-agent's own shutdown when the channel
+  # answers, else the ACPI power button) before forcing poweroff.
   shutdown_timeout: 120
   # Keep provisioned machines running when the agent exits (SHI's
   # keepserversrunning). false force-powers-off every machine this agent
@@ -232,26 +234,152 @@ template_sources:
   # Template storage root (<root>/<organization>/<box>/<version>/).
   # Empty = <data.dir>/templates (/var/lib/hyperweaver-agent/templates).
   local_storage_path: ''
-  # Vagrant/BoxVault-compatible registries. The entry named "Default
-  # Registry" (or flagged default) serves requests that name no source;
-  # auth_token authenticates private boxes (it never enters task metadata).
+  # Vagrant/BoxVault-compatible registries. The entry flagged default serves
+  # requests that name no source; names are display-only. auth_token
+  # authenticates private boxes (it never enters task metadata).
   sources:
-    - name: Default Registry
+    - name: STARTcloud BoxVault
       url: https://boxvault.startcloud.com
       enabled: true
       default: true
       auth_token: ''
 
-assets:
-  # Installer file cache (the artifacts capability token): hash-verified
-  # installer/fixpack/hotfix files that machines mount at start. A file that
-  # is absent, unhashed, or failing verification never reaches a machine.
+artifact_storage:
+  # The merged artifact system (the artifacts capability token): typed
+  # storage locations — iso, image, installer, fixpack, hotfix — with one
+  # scan, one SHA-256 checksum store, one /artifacts surface. Installer-
+  # family files are hash-verified before they ever reach a machine.
   enabled: true
-  # Cache root (layout: <dir>/<role>/{installers,fixpacks,hotfixes}/<file>).
-  # Empty = <data.dir>/file-cache (/var/lib/hyperweaver-agent/file-cache).
+  # Parent of the built-in locations (<dir>/isos, images, installers,
+  # fixpacks, hotfixes).
+  # Empty = <data.dir>/artifacts (/var/lib/hyperweaver-agent/artifacts).
   dir: ''
   # Upload size cap in GiB.
   max_upload_gb: 50
+  download:
+    # Timeout for one URL download.
+    timeout_seconds: 3600
+  scanning:
+    # Seconds between automatic location scans (0 disables; startup always
+    # scans once).
+    periodic_scan_interval: 300
+    # Extensions the iso/image scans register. Empty = the defaults
+    # (iso: .iso; image: .vmdk .raw .vdi .qcow2 .img .ova .ovf).
+    supported_extensions: {}
+  # Additional storage locations beyond the built-ins:
+  #   paths:
+  #     - name: Big ISO Shelf
+  #       path: /tank/isos
+  #       type: iso
+  #       enabled: true
+  # The storage-path API persists its entries here too.
+  paths: []
+
+file_browser:
+  # Host file browser (the file-browser capability token): GET /filesystem
+  # lists agent-host directories, and the /filesystem mutate family edits
+  # them — create/rename/move/copy/delete, text content read/write,
+  # upload/download, archives, permissions (the UI's path pickers and file
+  # manager). Set false to remove the whole surface.
+  enabled: true
+  # Confine browsing to this directory: "/" maps here and anything outside
+  # answers 403. Empty = unrestricted — "/" lists the host's drive letters
+  # on Windows and the real filesystem root elsewhere.
+  root: ''
+  # Size cap for one POST /filesystem/upload body, in GiB.
+  upload_size_limit_gb: 50
+  security:
+    # Reject paths carrying ".." or "~".
+    prevent_traversal: true
+    # Refuse listing directories larger than this.
+    max_directory_entries: 1000
+    # Files larger than this (MB) are refused by the text content
+    # read/write endpoints (download/upload stream without this bound).
+    max_edit_size_mb: 100
+    # Any path underneath these prefixes is forbidden.
+    forbidden_paths:
+      - /dev
+      - /proc
+      - /sys
+    # Glob-style patterns (* matches anything) that forbid matching paths.
+    forbidden_patterns: []
+  archive:
+    # Archive creation/extraction endpoints (task-queued).
+    enabled: true
+    # A created archive larger than this (MB) is deleted and the task fails.
+    max_archive_size_mb: 10240
+    # Formats POST /filesystem/archive/create accepts. This agent creates
+    # zip, tar, and tar.gz natively; extraction additionally handles
+    # tar.bz2 and .gz regardless of this list.
+    supported_formats:
+      - zip
+      - tar
+      - tar.gz
+
+guest_agent:
+  # QEMU guest-agent channel (the guest-agent capability token): the MASTER
+  # gate. The UART itself is a per-machine create option (zones.guest_agent,
+  # default false — the Proxmox model, shared with zoneweaver) or an opt-in
+  # via POST /machines/{name}/guest-agent/setup; guests run qemu-ga on the
+  # COM2 → host-pipe channel (baked into the box templates), and
+  # /machines/{name}/guest/* speaks the credential-less JSON protocol — live
+  # guest IPs, exec, clean shutdown — with no SSH and no Guest Additions.
+  # Set false to disable per-machine wiring and remove the surface entirely.
+  enabled: true
+
+snapshots:
+  # Scheduled machine snapshot rotation (zoneweaver's snapshots vocabulary on
+  # VBoxManage snapshots). The default policy below applies to EVERY machine
+  # unless a machine overrides it (the PUT /machines/{name} `snapshots` field;
+  # type none disables per machine, null clears back to this default).
+  # Defaults are deliberately CONSERVATIVE for VirtualBox: snapshot creation
+  # is CoW-thin, but pruning is a physical disk merge and snapshots of
+  # running machines carry RAM state.
+  enabled: false
+  # Cadence for simple/age policies in minutes; rotation ignores it and rides
+  # the fixed schedule (hourly :00 hours 1-23, daily 00:00 Sun-Fri, weekly
+  # 00:00 Sat).
+  interval_minutes: 60
+  default_policy:
+    # none | simple (keep newest N auto-*) | age (delete auto-* older than
+    # max_age_days) | rotation (hourly/daily/weekly tiers).
+    type: none
+    # Run qga fsfreeze around each snapshot when the guest agent answers
+    # (application-consistent; crash-consistent otherwise, never blocking).
+    quiesce: false
+    # simple: newest N auto snapshots to keep.
+    keep: 3
+    # age: delete auto snapshots older than this many days.
+    max_age_days: 7
+    # rotation: per-tier keep counts.
+    tiers:
+      hourly:
+        keep: 2
+      daily:
+        keep: 3
+      weekly:
+        keep: 2
+
+# External applications the agent can launch on its own desktop against a
+# machine (the UI's per-machine launch menu; Direct-mode desktop contract —
+# on a headless service these open on the service host's desktop, i.e.
+# nowhere useful). Args placeholders: {host} {port} {user} {password} —
+# resolved through the machine's SSH transport ladder and stored
+# credentials — and {machine}.
+#   applications:
+#     - name: PuTTY
+#       path: /usr/bin/putty
+#       args: ["-ssh", "{user}@{host}", "-P", "{port}"]
+applications: []
+
+ticket_system:
+  # Help & Support link in the UI's profile dropdown (served publicly at
+  # GET /api/config/ticket). The link renders only when enabled AND base_url
+  # are set.
+  enabled: true
+  base_url: https://xd.prominic.net/app/apprequest.nsf/router?openagent
+  req_type: sso
+  context: https://github.com/Makr91/hyperweaver-agent
 
 cleanup:
   # Seconds between periodic cleanup runs (task retention).

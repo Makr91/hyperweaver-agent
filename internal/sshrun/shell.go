@@ -37,14 +37,18 @@ func (w shellWriter) Write(p []byte) (int, error) {
 // StartShell connects and opens an interactive shell with a PTY
 // (xterm-256color, the base's term). onData receives remote output; Wait
 // blocks until the remote side ends the shell. The context bounds the
-// CONNECT; the shell itself lives until Close or remote exit.
+// CONNECT ONLY: the watchdog disarms once connected, so the shell lives
+// until Close or remote exit — cancelling the connect context after a
+// successful connect must never kill the live terminal (the runtime-found
+// 2026-07-09 instant "SSH connection closed").
 func StartShell(ctx context.Context, ip string, port int, credentials Credentials,
 	basePath, defaultKeyPath string, cols, rows int, onData func(string),
 ) (*Shell, error) {
-	client, closeClient, err := connectSSH(ctx, ip, port, credentials, basePath, defaultKeyPath)
+	client, closeClient, disarm, err := connectSSH(ctx, ip, port, credentials, basePath, defaultKeyPath)
 	if err != nil {
 		return nil, err
 	}
+	disarm()
 	fail := func(ferr error) (*Shell, error) {
 		closeClient()
 		return nil, ferr

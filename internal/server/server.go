@@ -45,10 +45,12 @@ type Server struct {
 	provisioners *provisioner.Registry
 	secrets      *secrets.Store
 	assets       *assets.Store
+	artifactSvc  *assets.Service
 	monitor      *monitoring.Service
 	dbs          []DBHandle
 	wsTickets    *wsTickets
 	sshSessions  *sshSessions
+	termSessions *termSessions
 	httpSrv      *http.Server
 	listener     net.Listener
 	startedAt    time.Time
@@ -70,7 +72,7 @@ type Server struct {
 }
 
 // New builds the server and its routes.
-func New(cfg *config.Config, keyStore *keys.Store, trayTokens *auth.TrayTokens, taskQueue *tasks.Queue, machineStore *machines.Store, provisioners *provisioner.Registry, secretsStore *secrets.Store, assetsStore *assets.Store, monitor *monitoring.Service, dbs []DBHandle, restartArgs []string, openUI func()) (*Server, error) {
+func New(cfg *config.Config, keyStore *keys.Store, trayTokens *auth.TrayTokens, taskQueue *tasks.Queue, machineStore *machines.Store, provisioners *provisioner.Registry, secretsStore *secrets.Store, assetsStore *assets.Store, artifactSvc *assets.Service, monitor *monitoring.Service, dbs []DBHandle, restartArgs []string, openUI func()) (*Server, error) {
 	s := &Server{
 		cfg:          cfg,
 		keys:         keyStore,
@@ -80,10 +82,12 @@ func New(cfg *config.Config, keyStore *keys.Store, trayTokens *auth.TrayTokens, 
 		provisioners: provisioners,
 		secrets:      secretsStore,
 		assets:       assetsStore,
+		artifactSvc:  artifactSvc,
 		monitor:      monitor,
 		dbs:          dbs,
 		wsTickets:    newWsTickets(),
 		sshSessions:  newSSHSessions(),
+		termSessions: newTermSessions(),
 		startedAt:    time.Now(),
 		restartArgs:  restartArgs,
 		openUI:       openUI,
@@ -95,6 +99,9 @@ func New(cfg *config.Config, keyStore *keys.Store, trayTokens *auth.TrayTokens, 
 	// /status is the canonical path, /api/status the SPA's discovery alias.
 	mux.HandleFunc("GET /status", s.handleStatus)
 	mux.HandleFunc("GET /api/status", s.handleStatus)
+	// Public ticket-system config (the UI's Help & Support link — the
+	// Server's /api/config/ticket served here too, so Direct mode has it).
+	mux.HandleFunc("GET /api/config/ticket", s.handleTicketConfig)
 
 	// API-key surface (Agent API v1 local tier). Bootstrap is public (gated
 	// by config + the setup token); everything else goes through the auth
@@ -175,6 +182,10 @@ func New(cfg *config.Config, keyStore *keys.Store, trayTokens *auth.TrayTokens, 
 	mux.Handle("POST /database/vacuum", requireKey(http.HandlerFunc(s.handleDatabaseVacuum)))
 	mux.Handle("POST /database/analyze", requireKey(http.HandlerFunc(s.handleDatabaseAnalyze)))
 	mux.Handle("POST /database/cleanup", requireKey(http.HandlerFunc(s.handleDatabaseCleanup)))
+	// Read-only explorer drill-down (zoneweaver's contract, shared wire): the
+	// literal /database/stats wins over {db} in ServeMux precedence.
+	mux.Handle("GET /database/{db}/tables", requireKey(http.HandlerFunc(s.handleListDatabaseTables)))
+	mux.Handle("GET /database/{db}/tables/{table}/rows", requireKey(http.HandlerFunc(s.handleBrowseDatabaseTable)))
 
 	// Host statistics (shared v1 stats shape). stats.public_access serves it
 	// without a key (the Node agent's conditional /stats registration).
@@ -196,6 +207,17 @@ func New(cfg *config.Config, keyStore *keys.Store, trayTokens *auth.TrayTokens, 
 
 	// SSH terminal sessions (the base's SSHTerminal family): REST lifecycle
 	// behind the key; the /ssh/{sessionId} WebSocket authenticates by ticket.
+	// Host terminal sessions (zoneweaver's /term family — a shell on the
+	// agent host as the agent's own user): REST lifecycle admin-only (the
+	// auth policy's /term prefix); the /term/{sessionId} WebSocket
+	// authenticates by ticket, its session id mintable only by an admin.
+	// Literal /term/start and /term/sessions win over {sessionId}.
+	mux.Handle("POST /term/start", requireKey(http.HandlerFunc(s.handleStartTermSession)))
+	mux.Handle("GET /term/sessions", requireKey(http.HandlerFunc(s.handleListTermSessions)))
+	mux.Handle("GET /term/sessions/{sessionId}", requireKey(http.HandlerFunc(s.handleTermSessionInfo)))
+	mux.Handle("DELETE /term/sessions/{sessionId}/stop", requireKey(http.HandlerFunc(s.handleStopTermSession)))
+	mux.HandleFunc("GET /term/{sessionId}", s.handleTermSocket)
+
 	mux.Handle("POST /machines/{machineName}/ssh/start", requireKey(http.HandlerFunc(s.handleStartSSHSession)))
 	mux.Handle("GET /ssh/sessions", requireKey(http.HandlerFunc(s.handleListSSHSessions)))
 	mux.Handle("GET /ssh/sessions/{sessionId}", requireKey(http.HandlerFunc(s.handleSSHSessionInfo)))
@@ -221,12 +243,26 @@ func New(cfg *config.Config, keyStore *keys.Store, trayTokens *auth.TrayTokens, 
 	mux.Handle("POST /machines/orchestration/disable", requireKey(http.HandlerFunc(s.handleOrchestrationDisable)))
 	mux.Handle("POST /machines/orchestration/test", requireKey(http.HandlerFunc(s.handleOrchestrationTest)))
 	mux.Handle("GET /machines/priorities", requireKey(http.HandlerFunc(s.handleMachinePriorities)))
+	// Create-time defaults document (the wizard's "(default: …)" labels).
+	mux.Handle("GET /machines/defaults", requireKey(http.HandlerFunc(s.handleMachineCreateDefaults)))
+	// Guest OS type vocabulary (the wizard's settings.os_type dropdown).
+	mux.Handle("GET /machines/ostypes", requireKey(http.HandlerFunc(s.handleMachineOSTypes)))
 	mux.Handle("GET /machines/ids", requireKey(http.HandlerFunc(s.handleServerIDs)))
 	mux.Handle("GET /machines/ids/next", requireKey(http.HandlerFunc(s.handleNextServerID)))
 	mux.Handle("POST /machines/bulk/start", requireKey(http.HandlerFunc(s.handleBulkStart)))
 	mux.Handle("POST /machines/bulk/stop", requireKey(http.HandlerFunc(s.handleBulkStop)))
+	// OVA/OVF appliance import — export's pair (Mark's verb-survey go
+	// 2026-07-12).
+	mux.Handle("POST /machines/import", requireKey(http.HandlerFunc(s.handleImportMachine)))
+	// Unattended OS install: ISO probe + the per-machine install below.
+	mux.Handle("GET /machines/unattended/detect", requireKey(http.HandlerFunc(s.handleUnattendedDetect)))
 	mux.Handle("GET /machines/{machineName}", requireKey(http.HandlerFunc(s.handleMachineDetails)))
 	mux.Handle("PUT /machines/{machineName}", requireKey(http.HandlerFunc(s.handleModifyMachine)))
+	// Accrue-changes cancel + apply-now (the agreed contract, 2026-07-09):
+	// DELETE clears the pending set a PUT against a non-powered-off machine
+	// stored; POST applies it immediately to a powered-off machine.
+	mux.Handle("DELETE /machines/{machineName}/pending-changes", requireKey(http.HandlerFunc(s.handleClearPendingChanges)))
+	mux.Handle("POST /machines/{machineName}/pending-changes/apply", requireKey(http.HandlerFunc(s.handleApplyPendingChanges)))
 	mux.Handle("GET /machines/{machineName}/config", requireKey(http.HandlerFunc(s.handleMachineConfig)))
 	mux.Handle("POST /machines/{machineName}/start", requireKey(http.HandlerFunc(s.handleStartMachine)))
 	mux.Handle("POST /machines/{machineName}/stop", requireKey(http.HandlerFunc(s.handleStopMachine)))
@@ -235,6 +271,25 @@ func New(cfg *config.Config, keyStore *keys.Store, trayTokens *auth.TrayTokens, 
 	mux.Handle("POST /machines/{machineName}/reset", requireKey(http.HandlerFunc(s.handleResetMachine)))
 	mux.Handle("POST /machines/{machineName}/pause", requireKey(http.HandlerFunc(s.handlePauseMachine)))
 	mux.Handle("POST /machines/{machineName}/resume", requireKey(http.HandlerFunc(s.handleResumeMachine)))
+	// NMI injection (zoneweaver's diagnostic extra, mirrored on Mark's go
+	// 2026-07-12: debugvm injectnmi ↔ bhyvectl --inject-nmi). Synchronous.
+	mux.Handle("POST /machines/{machineName}/nmi", requireKey(http.HandlerFunc(s.handleInjectNMI)))
+	// movevm relocation + the guest display resize hint (verb survey).
+	mux.Handle("POST /machines/{machineName}/move", requireKey(http.HandlerFunc(s.handleMoveMachine)))
+	mux.Handle("POST /machines/{machineName}/display", requireKey(http.HandlerFunc(s.handleSetDisplay)))
+	// USB passthrough: host device list + live attach/detach + persistent
+	// capture filters (verb survey).
+	mux.Handle("GET /system/usb", requireKey(http.HandlerFunc(s.handleListHostUSB)))
+	mux.Handle("POST /machines/{machineName}/usb/attach", requireKey(http.HandlerFunc(s.handleUSBAttach)))
+	mux.Handle("POST /machines/{machineName}/usb/detach", requireKey(http.HandlerFunc(s.handleUSBDetach)))
+	mux.Handle("GET /machines/{machineName}/usb/filters", requireKey(http.HandlerFunc(s.handleListUSBFilters)))
+	mux.Handle("POST /machines/{machineName}/usb/filters", requireKey(http.HandlerFunc(s.handleAddUSBFilter)))
+	mux.Handle("DELETE /machines/{machineName}/usb/filters/{filterIndex}", requireKey(http.HandlerFunc(s.handleRemoveUSBFilter)))
+	// UEFI Secure Boot lifecycle + Guest Additions exec (verb survey).
+	mux.Handle("POST /machines/{machineName}/nvram/secureboot", requireKey(http.HandlerFunc(s.handleSecureBoot)))
+	mux.Handle("POST /machines/{machineName}/guestcontrol/run", requireKey(http.HandlerFunc(s.handleGuestControlRun)))
+	// Unattended OS install onto an existing machine.
+	mux.Handle("POST /machines/{machineName}/unattended", requireKey(http.HandlerFunc(s.handleUnattendedInstall)))
 	// Snapshot family (VBoxManage snapshot — yardstick 2) + the no-session
 	// console screenshot (controlvm screenshotpng).
 	mux.Handle("GET /machines/{machineName}/snapshots", requireKey(http.HandlerFunc(s.handleListSnapshots)))
@@ -245,6 +300,37 @@ func New(cfg *config.Config, keyStore *keys.Store, trayTokens *auth.TrayTokens, 
 	mux.Handle("GET /machines/{machineName}/vnc", requireKey(http.HandlerFunc(s.handleVncInfo)))
 	mux.HandleFunc("GET /machines/{machineName}/vnc/websockify", s.handleVncWebsockify)
 	mux.Handle("GET /machines/{machineName}/guest-properties", requireKey(http.HandlerFunc(s.handleGuestProperties)))
+	// Machine launchers (SHI's Open Directory / Open FTP, Direct-mode
+	// desktop): the POSTs launch on the AGENT host; GET /ftp feeds a remote
+	// UI's own sftp:// handoff.
+	mux.Handle("GET /machines/{machineName}/ftp", requireKey(http.HandlerFunc(s.handleMachineFTPInfo)))
+	mux.Handle("POST /machines/{machineName}/open-ftp", requireKey(http.HandlerFunc(s.handleOpenMachineFTP)))
+	mux.Handle("POST /machines/{machineName}/open-directory", requireKey(http.HandlerFunc(s.handleOpenMachineDirectory)))
+	// External-applications launcher registry (config applications[] — SHI's
+	// per-server app buttons, generalized): the list feeds the UI's launch
+	// menu; the launch spawns the chosen tool on the agent host against the
+	// machine with the connection placeholders resolved.
+	mux.Handle("GET /applications", requireKey(http.HandlerFunc(s.handleListApplications)))
+	mux.Handle("POST /machines/{machineName}/applications/{appName}/launch", requireKey(http.HandlerFunc(s.handleLaunchApplication)))
+	// RDP launcher (Mark's settled two-target design 2026-07-09): the VRDE
+	// console (base VRDP, no extpack) and a guest's own RDP service.
+	mux.Handle("GET /machines/{machineName}/rdp", requireKey(http.HandlerFunc(s.handleMachineRDPInfo)))
+	mux.Handle("POST /machines/{machineName}/open-rdp", requireKey(http.HandlerFunc(s.handleOpenMachineRDP)))
+	// Browser-RDP (the IronRDP web client): the RDCleanPath WebSocket bridge
+	// onto the VRDE port (ticket-authed) + the turnkey VRDE TLS setup
+	// Enhanced security demands.
+	mux.HandleFunc("GET /machines/{machineName}/rdp-bridge", s.handleRDPBridge)
+	mux.Handle("POST /machines/{machineName}/vrde-tls", requireKey(http.HandlerFunc(s.handleVRDETLSSetup)))
+	// The QEMU guest-agent channel (the guest-agent token, config-gated by
+	// guest_agent.enabled): credential-less guest control over the COM2→pipe
+	// UART — live IPs, exec, clean shutdown; no SSH, no Guest Additions.
+	mux.Handle("GET /machines/{machineName}/guest/ping", requireKey(s.guestAgentGate(s.handleGuestPing)))
+	mux.Handle("GET /machines/{machineName}/guest/osinfo", requireKey(s.guestAgentGate(s.handleGuestOSInfo)))
+	mux.Handle("GET /machines/{machineName}/guest/network", requireKey(s.guestAgentGate(s.handleGuestNetwork)))
+	mux.Handle("POST /machines/{machineName}/guest/exec", requireKey(s.guestAgentGate(s.handleGuestExec)))
+	mux.Handle("GET /machines/{machineName}/guest/exec/{pid}", requireKey(s.guestAgentGate(s.handleGuestExecStatus)))
+	mux.Handle("POST /machines/{machineName}/guest/shutdown", requireKey(s.guestAgentGate(s.handleGuestShutdown)))
+	mux.Handle("POST /machines/{machineName}/guest-agent/setup", requireKey(s.guestAgentGate(s.handleGuestAgentSetup)))
 	mux.Handle("POST /machines/{machineName}/clone", requireKey(http.HandlerFunc(s.handleCloneMachine)))
 	mux.Handle("POST /machines/{machineName}/provision", requireKey(http.HandlerFunc(s.handleProvisionMachine)))
 	mux.Handle("GET /machines/{machineName}/provision/status", requireKey(http.HandlerFunc(s.handleProvisionStatus)))
@@ -288,21 +374,59 @@ func New(cfg *config.Config, keyStore *keys.Store, trayTokens *auth.TrayTokens, 
 	mux.Handle("DELETE /provisioning/profiles/{profileId}", requireKey(http.HandlerFunc(s.handleDeleteProfile)))
 	mux.Handle("GET /provisioning/provisioners", requireKey(http.HandlerFunc(s.handleListProvisioners)))
 	mux.Handle("POST /provisioning/provisioners/import", requireKey(http.HandlerFunc(s.handleImportProvisioner)))
+	mux.Handle("POST /provisioning/provisioners/refresh-specs", requireKey(http.HandlerFunc(s.handleRefreshProvisionerSpecs)))
 	mux.Handle("GET /provisioning/provisioners/{name}", requireKey(http.HandlerFunc(s.handleProvisionerDetails)))
 	mux.Handle("DELETE /provisioning/provisioners/{name}", requireKey(http.HandlerFunc(s.handleDeleteProvisioner)))
 	mux.Handle("GET /provisioning/provisioners/{name}/versions/{version}", requireKey(http.HandlerFunc(s.handleProvisionerVersion)))
 	mux.Handle("DELETE /provisioning/provisioners/{name}/versions/{version}", requireKey(http.HandlerFunc(s.handleDeleteProvisionerVersion)))
 
-	// Installer file cache (the `artifacts` token, config-gated by
-	// assets.enabled — Mark's ruling 2026-07-06: hash verification in full).
-	// Literal segments win over {id} in ServeMux precedence.
+	// The merged artifact system (the `artifacts` token, config-gated by
+	// artifact_storage.enabled — Mark's ruling 2026-07-09): zoneweaver's
+	// /artifacts wire contract with the merged type vocabulary, plus the SHI
+	// extras (hcl-download, register). Literal segments win over {id} in
+	// ServeMux precedence.
+	mux.Handle("GET /artifacts/storage/paths", requireKey(s.assetsGate(s.handleListStoragePaths)))
+	mux.Handle("POST /artifacts/storage/paths", requireKey(s.assetsGate(s.handleCreateStoragePath)))
+	mux.Handle("PUT /artifacts/storage/paths/{id}", requireKey(s.assetsGate(s.handleUpdateStoragePath)))
+	mux.Handle("DELETE /artifacts/storage/paths/{id}", requireKey(s.assetsGate(s.handleDeleteStoragePath)))
 	mux.Handle("GET /artifacts", requireKey(s.assetsGate(s.handleListArtifacts)))
+	mux.Handle("GET /artifacts/iso", requireKey(s.assetsGate(s.handleListISOArtifacts)))
+	mux.Handle("GET /artifacts/image", requireKey(s.assetsGate(s.handleListImageArtifacts)))
+	mux.Handle("GET /artifacts/stats", requireKey(s.assetsGate(s.handleArtifactStats)))
+	mux.Handle("GET /artifacts/service/status", requireKey(s.assetsGate(s.handleArtifactServiceStatus)))
+	mux.Handle("GET /artifacts/{id}", requireKey(s.assetsGate(s.handleArtifactDetails)))
+	mux.Handle("GET /artifacts/{id}/download", requireKey(s.assetsGate(s.handleDownloadArtifactFile)))
+	// move/copy share one {action} pattern: separate /artifacts/{id}/move and
+	// /artifacts/{id}/copy patterns CONFLICT with /artifacts/upload/{taskId}
+	// (neither is more specific — ServeMux panics at registration); the
+	// {id}/{action} shape is a strict superset the upload pattern wins over.
+	mux.Handle("POST /artifacts/{id}/{action}", requireKey(s.assetsGate(s.handleArtifactAction)))
+	mux.Handle("POST /artifacts/download", requireKey(s.assetsGate(s.handleArtifactDownloadFromURL)))
+	mux.Handle("POST /artifacts/upload/prepare", requireKey(s.assetsGate(s.handlePrepareArtifactUpload)))
+	mux.Handle("POST /artifacts/upload/{taskId}", requireKey(s.assetsGate(s.handleUploadArtifactToTask)))
 	mux.Handle("POST /artifacts/scan", requireKey(s.assetsGate(s.handleScanArtifacts)))
-	mux.Handle("POST /artifacts/download", requireKey(s.assetsGate(s.handleDownloadArtifact)))
+	mux.Handle("DELETE /artifacts/files", requireKey(s.assetsGate(s.handleDeleteArtifactFiles)))
 	mux.Handle("POST /artifacts/hcl-download", requireKey(s.assetsGate(s.handleHCLDownload)))
-	mux.Handle("POST /artifacts/upload", requireKey(s.assetsGate(s.handleUploadArtifact)))
 	mux.Handle("POST /artifacts/register", requireKey(s.assetsGate(s.handleRegisterArtifact)))
-	mux.Handle("DELETE /artifacts/{id}", requireKey(s.assetsGate(s.handleDeleteArtifact)))
+
+	// Host file browser (the `file-browser` token, config-gated by
+	// file_browser.enabled — zoneweaver's full browse + mutate/archive
+	// family, Mark's 1:1 go 2026-07-12; operator-only via the central
+	// policy's /filesystem rule).
+	mux.Handle("GET /filesystem", requireKey(s.fileBrowserGate(s.handleBrowseFilesystem)))
+	mux.Handle("DELETE /filesystem", requireKey(s.fileBrowserGate(s.handleDeleteFileItem)))
+	mux.Handle("POST /filesystem/folder", requireKey(s.fileBrowserGate(s.handleCreateFolder)))
+	mux.Handle("GET /filesystem/content", requireKey(s.fileBrowserGate(s.handleReadFileContent)))
+	mux.Handle("PUT /filesystem/content", requireKey(s.fileBrowserGate(s.handleWriteFileContent)))
+	mux.Handle("GET /filesystem/download", requireKey(s.fileBrowserGate(s.handleDownloadFile)))
+	mux.Handle("POST /filesystem/upload", requireKey(s.fileBrowserGate(s.handleUploadFile)))
+	mux.Handle("PATCH /filesystem/rename", requireKey(s.fileBrowserGate(s.handleRenameItem)))
+	mux.Handle("PUT /filesystem/move", requireKey(s.fileBrowserGate(s.handleTransferItem(opFileMove, "move"))))
+	mux.Handle("POST /filesystem/copy", requireKey(s.fileBrowserGate(s.handleTransferItem(opFileCopy, "copy"))))
+	mux.Handle("POST /filesystem/archive/create", requireKey(s.fileBrowserGate(s.handleCreateArchive)))
+	mux.Handle("POST /filesystem/archive/extract", requireKey(s.fileBrowserGate(s.handleExtractArchive)))
+	mux.Handle("PATCH /filesystem/permissions", requireKey(s.fileBrowserGate(s.handleChangePermissions)))
+	s.registerFilesystemExecutors()
 
 	// Global secrets store (architecture D-C, SHI's SecretsPage categories) —
 	// admin-only via the central role policy; separate from /settings so that

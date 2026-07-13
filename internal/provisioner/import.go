@@ -271,6 +271,7 @@ func (e *executors) importCollection(root string, out *tasks.OutputWriter) error
 		if cerr := copyTree(versionRoot, target); cerr != nil {
 			return cerr
 		}
+		narrateRoleSpecs(target, out)
 		imported++
 	}
 
@@ -322,8 +323,23 @@ func (e *executors) importVersion(root string, out *tasks.OutputWriter) error {
 	if cerr := copyTree(root, target); cerr != nil {
 		return cerr
 	}
+	narrateRoleSpecs(target, out)
 	out.Write("stdout", "Import complete: "+name+"/"+version+"\n")
 	return nil
+}
+
+// narrateRoleSpecs builds the imported version's role-specs cache (Mark's
+// argument-specs ruling — derived at import); failures narrate, never fail
+// the import (the read path self-heals).
+func narrateRoleSpecs(versionRoot string, out *tasks.OutputWriter) {
+	count, err := BuildRoleSpecs(versionRoot)
+	if err != nil {
+		out.Write("stderr", "role-specs cache build failed (rebuilt on first read): "+err.Error()+"\n")
+		return
+	}
+	if count > 0 {
+		out.Write("stdout", "Cached argument specs for "+strconv.Itoa(count)+" role(s)\n")
+	}
 }
 
 // findPackageRoot searches dir (breadth-first, rootSearchDepth levels) for a

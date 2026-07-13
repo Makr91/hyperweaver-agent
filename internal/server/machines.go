@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"time"
 
 	"github.com/Makr91/hyperweaver-agent/internal/auth"
@@ -120,7 +121,19 @@ func (s *Server) handleMachineDetails(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	systemStatus := liveMachineStatus(r.Context(), machine)
+	// One showvminfo serves the status probe AND knob_current's reverse map
+	// (liveMachineStatus would discard the view).
+	var live *vbox.Info
+	exe := machines.VBoxManagePath(r.Context())
+	systemStatus := "not_found"
+	if exe != "" {
+		probeCtx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
+		if info, err := vbox.ShowVMInfo(probeCtx, exe, machine.VBoxTarget()); err == nil {
+			live = info
+			systemStatus = machines.MapVBoxState(info.State)
+		}
+		cancel()
+	}
 	if systemStatus == "not_found" {
 		// Created-but-never-started machines (configured, no UUID) have no
 		// VM by design; report their stored status.
@@ -172,6 +185,41 @@ func (s *Server) handleMachineDetails(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// knob_current: the current values in PUT's own vocabulary (the Edit
+	// surface's prefill). showvminfo's ostype is the DESCRIPTION; the ID PUT
+	// takes resolves through this build's own ostypes feed.
+	osTypeID := ""
+	if live != nil && live.OSType != "" {
+		if types, terr := vbox.ListOSTypes(r.Context(), exe); terr == nil {
+			for _, t := range types {
+				if t.Description == live.OSType {
+					osTypeID = t.ID
+					break
+				}
+			}
+		}
+	}
+	// The accrued pending set (the accrue-changes contract) — null when none.
+	var pendingChanges any
+	if pending := machines.ParseConfiguration(fresh).Section("pending_changes"); len(pending) > 0 {
+		pendingChanges = pending
+	}
+
+	var liveRaw map[string]string
+	var settingsFile *vbox.MachineSettings
+	if live != nil {
+		liveRaw = live.Raw
+		// The .vbox settings fill the knobs showvminfo never emits; a failed
+		// read just leaves them absent (unknowable stays honest).
+		if live.ConfigFile != "" {
+			if ms, merr := vbox.ReadMachineSettings(live.ConfigFile); merr == nil {
+				settingsFile = ms
+			} else {
+				slog.Debug("read machine settings file", "machine", machine.Name, "error", merr)
+			}
+		}
+	}
+
 	writeJSON(w, map[string]any{
 		"machine_info":       fresh,
 		"configuration":      configuration,
@@ -179,6 +227,8 @@ func (s *Server) handleMachineDetails(w http.ResponseWriter, r *http.Request) {
 		"pending_tasks":      active,
 		"system_status":      systemStatus,
 		"web_address":        webAddress,
+		"knob_current":       machines.KnobCurrent(fresh, liveRaw, osTypeID, settingsFile),
+		"pending_changes":    pendingChanges,
 	})
 }
 
@@ -245,6 +295,41 @@ func operationResponse(w http.ResponseWriter, taskID any, machineName, operation
 	writeJSON(w, payload)
 }
 
+// queuePendingApply chains a machine_modify task carrying the machine's
+// accrued pending changes (the accrue-changes contract's apply half). The
+// _apply_pending marker makes the executor clear them on success; a failed
+// apply keeps them pending. Nil when nothing is pending or queueing failed
+// (a queue failure never blocks the power operation itself).
+func (s *Server) queuePendingApply(ctx context.Context, machine *machines.Machine,
+	dependsOn *string, createdBy string,
+) *tasks.Task {
+	pending := machines.ParseConfiguration(machine).Section("pending_changes")
+	if len(pending) == 0 {
+		return nil
+	}
+	pending["_apply_pending"] = true
+	raw, err := json.Marshal(pending)
+	if err != nil {
+		slog.Error("serialize pending changes", "machine", machine.Name, "error", err)
+		return nil
+	}
+	metadata := string(raw)
+	task, err := s.tasks.Store().Create(ctx, &tasks.NewTask{
+		MachineName: machine.Name,
+		Operation:   machines.OpModify,
+		Priority:    tasks.PriorityMedium,
+		CreatedBy:   createdBy,
+		DependsOn:   dependsOn,
+		Metadata:    &metadata,
+	})
+	if err != nil {
+		slog.Error("queue pending-changes apply", "machine", machine.Name, "error", err)
+		return nil
+	}
+	slog.Info("pending changes apply queued", "machine", machine.Name, "task_id", task.ID)
+	return task
+}
+
 // handleStartMachine queues a start task — one native VBoxManage boot for
 // every machine (the provision pipeline queues this same operation as its
 // boot child).
@@ -281,19 +366,30 @@ func (s *Server) handleStartMachine(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Accrued pending changes apply FIRST (modify → start chain) — the safety
+	// net for machines powered off outside the agent. Start depends on the
+	// modify: a bad pending value fails the boot honestly instead of booting
+	// and pretending the changes applied.
+	createdBy := auth.FromContext(r.Context()).Name
+	var dependsOn *string
+	message := "Start task queued successfully"
+	if applyTask := s.queuePendingApply(r.Context(), machine, nil, createdBy); applyTask != nil {
+		dependsOn = &applyTask.ID
+		message = "Pending changes apply queued, start chained after it"
+	}
 	task, err := s.tasks.Store().Create(r.Context(), &tasks.NewTask{
 		MachineName: machine.Name,
 		Operation:   machines.OpStart,
 		Priority:    tasks.PriorityMedium,
-		CreatedBy:   auth.FromContext(r.Context()).Name,
+		CreatedBy:   createdBy,
+		DependsOn:   dependsOn,
 	})
 	if err != nil {
 		slog.Error("queue start task", "machine", machine.Name, "error", err)
 		taskError(w, http.StatusInternalServerError, "Failed to queue start task")
 		return
 	}
-	operationResponse(w, task.ID, machine.Name, machines.OpStart, tasks.StatusPending,
-		"Start task queued successfully")
+	operationResponse(w, task.ID, machine.Name, machines.OpStart, tasks.StatusPending, message)
 }
 
 // cancelPendingStarts cancels pending start tasks before a stop (Node agent
@@ -350,11 +446,12 @@ func (s *Server) handleStopMachine(w http.ResponseWriter, r *http.Request) {
 		taskError(w, http.StatusInternalServerError, "Failed to queue stop task")
 		return
 	}
+	createdBy := auth.FromContext(r.Context()).Name
 	task, err := s.tasks.Store().Create(r.Context(), &tasks.NewTask{
 		MachineName: machine.Name,
 		Operation:   machines.OpStop,
 		Priority:    tasks.PriorityHigh,
-		CreatedBy:   auth.FromContext(r.Context()).Name,
+		CreatedBy:   createdBy,
 		Metadata:    metadata,
 	})
 	if err != nil {
@@ -362,8 +459,12 @@ func (s *Server) handleStopMachine(w http.ResponseWriter, r *http.Request) {
 		taskError(w, http.StatusInternalServerError, "Failed to queue stop task")
 		return
 	}
-	operationResponse(w, task.ID, machine.Name, machines.OpStop, tasks.StatusPending,
-		"Stop task queued successfully")
+	// Accrued pending changes apply right after the power-off.
+	message := "Stop task queued successfully"
+	if s.queuePendingApply(r.Context(), machine, &task.ID, createdBy) != nil {
+		message = "Stop task queued, pending changes apply chained after it"
+	}
+	operationResponse(w, task.ID, machine.Name, machines.OpStop, tasks.StatusPending, message)
 }
 
 func stopMetadataJSON(force bool) (*string, error) {
@@ -402,12 +503,17 @@ func (s *Server) handleRestartMachine(w http.ResponseWriter, r *http.Request) {
 		taskError(w, http.StatusInternalServerError, "Failed to queue restart tasks")
 		return
 	}
+	// Accrued pending changes slot between stop and start.
+	startDependsOn := &stopTask.ID
+	if applyTask := s.queuePendingApply(r.Context(), machine, &stopTask.ID, createdBy); applyTask != nil {
+		startDependsOn = &applyTask.ID
+	}
 	startTask, err := s.tasks.Store().Create(r.Context(), &tasks.NewTask{
 		MachineName: machine.Name,
 		Operation:   machines.OpStart,
 		Priority:    tasks.PriorityMedium,
 		CreatedBy:   createdBy,
-		DependsOn:   &stopTask.ID,
+		DependsOn:   startDependsOn,
 	})
 	if err != nil {
 		slog.Error("queue restart start task", "machine", machine.Name, "error", err)
@@ -544,6 +650,40 @@ func (s *Server) handleResumeMachine(w http.ResponseWriter, r *http.Request) {
 		"Resume task queued successfully")
 }
 
+// handleInjectNMI serves POST /machines/{machineName}/nmi — inject a
+// non-maskable interrupt into the running machine (VBoxManage debugvm
+// injectnmi): the diagnostic trigger for guest crash dumps / kernel
+// debuggers, zoneweaver's bhyvectl --inject-nmi mirror (Mark's parity go
+// 2026-07-12). Synchronous like the base's — the injection is instantaneous,
+// no task row.
+func (s *Server) handleInjectNMI(w http.ResponseWriter, r *http.Request) {
+	machine := s.findMachine(w, r)
+	if machine == nil {
+		return
+	}
+	exe := machines.VBoxManagePath(r.Context())
+	if exe == "" {
+		taskError(w, http.StatusServiceUnavailable, "VirtualBox is not installed")
+		return
+	}
+	if liveMachineStatus(r.Context(), machine) != machines.StatusRunning {
+		taskError(w, http.StatusBadRequest, "Can only inject an NMI into a running machine")
+		return
+	}
+	if err := vbox.InjectNMI(r.Context(), exe, machine.VBoxTarget()); err != nil {
+		slog.Error("inject nmi", "machine", machine.Name, "error", err)
+		taskError(w, http.StatusInternalServerError, "Failed to inject NMI")
+		return
+	}
+	slog.Info("nmi injected", "machine", machine.Name,
+		"by", auth.FromContext(r.Context()).Name)
+	writeJSON(w, map[string]any{
+		"success":      true,
+		"machine_name": machine.Name,
+		"message":      "NMI injected",
+	})
+}
+
 // handleMachineScreenshot serves a PNG of the running machine's framebuffer
 // (`controlvm screenshotpng`) — the base's no-session screenshot endpoint;
 // synchronous, no console session needed.
@@ -637,7 +777,14 @@ func snapshotMetadataJSON(name, description string, live bool) (*string, error) 
 	return &s, nil
 }
 
-// handleTakeSnapshot queues snapshot_take: body {name, description?, live?}.
+// snapshotNamePattern is the snapshot name/prefix vocabulary shared with
+// zoneweaver (its SNAPSHOT_NAME_PATTERN).
+var snapshotNamePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.:-]{0,255}$`)
+
+// handleTakeSnapshot queues snapshot_take: body {name} OR {prefix,
+// retention?} (Snapshoter-style rotation naming <prefix>-YYYYMMDD-HHMM with
+// keep-newest-N pruning — zoneweaver's take contract), plus description?,
+// quiesce? (qga fsfreeze around the take), live? (--live, no pause).
 func (s *Server) handleTakeSnapshot(w http.ResponseWriter, r *http.Request) {
 	machine := s.findMachine(w, r)
 	if machine == nil {
@@ -645,23 +792,45 @@ func (s *Server) handleTakeSnapshot(w http.ResponseWriter, r *http.Request) {
 	}
 	var body struct {
 		Name        string `json:"name"`
+		Prefix      string `json:"prefix"`
+		Retention   int    `json:"retention"`
 		Description string `json:"description"`
+		Quiesce     bool   `json:"quiesce"`
 		Live        bool   `json:"live"`
 	}
 	if err := decodeBody(r, &body); err != nil {
 		taskError(w, http.StatusBadRequest, "Invalid JSON body")
 		return
 	}
-	if body.Name == "" {
-		taskError(w, http.StatusBadRequest, "name is required")
+	if body.Name == "" && body.Prefix == "" {
+		taskError(w, http.StatusBadRequest, "name or prefix is required")
 		return
 	}
-	metadata, err := snapshotMetadataJSON(body.Name, body.Description, body.Live)
+	label := body.Name
+	if label == "" {
+		label = body.Prefix
+	}
+	if !snapshotNamePattern.MatchString(label) {
+		taskError(w, http.StatusBadRequest, "snapshot name/prefix contains unsupported characters")
+		return
+	}
+	if body.Retention < 0 {
+		body.Retention = 0
+	}
+	raw, err := json.Marshal(map[string]any{
+		"snapshot_name": body.Name,
+		"prefix":        body.Prefix,
+		"retention":     body.Retention,
+		"description":   body.Description,
+		"quiesce":       body.Quiesce,
+		"live":          body.Live,
+	})
 	if err != nil {
 		taskError(w, http.StatusInternalServerError, "Failed to queue snapshot task")
 		return
 	}
-	s.queueMachineOp(w, r, machine, machines.OpSnapshotTake, tasks.PriorityMedium, metadata,
+	metadata := string(raw)
+	s.queueMachineOp(w, r, machine, machines.OpSnapshotTake, tasks.PriorityMedium, &metadata,
 		"Snapshot task queued successfully")
 }
 
@@ -742,6 +911,63 @@ func (s *Server) handleGuestProperties(w http.ResponseWriter, r *http.Request) {
 		"properties":   entries,
 		"total":        len(entries),
 	})
+}
+
+// handleClearPendingChanges cancels the machine's accrued pending changes
+// (the accrue-changes contract's cancel path — v1 clears the whole set).
+func (s *Server) handleClearPendingChanges(w http.ResponseWriter, r *http.Request) {
+	machine := s.findMachine(w, r)
+	if machine == nil {
+		return
+	}
+	pending := machines.ParseConfiguration(machine).Section("pending_changes")
+	keys := make([]string, 0, len(pending))
+	for key := range pending {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	if err := s.machines.ClearPendingChanges(r.Context(), machine.Name); err != nil {
+		slog.Error("clear pending changes", "machine", machine.Name, "error", err)
+		taskError(w, http.StatusInternalServerError, "Failed to clear pending changes")
+		return
+	}
+	slog.Info("pending changes cleared", "machine", machine.Name,
+		"keys", len(keys), "by", auth.FromContext(r.Context()).Name)
+	writeJSON(w, map[string]any{
+		"success":      true,
+		"machine_name": machine.Name,
+		"cleared_keys": keys,
+		"message":      "Pending changes cleared",
+	})
+}
+
+// handleApplyPendingChanges applies the accrued pending changes NOW, without
+// a power transition — the stopped-with-pending case (machine shut down from
+// inside the guest or the GUI, user wants the changes in without booting).
+func (s *Server) handleApplyPendingChanges(w http.ResponseWriter, r *http.Request) {
+	machine := s.findMachine(w, r)
+	if machine == nil {
+		return
+	}
+	pending := machines.ParseConfiguration(machine).Section("pending_changes")
+	if len(pending) == 0 {
+		taskError(w, http.StatusBadRequest, "No pending changes to apply")
+		return
+	}
+	switch liveMachineStatus(r.Context(), machine) {
+	case machines.StatusStopped, machines.StatusAborted:
+	default:
+		taskError(w, http.StatusBadRequest,
+			"Machine must be powered off to apply pending changes now — they apply automatically at the next agent-driven power cycle")
+		return
+	}
+	task := s.queuePendingApply(r.Context(), machine, nil, auth.FromContext(r.Context()).Name)
+	if task == nil {
+		taskError(w, http.StatusInternalServerError, "Failed to queue pending-changes apply")
+		return
+	}
+	operationResponse(w, task.ID, machine.Name, machines.OpModify, tasks.StatusPending,
+		"Pending changes apply queued")
 }
 
 // handleDeleteMachine: running machines need force=true, which chains a

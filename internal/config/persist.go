@@ -25,6 +25,33 @@ func validateConfigBytes(raw []byte) error {
 	return candidate.validate()
 }
 
+// normalizeNumbers rewrites whole-valued floats as ints, recursively through
+// maps and slices. JSON decoding types every number float64, so without this
+// a settings save writes port: 9420.0 into the YAML (Mark's fix order
+// 2026-07-08 — the config had float-ified integers everywhere). Fractional
+// values pass through untouched.
+func normalizeNumbers(value any) any {
+	switch typed := value.(type) {
+	case float64:
+		if typed == float64(int64(typed)) {
+			return int64(typed)
+		}
+		return typed
+	case map[string]any:
+		for key, entry := range typed {
+			typed[key] = normalizeNumbers(entry)
+		}
+		return typed
+	case []any:
+		for i, entry := range typed {
+			typed[i] = normalizeNumbers(entry)
+		}
+		return typed
+	default:
+		return value
+	}
+}
+
 // MergeAndSave merges the submitted top-level sections onto the on-disk
 // configuration and persists the result. A backup of the current file is
 // created first. Comments in the file are lost on save (same trade-off as the
@@ -41,7 +68,12 @@ func (c *Config) MergeAndSave(updates map[string]any) error {
 	}
 
 	for key, value := range updates {
-		current[key] = value
+		current[key] = normalizeNumbers(value)
+	}
+	// The current file may already carry float-ified integers from earlier
+	// saves — normalize the whole document on the way out, healing it.
+	for key, value := range current {
+		current[key] = normalizeNumbers(value)
 	}
 
 	merged, err := yaml.Marshal(current)

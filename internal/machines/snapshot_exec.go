@@ -5,7 +5,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
+	"strings"
+	"time"
 
+	"github.com/Makr91/hyperweaver-agent/internal/qga"
 	"github.com/Makr91/hyperweaver-agent/internal/tasks"
 	"github.com/Makr91/hyperweaver-agent/internal/vbox"
 )
@@ -24,16 +28,28 @@ const (
 	OpCloneCurrent    = "machine_clone_current"
 )
 
-// snapshotMetadata is the snapshot tasks' metadata document.
+// snapshotMetadata is the snapshot tasks' metadata document. Take accepts a
+// literal snapshot_name OR prefix (+ retention / max_age_days) — the
+// Snapshoter-style rotation semantics shared with zoneweaver: the snapshot is
+// named <prefix>-YYYYMMDD-HHMM and the prune keeps the newest N (or drops
+// aged-out) <prefix>-* snapshots after the take.
 type snapshotMetadata struct {
 	SnapshotName string `json:"snapshot_name"`
+	Prefix       string `json:"prefix,omitempty"`
+	Retention    int    `json:"retention,omitempty"`
+	MaxAgeDays   int    `json:"max_age_days,omitempty"`
 	Description  string `json:"description,omitempty"`
 	// Live takes the snapshot without pausing a running machine (--live).
 	Live bool `json:"live,omitempty"`
+	// Quiesce runs qga fsfreeze around the take when the guest agent answers
+	// (application-consistent; a silent channel narrates and the snapshot
+	// proceeds crash-consistent).
+	Quiesce bool `json:"quiesce,omitempty"`
 }
 
-// readSnapshotMetadata parses a snapshot task's metadata.
-func readSnapshotMetadata(task *tasks.Task) (*snapshotMetadata, error) {
+// readSnapshotMetadata parses a snapshot task's metadata. allowPrefix lets
+// the take task name by prefix instead of a literal snapshot_name.
+func readSnapshotMetadata(task *tasks.Task, allowPrefix bool) (*snapshotMetadata, error) {
 	if task.Metadata == nil {
 		return nil, errors.New("snapshot task has no metadata")
 	}
@@ -41,30 +57,146 @@ func readSnapshotMetadata(task *tasks.Task) (*snapshotMetadata, error) {
 	if err := json.Unmarshal([]byte(*task.Metadata), &meta); err != nil {
 		return nil, fmt.Errorf("parse snapshot metadata: %w", err)
 	}
-	if meta.SnapshotName == "" {
+	if meta.SnapshotName == "" && (!allowPrefix || meta.Prefix == "") {
 		return nil, errors.New("snapshot task metadata has no snapshot_name")
 	}
 	return &meta, nil
 }
 
-// snapshotTake executes snapshot_take (`VBoxManage snapshot take`).
+// snapshotTimestampLayout names rotation snapshots — lexicographic order IS
+// chronological order, so the prune sorts by name (VirtualBox snapshots carry
+// no queryable creation time the machinereadable list exposes).
+const snapshotTimestampLayout = "20060102-1504"
+
+// snapshotTake executes snapshot_take (`VBoxManage snapshot take`): quiesce →
+// take → retention/age prune (prefix-scoped, exactly zoneweaver's semantics).
 func (e *executors) snapshotTake(ctx context.Context, task *tasks.Task, out *tasks.OutputWriter) error {
 	machine, vboxExe, err := e.resolve(ctx, task)
 	if err != nil {
 		return err
 	}
-	meta, err := readSnapshotMetadata(task)
+	meta, err := readSnapshotMetadata(task, true)
 	if err != nil {
 		return err
 	}
-	out.Write("stdout", "Taking snapshot "+meta.SnapshotName+" of "+machine.Name+"\n")
-	if serr := vbox.TakeSnapshot(ctx, vboxExe, machine.VBoxTarget(),
-		meta.SnapshotName, meta.Description, meta.Live); serr != nil {
+	name := meta.SnapshotName
+	if name == "" {
+		name = meta.Prefix + "-" + time.Now().Format(snapshotTimestampLayout)
+	}
+
+	e.taskProgress(task, 20, "taking_snapshot")
+	thaw := func() {}
+	if meta.Quiesce {
+		thaw = e.freezeGuest(ctx, machine, vboxExe, out)
+	}
+	out.Write("stdout", "Taking snapshot "+name+" of "+machine.Name+"\n")
+	serr := vbox.TakeSnapshot(ctx, vboxExe, machine.VBoxTarget(),
+		name, meta.Description, meta.Live)
+	thaw()
+	if serr != nil {
 		out.Write("stderr", "Snapshot failed: "+serr.Error()+"\n")
 		return serr
 	}
-	out.Write("stdout", "Snapshot "+meta.SnapshotName+" taken\n")
+	out.Write("stdout", "Snapshot "+name+" taken\n")
+
+	// The prune runs only for prefix-named takes (rotation semantics) — a
+	// literal named snapshot never deletes anything. Prune failures narrate
+	// and never fail the take: the snapshot itself exists.
+	if meta.Prefix != "" && (meta.Retention > 0 || meta.MaxAgeDays > 0) {
+		e.taskProgress(task, 90, "pruning_snapshots")
+		e.pruneSnapshots(ctx, vboxExe, machine.VBoxTarget(), meta.Prefix,
+			meta.Retention, meta.MaxAgeDays, out)
+	}
+	e.taskProgress(task, 100, "completed")
 	return nil
+}
+
+// freezeGuest runs qga guest-fsfreeze-freeze before a snapshot and returns
+// the thaw (always safe to call) — application-consistent when the guest
+// agent answers; any failure narrates and the snapshot proceeds
+// crash-consistent, never blocking (zoneweaver's freezeGuest contract).
+func (e *executors) freezeGuest(ctx context.Context, machine *Machine, vboxExe string,
+	out *tasks.OutputWriter,
+) func() {
+	noop := func() {}
+	if !e.env.GuestAgentEnabled {
+		return noop
+	}
+	if info, ierr := vbox.ShowVMInfo(ctx, vboxExe, machine.VBoxTarget()); ierr != nil ||
+		MapVBoxState(info.State) != StatusRunning {
+		return noop
+	}
+	workdir := e.machineWorkdir(machine.Name)
+	if machine.Home != nil && *machine.Home != "" {
+		workdir = *machine.Home
+	}
+	pipe := qga.PipePath(workdir, machine.Name)
+	freezeCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	if _, ferr := qga.Do(freezeCtx, pipe, "guest-fsfreeze-freeze", nil); ferr != nil {
+		out.Write("stdout", "Guest agent fsfreeze unavailable ("+ferr.Error()+") — snapshot proceeds crash-consistent\n")
+		return noop
+	}
+	out.Write("stdout", "Guest filesystems frozen (qga fsfreeze)\n")
+	return func() {
+		thawCtx, thawCancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer thawCancel()
+		if _, terr := qga.Do(thawCtx, pipe, "guest-fsfreeze-thaw", nil); terr != nil {
+			out.Write("stderr", "fsfreeze thaw failed: "+terr.Error()+"\n")
+			return
+		}
+		out.Write("stdout", "Guest filesystems thawed\n")
+	}
+}
+
+// pruneSnapshots applies the rotation retention to <prefix>-* snapshots:
+// keep the newest retention (0 = keep all), then drop those older than
+// maxAgeDays (0 = no age limit). Names sort chronologically by construction
+// (the timestamp suffix); snapshots whose suffix does not parse are left
+// alone. Every deletion narrates; failures never fail the caller — on
+// VirtualBox a snapshot delete is a physical disk merge, which is exactly
+// why the defaults keep so few.
+func (e *executors) pruneSnapshots(ctx context.Context, vboxExe, target, prefix string,
+	retention, maxAgeDays int, out *tasks.OutputWriter,
+) {
+	list, err := vbox.ListSnapshots(ctx, vboxExe, target)
+	if err != nil {
+		out.Write("stderr", "Snapshot prune skipped — list failed: "+err.Error()+"\n")
+		return
+	}
+	matching := []string{}
+	for i := range list {
+		if strings.HasPrefix(list[i].Name, prefix+"-") {
+			matching = append(matching, list[i].Name)
+		}
+	}
+	sort.Strings(matching)
+
+	remove := func(name, reason string) {
+		out.Write("stdout", "Pruning "+name+" ("+reason+")\n")
+		if derr := vbox.DeleteSnapshot(ctx, vboxExe, target, name); derr != nil {
+			out.Write("stderr", name+": "+derr.Error()+"\n")
+		}
+	}
+	if retention > 0 && len(matching) > retention {
+		for _, name := range matching[:len(matching)-retention] {
+			remove(name, "retention")
+		}
+		matching = matching[len(matching)-retention:]
+	}
+	if maxAgeDays > 0 {
+		cutoff := time.Now().AddDate(0, 0, -maxAgeDays)
+		for _, name := range matching {
+			stamp, perr := time.ParseInLocation(snapshotTimestampLayout,
+				strings.TrimPrefix(name, prefix+"-"), time.Local)
+			if perr != nil {
+				continue
+			}
+			if stamp.Before(cutoff) {
+				remove(name, "aged out")
+			}
+		}
+	}
 }
 
 // snapshotRestore executes snapshot_restore. VirtualBox refuses restores on a
@@ -75,7 +207,7 @@ func (e *executors) snapshotRestore(ctx context.Context, task *tasks.Task, out *
 	if err != nil {
 		return err
 	}
-	meta, err := readSnapshotMetadata(task)
+	meta, err := readSnapshotMetadata(task, false)
 	if err != nil {
 		return err
 	}
@@ -103,7 +235,7 @@ func (e *executors) snapshotDelete(ctx context.Context, task *tasks.Task, out *t
 	if err != nil {
 		return err
 	}
-	meta, err := readSnapshotMetadata(task)
+	meta, err := readSnapshotMetadata(task, false)
 	if err != nil {
 		return err
 	}

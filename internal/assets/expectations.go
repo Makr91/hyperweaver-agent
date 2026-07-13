@@ -40,15 +40,22 @@ var kindByGroup = map[string]string{
 
 // SeedExpectations loads the bundled expectations into the registry —
 // insert-if-absent, so user-observed reality is never overwritten (SHI's
-// initializeWithDefaults semantics). Malformed seed data is logged and
-// skipped, never fatal: expectations are advisory until a file references
-// them.
+// initializeWithDefaults semantics). Entries land in each kind's default
+// storage location (the built-in cache), so the locations must be synced
+// first. Malformed seed data is logged and skipped, never fatal.
 func SeedExpectations(ctx context.Context, store *Store) error {
 	var registry map[string]map[string][]shiRegistryEntry
 	if err := json.Unmarshal(initialRegistryJSON, &registry); err != nil {
 		alog().Error("bundled initial-registry.json is not SHI registry format — no expectations seeded",
 			"error", err)
 		return nil
+	}
+
+	locations := map[string]*Location{}
+	for _, kind := range []string{KindInstaller, KindFixpack, KindHotfix} {
+		if location, err := store.DefaultLocation(ctx, kind); err == nil {
+			locations[kind] = location
+		}
 	}
 
 	seeded := 0
@@ -63,14 +70,19 @@ func SeedExpectations(ctx context.Context, store *Store) error {
 				alog().Warn("skipping unknown initial-registry group", "role", role, "group", group)
 				continue
 			}
+			location := locations[kind]
+			if location == nil {
+				alog().Warn("no storage location for initial-registry kind", "kind", kind)
+				continue
+			}
 			for _, entry := range entries {
 				if !ValidFilename(entry.FileName) || entry.SHA256 == "" {
 					alog().Warn("skipping unusable initial-registry entry",
 						"role", role, "group", group, "filename", entry.FileName)
 					continue
 				}
-				if err := store.SeedExpectation(ctx, role, kind, entry.FileName,
-					entry.SHA256, entry.Version.FullVersion); err != nil {
+				if err := store.SeedExpectation(ctx, location.ID, role, kind,
+					entry.FileName, entry.SHA256, entry.Version.FullVersion); err != nil {
 					return fmt.Errorf("seed expectation %s/%s/%s: %w",
 						role, kind, entry.FileName, err)
 				}

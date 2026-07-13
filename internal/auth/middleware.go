@@ -34,8 +34,10 @@ var adminWritePrefixes = []string{
 }
 
 // Surfaces that are admin-only regardless of method: key management, agent
-// settings (which can expose credentials), and the global secrets store.
-var adminAlwaysPrefixes = []string{"/api-keys", "/settings", "/secrets"}
+// settings (which can expose credentials), the global secrets store, and the
+// host terminal (a shell as the agent's own user is full host access — even
+// listing sessions stays admin).
+var adminAlwaysPrefixes = []string{"/api-keys", "/settings", "/secrets", "/term"}
 
 func underPrefix(path string, prefixes []string) bool {
 	for _, prefix := range prefixes {

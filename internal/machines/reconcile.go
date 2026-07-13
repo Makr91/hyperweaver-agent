@@ -3,17 +3,36 @@ package machines
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"os"
+	"path/filepath"
+	"regexp"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/Makr91/hyperweaver-agent/internal/logging"
 	"github.com/Makr91/hyperweaver-agent/internal/prereqs"
+	"github.com/Makr91/hyperweaver-agent/internal/provisioner"
+	"github.com/Makr91/hyperweaver-agent/internal/qga"
 	"github.com/Makr91/hyperweaver-agent/internal/tasks"
 	"github.com/Makr91/hyperweaver-agent/internal/vbox"
 )
+
+// GuestPropertyIPName matches the Guest Additions' live per-adapter IPv4
+// property keys — shared by the sweep's fallback and the server's RDP-target
+// ladder (one definition, never two).
+var GuestPropertyIPName = regexp.MustCompile(`^/VirtualBox/GuestInfo/Net/\d+/V4/IP$`)
+
+// UsableGuestIP filters one reported guest address: the provisioning NAT's
+// 10.0.2.x is host-unreachable by construction; loopback and unassigned
+// values are noise.
+func UsableGuestIP(ip string) bool {
+	return ip != "" && ip != "0.0.0.0" &&
+		!strings.HasPrefix(ip, "10.0.2.") && !strings.HasPrefix(ip, "127.")
+}
 
 // mlog is this package's category logger (the Node agent's per-category
 // winston loggers: logging.categories.machines overrides its level).
@@ -41,6 +60,13 @@ type Reconciler struct {
 	autoDiscovery bool
 	interval      time.Duration
 	hostname      string
+	// machinesDir + guestAgent drive the sweep's guest-info probe: every
+	// RUNNING machine's QGA channel is asked for its live IPs and the answer
+	// is STORED on the row (configuration.guest_info) — the machine list the
+	// UI already polls carries the direct-connect gate, so no per-machine
+	// query storms (Mark's design ruling 2026-07-11).
+	machinesDir string
+	guestAgent  bool
 
 	mu      sync.Mutex
 	stopCh  chan struct{}
@@ -53,8 +79,11 @@ type Reconciler struct {
 const startupDiscoveryDelay = 5 * time.Second
 
 // NewReconciler builds the reconciler over the machine store; discover tasks
-// are created in taskStore.
-func NewReconciler(store *Store, taskStore *tasks.Store, autoDiscovery bool, interval time.Duration) *Reconciler {
+// are created in taskStore. machinesDir anchors QGA pipe derivation for rows
+// without a working directory; guestAgent gates the sweep's guest-info probe.
+func NewReconciler(store *Store, taskStore *tasks.Store, autoDiscovery bool, interval time.Duration,
+	machinesDir string, guestAgent bool,
+) *Reconciler {
 	hostname, err := os.Hostname()
 	if err != nil {
 		hostname = "unknown"
@@ -65,6 +94,8 @@ func NewReconciler(store *Store, taskStore *tasks.Store, autoDiscovery bool, int
 		autoDiscovery: autoDiscovery,
 		interval:      interval,
 		hostname:      hostname,
+		machinesDir:   machinesDir,
+		guestAgent:    guestAgent,
 	}
 }
 
@@ -215,8 +246,8 @@ func (r *Reconciler) RunOnce(ctx context.Context, out *tasks.OutputWriter) {
 			UUID:          reg.UUID,
 			Configuration: configuration,
 		}
-		if existing, gerr := r.store.Get(sweepCtx, reg.Name); gerr == nil &&
-			existing.Backing == BackingVagrant && existing.Home != nil {
+		existing, gerr := r.store.Get(sweepCtx, reg.Name)
+		if gerr == nil && existing.Backing == BackingVagrant && existing.Home != nil {
 			// A row that carries vagrant provenance (recorded before the
 			// vagrant cut, or by an agent-created machine's home) keeps its
 			// backing and home — read from the store, never from vagrant.
@@ -239,6 +270,11 @@ func (r *Reconciler) RunOnce(ctx context.Context, out *tasks.OutputWriter) {
 		} else {
 			updated++
 		}
+
+		// The guest-info probe: running machines get their live IPs observed
+		// (QGA channel first, Guest Additions properties second) and stored on
+		// the row; anything else loses the section.
+		r.refreshGuestInfo(sweepCtx, exe, reg.UUID, reg.Name, existing, observation.Status, narrate)
 	}
 
 	// Hard-delete rows orphaned on a PREVIOUS sweep and still missing (the
@@ -270,6 +306,80 @@ func (r *Reconciler) RunOnce(ctx context.Context, out *tasks.OutputWriter) {
 	narrate("stdout", "Discovery completed: "+strconv.Itoa(discovered)+" new machines discovered, "+
 		strconv.Itoa(updated)+" updated, "+strconv.FormatInt(orphaned, 10)+" machines orphaned, "+
 		strconv.Itoa(len(deleted))+" removed")
+}
+
+// refreshGuestInfo records one machine's live-IP observation on its row —
+// configuration.guest_info {ips[], source, agent_responding, checked_at}.
+// A RUNNING machine's QGA channel is probed first (guest_agent.enabled; 3s —
+// qemu-ga answers in milliseconds, the timeout only bites channels nothing
+// listens on); when it yields nothing, the Guest Additions' live IP
+// properties are the fallback — the SAME two live sources the RDP/SSH target
+// ladders dial, and NEVER the provisioning-plan control IP (Mark's ruling
+// 2026-07-11: a plan address nothing answers must not present as live).
+// Non-running machines lose the section — honest absence ungates the UI's
+// direct-connect buttons. existing may be nil (first sight): the pipe then
+// derives from the machines root, the same fallback the on-demand handlers
+// use, so both sides always address the same channel.
+func (r *Reconciler) refreshGuestInfo(ctx context.Context, vboxExe, target, name string,
+	existing *Machine, status string, narrate func(stream, line string),
+) {
+	if status != StatusRunning {
+		if err := r.store.SetGuestInfo(ctx, name, nil); err != nil && !errors.Is(err, ErrNotFound) {
+			mlog().Warn("clear guest info failed", "machine", name, "error", err)
+		}
+		return
+	}
+
+	ips := []string{}
+	source := ""
+	responding := false
+	if r.guestAgent {
+		workdir := ""
+		if existing != nil && existing.Home != nil {
+			workdir = *existing.Home
+		}
+		if workdir == "" {
+			workdir = filepath.Join(r.machinesDir, provisioner.MachineDirName(name))
+		}
+		probeCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+		agentIPs, err := qga.GuestIPv4s(probeCtx, qga.PipePath(workdir, name))
+		cancel()
+		responding = err == nil
+		if len(agentIPs) > 0 {
+			ips = agentIPs
+			source = "guest-agent"
+		}
+	}
+	if len(ips) == 0 {
+		if entries, err := vbox.EnumerateGuestProperties(ctx, vboxExe, target); err == nil {
+			for _, entry := range entries {
+				if GuestPropertyIPName.MatchString(entry.Name) && UsableGuestIP(entry.Value) {
+					ips = append(ips, entry.Value)
+				}
+			}
+			if len(ips) > 0 {
+				source = "additions"
+			}
+		}
+	}
+
+	switch {
+	case len(ips) > 0:
+		narrate("stdout", name+": guest IPs ("+source+"): "+strings.Join(ips, ", "))
+	case responding:
+		narrate("stdout", name+": guest agent responding, no host-reachable IP yet")
+	default:
+		narrate("stdout", name+": no live guest IP source (guest agent silent, no Additions)")
+	}
+	if serr := r.store.SetGuestInfo(ctx, name, map[string]any{
+		"ips":              ips,
+		"source":           source,
+		"agent_responding": responding,
+		"checked_at":       time.Now().UTC().Format(time.RFC3339),
+	}); serr != nil {
+		narrate("stderr", name+": storing guest info failed ("+serr.Error()+")")
+		mlog().Warn("store guest info failed", "machine", name, "error", serr)
+	}
 }
 
 // cancelPendingTasks cancels a deleted machine's leftover pending tasks —

@@ -59,7 +59,7 @@ func (m *HCLDownloadMetadata) Validate() error {
 	if !ValidRole(m.Role) {
 		return errors.New("role is not usable")
 	}
-	if !ValidKind(m.Kind) {
+	if !RoleKeyed(m.Kind) {
 		return errors.New("kind must be installer, fixpack, or hotfix")
 	}
 	if !ValidFilename(m.Filename) {
@@ -109,13 +109,19 @@ func (e *executors) hclDownload(ctx context.Context, task *tasks.Task, out *task
 	}
 	out.Write("stdout", "Catalog entry "+fileID+" (sha256 "+catalogSHA+")\n")
 
+	// Downloads land in the kind's default location (built-in cache first).
+	location, err := e.store.DefaultLocation(ctx, meta.Kind)
+	if err != nil {
+		return fmt.Errorf("no enabled %s storage location: %w", meta.Kind, err)
+	}
+
 	// The catalog's hash is authoritative — it overwrites the expectation
 	// (SHI rule) and the download must reproduce it.
-	if serr := e.store.SetExpectation(ctx, meta.Role, meta.Kind, meta.Filename, catalogSHA); serr != nil {
+	if serr := e.store.SetExpectation(ctx, location.ID, meta.Role, meta.Kind, meta.Filename, catalogSHA); serr != nil {
 		out.Write("stderr", "record catalog expectation failed: "+serr.Error()+"\n")
 	}
 
-	target, err := e.store.PathFor(meta.Role, meta.Kind, meta.Filename)
+	target, err := PathFor(location, meta.Role, meta.Filename)
 	if err != nil {
 		return err
 	}
@@ -158,12 +164,15 @@ func (e *executors) hclDownload(ctx context.Context, task *tasks.Task, out *task
 	}
 
 	artifact, err := e.store.RecordIngested(ctx, &Ingested{
-		Role: meta.Role, Kind: meta.Kind, Filename: meta.Filename,
-		Path: target, SHA256: sha, Size: size,
+		LocationID: location.ID, Role: meta.Role, Kind: meta.Kind,
+		Filename: meta.Filename, Path: target, SHA256: sha, Size: size,
 		SourceURL: fmt.Sprintf(hclDownloadURLFmt, fileID),
 	})
 	if err != nil {
 		return err
+	}
+	if rerr := e.store.RefreshLocationStats(ctx, location.ID); rerr != nil {
+		out.Write("stderr", "location stats refresh failed: "+rerr.Error()+"\n")
 	}
 	out.Write("stdout", "Downloaded and verified "+artifact.Filename+" ("+sha+", "+
 		strconv.FormatInt(size, 10)+" bytes)\n")

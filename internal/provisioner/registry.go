@@ -99,6 +99,7 @@ func (r *Registry) GetVersion(name, version string) (*Version, error) {
 	}
 	for _, v := range collection.Versions {
 		if v.Version == version || v.Dir == version {
+			v.RoleSpecs = ReadRoleSpecs(v.Root)
 			return v, nil
 		}
 	}

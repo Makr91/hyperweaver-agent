@@ -22,7 +22,8 @@ import (
 // the same way).
 var preservedConfigKeys = []string{
 	"settings", "zones", "networks", "disks", "metadata",
-	"provisioner", "provisioner_state",
+	"provisioner", "provisioner_state", "pending_changes", "guest_info",
+	"snapshots",
 }
 
 // Credentials is the SSH credential triple extracted from settings
@@ -385,6 +386,59 @@ func (s *Store) StampProvisionerState(ctx context.Context, name string) error {
 	return s.SetConfiguration(ctx, name, raw)
 }
 
+// SetGuestInfo records the discovery sweep's guest-agent observation on the
+// machine row — configuration.guest_info ({ips[], agent_responding,
+// checked_at}): the machine LIST carries it, so the UI gates direct RDP/SSH
+// buttons off data it already polls instead of querying per machine. nil
+// clears the section (stopped machines, honest absence). Same fresh-read +
+// merge rule as every configuration write.
+func (s *Store) SetGuestInfo(ctx context.Context, name string, info map[string]any) error {
+	machine, err := s.Get(ctx, name)
+	if err != nil {
+		return err
+	}
+	config := ParseConfiguration(machine)
+	if info == nil {
+		if _, ok := config["guest_info"]; !ok {
+			return nil
+		}
+		delete(config, "guest_info")
+	} else {
+		config["guest_info"] = info
+	}
+	raw, err := json.Marshal(config)
+	if err != nil {
+		return err
+	}
+	return s.SetConfiguration(ctx, name, raw)
+}
+
+// SetSnapshotPolicy stores (or clears, on nil) the machine's per-machine
+// snapshot retention policy — configuration.snapshots, the PUT `snapshots`
+// field (zoneweaver's setSnapshotPolicy: an object with a type stores
+// verbatim, null clears back to the agent default). Same fresh-read + merge
+// rule as every configuration write.
+func (s *Store) SetSnapshotPolicy(ctx context.Context, name string, policy map[string]any) error {
+	machine, err := s.Get(ctx, name)
+	if err != nil {
+		return err
+	}
+	config := ParseConfiguration(machine)
+	if policy == nil {
+		if _, ok := config["snapshots"]; !ok {
+			return nil
+		}
+		delete(config, "snapshots")
+	} else {
+		config["snapshots"] = policy
+	}
+	raw, err := json.Marshal(config)
+	if err != nil {
+		return err
+	}
+	return s.SetConfiguration(ctx, name, raw)
+}
+
 // MergeConfigurationSections merges document sections into a machine's
 // configuration (create-finalize's storeInfrastructureConfig and PUT's
 // provisioner store share it): existing keys survive unless the update
@@ -398,6 +452,101 @@ func (s *Store) MergeConfigurationSections(ctx context.Context, name string, sec
 	for key, value := range sections {
 		config[key] = value
 	}
+	raw, err := json.Marshal(config)
+	if err != nil {
+		return err
+	}
+	return s.SetConfiguration(ctx, name, raw)
+}
+
+// MergeSettingsKeys merges individual keys INTO configuration.settings (PUT's
+// DB-immediate credentials family — the base's provisioner-store rule applied
+// one level deeper: the rest of the settings section survives untouched).
+// A nil or empty-string value deletes the key.
+func (s *Store) MergeSettingsKeys(ctx context.Context, name string, keys map[string]any) error {
+	machine, err := s.Get(ctx, name)
+	if err != nil {
+		return err
+	}
+	config := ParseConfiguration(machine)
+	settings := config.Section("settings")
+	for key, value := range keys {
+		if value == nil {
+			delete(settings, key)
+			continue
+		}
+		if text, ok := value.(string); ok && text == "" {
+			delete(settings, key)
+			continue
+		}
+		settings[key] = value
+	}
+	config["settings"] = settings
+	raw, err := json.Marshal(config)
+	if err != nil {
+		return err
+	}
+	return s.SetConfiguration(ctx, name, raw)
+}
+
+// MergePendingChanges merges an accrued modify body into
+// configuration.pending_changes (the accrue-changes contract: per top-level
+// key the last edit wins; hardware merges per section.key so successive
+// edits of different knobs coexist) and returns the merged set.
+func (s *Store) MergePendingChanges(ctx context.Context, name string, updates map[string]any) (map[string]any, error) {
+	machine, err := s.Get(ctx, name)
+	if err != nil {
+		return nil, err
+	}
+	config := ParseConfiguration(machine)
+	pending := config.Section("pending_changes")
+	for key, value := range updates {
+		if key != "hardware" {
+			pending[key] = value
+			continue
+		}
+		hardware, _ := pending["hardware"].(map[string]any)
+		if hardware == nil {
+			hardware = map[string]any{}
+		}
+		for sectionName, raw := range mapOr(value) {
+			// serial[]/parallel[] are arrays — they replace whole.
+			section, ok := raw.(map[string]any)
+			if !ok {
+				hardware[sectionName] = raw
+				continue
+			}
+			merged, _ := hardware[sectionName].(map[string]any)
+			if merged == nil {
+				merged = map[string]any{}
+			}
+			for k, v := range section {
+				merged[k] = v
+			}
+			hardware[sectionName] = merged
+		}
+		pending["hardware"] = hardware
+	}
+	config["pending_changes"] = pending
+	raw, err := json.Marshal(config)
+	if err != nil {
+		return nil, err
+	}
+	return pending, s.SetConfiguration(ctx, name, raw)
+}
+
+// ClearPendingChanges drops the accrued set (the cancel path, and the
+// executor's apply-success cleanup).
+func (s *Store) ClearPendingChanges(ctx context.Context, name string) error {
+	machine, err := s.Get(ctx, name)
+	if err != nil {
+		return err
+	}
+	config := ParseConfiguration(machine)
+	if _, ok := config["pending_changes"]; !ok {
+		return nil
+	}
+	delete(config, "pending_changes")
 	raw, err := json.Marshal(config)
 	if err != nil {
 		return err

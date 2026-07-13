@@ -8,6 +8,7 @@ import (
 	"github.com/Makr91/hyperweaver-agent/internal/auth"
 	"github.com/Makr91/hyperweaver-agent/internal/machines"
 	"github.com/Makr91/hyperweaver-agent/internal/tasks"
+	"github.com/Makr91/hyperweaver-agent/internal/vbox"
 )
 
 // PUT /machines/{machineName} — zoneweaver's modifyZone ported whole
@@ -22,10 +23,20 @@ import (
 // must be present or the request is a 400.
 var modifyChangeFields = []string{
 	"ram", "vcpus", "bootrom", "hostbridge", "diskif", "netif", "os_type",
-	"vnc", "acpi", "xhci", "autoboot", "boot_order", "vbox",
-	"add_nics", "remove_nics", "add_disks", "remove_disks",
-	"add_cdroms", "remove_cdroms", "cloud_init", "provisioner", "notes", "tags",
-	"boot_priority",
+	"vnc", "acpi", "xhci", "autoboot", "guest_agent", "boot_order", "vbox", "hardware",
+	"add_nics", "remove_nics", "nics", "add_disks", "remove_disks",
+	"add_cdroms", "remove_cdroms", "add_controllers", "remove_controllers",
+	"cloud_init", "provisioner", "notes", "tags",
+	"boot_priority", "snapshots",
+	"vagrant_user", "vagrant_user_pass", "vagrant_user_private_key_path",
+}
+
+// credentialFields is the SSH credentials family (configuration.settings keys
+// — the vocabulary ExtractCredentials and the SSH terminal read). DB-immediate
+// like the provisioner document: the fix for machines created without wizard
+// credentials, which could otherwise never SSH.
+var credentialFields = []string{
+	"vagrant_user", "vagrant_user_pass", "vagrant_user_private_key_path",
 }
 
 // modifyCompleted answers the base's DB-only early returns: the change is
@@ -127,6 +138,135 @@ func (s *Server) applyModifyBootPriority(w http.ResponseWriter, r *http.Request,
 	return true
 }
 
+// applyModifySnapshots handles the snapshots field — the per-machine
+// snapshot retention override (zoneweaver's setSnapshotPolicy contract,
+// DB-immediate): an object with a valid type stores verbatim into
+// configuration.snapshots (unknown extra keys ride along, ignored by the
+// rotation service); null or a typeless object clears back to the agent
+// default. False return = response already written.
+func (s *Server) applyModifySnapshots(w http.ResponseWriter, r *http.Request, machineName string, body map[string]any) bool {
+	value := body["snapshots"]
+	var policy map[string]any
+	if value != nil {
+		object, ok := value.(map[string]any)
+		if !ok {
+			taskError(w, http.StatusBadRequest, "snapshots must be an object or null")
+			return false
+		}
+		kind, _ := object["type"].(string)
+		switch kind {
+		case "":
+			// A typeless object clears, exactly like null (the base's rule).
+		case "none", "simple", "age", "rotation":
+			policy = object
+		default:
+			taskError(w, http.StatusBadRequest,
+				"snapshots.type must be one of none, simple, age, rotation")
+			return false
+		}
+	}
+	if err := s.machines.SetSnapshotPolicy(r.Context(), machineName, policy); err != nil {
+		slog.Error("update snapshot policy", "machine", machineName, "error", err)
+		taskError(w, http.StatusInternalServerError, "Failed to update snapshot policy")
+		return false
+	}
+	slog.Info("snapshot policy updated", "machine", machineName,
+		"cleared", policy == nil, "by", auth.FromContext(r.Context()).Name)
+	return true
+}
+
+// applyModifyCredentials merges the credentials family into
+// configuration.settings key-by-key (the provisioner document's DB-immediate
+// rule, one level deeper — the rest of settings survives). Empty string or
+// null deletes a key. False return = response already written.
+func (s *Server) applyModifyCredentials(w http.ResponseWriter, r *http.Request, machineName string, body map[string]any) bool {
+	updates := map[string]any{}
+	for _, field := range credentialFields {
+		value, ok := body[field]
+		if !ok {
+			continue
+		}
+		if value != nil {
+			if _, sok := value.(string); !sok {
+				taskError(w, http.StatusBadRequest, field+" must be a string or null")
+				return false
+			}
+		}
+		updates[field] = value
+	}
+	if err := s.machines.MergeSettingsKeys(r.Context(), machineName, updates); err != nil {
+		slog.Error("update ssh credentials", "machine", machineName, "error", err)
+		taskError(w, http.StatusInternalServerError, "Failed to update SSH credentials")
+		return false
+	}
+	slog.Info("ssh credentials updated", "machine", machineName,
+		"by", auth.FromContext(r.Context()).Name)
+	return true
+}
+
+// accrueModifyChanges implements the accrue half of PUT: when the machine's
+// VM exists and is NOT powered off (running/paused/saved/transitioning), the
+// remaining body merges into configuration.pending_changes and the answer is
+// pending_power_cycle. True = response written. Body must already be stripped
+// of the DB-immediate fields; "provisioner" is stripped here (stored above).
+func (s *Server) accrueModifyChanges(w http.ResponseWriter, r *http.Request,
+	machine *machines.Machine, body map[string]any, resourceWarnings []map[string]any,
+) bool {
+	exe := machines.VBoxManagePath(r.Context())
+	if exe == "" {
+		return false
+	}
+	info, err := vbox.ShowVMInfo(r.Context(), exe, machine.VBoxTarget())
+	if err != nil {
+		// No VM yet — the queued task answers that case honestly.
+		return false
+	}
+	switch machines.MapVBoxState(info.State) {
+	case machines.StatusStopped, machines.StatusAborted:
+		return false
+	}
+
+	pendingDoc := map[string]any{}
+	for key, value := range body {
+		if key == "provisioner" || key == "notes" || key == "tags" ||
+			key == "boot_priority" || key == "snapshots" {
+			continue
+		}
+		pendingDoc[key] = value
+	}
+	if len(pendingDoc) == 0 {
+		return false
+	}
+	// PUT-time dry validation — unknown knobs reject NOW, not at apply time.
+	if verr := machines.ValidateModifyDocument(pendingDoc, info); verr != nil {
+		taskError(w, http.StatusBadRequest, verr.Error())
+		return true
+	}
+
+	merged, merr := s.machines.MergePendingChanges(r.Context(), machine.Name, pendingDoc)
+	if merr != nil {
+		slog.Error("merge pending changes", "machine", machine.Name, "error", merr)
+		taskError(w, http.StatusInternalServerError, "Failed to store pending changes")
+		return true
+	}
+	slog.Info("machine changes accrued for next power cycle", "machine", machine.Name,
+		"keys", len(merged), "by", auth.FromContext(r.Context()).Name)
+	response := map[string]any{
+		"success":          true,
+		"machine_name":     machine.Name,
+		"operation":        machines.OpModify,
+		"status":           "pending_power_cycle",
+		"requires_restart": true,
+		"pending_changes":  merged,
+		"message":          "Machine is not powered off — changes stored and will apply at the next agent-driven power cycle (stop, start, or restart). DELETE /machines/{name}/pending-changes cancels them.",
+	}
+	if len(resourceWarnings) > 0 {
+		response["resource_warnings"] = resourceWarnings
+	}
+	writeJSON(w, response)
+	return true
+}
+
 // handleModifyMachine executes the modify mechanism end to end.
 func (s *Server) handleModifyMachine(w http.ResponseWriter, r *http.Request) {
 	machine := s.findMachine(w, r)
@@ -167,9 +307,30 @@ func (s *Server) handleModifyMachine(w http.ResponseWriter, r *http.Request) {
 	if present("boot_priority") && !s.applyModifyBootPriority(w, r, machine, body) {
 		return
 	}
+	// The per-machine snapshot retention policy is DB-immediate too
+	// (zoneweaver's rule — the rotation service reads it live each tick).
+	if present("snapshots") && !s.applyModifySnapshots(w, r, machine.Name, body) {
+		return
+	}
+	// The SSH credentials family joins the DB-immediate class: merged into
+	// configuration.settings, live for the terminal/SFTP/pipeline instantly.
+	credentialsChanged := false
+	for _, field := range credentialFields {
+		if present(field) {
+			credentialsChanged = true
+			break
+		}
+	}
+	if credentialsChanged && !s.applyModifyCredentials(w, r, machine.Name, body) {
+		return
+	}
+	immediate := map[string]bool{"notes": true, "tags": true, "boot_priority": true, "snapshots": true}
+	for _, field := range credentialFields {
+		immediate[field] = true
+	}
 	hasOther := false
 	for _, field := range modifyChangeFields {
-		if field == "notes" || field == "tags" || field == "boot_priority" {
+		if immediate[field] {
 			continue
 		}
 		if present(field) {
@@ -178,7 +339,11 @@ func (s *Server) handleModifyMachine(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if !hasOther {
-		modifyCompleted(w, machine.Name, "Machine metadata updated successfully.")
+		message := "Machine metadata updated successfully."
+		if credentialsChanged && !present("notes") && !present("tags") && !present("boot_priority") {
+			message = "SSH credentials updated successfully."
+		}
+		modifyCompleted(w, machine.Name, message)
 		return
 	}
 
@@ -225,8 +390,22 @@ func (s *Server) handleModifyMachine(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Infrastructure changes queue the machine_modify task — metadata is the
-	// body verbatim (the base's rule). VirtualBox applies them only to a
-	// powered-off machine; the executor enforces that.
+	// body verbatim (the base's rule), minus the already-applied credentials
+	// (a password must never land in the task table) and the already-applied
+	// snapshot policy (DB-immediate, not the executor's business).
+	for _, field := range credentialFields {
+		delete(body, field)
+	}
+	delete(body, "snapshots")
+
+	// The accrue-changes contract (agreed in the sync 2026-07-09): VirtualBox
+	// only modifies powered-off machines, so against anything else the PUT
+	// ACCRUES into configuration.pending_changes instead of queueing a task
+	// doomed to fail — applied by the chained modify at the next agent-driven
+	// power cycle. Dry-validated here so bad keys reject at the PUT.
+	if done := s.accrueModifyChanges(w, r, machine, body, resourceWarnings); done {
+		return
+	}
 	metadata, err := json.Marshal(body)
 	if err != nil {
 		slog.Error("serialize modify metadata", "machine", machine.Name, "error", err)

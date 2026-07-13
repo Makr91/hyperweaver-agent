@@ -18,6 +18,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"sync"
 	"syscall"
 	"time"
@@ -191,7 +192,7 @@ func run() error {
 	reconciler := systems.reconciler
 	monitor := systems.monitor
 
-	srv, err := server.New(cfg, keyStore, trayTokens, taskQueue, systems.machines, systems.provisioners, secretsStore, systems.assets, monitor, systems.dbs, restartArgs, openUI)
+	srv, err := server.New(cfg, keyStore, trayTokens, taskQueue, systems.machines, systems.provisioners, secretsStore, systems.assets, systems.artifactSvc, monitor, systems.dbs, restartArgs, openUI)
 	if err != nil {
 		slog.Error("server setup failed", "error", err)
 		return err
@@ -230,12 +231,20 @@ func run() error {
 		return handleBindConflict(cfg, selfClient(cfg), lerr)
 	}
 
-	// The queue, reconciler, and monitoring collector start only once this
-	// process owns the port — a duplicate desktop launch (resolved above)
-	// must never process tasks, sweep the registry, or write telemetry.
+	// The queue, reconciler, monitoring collector, and artifact storage
+	// service start only once this process owns the port — a duplicate
+	// desktop launch (resolved above) must never process tasks, sweep the
+	// registry, or write telemetry. Location sync + expectation seeding run
+	// synchronously so the first task always sees the locations.
+	if ierr := systems.artifactSvc.Initialize(context.Background()); ierr != nil {
+		slog.Error("artifact storage initialization failed", "error", ierr)
+		return ierr
+	}
 	taskQueue.Start()
 	reconciler.Start()
 	monitor.Start()
+	systems.artifactSvc.Start()
+	systems.snapshots.Start()
 
 	// Machine orchestration startup (the base's startZoneOrchestration):
 	// autostart machines boot in boot_priority order, highest first — plain
@@ -271,6 +280,8 @@ func run() error {
 	}
 
 	shutdown := func() {
+		systems.snapshots.Stop()
+		systems.artifactSvc.Stop()
 		monitor.Stop()
 		reconciler.Stop()
 		taskQueue.Stop()
@@ -326,13 +337,28 @@ func run() error {
 		openUI()
 	})
 
+	// Troubleshooting submenu targets. Path resolution failures degrade to
+	// opening nothing rather than blocking the tray.
+	logPath, lerr := cfg.LogFilePath()
+	if lerr != nil {
+		slog.Warn("resolve log path for tray", "error", lerr)
+	}
+	dataDir, derr := cfg.DataDir()
+	if derr != nil {
+		slog.Warn("resolve data dir for tray", "error", derr)
+	}
+
 	// Blocks the main goroutine until Quit (macOS requires the tray's event
 	// loop on the main thread).
-	tray.Run(tray.Options{
-		Title:   "Hyperweaver Agent v" + version.Version,
-		Tooltip: "Hyperweaver Agent",
-		OnOpen:  openUI,
-		OnExit:  shutdown,
+	tray.Run(&tray.Options{
+		Title:           "Hyperweaver Agent v" + version.Version,
+		Tooltip:         "Hyperweaver Agent",
+		OnOpen:          openUI,
+		OnExit:          shutdown,
+		OnOpenLog:       func() { openbrowser.Open(logPath, "") },
+		OnOpenConfigDir: func() { openbrowser.Open(filepath.Dir(resolvedPath), "") },
+		OnOpenDataDir:   func() { openbrowser.Open(dataDir, "") },
+		OnRestart:       srv.Restart,
 	})
 
 	select {
@@ -352,7 +378,9 @@ type agentSystems struct {
 	machines     *machines.Store
 	provisioners *provisioner.Registry
 	assets       *assets.Store
+	artifactSvc  *assets.Service
 	reconciler   *machines.Reconciler
+	snapshots    *machines.SnapshotRotation
 	monitor      *monitoring.Service
 	dbs          []server.DBHandle
 	closeDBs     func()
@@ -420,12 +448,13 @@ func setupTasks(cfg *config.Config, secretsStore *secrets.Store) (*agentSystems,
 	if err != nil {
 		return nil, err
 	}
-	// agent.sqlite carries every core-state family: the machine registry's
-	// migrations plus the artifact cache's and the box-template registry's,
-	// one ordered list.
+	// agent.sqlite carries every core-state family in ONE ordered list —
+	// user_version tracking is positional, so new scripts APPEND at the end
+	// (the artifact merge rebuild rides last for exactly that reason).
 	agentMigrations := append(append([]string{}, machines.Migrations...), assets.Migrations...)
 	agentMigrations = append(agentMigrations, machines.TemplateMigrations...)
 	agentMigrations = append(agentMigrations, machines.ProfileMigrations...)
+	agentMigrations = append(agentMigrations, assets.MergeMigrations...)
 	agentDB, err := openDB(agentPath, agentMigrations)
 	if err != nil {
 		_ = tasksDB.Close()
@@ -436,7 +465,7 @@ func setupTasks(cfg *config.Config, secretsStore *secrets.Store) (*agentSystems,
 	// them all, and the closer releases them in reverse-open order.
 	handles := []server.DBHandle{
 		{Name: "tasks.sqlite", Path: tasksPath, DB: tasksDB, Tables: []string{"tasks"}},
-		{Name: "agent.sqlite", Path: agentPath, DB: agentDB, Tables: []string{"machines", "artifacts", "templates", "provisioning_profiles"}},
+		{Name: "agent.sqlite", Path: agentPath, DB: agentDB, Tables: []string{"machines", "artifacts", "artifact_locations", "templates", "provisioning_profiles"}},
 	}
 	closer := func() {
 		for i := len(handles) - 1; i >= 0; i-- {
@@ -513,24 +542,36 @@ func setupTasks(cfg *config.Config, secretsStore *secrets.Store) (*agentSystems,
 	provisioners := provisioner.NewRegistry(provisionersDir)
 	provisioner.RegisterExecutors(queue, provisioners, secretsStore.GitToken)
 
-	// Installer file cache (assets.enabled): registered rows verify every
-	// file machines mount (Mark's ruling — hash verification in full). The
-	// store always exists (the /database endpoints see the table); a nil
-	// handle in ProvisionEnv is what "disabled" means to the pipeline.
-	assetsDir, err := cfg.AssetsDir()
+	// The merged artifact system (artifact_storage.enabled): typed storage
+	// locations + the hash-verified registry every mounted file passes
+	// through. The store always exists (the /database endpoints see the
+	// tables); a nil handle in ProvisionEnv is what "disabled" means to the
+	// pipeline. The service (location sync, expectation seeding, startup +
+	// periodic scans) initializes in run once this process owns the port.
+	artifactsRoot, err := cfg.ArtifactsRootDir()
 	if err != nil {
 		closer()
 		return nil, err
 	}
-	assetsStore := assets.NewStore(agentDB, assetsDir)
-	assets.RegisterExecutors(queue, assetsStore, secretsStore.ResourceAuth, secretsStore)
+	assetsStore := assets.NewStore(agentDB, artifactsRoot)
+	assets.RegisterExecutors(queue, assetsStore, secretsStore.ResourceAuth, secretsStore,
+		cfg.ArtifactStorage.Scanning.SupportedExtensions)
+	servicePaths := make([]assets.PathConfig, 0, len(cfg.ArtifactStorage.Paths))
+	for _, entry := range cfg.ArtifactStorage.Paths {
+		servicePaths = append(servicePaths, assets.PathConfig{
+			Name: entry.Name, Path: entry.Path, Type: entry.Type, Enabled: entry.Enabled,
+		})
+	}
+	artifactSvc := assets.NewService(assetsStore, assets.ServiceConfig{
+		Enabled:      cfg.ArtifactStorage.Enabled,
+		Root:         artifactsRoot,
+		Paths:        servicePaths,
+		Extensions:   cfg.ArtifactStorage.Scanning.SupportedExtensions,
+		ScanInterval: cfg.ArtifactStorage.Scanning.PeriodicScanInterval,
+	})
 	var pipelineAssets *assets.Store
-	if cfg.Assets.Enabled {
+	if cfg.ArtifactStorage.Enabled {
 		pipelineAssets = assetsStore
-		if serr := assets.SeedExpectations(context.Background(), assetsStore); serr != nil {
-			closer()
-			return nil, serr
-		}
 	}
 
 	machinesDir, err := cfg.MachinesDir()
@@ -563,8 +604,6 @@ func setupTasks(cfg *config.Config, secretsStore *secrets.Store) (*agentSystems,
 			Enabled:   source.Enabled,
 			Default:   source.Default,
 			AuthToken: source.AuthToken,
-			Username:  source.Username,
-			APIKey:    source.APIKey,
 			CAFile:    source.CAFile,
 		})
 	}
@@ -572,7 +611,8 @@ func setupTasks(cfg *config.Config, secretsStore *secrets.Store) (*agentSystems,
 	machineStore := machines.NewStore(agentDB)
 	reconciler := machines.NewReconciler(machineStore, store,
 		cfg.Machines.AutoDiscovery,
-		time.Duration(cfg.Machines.DiscoveryInterval)*time.Second)
+		time.Duration(cfg.Machines.DiscoveryInterval)*time.Second,
+		machinesDir, cfg.GuestAgent.Enabled)
 	machines.RegisterExecutors(queue, machineStore, reconciler,
 		time.Duration(cfg.Machines.ShutdownTimeout)*time.Second,
 		&machines.ProvisionEnv{
@@ -583,6 +623,8 @@ func setupTasks(cfg *config.Config, secretsStore *secrets.Store) (*agentSystems,
 			CACertPath:              cfg.SSLCACertPath(),
 			CAKeyPath:               cfg.SSLCAKeyPath(),
 			DefaultSyncMethod:       cfg.Provisioning.DefaultSyncMethod,
+			GuestAgentEnabled:       cfg.GuestAgent.Enabled,
+			VRDECertRoot:            cfg.VRDECertRoot(),
 			DefaultNetworkInterface: cfg.Provisioning.DefaultNetworkInterface,
 			TemplatesDir:            templatesDir,
 			TemplateSources:         templateSources,
@@ -607,12 +649,35 @@ func setupTasks(cfg *config.Config, secretsStore *secrets.Store) (*agentSystems,
 	// no handler queues them while the surface is disabled).
 	hostpower.RegisterExecutors(queue, hostpower.LookupCommand)
 
+	// Scheduled snapshot rotation (snapshots.enabled — zoneweaver's
+	// Snapshoter.sh replacement, VBox-conservative defaults): visible
+	// snapshot_take rows through the queue, per-machine policy overrides read
+	// live from configuration.snapshots.
+	defaultTiers := map[string]machines.SnapshotTier{}
+	for tier, entry := range cfg.Snapshots.DefaultPolicy.Tiers {
+		defaultTiers[tier] = machines.SnapshotTier{Keep: entry.Keep}
+	}
+	snapshotRotation := machines.NewSnapshotRotation(machineStore, store,
+		machines.SnapshotRotationConfig{
+			Enabled:  cfg.Snapshots.Enabled,
+			Interval: time.Duration(cfg.Snapshots.IntervalMinutes) * time.Minute,
+			DefaultPolicy: machines.SnapshotPolicy{
+				Type:       cfg.Snapshots.DefaultPolicy.Type,
+				Quiesce:    cfg.Snapshots.DefaultPolicy.Quiesce,
+				Keep:       cfg.Snapshots.DefaultPolicy.Keep,
+				MaxAgeDays: cfg.Snapshots.DefaultPolicy.MaxAgeDays,
+				Tiers:      defaultTiers,
+			},
+		})
+
 	return &agentSystems{
 		queue:        queue,
 		machines:     machineStore,
 		provisioners: provisioners,
 		assets:       assetsStore,
+		artifactSvc:  artifactSvc,
 		reconciler:   reconciler,
+		snapshots:    snapshotRotation,
 		monitor:      monitor,
 		dbs:          handles,
 		closeDBs:     closer,

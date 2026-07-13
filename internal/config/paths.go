@@ -45,6 +45,14 @@ func (c *Config) SSLCAKeyPath() string {
 	return filepath.Join(filepath.Dir(c.path), "ssl", "ca.key")
 }
 
+// VRDECertRoot returns where per-machine VRDE TLS material lives:
+// ssl/vrde/<machine>/ beside the loaded configuration file — surviving as
+// long as the configuration does. Shared by the create executor, the
+// browser-RDP bridge's self-heal, and the vrde-tls endpoint.
+func (c *Config) VRDECertRoot() string {
+	return filepath.Join(filepath.Dir(c.path), "ssl", "vrde")
+}
+
 // LogFilePath returns the configured log file, defaulting to
 // <config dir>/logs/agent.log.
 func (c *Config) LogFilePath() (string, error) {
@@ -195,17 +203,17 @@ func (c *Config) DownloadsDir() (string, error) {
 	return filepath.Join(dir, "downloads"), nil
 }
 
-// AssetsDir returns the installer file cache root: assets.dir when
-// configured, else file-cache under the data root (SHI's file-cache naming).
-func (c *Config) AssetsDir() (string, error) {
-	if c.Assets.Dir != "" {
-		return safepath.CleanAbs(c.Assets.Dir)
+// ArtifactsRootDir returns the built-in storage locations' parent:
+// artifact_storage.dir when configured, else artifacts under the data root.
+func (c *Config) ArtifactsRootDir() (string, error) {
+	if c.ArtifactStorage.Dir != "" {
+		return safepath.CleanAbs(c.ArtifactStorage.Dir)
 	}
 	dir, err := c.DataDir()
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(dir, "file-cache"), nil
+	return filepath.Join(dir, "artifacts"), nil
 }
 
 // TemplatesDir returns the box-template storage root:

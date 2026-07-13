@@ -184,6 +184,94 @@ func SeedCA(caCertPath, caKeyPath string) error {
 	return nil
 }
 
+// EnsureVRDECertificate makes a machine's VRDE TLS material exist under dir:
+// vrde.key + vrde.crt signed by the agent CA (generated first when absent),
+// plus vrde-ca.crt — the CA certificate copied beside them, since VRDE's
+// Security/CACertificate wants its own file. Existing files are never
+// touched. The certificate carries loopback SANs: the RDP bridge dials
+// 127.0.0.1 and verifies against the agent CA — real verification, never a
+// skipped one. Ten-year validity: VRDE queries the files per client
+// connection (source-verified 2026-07-11) and a yearly surprise expiry
+// serves nobody on a private CA.
+func EnsureVRDECertificate(caCertPath, caKeyPath, dir, commonName string) (certPath, keyPath, caPath string, err error) {
+	cleanDir, err := safepath.CleanAbs(dir)
+	if err != nil {
+		return "", "", "", err
+	}
+	cleanCACert, err := safepath.CleanAbs(caCertPath)
+	if err != nil {
+		return "", "", "", err
+	}
+	cleanCAKey, err := safepath.CleanAbs(caKeyPath)
+	if err != nil {
+		return "", "", "", err
+	}
+	certPath = filepath.Join(cleanDir, "vrde.crt")
+	keyPath = filepath.Join(cleanDir, "vrde.key")
+	caPath = filepath.Join(cleanDir, "vrde-ca.crt")
+
+	if merr := os.MkdirAll(cleanDir, 0o700); merr != nil {
+		return "", "", "", fmt.Errorf("create vrde ssl dir: %w", merr)
+	}
+	caCert, caKey, err := ensureCA(cleanCACert, cleanCAKey)
+	if err != nil {
+		return "", "", "", err
+	}
+
+	if !fileExists(caPath) {
+		caPEM, rerr := os.ReadFile(filepath.Clean(cleanCACert))
+		if rerr != nil {
+			return "", "", "", fmt.Errorf("read ca certificate: %w", rerr)
+		}
+		if werr := safepath.WriteFile(caPath, caPEM, 0o600); werr != nil {
+			return "", "", "", fmt.Errorf("write vrde ca copy: %w", werr)
+		}
+	}
+	if fileExists(keyPath) && fileExists(certPath) {
+		return certPath, keyPath, caPath, nil
+	}
+
+	leafKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		return "", "", "", fmt.Errorf("generate vrde key: %w", err)
+	}
+	serial, err := newSerial()
+	if err != nil {
+		return "", "", "", err
+	}
+	now := time.Now()
+	template := x509.Certificate{
+		SerialNumber: serial,
+		Subject: pkix.Name{
+			Country:      []string{"US"},
+			Organization: []string{"Hyperweaver"},
+			CommonName:   commonName,
+		},
+		NotBefore:   now,
+		NotAfter:    now.AddDate(0, 0, caValidityDays),
+		KeyUsage:    x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment,
+		ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+		DNSNames:    []string{"localhost"},
+		IPAddresses: []net.IP{net.ParseIP("127.0.0.1"), net.ParseIP("::1")},
+	}
+	der, err := x509.CreateCertificate(rand.Reader, &template, caCert, &leafKey.PublicKey, caKey)
+	if err != nil {
+		return "", "", "", fmt.Errorf("sign vrde certificate: %w", err)
+	}
+	keyPEM := pem.EncodeToMemory(&pem.Block{
+		Type:  "RSA PRIVATE KEY",
+		Bytes: x509.MarshalPKCS1PrivateKey(leafKey),
+	})
+	certPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})
+	if werr := safepath.WriteFile(keyPath, keyPEM, 0o600); werr != nil {
+		return "", "", "", fmt.Errorf("write vrde key: %w", werr)
+	}
+	if werr := safepath.WriteFile(certPath, certPEM, 0o600); werr != nil {
+		return "", "", "", fmt.Errorf("write vrde certificate: %w", werr)
+	}
+	return certPath, keyPath, caPath, nil
+}
+
 // ensureCA loads the CA pair, generating it first when absent — CA:TRUE
 // critical + keyCertSign, exactly the role's CA CSR. An operator-provided
 // pair (both files present) is used as-is.

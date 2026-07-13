@@ -92,8 +92,9 @@ type Spec struct {
 	// Disks is the document's disks section at create (the base's
 	// disks{boot{...}, additional[]} + cdroms, in the Hosts.yml vocabulary
 	// the executors consume: boot{path|size|sparse|volume_name},
-	// additional_disks[], cdroms[{path}]). Omit entirely for a diskless
-	// machine. With a provisioner package the render's disks win.
+	// additional_disks[], cdroms[{path|iso}] — iso names a cached ISO in the
+	// artifact registry; path stays the raw passthrough). Omit entirely for
+	// a diskless machine. With a provisioner package the render's disks win.
 	Disks map[string]any `json:"disks"`
 	// Zones is the document's zones section at create (autostart today; the
 	// base's system attrs land through Vbox below).
@@ -105,6 +106,11 @@ type Spec struct {
 	// is the generic modifyvm passthrough (the base's zone attr map analog:
 	// any --flag=value, so hostbridge/netif/acpi/xhci-class fields ride it).
 	Vbox map[string]any `json:"vbox"`
+	// Hardware is the first-class modifyvm knob vocabulary (hardware.go):
+	// hardware.<section>.<key> — cpu, memory, graphics, audio, usb,
+	// integration, platform, firmware, recording, vrde, autostart,
+	// serial[], parallel[].
+	Hardware map[string]any `json:"hardware"`
 	// Notes/Tags persist onto the machine row at finalize (the base's
 	// SubTaskExecutors finalize does exactly this).
 	Notes            string   `json:"notes"`
@@ -150,6 +156,14 @@ type ProvisionEnv struct {
 	// DefaultSyncMethod fills specs without an explicit sync_method (SHI's
 	// global syncmethod preference); platform rules still apply on top.
 	DefaultSyncMethod string
+	// GuestAgentEnabled wires the QEMU guest-agent UART (COM2 → host pipe)
+	// into every created machine (guest_agent.enabled).
+	GuestAgentEnabled bool
+	// VRDECertRoot is where per-machine VRDE TLS material lives
+	// (<config dir>/ssl/vrde) — create mints each machine's certificate there
+	// and sets the Enhanced-security properties from birth (Mark's zero-click
+	// ruling 2026-07-11: the vrde-tls button dies).
+	VRDECertRoot string
 	// DefaultNetworkInterface reaches the template context as
 	// settings.default_network_interface / DEFAULT_NETWORK_INTERFACE when
 	// the spec sets none (SHI's bridge-interface fallback).
@@ -265,6 +279,30 @@ func (e *executors) taskProgress(task *tasks.Task, percent float64, status strin
 	}
 	if uerr := e.queue.Store().UpdateProgress(context.Background(), task.ID, percent, info); uerr != nil {
 		mlog().Debug("progress update failed", "task_id", task.ID, "error", uerr)
+	}
+}
+
+// playbookProgress folds one STARTcloud progress-role report into the
+// machine_provision task: the guest's own percent (progress role over stdout)
+// maps into the task's running_playbook window (40→90; 95 is the
+// provisioner-state stamp, 100 completed), and progress_info carries the raw
+// guest values for the UI — {status, ansible_percent, message}. Same
+// failure contract as taskProgress: progress never fails an operation.
+func (e *executors) playbookProgress(task *tasks.Task, ansiblePercent int, message string) {
+	if task == nil {
+		return
+	}
+	info, err := json.Marshal(map[string]any{
+		"status":          "running_playbook",
+		"ansible_percent": ansiblePercent,
+		"message":         message,
+	})
+	if err != nil {
+		return
+	}
+	percent := 40 + float64(ansiblePercent)/2
+	if uerr := e.queue.Store().UpdateProgress(context.Background(), task.ID, percent, info); uerr != nil {
+		mlog().Debug("playbook progress update failed", "task_id", task.ID, "error", uerr)
 	}
 }
 

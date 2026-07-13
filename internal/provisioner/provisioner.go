@@ -68,6 +68,9 @@ type Version struct {
 	Description string         `json:"description"`
 	Root        string         `json:"root"`
 	Metadata    map[string]any `json:"metadata"`
+	// RoleSpecs is the derived per-role argument-spec cache — attached on
+	// the version-detail read only (GetVersion), never in listings.
+	RoleSpecs *RoleSpecs `json:"role_specs,omitempty"`
 }
 
 // readManifest parses one YAML manifest into a generic document (served to

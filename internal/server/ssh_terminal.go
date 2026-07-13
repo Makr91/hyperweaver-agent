@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
-	"encoding/json"
 	"log/slog"
 	"net/http"
 	"sort"
@@ -113,13 +112,18 @@ func randomID() (string, error) {
 	return hex.EncodeToString(raw), nil
 }
 
-// sshTransport resolves the shell's target: the NAT ssh forward first, then
-// the document's control IP (resolveTransport's ladder for one machine).
-func sshTransport(ctx context.Context, machine *machines.Machine,
+// sshTransport resolves the shell's target: the NAT ssh forward first
+// (immune to guest network reconfiguration), the guest agent's live IP
+// second (the QGA channel's truth), the document's control IP last
+// (resolveTransport's ladder plus the live-truth rung).
+func (s *Server) sshTransport(ctx context.Context, machine *machines.Machine,
 	config machines.MachineConfig,
 ) (host string, port int) {
 	if forwardPort := machines.FindSSHForward(ctx, machine); forwardPort > 0 {
 		return "127.0.0.1", forwardPort
+	}
+	if ip := s.guestAgentIP(ctx, machine); ip != "" {
+		return ip, 22
 	}
 	if ip := machines.ExtractControlIP(config.List("networks")); ip != "" {
 		return ip, 22
@@ -145,10 +149,10 @@ func (s *Server) handleStartSSHSession(w http.ResponseWriter, r *http.Request) {
 			"SSH credentials not configured. Set settings.vagrant_user in the machine configuration.")
 		return
 	}
-	host, port := sshTransport(r.Context(), machine, config)
+	host, port := s.sshTransport(r.Context(), machine, config)
 	if host == "" {
 		taskError(w, http.StatusBadRequest,
-			"No SSH transport: machine has no NAT ssh port-forward and no control IP in networks[] (set is_control: true on one network)")
+			"No SSH transport: machine has no NAT ssh port-forward, no guest-agent-reported IP, and no control IP in networks[] (set is_control: true on one network)")
 		return
 	}
 
@@ -277,16 +281,15 @@ func (s *Server) handleSSHSocket(w http.ResponseWriter, r *http.Request) {
 		cancel()
 	}()
 
-	// Client input loop: JSON resize frames or raw terminal bytes.
+	// Client input loop: resize control frames (bare or NUL-prefixed JSON — the
+	// zoneweaver footer terminal's framing) or raw terminal bytes.
 	for {
 		_, data, rerr := conn.Read(ctx)
 		if rerr != nil {
 			return
 		}
-		var control terminalControl
-		if jerr := json.Unmarshal(data, &control); jerr == nil &&
-			control.Type == "resize" && control.Cols > 0 && control.Rows > 0 {
-			if werr := shell.Resize(control.Cols, control.Rows); werr != nil {
+		if cols, rows, isResize := parseResizeFrame(data); isResize {
+			if werr := shell.Resize(cols, rows); werr != nil {
 				slog.Debug("ssh terminal resize failed", "session_id", sessionID, "error", werr)
 			}
 			continue

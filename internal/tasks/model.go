@@ -15,9 +15,13 @@ import (
 
 // Task statuses. completed_with_errors is a parent-task terminal state: some
 // children failed, some completed (design §3; the Node agent buries this
-// distinction in progress_info — here it is the status proper).
+// distinction in progress_info — here it is the status proper). prepared is
+// the upload handshake's holding state (zoneweaver's artifact upload): the
+// queue never claims it; the upload handler flips it to pending once the
+// file has landed.
 const (
 	StatusPending             = "pending"
+	StatusPrepared            = "prepared"
 	StatusRunning             = "running"
 	StatusCompleted           = "completed"
 	StatusFailed              = "failed"
@@ -72,6 +76,10 @@ type NewTask struct {
 	// status running and never dispatched — child completions drive its
 	// progress and final status.
 	Parent bool
+
+	// Prepared creates the task in status prepared (the artifact-upload
+	// handshake): never dispatched until Requeue flips it to pending.
+	Prepared bool
 }
 
 // newTaskID mints a random UUIDv4 (the Node agent's task id format).

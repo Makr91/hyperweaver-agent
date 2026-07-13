@@ -191,6 +191,15 @@ func ControlVM(ctx context.Context, vboxManage, name, action string) error {
 	return runSimple(ctx, vboxManage, "controlvm", name, action)
 }
 
+// ControlVMArgs runs one controlvm verb with arguments — the runtime knobs
+// beyond the bare power verbs (`vrdeproperty Security/Method=Negotiate`,
+// `vrde on`, ...). The VRDP server queries Security/* properties per
+// connection (VirtualBox-source-verified, runtime-proven on 7.2 2026-07-11),
+// so VRDE TLS material set this way applies LIVE — no power cycle.
+func ControlVMArgs(ctx context.Context, vboxManage, name string, args ...string) error {
+	return runSimple(ctx, vboxManage, append([]string{"controlvm", name}, args...)...)
+}
+
 // UnregisterVM removes a machine from VirtualBox; deleteFiles also deletes
 // its media and directories. VirtualBox itself refuses to delete media still
 // attached to another machine — the shared-disk guard beyond that arrives

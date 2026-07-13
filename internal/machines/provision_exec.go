@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -114,12 +115,15 @@ func (e *executors) syncFolder(ctx context.Context, task *tasks.Task, out *tasks
 		return errors.New("folder is required in task metadata")
 	}
 	folder := meta.Folder
-	if folder.Disabled || strings.EqualFold(folder.Type, "virtualbox") {
-		out.Write("stdout", "Folder sync skipped ("+skipReason(folder)+")\n")
+	if folder.Disabled {
+		out.Write("stdout", "Folder sync skipped (disabled)\n")
 		return nil
 	}
 	if folder.Map == "" || folder.To == "" {
 		return errors.New("folder missing source (map) or destination (to)")
+	}
+	if strings.EqualFold(folder.Type, "virtualbox") {
+		return e.attachSharedFolder(ctx, task, meta, folder, out)
 	}
 
 	workdir := e.machineWorkdir(task.MachineName)
@@ -161,11 +165,69 @@ func (e *executors) syncFolder(ctx context.Context, task *tasks.Task, out *tasks
 	return nil
 }
 
-func skipReason(folder *Folder) string {
-	if folder.Disabled {
-		return "disabled"
+// attachSharedFolder lands a `type: virtualbox` folder as a REAL VirtualBox
+// shared folder (Mark's go 2026-07-12 — these were skipped before): register
+// on the VM (hot-add works while running; already-registered narrates as the
+// idempotent re-sync), then mount in the guest — vboxsf needs Guest
+// Additions, so a mount failure narrates the automount fallback instead of
+// failing the pipeline.
+func (e *executors) attachSharedFolder(ctx context.Context, task *tasks.Task,
+	meta *provisionTaskMetadata, folder *Folder, out *tasks.OutputWriter,
+) error {
+	machine, vboxExe, err := e.resolve(ctx, task)
+	if err != nil {
+		return err
 	}
-	return "virtualbox shared folders are never used"
+	hostPath := filepath.FromSlash(folder.Map)
+	if !filepath.IsAbs(hostPath) {
+		hostPath = filepath.Join(e.machineWorkdir(task.MachineName),
+			strings.TrimPrefix(strings.TrimPrefix(folder.Map, "./"), "."))
+	}
+	shareName := sharedFolderName(folder.To)
+
+	e.taskProgress(task, 20, "registering_shared_folder")
+	out.Write("stdout", "Registering VirtualBox shared folder "+shareName+" ("+hostPath+" → "+folder.To+")\n")
+	if aerr := vbox.SharedFolderAdd(ctx, vboxExe, machine.VBoxTarget(), shareName, hostPath, folder.To); aerr != nil {
+		if !strings.Contains(aerr.Error(), "already exists") {
+			return aerr
+		}
+		out.Write("stdout", "Shared folder already registered — continuing\n")
+	}
+
+	// Guest mount (vagrant's model): skipped when automount already landed it.
+	owner := folder.Owner
+	if owner == "" {
+		owner = meta.Credentials.Username
+	}
+	if owner == "" {
+		owner = "root"
+	}
+	group := folder.Group
+	if group == "" {
+		group = owner
+	}
+	e.taskProgress(task, 60, "mounting_in_guest")
+	mount := fmt.Sprintf(
+		"sudo mkdir -p %s && (mount | grep -q ' %s ' || sudo mount -t vboxsf -o uid=$(id -u %s),gid=$(getent group %s | cut -d: -f3) %s %s)",
+		folder.To, folder.To, owner, group, shareName, folder.To)
+	if merr := sshrun.Run(ctx, meta.IP, meta.Port, meta.Credentials, mount,
+		e.machineWorkdir(task.MachineName), e.env.ProvisionKeyPath, time.Minute, out.Write); merr != nil {
+		out.Write("stderr", "Guest mount failed ("+merr.Error()+") — vboxsf needs Guest Additions; the automount lands it at "+folder.To+" when they run\n")
+	} else {
+		out.Write("stdout", "Shared folder mounted at "+folder.To+"\n")
+	}
+	e.taskProgress(task, 100, "completed")
+	return nil
+}
+
+// sharedFolderName derives the share's registry name from the guest path
+// (vagrant's rule: "/vagrant" → "vagrant").
+func sharedFolderName(guestPath string) string {
+	name := strings.Trim(strings.ReplaceAll(guestPath, "/", "_"), "_")
+	if name == "" {
+		return "shared"
+	}
+	return name
 }
 
 // runFolderTransport lands one folder over the transport ladder (Mark's
@@ -345,8 +407,21 @@ func (e *executors) provisionPlaybook(ctx context.Context, task *tasks.Task, out
 		provisioningPath, ansibleConfig, playbook.Playbook, escaped)
 
 	out.Write("stdout", "Running ansible-local playbook "+playbook.Playbook+"\n")
+	// STARTcloud progress adoption: watch the streamed ansible output for the
+	// packages' callback marker (PROGRESS::{json}, progress_scan.go) and fold
+	// it into the task's progress_info live (the guest's percent maps into
+	// this task's running_playbook window, 40→95 — the task percent stays
+	// honest across the install/collections phases before it and the stamp
+	// after).
+	scanner := newProgressScanner(func(percent int, description string) {
+		e.playbookProgress(task, percent, description)
+	})
+	streamWrite := func(stream, data string) {
+		scanner.Scan(stream, data)
+		out.Write(stream, data)
+	}
 	if rerr := sshrun.Run(ctx, meta.IP, meta.Port, meta.Credentials, command,
-		workdir, e.env.ProvisionKeyPath, playbookTimeout, out.Write); rerr != nil {
+		workdir, e.env.ProvisionKeyPath, playbookTimeout, streamWrite); rerr != nil {
 		return fmt.Errorf("ansible-local failed: %w", rerr)
 	}
 

@@ -71,6 +71,25 @@ func (s *Server) handleProvisionerVersion(w http.ResponseWriter, r *http.Request
 	writeJSON(w, version)
 }
 
+// handleRefreshProvisionerSpecs re-derives every version's role-specs cache
+// (POST /provisioning/provisioners/refresh-specs — the manual refresh for
+// hand-dropped packages and updated specs; imports rebuild automatically).
+func (s *Server) handleRefreshProvisionerSpecs(w http.ResponseWriter, r *http.Request) {
+	refreshed, err := s.provisioners.RefreshAllRoleSpecs()
+	if err != nil {
+		slog.Error("refresh role specs", "error", err)
+		taskError(w, http.StatusInternalServerError, "Failed to refresh role specs")
+		return
+	}
+	slog.Info("provisioner role-specs refreshed", "versions", len(refreshed),
+		"by", auth.FromContext(r.Context()).Name)
+	writeJSON(w, map[string]any{
+		"success":   true,
+		"refreshed": refreshed,
+		"total":     len(refreshed),
+	})
+}
+
 // handleImportProvisioner queues a provisioner_import task. The request body
 // is the task metadata verbatim: {source_type: folder|archive|git, path?,
 // url?, branch?} — paths name locations on the agent host.

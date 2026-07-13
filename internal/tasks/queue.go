@@ -257,7 +257,9 @@ func (q *Queue) tick() {
 	capacityFull := len(q.running) >= q.cfg.MaxConcurrent
 	busyMachines := []string{}
 	for _, entry := range q.running {
-		if entry.machine != "" && entry.machine != "system" {
+		// "system" and "filesystem" are scopes, not machines — exempt
+		// (zoneweaver's EXCLUSIVITY_EXEMPT_SCOPES).
+		if entry.machine != "" && entry.machine != "system" && entry.machine != "filesystem" {
 			busyMachines = append(busyMachines, entry.machine)
 		}
 	}

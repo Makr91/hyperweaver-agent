@@ -65,7 +65,7 @@ func (e *executors) templatePublish(ctx context.Context, task *tasks.Task, out *
 		return err
 	}
 	client := registryHTTPClient(source)
-	token := registryToken(ctx, client, source)
+	token := registryToken(source)
 
 	// The artifact: an existing .box, or a fresh export of the machine.
 	boxPath := meta.BoxPath

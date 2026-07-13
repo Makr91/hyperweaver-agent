@@ -25,11 +25,16 @@ var operationCategories = map[string]string{
 	// One import at a time: imports copy large trees into the shared
 	// provisioner registry directory.
 	"provisioner_import": CategorySystem,
-	// One cache mutation at a time: scans and downloads write the same
-	// registry rows and cache tree.
-	"artifact_scan":     CategoryArtifact,
-	"artifact_download": CategoryArtifact,
-	"hcl_download":      CategoryArtifact,
+	// One storage mutation at a time: scans, transfers, and deletions write
+	// the same registry rows and location trees.
+	"artifact_scan":          CategoryArtifact,
+	"artifact_download":      CategoryArtifact,
+	"artifact_upload":        CategoryArtifact,
+	"artifact_move":          CategoryArtifact,
+	"artifact_copy":          CategoryArtifact,
+	"artifact_delete_file":   CategoryArtifact,
+	"artifact_delete_folder": CategoryArtifact,
+	"hcl_download":           CategoryArtifact,
 	// One template download at a time: two same-tuple downloads race the
 	// same target files (runtime-proven 2026-07-06 — the loser dies at the
 	// rename); the later one then no-ops on the already-exists check.

@@ -16,7 +16,10 @@ import (
 
 	"github.com/goccy/go-yaml"
 
+	"github.com/Makr91/hyperweaver-agent/internal/assets"
 	"github.com/Makr91/hyperweaver-agent/internal/provisioner"
+	"github.com/Makr91/hyperweaver-agent/internal/qga"
+	"github.com/Makr91/hyperweaver-agent/internal/sslcert"
 	"github.com/Makr91/hyperweaver-agent/internal/tasks"
 	"github.com/Makr91/hyperweaver-agent/internal/vbox"
 )
@@ -212,6 +215,7 @@ func specDocument(ctx context.Context, env *ProvisionEnv, spec *Spec) map[string
 		"zones":      spec.Zones,
 		"cloud_init": spec.CloudInit,
 		"vbox":       spec.Vbox,
+		"hardware":   spec.Hardware,
 	} {
 		if len(section) > 0 {
 			document[key] = section
@@ -489,7 +493,50 @@ func (e *executors) createConfig(ctx context.Context, task *tasks.Task, out *tas
 	out.Write("stdout", fmt.Sprintf("Provisioning SSH port-forward: 127.0.0.1:%d → guest 22\n", sshPort))
 
 	e.taskProgress(task, 40, "configuring_vm")
-	if merr := vbox.ModifyVM(ctx, vboxExe, task.MachineName, modifyFlags(document, hostAdapter, sshPort)); merr != nil {
+	flags, ferr := modifyFlags(document, hostAdapter, sshPort)
+	if ferr != nil {
+		return failed("modifyvm", ferr)
+	}
+	// The QEMU guest-agent UART: COM2 onto a host pipe — the credential-less
+	// guest channel the box templates' qemu-ga answers on. A PER-MACHINE
+	// create option (Mark's Proxmox-model ruling 2026-07-12, zoneweaver's
+	// shipped decision ported: zones.guest_agent === true, default OFF, under
+	// the guest_agent.enabled master gate — ConfigurationManager.js's
+	// buildExtraAttrCommand). A document claiming serial port 2 itself wins;
+	// QGA steps aside. Opt-in later via POST /machines/{name}/guest-agent/setup.
+	guestAgent, _ := document.Section("zones")["guest_agent"].(bool)
+	if e.env.GuestAgentEnabled && guestAgent {
+		if serialPortClaimed(document.Section("hardware"), 2) {
+			out.Write("stderr", "Document claims serial port 2 — guest-agent UART skipped\n")
+		} else {
+			pipe := qga.PipePath(e.machineWorkdir(task.MachineName), task.MachineName)
+			flags = append(flags, "--uart2", "0x2F8", "3", "--uart-mode2", "server", pipe)
+			out.Write("stdout", "Guest-agent channel: COM2 → "+pipe+"\n")
+		}
+	}
+	// VRDE TLS from birth (Mark's zero-click ruling 2026-07-11): mint the
+	// machine's certificate from the agent CA and set the Enhanced-security
+	// properties with the other create flags — every new machine is
+	// browser-RDP-ready without the vrde-tls setup. PREPENDED so document
+	// knobs override (modifyvm's last occurrence wins). Failure only
+	// narrates — the bridge self-heals live at first connect anyway.
+	if e.env.VRDECertRoot != "" {
+		certPath, keyPath, caPath, verr := sslcert.EnsureVRDECertificate(
+			e.env.CACertPath, e.env.CAKeyPath,
+			filepath.Join(e.env.VRDECertRoot, task.MachineName), task.MachineName)
+		if verr != nil {
+			out.Write("stderr", "VRDE TLS material generation failed (the browser-RDP bridge self-heals at first connect): "+verr.Error()+"\n")
+		} else {
+			flags = append([]string{
+				"--vrde-property=Security/Method=Negotiate",
+				"--vrde-property=Security/ServerCertificate=" + certPath,
+				"--vrde-property=Security/ServerPrivateKey=" + keyPath,
+				"--vrde-property=Security/CACertificate=" + caPath,
+			}, flags...)
+			out.Write("stdout", "VRDE TLS: certificate minted, Enhanced security set — browser-RDP ready from birth\n")
+		}
+	}
+	if merr := vbox.ModifyVM(ctx, vboxExe, task.MachineName, flags); merr != nil {
 		return failed("modifyvm", merr)
 	}
 
@@ -590,9 +637,22 @@ func hasHostNetworks(document MachineConfig) bool {
 // refuses guests with fewer than two interfaces). Document networks occupy
 // adapters 2+ (host-type entries ride hostOnlyAdapter, the provisioning
 // network's interface).
-func modifyFlags(document MachineConfig, hostOnlyAdapter string, sshForwardPort int) []string {
+func modifyFlags(document MachineConfig, hostOnlyAdapter string, sshForwardPort int) ([]string, error) {
 	settings := document.Section("settings")
 	flags := []string{
+		// Browser-RDP-era defaults (Mark's directive 2026-07-10, after live
+		// multi-connection testing): absolute pointer + USB keyboard + xHCI
+		// for usable consoles, bidirectional clipboard, and a VRDE server
+		// that takes parallel clients and keeps the guest session across
+		// reconnects. Emitted FIRST — any document knob later in the flag
+		// list overrides (modifyvm's last occurrence wins).
+		"--mouse=usbtablet",
+		"--keyboard=usb",
+		"--usb-xhci=on",
+		"--clipboard-mode=bidirectional",
+		"--clipboard-file-transfers=enabled",
+		"--vrde-multi-con=on",
+		"--vrde-reuse-con=on",
 		"--cpus=" + strconv.FormatInt(intOr(settings["vcpus"], 2), 10),
 		"--memory=" + strconv.FormatInt(memoryToMB(settings["memory"]), 10),
 		"--nic1=nat",
@@ -675,22 +735,37 @@ func modifyFlags(document MachineConfig, hostOnlyAdapter string, sshForwardPort 
 				flags = append(flags, "--bridge-adapter"+n+"="+bridge)
 			}
 		}
-		if nicType != "" {
+		// zones.netif's coarse type, unless the entry carries its own raw
+		// nic_type (nicExtraFlags emits it with the other per-NIC knobs).
+		if nicType != "" && stringOr(network["nic_type"], "") == "" {
 			flags = append(flags, "--nic-type"+n+"="+nicType)
 		}
 		if mac := stringOr(network["mac"], ""); mac != "" && !strings.EqualFold(mac, "auto") {
 			flags = append(flags, "--mac-address"+n+"="+strings.ReplaceAll(mac, ":", ""))
 		}
+		flags = append(flags, nicExtraFlags(network, n)...)
 	}
 
-	// The vbox.directives passthrough: the document's own modifyvm attributes.
+	// The first-class hardware vocabulary (Mark's ALL-knobs ruling
+	// 2026-07-09): hardware.<section>.<key> — emitted after the legacy
+	// zones/settings flags so a hardware twin of the same knob wins.
+	if hardware := document.Section("hardware"); len(hardware) > 0 {
+		hwFlags, herr := hardwareFlags(hardware)
+		if herr != nil {
+			return nil, herr
+		}
+		flags = append(flags, hwFlags...)
+	}
+
+	// The vbox.directives passthrough: the document's own modifyvm attributes
+	// — the user's final word, after everything.
 	for _, entry := range listOr(document.Section("vbox")["directives"]) {
 		directive := mapOr(entry)
 		if name := stringOr(directive["directive"], ""); name != "" {
 			flags = append(flags, "--"+name+"="+stringOr(directive["value"], ""))
 		}
 	}
-	return flags
+	return flags, nil
 }
 
 // bootOrderFlags maps a boot_order list onto --boot1..4 (VirtualBox's four
@@ -723,9 +798,11 @@ func bootOrderFlags(value any) []string {
 	return flags
 }
 
-// storageControllerKind maps the document's diskif vocabulary onto storagectl
-// --add types (yardstick 2: the controller type is the user's choice at
-// create; VirtualBox fixes it once media attach). Default sata.
+// storageControllerKind maps the document's controller-type vocabulary onto
+// storagectl --add types (yardstick 2: the controller type is the user's
+// choice at create; VirtualBox fixes a controller's type once media attach).
+// Default sata. The full storagectl bus set is exposed — Mark's rule: every
+// option VirtualBox has.
 func storageControllerKind(diskif string) string {
 	switch strings.ToLower(diskif) {
 	case "ide":
@@ -738,36 +815,144 @@ func storageControllerKind(diskif string) string {
 		return "pcie"
 	case "virtio", "virtio-scsi", "virtio-blk":
 		return "virtio"
+	case "usb":
+		return "usb"
+	case "floppy":
+		return "floppy"
 	default:
 		return "sata"
 	}
 }
 
-// attachStorage wires the media: one controller (type from zones.diskif,
-// default SATA — the name stays "SATA Controller" as the stable label modify
-// addresses ports through), boot at port 0, additional disks at their
-// declared ports, cdroms as dvddrives after.
+// controllerPlan is one storage controller the create builds, with its
+// next-free-port counter for entries that declare no port.
+type controllerPlan struct {
+	name     string
+	kind     string
+	ports    int
+	bootable bool
+	nextPort int
+}
+
+// storageControllers derives the create's controller set — the device model
+// (Mark's Proxmox/VirtualBox correction 2026-07-07 + the multiple-adapters
+// ask 2026-07-08): disks.controllers[] entries ({name?, type, ports?,
+// bootable?}) each become a storagectl controller; media then address them by
+// name. Absent, ONE default controller exists exactly as before — type from
+// zones.diskif, the stable "SATA Controller" label modify addresses ports
+// through (the name deliberately survives a non-SATA diskif for port-address
+// stability).
+func storageControllers(document MachineConfig) ([]*controllerPlan, error) {
+	plans := []*controllerPlan{}
+	seen := map[string]bool{}
+	for _, entry := range listOr(document.Section("disks")["controllers"]) {
+		c := mapOr(entry)
+		if len(c) == 0 {
+			continue
+		}
+		kind := storageControllerKind(stringOr(c["type"], ""))
+		name := stringOr(c["name"], defaultControllerName(kind))
+		if seen[name] {
+			return nil, fmt.Errorf("disks.controllers: duplicate controller name %q", name)
+		}
+		seen[name] = true
+		bootable := true
+		if v, ok := c["bootable"].(bool); ok {
+			bootable = v
+		}
+		plans = append(plans, &controllerPlan{
+			name:     name,
+			kind:     kind,
+			ports:    int(intOr(c["ports"], 0)),
+			bootable: bootable,
+		})
+	}
+	if len(plans) == 0 {
+		plans = append(plans, &controllerPlan{
+			name:     sataController,
+			kind:     storageControllerKind(stringOr(document.Section("zones")["diskif"], "")),
+			bootable: true,
+		})
+	}
+	return plans, nil
+}
+
+// defaultControllerName names an unnamed controller after its bus.
+func defaultControllerName(kind string) string {
+	switch kind {
+	case "ide":
+		return "IDE Controller"
+	case "scsi":
+		return "SCSI Controller"
+	case "sas":
+		return "SAS Controller"
+	case "pcie":
+		return "NVMe Controller"
+	case "virtio":
+		return "VirtIO Controller"
+	case "usb":
+		return "USB Controller"
+	case "floppy":
+		return "Floppy Controller"
+	default:
+		return sataController
+	}
+}
+
+// resolveController picks an entry's controller: its own controller name when
+// declared (must exist), else the first (default) controller.
+func resolveController(plans []*controllerPlan, entry map[string]any) (*controllerPlan, error) {
+	name := stringOr(entry["controller"], "")
+	if name == "" {
+		return plans[0], nil
+	}
+	for _, plan := range plans {
+		if plan.name == name {
+			return plan, nil
+		}
+	}
+	return nil, fmt.Errorf("controller %q is not declared in disks.controllers", name)
+}
+
+// attachStorage wires the media over the controller set: boot at the default
+// controller's port 0 (or its own controller/port/device), additional disks
+// and cdroms at their declared controller/port/device or the controller's
+// next free port.
 func (e *executors) attachStorage(ctx context.Context, vboxExe, name string,
 	document MachineConfig, output *createExecutionOutput, out *tasks.OutputWriter,
 ) error {
-	const controller = "SATA Controller"
-	kind := storageControllerKind(stringOr(document.Section("zones")["diskif"], ""))
-	if kind != "sata" {
-		out.Write("stdout", "Storage controller type: "+kind+" (zones.diskif)\n")
-	}
-	if err := vbox.AddStorageController(ctx, vboxExe, name, controller, kind); err != nil {
+	plans, err := storageControllers(document)
+	if err != nil {
 		return err
 	}
-	// Diskless machines (the base's prepareBootVolume null) have no boot
-	// medium — the controller still exists so modify can attach media later.
-	if output.BootdiskPath != "" {
-		if err := vbox.StorageAttach(ctx, vboxExe, name, controller, 0, "hdd", output.BootdiskPath); err != nil {
-			return err
+	for _, plan := range plans {
+		if plan.kind != "sata" || plan.name != sataController || plan.ports > 0 {
+			out.Write("stdout", fmt.Sprintf("Storage controller %q (%s)\n", plan.name, plan.kind))
+		}
+		if cerr := vbox.AddStorageController(ctx, vboxExe, name, plan.name, plan.kind, plan.ports, plan.bootable); cerr != nil {
+			return cerr
 		}
 	}
 
 	disks := document.Section("disks")
-	nextPort := 1
+	// Diskless machines (the base's prepareBootVolume null) have no boot
+	// medium — the controllers still exist so modify can attach media later.
+	if output.BootdiskPath != "" {
+		boot := mapOr(disks["boot"])
+		plan, berr := resolveController(plans, boot)
+		if berr != nil {
+			return berr
+		}
+		port := int(intOr(boot["port"], 0))
+		device := int(intOr(boot["device"], 0))
+		if aerr := vbox.StorageAttach(ctx, vboxExe, name, plan.name, port, device, "hdd", output.BootdiskPath); aerr != nil {
+			return aerr
+		}
+		if port >= plan.nextPort {
+			plan.nextPort = port + 1
+		}
+	}
+
 	for i, entry := range listOr(disks["additional_disks"]) {
 		disk := mapOr(entry)
 		if len(disk) == 0 {
@@ -778,26 +963,69 @@ func (e *executors) attachStorage(ctx context.Context, vboxExe, name string,
 		if path == "" {
 			path = filepath.Join(e.machineWorkdir(name), "disks", diskName+".vdi")
 		}
-		port := int(intOr(disk["port"], int64(nextPort)))
-		out.Write("stdout", fmt.Sprintf("Attaching %s at port %d\n", path, port))
-		if err := vbox.StorageAttach(ctx, vboxExe, name, controller, port, "hdd", path); err != nil {
-			return err
+		plan, perr := resolveController(plans, disk)
+		if perr != nil {
+			return perr
 		}
-		nextPort = port + 1
+		port := int(intOr(disk["port"], int64(plan.nextPort)))
+		device := int(intOr(disk["device"], 0))
+		out.Write("stdout", fmt.Sprintf("Attaching %s at %s port %d device %d\n", path, plan.name, port, device))
+		if aerr := vbox.StorageAttach(ctx, vboxExe, name, plan.name, port, device, "hdd", path); aerr != nil {
+			return aerr
+		}
+		if port >= plan.nextPort {
+			plan.nextPort = port + 1
+		}
 	}
 
 	for _, entry := range listOr(disks["cdroms"]) {
 		cdrom := mapOr(entry)
-		iso := stringOr(cdrom["path"], "")
+		iso, rerr := e.resolveCdromPath(ctx, cdrom)
+		if rerr != nil {
+			return rerr
+		}
 		if iso == "" {
 			continue
 		}
-		if err := vbox.StorageAttach(ctx, vboxExe, name, controller, nextPort, "dvddrive", iso); err != nil {
-			return err
+		plan, perr := resolveController(plans, cdrom)
+		if perr != nil {
+			return perr
 		}
-		nextPort++
+		port := int(intOr(cdrom["port"], int64(plan.nextPort)))
+		device := int(intOr(cdrom["device"], 0))
+		out.Write("stdout", fmt.Sprintf("Attaching %s at %s port %d device %d\n", iso, plan.name, port, device))
+		if aerr := vbox.StorageAttach(ctx, vboxExe, name, plan.name, port, device, "dvddrive", iso); aerr != nil {
+			return aerr
+		}
+		if port >= plan.nextPort {
+			plan.nextPort = port + 1
+		}
 	}
 	return nil
+}
+
+// resolveCdromPath answers a cdroms[] entry's medium: path verbatim (raw
+// paths stay legal), or iso — a cached-ISO filename resolved through the
+// artifact registry (Mark's ruling 2026-07-09).
+func (e *executors) resolveCdromPath(ctx context.Context, cdrom map[string]any) (string, error) {
+	if path := stringOr(cdrom["path"], ""); path != "" {
+		return path, nil
+	}
+	name := stringOr(cdrom["iso"], "")
+	if name == "" {
+		return "", nil
+	}
+	if e.env.Assets == nil {
+		return "", errors.New("cdroms[].iso references the artifact registry — artifact_storage.enabled is false")
+	}
+	artifact, err := e.env.Assets.FindByKindFilename(ctx, assets.KindISO, name)
+	if errors.Is(err, assets.ErrNotFound) {
+		return "", fmt.Errorf("ISO %q is not in any storage location — upload or download it first (GET /artifacts/iso lists what exists)", name)
+	}
+	if err != nil {
+		return "", err
+	}
+	return artifact.Path, nil
 }
 
 // clearStaleSettings removes a leftover machine settings file from a

@@ -6,28 +6,23 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
-	"fmt"
 	"io"
 	"net/http"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 )
 
-// Registry auth + transport — the base's TemplateRegistryUtils ported: a
-// per-source HTTP client honoring verify_ssl, and the BoxVault token ladder
-// (explicit JWT auth_token → JWT-shaped api_key → username+api_key signin →
-// raw token fallback). Shared by download and publish.
+// Registry auth + transport — vagrant's own model (Mark's ruling 2026-07-09:
+// "API keys, PERIOD"): ONE raw service-account token per source, sent as
+// Bearer on every call. BoxVault accepts it everywhere (its verifyToken falls
+// back to the service_account table); the base's username/JWT signin ladder
+// is deliberately dead — a JWT expires and impersonates the key's owner.
+// Shared by download, publish, and the catalog proxy.
 
 // registryUserAgent satisfies BoxVault's service-account expectations (the
 // base's exact convention, this agent's name).
 const registryUserAgent = "Vagrant/2.2.19 Hyperweaver/1.0.0"
-
-// isJWT reports the three-dot-part JWT shape the base sniffs for.
-func isJWT(token string) bool {
-	return strings.Count(token, ".") == 2 && !strings.Contains(token, " ")
-}
 
 // registryHTTPClient builds the per-source client. Self-signed registries are
 // handled PROPERLY: the source's ca_file joins the trust store — verification
@@ -60,80 +55,18 @@ func registryHTTPClient(source *TemplateSource) *http.Client {
 	return client
 }
 
-// setRegistryAuth stamps the auth headers the base's client sends: Bearer
-// always, x-access-token additionally when the token is a JWT (BoxVault's API
-// endpoints read that header).
+// setRegistryAuth stamps the auth headers: Bearer with the source's API key.
 func setRegistryAuth(request *http.Request, token string) {
 	request.Header.Set("User-Agent", registryUserAgent)
-	if token == "" {
-		return
-	}
-	request.Header.Set("Authorization", "Bearer "+token)
-	if isJWT(token) {
-		request.Header.Set("x-access-token", token)
+	if token != "" {
+		request.Header.Set("Authorization", "Bearer "+token)
 	}
 }
 
-// registryToken resolves the source's effective token (getRegistryToken's
-// ladder): a JWT auth_token or api_key is used directly; username+api_key
-// signs in for a JWT; failures fall back to the raw token.
-func registryToken(ctx context.Context, client *http.Client, source *TemplateSource) string {
-	if source.AuthToken != "" && isJWT(source.AuthToken) {
-		return source.AuthToken
-	}
-	if source.APIKey != "" && isJWT(source.APIKey) {
-		return source.APIKey
-	}
-	if source.Username != "" && source.APIKey != "" {
-		if token, err := registrySignin(ctx, client, source); err == nil && token != "" {
-			return token
-		} else if err != nil {
-			mlog().Warn("registry signin failed, falling back to raw token",
-				"source", source.Name, "error", err)
-		}
-	}
-	if source.AuthToken != "" {
-		return source.AuthToken
-	}
-	return source.APIKey
-}
-
-// registrySignin exchanges username+api_key for a JWT (POST /api/auth/signin,
-// BoxVault's flow).
-func registrySignin(ctx context.Context, client *http.Client, source *TemplateSource) (string, error) {
-	body, err := json.Marshal(map[string]any{
-		"username":     source.Username,
-		"password":     source.APIKey,
-		"stayLoggedIn": true,
-	})
-	if err != nil {
-		return "", err
-	}
-	request, err := http.NewRequestWithContext(ctx, http.MethodPost,
-		source.URL+"/api/auth/signin", bytes.NewReader(body))
-	if err != nil {
-		return "", err
-	}
-	request.Header.Set("Content-Type", "application/json")
-	request.Header.Set("User-Agent", registryUserAgent)
-
-	response, err := client.Do(request)
-	if err != nil {
-		return "", err
-	}
-	defer func() {
-		_ = response.Body.Close()
-	}()
-	if response.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("signin: HTTP %s", response.Status)
-	}
-	var parsed struct {
-		AccessToken string `json:"accessToken"`
-	}
-	if derr := json.NewDecoder(io.LimitReader(response.Body, 1<<20)).Decode(&parsed); derr != nil {
-		return "", derr
-	}
-	return parsed.AccessToken, nil
+// registryToken resolves the source's credential: the configured API key
+// (BoxVault service-account token), used raw.
+func registryToken(source *TemplateSource) string {
+	return source.AuthToken
 }
 
 // registryPost sends one JSON document and reports the status code.
@@ -183,7 +116,7 @@ func RegistryHTTPClient(source *TemplateSource) *http.Client {
 	return registryHTTPClient(source)
 }
 
-// RegistryToken exposes the token ladder for the server's catalog proxy.
-func RegistryToken(ctx context.Context, client *http.Client, source *TemplateSource) string {
-	return registryToken(ctx, client, source)
+// RegistryToken exposes the source's API key for the server's catalog proxy.
+func RegistryToken(source *TemplateSource) string {
+	return registryToken(source)
 }

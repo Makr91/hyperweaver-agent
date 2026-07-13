@@ -91,12 +91,11 @@ type TemplateSource struct {
 	URL     string `json:"url"     yaml:"url"`
 	Enabled bool   `json:"enabled" yaml:"enabled"`
 	Default bool   `json:"default" yaml:"default"`
-	// AuthToken authenticates private boxes (Bearer); a per-request
-	// auth_token in the task metadata overrides it.
+	// AuthToken is the registry API key — a BoxVault service-account token,
+	// sent raw as Bearer on every call (vagrant's own model; Mark's ruling
+	// 2026-07-09: "API keys, PERIOD"). The ONLY credential: the base's
+	// username/JWT signin ladder is deliberately dead.
 	AuthToken string `json:"auth_token,omitempty" yaml:"auth_token"`
-	// Username + APIKey enable the BoxVault signin flow (the base's model).
-	Username string `json:"username,omitempty" yaml:"username"`
-	APIKey   string `json:"api_key,omitempty"  yaml:"api_key"`
 	// CAFile adds a PEM CA bundle to the trust store for THIS registry —
 	// the self-signed-registry answer (verification always stays on; the
 	// base's verify_ssl:false has no analog here by design).
@@ -420,10 +419,10 @@ func (e *executors) templateDownload(ctx context.Context, task *tasks.Task, out 
 	if err != nil {
 		return err
 	}
-	// Registry auth rides the shared ladder (signin JWT when the source
-	// carries username+api_key; verify_ssl honored by the client).
+	// Registry auth: the source's API key as Bearer (ca_file honored by the
+	// client).
 	client := registryHTTPClient(source)
-	setRegistryAuth(request, registryToken(ctx, client, source))
+	setRegistryAuth(request, registryToken(source))
 
 	out.Write("stdout", "Downloading "+downloadURL+"\n")
 	e.taskProgress(task, 10, "downloading")
@@ -489,7 +488,9 @@ func (e *executors) templateDownload(ctx context.Context, task *tasks.Task, out 
 }
 
 // findTemplateSource resolves a configured source by name (empty name = the
-// default/first-enabled — determineSourceFromBoxUrl's default rule).
+// source flagged default — names are pure display, never behavior; the
+// "Default Registry" name-match fallback died with Mark's real-name ask,
+// 2026-07-09).
 func findTemplateSource(sources []TemplateSource, name string) (*TemplateSource, error) {
 	for i := range sources {
 		if !sources[i].Enabled {
@@ -498,7 +499,7 @@ func findTemplateSource(sources []TemplateSource, name string) (*TemplateSource,
 		if name != "" && sources[i].Name == name {
 			return &sources[i], nil
 		}
-		if name == "" && (sources[i].Default || sources[i].Name == "Default Registry") {
+		if name == "" && sources[i].Default {
 			return &sources[i], nil
 		}
 	}

@@ -21,12 +21,13 @@ import (
 	"github.com/pkg/sftp"
 )
 
-// streamOrDiscard adapts an optional StreamFunc to an io.Writer.
-func streamOrDiscard(stream StreamFunc, name string) io.Writer {
+// stderrOrDiscard adapts an optional StreamFunc to the transports' stderr
+// writer (every remote-rsync surface writes its diagnostics there).
+func stderrOrDiscard(stream StreamFunc) io.Writer {
 	if stream == nil {
 		return io.Discard
 	}
-	return streamWriter{stream: name, cb: stream}
+	return streamWriter{stream: "stderr", cb: stream}
 }
 
 // shellQuoteArgs single-quotes each argument for the remote shell (the same
@@ -62,12 +63,12 @@ func BuiltinRsyncSync(ctx context.Context, ip string, port int, credentials Cred
 	}
 
 	client, err := rsyncclient.New(flags, rsyncclient.WithSender(),
-		rsyncclient.WithStderr(streamOrDiscard(stream, "stderr")))
+		rsyncclient.WithStderr(stderrOrDiscard(stream)))
 	if err != nil {
 		return fmt.Errorf("built-in rsync client: %w", err)
 	}
 
-	sshClient, closeSSH, err := connectSSH(ctx, ip, port, credentials, basePath, defaultKeyPath)
+	sshClient, closeSSH, _, err := connectSSH(ctx, ip, port, credentials, basePath, defaultKeyPath)
 	if err != nil {
 		return err
 	}
@@ -89,7 +90,7 @@ func BuiltinRsyncSync(ctx context.Context, ip string, port int, credentials Cred
 	if err != nil {
 		return err
 	}
-	session.Stderr = streamOrDiscard(stream, "stderr")
+	session.Stderr = stderrOrDiscard(stream)
 
 	remote := "sudo rsync " + shellQuoteArgs(client.ServerCommandOptions(remoteDir))
 	if serr := session.Start(remote); serr != nil {
@@ -126,7 +127,7 @@ func BuiltinRsyncSync(ctx context.Context, ip string, port int, credentials Cred
 func SFTPSync(ctx context.Context, ip string, port int, credentials Credentials,
 	localDir, remoteDir, basePath, defaultKeyPath string, stream StreamFunc,
 ) error {
-	sshClient, closeSSH, err := connectSSH(ctx, ip, port, credentials, basePath, defaultKeyPath)
+	sshClient, closeSSH, _, err := connectSSH(ctx, ip, port, credentials, basePath, defaultKeyPath)
 	if err != nil {
 		return err
 	}
