@@ -274,9 +274,13 @@ func (s *Server) handleDeleteProvisionerVersion(w http.ResponseWriter, r *http.R
 	})
 }
 
-// handleBridgedInterfaces lists the host's bridgeable interface names
-// (VBoxManage list bridgedifs) — the UI's bridge/default-NIC picker and the
-// source for provisioning.default_network_interface values.
+// handleBridgedInterfaces lists the host's bridgeable interfaces (VBoxManage
+// list bridgedifs) — the UI's uplink dropdown and the source for
+// provisioning.default_network_interface values. FLAT ROWS (converged with
+// zoneweaver, sync 2026-07-17): every row is {name, class} — on this
+// hypervisor every bridgeable interface is a physical adapter, so class is
+// always "phys" (zoneweaver's vocabulary adds aggr/etherstub/simnet/overlay
+// for its link families). The `default` extra rides as before.
 func (s *Server) handleBridgedInterfaces(w http.ResponseWriter, r *http.Request) {
 	exe := machines.VBoxManagePath(r.Context())
 	if exe == "" {
@@ -289,10 +293,14 @@ func (s *Server) handleBridgedInterfaces(w http.ResponseWriter, r *http.Request)
 		taskError(w, http.StatusInternalServerError, "Failed to list bridged interfaces")
 		return
 	}
+	rows := make([]map[string]any, 0, len(names))
+	for _, name := range names {
+		rows = append(rows, map[string]any{"name": name, "class": "phys"})
+	}
 	writeJSON(w, map[string]any{
-		"interfaces": names,
+		"interfaces": rows,
 		"default":    s.cfg.Provisioning.DefaultNetworkInterface,
-		"total":      len(names),
+		"total":      len(rows),
 	})
 }
 

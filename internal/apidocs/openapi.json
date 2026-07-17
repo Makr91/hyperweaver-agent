@@ -2427,11 +2427,11 @@
       "get": {
         "tags": ["Provisioning"],
         "summary": "Host bridgeable interfaces",
-        "description": "Minimum role: viewer. VBoxManage list bridgedifs names — the bridge/default-NIC picker's choices; default echoes provisioning.default_network_interface.",
+        "description": "Minimum role: viewer. VBoxManage list bridgedifs — the UI's uplink dropdown and the bridge/default-NIC picker's choices. FLAT ROWS (the converged wire, sync 2026-07-17 — one shape on both agents): every entry is {name, class}, class from each agent's own link vocabulary. On this hypervisor every bridgeable interface is a physical adapter, so class is always \"phys\"; zoneweaver's rows additionally speak aggr/etherstub/simnet/overlay for its link families. default echoes provisioning.default_network_interface.",
         "responses": {
           "200": {
-            "description": "Interface names",
-            "content": { "application/json": { "schema": { "type": "object", "properties": { "interfaces": { "type": "array", "items": { "type": "string" } }, "default": { "type": "string" }, "total": { "type": "integer" } } } } }
+            "description": "Interface rows",
+            "content": { "application/json": { "schema": { "type": "object", "properties": { "interfaces": { "type": "array", "items": { "type": "object", "properties": { "name": { "type": "string", "example": "Intel(R) Ethernet Connection I217-LM" }, "class": { "type": "string", "description": "Always \"phys\" on this agent (VBoxManage list bridgedifs enumerates physical adapters only)", "example": "phys" } } } }, "default": { "type": "string" }, "total": { "type": "integer" } } } } }
           },
           "503": { "description": "VirtualBox is not installed" }
         }

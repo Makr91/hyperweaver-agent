@@ -100,7 +100,12 @@ jobs:
             exit 1
           fi
           mkdir -p "$RUNNER_TEMP/core-driver"
-          tar -xzf "$RUNNER_TEMP/$ARCHIVE" -C "$RUNNER_TEMP/core-driver"
+          # tar on the Windows runner reads the "D:" in an absolute path as a
+          # REMOTE HOSTNAME (the Git-Bash tar colon trap — runtime-proven
+          # 2026-07-17: "Cannot connect to D: resolve failed"); extracting
+          # with relative paths from inside $RUNNER_TEMP sidesteps it on
+          # every OS.
+          (cd "$RUNNER_TEMP" && tar -xzf "$ARCHIVE" -C core-driver)
           CA="$RUNNER_TEMP/core-driver/driver/ssls/ca"
           for f in root-ca.crt ca-certificate.crt ca-certificate.key; do
             test -f "$CA/$f" || { echo "$f missing from the core driver archive" >&2; exit 1; }
@@ -241,7 +246,12 @@ jobs:
             exit 1
           fi
           mkdir -p "$RUNNER_TEMP/core-driver"
-          tar -xzf "$RUNNER_TEMP/$ARCHIVE" -C "$RUNNER_TEMP/core-driver"
+          # tar on the Windows runner reads the "D:" in an absolute path as a
+          # REMOTE HOSTNAME (the Git-Bash tar colon trap — runtime-proven
+          # 2026-07-17: "Cannot connect to D: resolve failed"); extracting
+          # with relative paths from inside $RUNNER_TEMP sidesteps it on
+          # every OS.
+          (cd "$RUNNER_TEMP" && tar -xzf "$ARCHIVE" -C core-driver)
           CA="$RUNNER_TEMP/core-driver/driver/ssls/ca"
           for f in root-ca.crt ca-certificate.crt ca-certificate.key; do
             test -f "$CA/$f" || { echo "$f missing from the core driver archive" >&2; exit 1; }
@@ -409,7 +419,12 @@ jobs:
             exit 1
           fi
           mkdir -p "$RUNNER_TEMP/core-driver"
-          tar -xzf "$RUNNER_TEMP/$ARCHIVE" -C "$RUNNER_TEMP/core-driver"
+          # tar on the Windows runner reads the "D:" in an absolute path as a
+          # REMOTE HOSTNAME (the Git-Bash tar colon trap — runtime-proven
+          # 2026-07-17: "Cannot connect to D: resolve failed"); extracting
+          # with relative paths from inside $RUNNER_TEMP sidesteps it on
+          # every OS.
+          (cd "$RUNNER_TEMP" && tar -xzf "$ARCHIVE" -C core-driver)
           CA="$RUNNER_TEMP/core-driver/driver/ssls/ca"
           for f in root-ca.crt ca-certificate.crt ca-certificate.key; do
             test -f "$CA/$f" || { echo "$f missing from the core driver archive" >&2; exit 1; }
