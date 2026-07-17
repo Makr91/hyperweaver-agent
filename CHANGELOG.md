@@ -1,5 +1,27 @@
 # Changelog
 
+## [0.1.4](https://github.com/Makr91/hyperweaver-agent/compare/v0.1.3...v0.1.4) (2026-07-17)
+
+
+### Bug Fixes
+
+* add SHI mode ([f5a9645](https://github.com/Makr91/hyperweaver-agent/commit/f5a9645ea95e96907a0a17e6befbb146ce45b3ec))
+* **deps:** bump the minor-and-patch group with 4 updates ([c5679e9](https://github.com/Makr91/hyperweaver-agent/commit/c5679e90b8973a7fe46975fbd3a8ce85de09fd2d))
+* **deps:** bump the minor-and-patch group with 4 updates ([ec3a8ef](https://github.com/Makr91/hyperweaver-agent/commit/ec3a8eff74a89735f1f0693338e34b450241422e))
+* implemening more ([2684919](https://github.com/Makr91/hyperweaver-agent/commit/268491955f87177436d0a924556c67b5a7d002cd))
+* parity with zoneweaver and implementing as many features as possible ([bd93683](https://github.com/Makr91/hyperweaver-agent/commit/bd93683fc0ddde26d016a61facf546773a4c5e37))
+* provisioning pipeline end-to-end - stamp-at-completion (final playbook only), provisioning NIC architecture (NAT adapter 1 + ssh port-forward transport), live MAC resolution into extra_vars, DHCP server restart + delete-time lease cleanup, Forwarding(N) parser fix, remote_collections honored ([4c529bf](https://github.com/Makr91/hyperweaver-agent/commit/4c529bf6ef07011a6ef13c7e9cd00d1f364e78f9))
+* provisioning pipeline end-to-end proven - stamp-at-completion, provisioning NIC architecture (NAT adapter 1 + ssh port-forward transport), live MAC resolution into extra_vars, DHCP server restart + lease cleanup, Forwarding(N) parser fix, ANSIBLE_CONFIG default, browser.open_on_start, provisioning.network man page, first-run config fix ([98c25b8](https://github.com/Makr91/hyperweaver-agent/commit/98c25b84145abd103cdb36ab9e10ebc69425c372))
+* RDP, API Shaping, General Improvments ([06e170e](https://github.com/Makr91/hyperweaver-agent/commit/06e170ef3027b21ddb01875d7bb31cee7bfeec42))
+* RDP, API Shaping, General Improvments ([b4b68d5](https://github.com/Makr91/hyperweaver-agent/commit/b4b68d5d42551f4738845e69a82ed0bf041b8760))
+* RDP, API Shaping, General Improvments ([3e2bdfb](https://github.com/Makr91/hyperweaver-agent/commit/3e2bdfb74535558e1bffc8a655ea2ba95a5789b1))
+* RDP, API Shaping, General Improvments ([3fc0e48](https://github.com/Makr91/hyperweaver-agent/commit/3fc0e487062e3f70cdb756d7853e37b1d05e3a84))
+* RDP, API Shaping, General Improvments ([e4a7dab](https://github.com/Makr91/hyperweaver-agent/commit/e4a7dab350a54b2bc28e19970eb487b18baee980))
+* RDP, API Shaping, General Improvments ([90229c3](https://github.com/Makr91/hyperweaver-agent/commit/90229c3511521917b76a06faee2c24643dbff86e))
+* RDP, API Shaping, General Improvments ([104c9d6](https://github.com/Makr91/hyperweaver-agent/commit/104c9d6013fc9dabb46603212193e96891a3c087))
+* seed startcloud_generic_provisioner per Mark's ruling; audit fixes - one running task per machine (stop can no longer race a running vagrant up), PUT machines server_id kept in sync between spec and row; UI 0.10.12 ([3bb324c](https://github.com/Makr91/hyperweaver-agent/commit/3bb324c20165193460787b73804b38d0e9e2a0b4))
+* updating version ([c4d26c4](https://github.com/Makr91/hyperweaver-agent/commit/c4d26c4cf5a4ea857f957b327b11f360052e9bef))
+
 ## [0.1.3](https://github.com/Makr91/hyperweaver-agent/compare/v0.1.2...v0.1.3) (2026-07-06)
 
 
