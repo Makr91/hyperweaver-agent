@@ -337,6 +337,11 @@ func GetMediumProperty(ctx context.Context, vboxManage, path, key string) (strin
 // HDD is one `VBoxManage list hdds --long` block — the media inventory the
 // delete flow's stamp rule, the image attach pre-check, and GET /media read.
 type HDD struct {
+	// UUID is VirtualBox's registry identity for the medium — the
+	// registry-hygiene close targets it (closing a stale entry by PATH
+	// re-opens the file and dies on the very UUID mismatch being cleaned).
+	// Never on the /media wire (the frozen shape carries no uuid).
+	UUID      string   `json:"-"`
 	Path      string   `json:"path"`
 	Format    string   `json:"format"`
 	SizeBytes int64    `json:"size_bytes"`
@@ -380,7 +385,7 @@ func ListHDDs(ctx context.Context, vboxManage string) ([]HDD, error) {
 		// not match — it never opens a block).
 		if strings.HasPrefix(trimmed, "UUID:") {
 			flush()
-			current = &HDD{}
+			current = &HDD{UUID: strings.TrimSpace(strings.TrimPrefix(trimmed, "UUID:"))}
 			inUseBlock = false
 			continue
 		}

@@ -2,6 +2,7 @@ package machines
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -111,6 +112,11 @@ func ValidateDisks(disks, settings map[string]any) (problems, warnings []string)
 		if hasSize || hasVolumeName {
 			refuse("disks.boot.type image does not take size or volume_name (an image attaches as-is)")
 		}
+		// directory places CREATED files (the addendum, converged 2026-07-17)
+		// — an image's full path already places it.
+		if _, has := boot["directory"]; has {
+			refuse("disks.boot.type image does not take directory")
+		}
 	case DiskTypeBlank:
 		if sizeToMB(boot["size"]) <= 0 {
 			refuse("disks.boot.type blank requires size")
@@ -146,6 +152,9 @@ func ValidateDisks(disks, settings map[string]any) (problems, warnings []string)
 			_, hasVolumeName := disk["volume_name"]
 			if hasSize || hasVolumeName {
 				refuse(prefix + ".type image does not take size or volume_name (an image attaches as-is)")
+			}
+			if _, has := disk["directory"]; has {
+				refuse(prefix + ".type image does not take directory")
 			}
 		case DiskTypeBlank:
 			if sizeToMB(disk["size"]) <= 0 {
@@ -240,6 +249,29 @@ func stampMedium(ctx context.Context, vboxExe, path, source string, out *tasks.O
 // the medium itself is already gone).
 func removeMediumSidecar(path string) {
 	_ = os.Remove(filepath.Clean(path + mediumSourceSidecar))
+}
+
+// diskDirectory resolves a CREATED disk's target folder — the `directory`
+// addendum (converged, sync 2026-07-17: the pool/dataset mirror for VBox):
+// the entry's directory when present must be an ABSOLUTE, EXISTING folder on
+// the agent host (never created by the agent — the frozen refusal names it);
+// absent = fallback, the machine folder (the spelled default). where names
+// the entry for the refusal string.
+func diskDirectory(entry map[string]any, fallback, where string) (string, error) {
+	raw, present := entry["directory"]
+	if !present {
+		return fallback, nil
+	}
+	dir := verbatimValue(raw)
+	refusal := errors.New(where + " directory " + dir + " is not an absolute existing directory on this host")
+	if !filepath.IsAbs(dir) {
+		return "", refusal
+	}
+	info, serr := os.Stat(dir)
+	if serr != nil || !info.IsDir() {
+		return "", refusal
+	}
+	return filepath.Clean(dir), nil
 }
 
 // mediumHolder answers which OTHER machine holds the medium (the image

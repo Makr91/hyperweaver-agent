@@ -514,12 +514,29 @@ func (e *executors) createStorage(ctx context.Context, task *tasks.Task, out *ta
 			return fmt.Errorf("template %s/%s: %w (download it first — POST /templates/pull or let create chain it)", org, box, terr)
 		}
 		e.taskProgress(task, 30, "importing_template")
-		bootPath = filepath.Join(workdir, "boot"+filepath.Ext(template.DiskPath))
+		bootDir, derr := diskDirectory(boot, workdir, "disks.boot")
+		if derr != nil {
+			return derr
+		}
+		// The cloned file takes the entry's volume_name (zoneweaver names the
+		// cloned zvol by it — the native mirror); absent = the spelled "boot"
+		// default. The template's own format keeps its extension.
+		bootPath = filepath.Join(bootDir,
+			stringOr(boot["volume_name"], "boot")+filepath.Ext(template.DiskPath))
 		clearStaleMedium(ctx, vboxExe, bootPath, out)
+		e.clearStaleSourceRegistration(ctx, vboxExe, template.DiskPath, out)
 		out.Write("stdout", "Cloning template "+template.DiskPath+" → "+bootPath+"\n")
 		if cerr := vbox.CloneMedium(ctx, vboxExe, template.DiskPath, bootPath, ""); cerr != nil {
 			rollback()
 			return cerr
+		}
+		// Release the SOURCE's fresh registration immediately: clonemedium
+		// registers the source, and a lingering entry goes STALE — packer's
+		// stream-optimized VMDKs never take the UUID VirtualBox assigns, so
+		// the NEXT clone dies on an E_FAIL UUID mismatch (Mark's live failure,
+		// 2026-07-17). Failures narrate; the clone already succeeded.
+		if cerr := vbox.CloseMedium(ctx, vboxExe, template.DiskPath, false); cerr != nil {
+			out.Write("stderr", "Releasing the template from the media registry failed (harmless when unregistered): "+cerr.Error()+"\n")
 		}
 		media = append(media, bootPath)
 		// Provenance stamp at materialization (property-first, sidecar
@@ -538,7 +555,11 @@ func (e *executors) createStorage(ctx context.Context, task *tasks.Task, out *ta
 	case DiskTypeBlank:
 		e.taskProgress(task, 30, "creating_boot_volume")
 		name := stringOr(boot["volume_name"], "boot")
-		bootPath = filepath.Join(workdir, name+".vdi")
+		bootDir, derr := diskDirectory(boot, workdir, "disks.boot")
+		if derr != nil {
+			return derr
+		}
+		bootPath = filepath.Join(bootDir, name+".vdi")
 		sparse := true
 		if v, bok := boot["sparse"].(bool); bok {
 			sparse = v
@@ -599,11 +620,21 @@ func (e *executors) createStorage(ctx context.Context, task *tasks.Task, out *ta
 		case DiskTypeBlank:
 			name := stringOr(disk["volume_name"], fmt.Sprintf("disk%d", i+1))
 			sizeMB := sizeToMB(disk["size"])
-			if merr := os.MkdirAll(disksDir, 0o750); merr != nil {
+			targetDir, derr := diskDirectory(disk,
+				disksDir, "disks.additional_disks["+strconv.Itoa(i+1)+"]")
+			if derr != nil {
 				rollback()
-				return merr
+				return derr
 			}
-			diskPath := filepath.Join(disksDir, name+".vdi")
+			if targetDir == disksDir {
+				// Only the DEFAULT location is agent-created; a custom
+				// directory must already exist (diskDirectory checked).
+				if merr := os.MkdirAll(disksDir, 0o750); merr != nil {
+					rollback()
+					return merr
+				}
+			}
+			diskPath := filepath.Join(targetDir, name+".vdi")
 			sparse := true
 			if v, bok := disk["sparse"].(bool); bok {
 				sparse = v
@@ -1256,7 +1287,16 @@ func (e *executors) attachStorage(ctx context.Context, vboxExe, name string,
 		diskName := stringOr(disk["volume_name"], fmt.Sprintf("disk%d", i+1))
 		path := stringOr(disk["path"], "")
 		if path == "" {
-			path = filepath.Join(e.machineWorkdir(name), "disks", diskName+".vdi")
+			// The created file's location honors the entry's directory (the
+			// addendum) exactly as createStorage placed it — the two MUST
+			// agree or the attach misses the medium.
+			targetDir, derr := diskDirectory(disk,
+				filepath.Join(e.machineWorkdir(name), "disks"),
+				"disks.additional_disks["+strconv.Itoa(i+1)+"]")
+			if derr != nil {
+				return derr
+			}
+			path = filepath.Join(targetDir, diskName+".vdi")
 		}
 		plan, perr := resolveController(plans, disk)
 		if perr != nil {
@@ -1346,6 +1386,32 @@ func (e *executors) clearStaleSettings(ctx context.Context, vboxExe, name string
 	}
 }
 
+// clearStaleSourceRegistration drops a clone SOURCE's stale media-registry
+// entry (registry hygiene, runtime-proven 2026-07-17: packer's
+// stream-optimized VMDKs never take the UUID VirtualBox assigns at first
+// registration, so a lingering entry fails the NEXT clone with an E_FAIL
+// UUID mismatch). The close targets the entry's REGISTRY UUID — the path
+// form re-opens the file and dies on the very mismatch being cleaned.
+// Failures narrate; the clone's own error stays the honest signal.
+func (e *executors) clearStaleSourceRegistration(ctx context.Context, vboxExe, sourcePath string, out *tasks.OutputWriter) {
+	hdds, err := vbox.ListHDDs(ctx, vboxExe)
+	if err != nil {
+		out.Write("stderr", "Media-registry listing failed (clone proceeds): "+err.Error()+"\n")
+		return
+	}
+	want := filepath.Clean(sourcePath)
+	for i := range hdds {
+		if !strings.EqualFold(filepath.Clean(hdds[i].Path), want) {
+			continue
+		}
+		out.Write("stdout", "Releasing stale media-registry entry for "+sourcePath+"\n")
+		if cerr := vbox.CloseMedium(ctx, vboxExe, hdds[i].UUID, false); cerr != nil {
+			out.Write("stderr", "Stale registry release failed (the clone may refuse): "+cerr.Error()+"\n")
+		}
+		return
+	}
+}
+
 // clearStaleMedium makes a create retry idempotent: a previous failed run
 // can leave the target medium on disk AND registered as an orphan in
 // VirtualBox's media registry (runtime-proven 2026-07-06 — clonemedium onto
@@ -1386,6 +1452,12 @@ func (e *executors) cancelCreateStorage(task *tasks.Task, out *tasks.OutputWrite
 			}
 		}
 	}
+	// Spec-named locations (the directory addendum + volume_name naming):
+	// best-effort — only the EXACT filenames this step would have created are
+	// swept, never a directory scan outside the workdir.
+	if meta, merr := readCreateMetadata(task); merr == nil {
+		candidates = append(candidates, cancelDiskCandidates(meta.Spec.Disks, workdir)...)
+	}
 	out.Write("stderr", "Storage step cancelled — removing half-made media\n")
 	for _, path := range candidates {
 		if _, serr := os.Stat(path); serr != nil {
@@ -1400,6 +1472,42 @@ func (e *executors) cancelCreateStorage(task *tasks.Task, out *tasks.OutputWrite
 		// A half-made medium's sidecar stamp goes with it.
 		removeMediumSidecar(path)
 	}
+}
+
+// cancelDiskCandidates names the EXACT files createStorage would have
+// created from a disks section — volume_name'd boot media and blank
+// additional disks, honoring each entry's directory (the addendum) — for the
+// post-kill sweep. Custom directories contribute only these specific
+// filenames, never a scan.
+func cancelDiskCandidates(disks map[string]any, workdir string) []string {
+	candidates := []string{}
+	boot := mapOr(disks["boot"])
+	bootDir := workdir
+	if dir := stringOr(boot["directory"], ""); dir != "" && filepath.IsAbs(dir) {
+		bootDir = dir
+	}
+	bootNames := []string{"boot"}
+	if name := stringOr(boot["volume_name"], ""); name != "" && name != "boot" {
+		bootNames = append(bootNames, name)
+	}
+	for _, name := range bootNames {
+		for _, ext := range []string{".vmdk", ".vdi", ".vhd"} {
+			candidates = append(candidates, filepath.Join(bootDir, name+ext))
+		}
+	}
+	for i, entry := range listOr(disks["additional_disks"]) {
+		disk := mapOr(entry)
+		if stringOr(disk["type"], "") != DiskTypeBlank {
+			continue
+		}
+		dir := filepath.Join(workdir, "disks")
+		if custom := stringOr(disk["directory"], ""); custom != "" && filepath.IsAbs(custom) {
+			dir = custom
+		}
+		name := stringOr(disk["volume_name"], fmt.Sprintf("disk%d", i+1))
+		candidates = append(candidates, filepath.Join(dir, name+".vdi"))
+	}
+	return candidates
 }
 
 // cancelCreateConfig is machine_create_config's post-kill cleanup: the
