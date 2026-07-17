@@ -60,7 +60,9 @@ func (s *Server) committedTotals(ctx context.Context, exclude string, runningOnl
 			continue
 		}
 		memoryBytes += machines.MemoryToMB(spec.Settings["memory"]) * mib
-		vcpus += machines.DocInt(spec.Settings["vcpus"], 2)
+		// VCPUCount, not DocInt (converged v2, sync 2026-07-17): committed
+		// sums must count a float-string "4.0" as 4, never the default.
+		vcpus += machines.VCPUCount(spec.Settings["vcpus"], 2)
 		storageBytes += requestedStorageBytes(spec.Disks)
 	}
 	return memoryBytes, vcpus, storageBytes
@@ -284,7 +286,9 @@ func (s *Server) validateCreationResources(ctx context.Context, document map[str
 		}
 	}
 	if rv.CPU.Enabled {
-		if requested := machines.DocInt(settings["vcpus"], 0); requested > 0 {
+		// VCPUCount (converged v2, sync 2026-07-17): the guard-passed value's
+		// canonical integer, never a ParseInt fallback.
+		if requested := machines.VCPUCount(settings["vcpus"], 0); requested > 0 {
 			e, w := s.validateCPU(ctx, requested, "")
 			errs, warns = append(errs, e...), append(warns, w...)
 		}
@@ -318,7 +322,9 @@ func (s *Server) validateModificationResources(ctx context.Context, body map[str
 	}
 	if rv.CPU.Enabled {
 		if vcpus, ok := body["vcpus"]; ok {
-			if requested := machines.DocInt(vcpus, 0); requested > 0 {
+			// VCPUCount (converged v2, sync 2026-07-17) — same normalization
+			// as the create-side count reads.
+			if requested := machines.VCPUCount(vcpus, 0); requested > 0 {
 				e, w := s.validateCPU(ctx, requested, machineName)
 				errs, warns = append(errs, e...), append(warns, w...)
 			}

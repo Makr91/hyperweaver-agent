@@ -301,3 +301,122 @@ func SetVideoModeHint(ctx context.Context, vboxManage, name string, width, heigh
 	}
 	return runSimple(ctx, vboxManage, args...)
 }
+
+// SetMediumProperty sets one custom key/value on a disk medium
+// (`modifymedium disk <path> --property key=value`) — the provenance stamp's
+// write half (typed disk spec, converged sync 2026-07-17).
+func SetMediumProperty(ctx context.Context, vboxManage, path, key, value string) error {
+	return runSimple(ctx, vboxManage, "modifymedium", "disk", path,
+		"--property", key+"="+value)
+}
+
+// GetMediumProperty reads one custom medium property back. Mechanism:
+// `showmediuminfo disk <path>` — its "Property: key=value" lines are the only
+// CLI read for medium properties (modifymedium sets, never gets). "" when the
+// key is unset; a missing/unregistered medium answers the command's error.
+func GetMediumProperty(ctx context.Context, vboxManage, path, key string) (string, error) {
+	cmd := exec.CommandContext(ctx, vboxManage, "showmediuminfo", "disk", path)
+	cmd.SysProcAttr = procattr.NoConsole()
+	out, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("VBoxManage showmediuminfo: %w", err)
+	}
+	for _, line := range strings.Split(string(out), "\n") {
+		rest, found := strings.CutPrefix(strings.TrimSpace(line), "Property:")
+		if !found {
+			continue
+		}
+		name, value, ok := strings.Cut(strings.TrimSpace(rest), "=")
+		if ok && strings.TrimSpace(name) == key {
+			return strings.TrimSpace(value), nil
+		}
+	}
+	return "", nil
+}
+
+// HDD is one `VBoxManage list hdds --long` block — the media inventory the
+// delete flow's stamp rule, the image attach pre-check, and GET /media read.
+type HDD struct {
+	Path      string   `json:"path"`
+	Format    string   `json:"format"`
+	SizeBytes int64    `json:"size_bytes"`
+	InUseBy   []string `json:"in_use_by"`
+}
+
+// hddInUseVM matches the VM references the "In use by VMs:" lines carry —
+// `<name> (UUID: <uuid>)`, with an optional snapshot suffix after the UUID
+// (non-greedy name so the FIRST UUID parenthesis terminates the match).
+var hddInUseVM = regexp.MustCompile(`^(.+?) \(UUID: [0-9a-fA-F-]{36}\)`)
+
+// ListHDDs inventories every registered disk medium (`list hdds --long` —
+// the short listing omits the attachment lines): Location, Storage format,
+// Capacity (MBytes → bytes), and the VM names holding the medium. Blocks are
+// blank-line separated and each opens with its UUID line.
+func ListHDDs(ctx context.Context, vboxManage string) ([]HDD, error) {
+	cmd := exec.CommandContext(ctx, vboxManage, "list", "hdds", "--long")
+	cmd.SysProcAttr = procattr.NoConsole()
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("VBoxManage list hdds: %w", err)
+	}
+
+	hdds := []HDD{}
+	var current *HDD
+	flush := func() {
+		if current != nil {
+			hdds = append(hdds, *current)
+			current = nil
+		}
+	}
+	inUseBlock := false
+	for _, raw := range strings.Split(string(out), "\n") {
+		trimmed := strings.TrimSpace(raw)
+		if trimmed == "" {
+			flush()
+			inUseBlock = false
+			continue
+		}
+		// A new block's opening UUID line ("Parent UUID:" deliberately does
+		// not match — it never opens a block).
+		if strings.HasPrefix(trimmed, "UUID:") {
+			flush()
+			current = &HDD{}
+			inUseBlock = false
+			continue
+		}
+		if current == nil {
+			continue
+		}
+		switch {
+		case strings.HasPrefix(trimmed, "Location:"):
+			current.Path = strings.TrimSpace(strings.TrimPrefix(trimmed, "Location:"))
+			inUseBlock = false
+		case strings.HasPrefix(trimmed, "Storage format:"):
+			current.Format = strings.TrimSpace(strings.TrimPrefix(trimmed, "Storage format:"))
+			inUseBlock = false
+		case strings.HasPrefix(trimmed, "Capacity:"):
+			fields := strings.Fields(strings.TrimPrefix(trimmed, "Capacity:"))
+			if len(fields) > 0 {
+				if mb, perr := strconv.ParseInt(fields[0], 10, 64); perr == nil {
+					current.SizeBytes = mb * 1024 * 1024
+				}
+			}
+			inUseBlock = false
+		case strings.HasPrefix(trimmed, "In use by VMs:"):
+			inUseBlock = true
+			rest := strings.TrimSpace(strings.TrimPrefix(trimmed, "In use by VMs:"))
+			if match := hddInUseVM.FindStringSubmatch(rest); match != nil {
+				current.InUseBy = append(current.InUseBy, match[1])
+			}
+		case inUseBlock:
+			// Continuation lines list further holders, indented.
+			if match := hddInUseVM.FindStringSubmatch(trimmed); match != nil {
+				current.InUseBy = append(current.InUseBy, match[1])
+			} else {
+				inUseBlock = false
+			}
+		}
+	}
+	flush()
+	return hdds, nil
+}

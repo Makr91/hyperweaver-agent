@@ -370,6 +370,11 @@ func New(cfg *config.Config, keyStore *keys.Store, trayTokens *auth.TrayTokens, 
 	mux.Handle("GET /templates/{templateId}", requireKey(http.HandlerFunc(s.handleGetTemplate)))
 	mux.Handle("DELETE /templates/{templateId}", requireKey(http.HandlerFunc(s.handleDeleteTemplate)))
 	mux.Handle("POST /templates/{templateId}/move", requireKey(http.HandlerFunc(s.handleMoveTemplate)))
+	// Host disk-medium inventory (typed disk spec, converged sync 2026-07-17):
+	// every registered hdd with its provenance stamp and holders — the delete
+	// flow's stamp rule made visible. GET-only, viewer via the central policy
+	// (no capability token of its own).
+	mux.Handle("GET /media", requireKey(http.HandlerFunc(s.handleListMedia)))
 	// Remote-registry discovery (zoneweaver's TemplateSourceController — the
 	// wizard's box-catalog feed).
 	mux.Handle("GET /templates/sources", requireKey(http.HandlerFunc(s.handleListTemplateSources)))

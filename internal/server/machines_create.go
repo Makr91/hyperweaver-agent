@@ -53,13 +53,16 @@ type createMachineRequest struct {
 // validateSpec checks the creation spec: the provisioner reference is
 // OPTIONAL (the base's provisioner-free create — Mark's ruling 2026-07-07)
 // and validated against the registry only when given; hostname and domain are
-// required (the name derives from them), role names must be usable, the
-// safe-ID source must exist, sync_method must be valid.
-func (s *Server) validateSpec(w http.ResponseWriter, spec *machines.Spec) bool {
+// required (the name derives from them), the typed disk spec must hold, role
+// names must be usable, the safe-ID source must exist, sync_method must be
+// valid. diskWarnings carry the typed-disk never-refuse rows (bhyve
+// vocabulary keys, an unused settings.box) for the create response's
+// resource_warnings.
+func (s *Server) validateSpec(w http.ResponseWriter, spec *machines.Spec) (ok bool, diskWarnings []string) {
 	if (spec.Provisioner.Name == "") != (spec.Provisioner.Version == "") {
 		taskError(w, http.StatusBadRequest,
 			"provisioner needs both name and version — or neither: provisioning is optional")
-		return false
+		return false, nil
 	}
 	if spec.HasProvisioner() {
 		version, err := s.provisioners.GetVersion(spec.Provisioner.Name, spec.Provisioner.Version)
@@ -67,11 +70,11 @@ func (s *Server) validateSpec(w http.ResponseWriter, spec *machines.Spec) bool {
 			if errors.Is(err, provisioner.ErrNotFound) || errors.Is(err, provisioner.ErrVersionNotFound) {
 				taskError(w, http.StatusBadRequest,
 					"provisioner "+spec.Provisioner.Name+"/"+spec.Provisioner.Version+" is not in the registry")
-				return false
+				return false, nil
 			}
 			slog.Error("resolve provisioner for machine spec", "error", err)
 			taskError(w, http.StatusInternalServerError, "Failed to resolve provisioner")
-			return false
+			return false, nil
 		}
 		// Authoritative pre-render answer validation (Field DSL, design §3.1):
 		// the ruled wire is a 422 whose body IS the {FIELD: message} map.
@@ -79,11 +82,11 @@ func (s *Server) validateSpec(w http.ResponseWriter, spec *machines.Spec) bool {
 			spec.Properties, nil, false)
 		if derr != nil {
 			taskError(w, http.StatusBadRequest, derr.Error())
-			return false
+			return false, nil
 		}
 		if len(problems) > 0 {
 			writeJSONStatus(w, http.StatusUnprocessableEntity, problems)
-			return false
+			return false, nil
 		}
 	}
 	if spec.Settings == nil {
@@ -94,23 +97,56 @@ func (s *Server) validateSpec(w http.ResponseWriter, spec *machines.Spec) bool {
 	if hostname == "" || domain == "" {
 		taskError(w, http.StatusBadRequest,
 			"Missing required parameters: settings.hostname and settings.domain are required")
-		return false
+		return false, nil
+	}
+	// consoleport pre-flight (converged, sync 2026-07-17): when the request's
+	// settings carry consoleport it must be an integer 1025-65535 (number or
+	// numeric string) — the value feeds VRDE's TCP/Ports, and an out-of-range
+	// value otherwise dies mid-chain as a cryptic modifyvm E_INVALIDARG. An
+	// ABSENT consoleport is fine; the render-time default is the executor
+	// guard's business (create_exec.go).
+	if value, ok := spec.Settings["consoleport"]; ok {
+		if problem := machines.ConsolePortProblem(value); problem != "" {
+			taskError(w, http.StatusBadRequest, problem)
+			return false, nil
+		}
+	}
+	// vcpus pre-flight (converged, sync 2026-07-17 — zoneweaver's proposal,
+	// ACKED): a present settings.vcpus must be a whole number >= 1 (integral
+	// floats like 2.0 pass — the 0.1.31 template renders them from wizard
+	// integers). Absent keeps the default-2 behavior byte-identical; the
+	// render-time value is the executor guard's business (create_exec.go).
+	if value, ok := spec.Settings["vcpus"]; ok {
+		if problem := machines.VCPUProblem(value); problem != "" {
+			taskError(w, http.StatusBadRequest, problem)
+			return false, nil
+		}
+	}
+	// Typed disk spec pre-flight (Mark's word, sync 2026-07-17 — the
+	// ZERO-inference model): disks.boot.type dispatches everything; the FIRST
+	// frozen-string problem answers the 400, warnings ride the response's
+	// resource_warnings. The rendered document re-validates at task time —
+	// this gate covers the request's own disks.
+	diskProblems, diskWarnings := machines.ValidateDisks(spec.Disks, spec.Settings)
+	if len(diskProblems) > 0 {
+		taskError(w, http.StatusBadRequest, diskProblems[0])
+		return false, nil
 	}
 	for i := range spec.Roles {
 		if !provisioner.ValidName(spec.Roles[i].Name) {
 			taskError(w, http.StatusBadRequest, "role name "+spec.Roles[i].Name+" is not usable")
-			return false
+			return false, nil
 		}
 	}
 	if spec.SafeIDPath != "" {
 		clean, err := safepath.CleanAbs(spec.SafeIDPath)
 		if err != nil {
 			taskError(w, http.StatusBadRequest, "safe_id_path is not a usable path")
-			return false
+			return false, nil
 		}
 		if info, serr := os.Stat(clean); serr != nil || info.IsDir() {
 			taskError(w, http.StatusBadRequest, "safe_id_path does not name a file on the agent host")
-			return false
+			return false, nil
 		}
 		spec.SafeIDPath = clean
 	}
@@ -118,9 +154,20 @@ func (s *Server) validateSpec(w http.ResponseWriter, spec *machines.Spec) bool {
 	case "", machines.SyncRsync, machines.SyncSCP:
 	default:
 		taskError(w, http.StatusBadRequest, "sync_method must be rsync or scp")
-		return false
+		return false, nil
 	}
-	return true
+	return true, diskWarnings
+}
+
+// diskWarningRows wraps the typed-disk warning strings into the create
+// response's resource_warnings row shape (converged, sync 2026-07-17):
+// {"resource": "disks", "message": ...}.
+func diskWarningRows(warnings []string) []resourceIssue {
+	rows := make([]resourceIssue, 0, len(warnings))
+	for _, warning := range warnings {
+		rows = append(rows, resourceIssue{"resource": "disks", "message": warning})
+	}
+	return rows
 }
 
 // resolveMachineName settles the machine's name — the base's resolveZoneName:
@@ -212,9 +259,13 @@ func (s *Server) renderAllHosts(ctx context.Context, spec *machines.Spec) ([]map
 		return nil, err
 	}
 	rendered, err := provisioner.RenderHostsFile(&provisioner.GenerateInput{
-		Version:        version,
-		Settings:       machines.EffectiveSettings(ctx, spec, s.cfg.Provisioning.DefaultSyncMethod, s.cfg.Provisioning.DefaultNetworkInterface),
-		Networks:       spec.Networks,
+		Version:  version,
+		Settings: machines.EffectiveSettings(ctx, spec, s.cfg.Provisioning.DefaultSyncMethod, s.cfg.Provisioning.DefaultNetworkInterface),
+		Networks: spec.Networks,
+		// disks in the render context, structured and verbatim — the
+		// networks model exactly (converged, sync 2026-07-17): inert until
+		// a template echoes it.
+		Disks:          spec.Disks,
 		Roles:          spec.Roles,
 		UserProperties: spec.Properties,
 		SecretsVars:    s.secrets.TemplateVars(),
@@ -239,11 +290,15 @@ func (s *Server) queueCreateOrchestration(ctx context.Context, name string, spec
 	// settings.box is OPTIONAL — the base's model (resolveBoxToTemplate
 	// returns success with no box): a box-less create builds from a scratch
 	// volume, an existing medium, or DISKLESS (a stub — Mark's ruling).
-	// Template resolution and auto-download engage only when a box is named.
+	// Template resolution and auto-download engage ONLY when the EFFECTIVE
+	// boot type is template (typed disk spec, converged sync 2026-07-17): a
+	// box named under a non-template type is unused (the pre-flight warned)
+	// and must NOT chain a download.
 	settings := machines.MachineConfig(document).Section("settings")
+	docDisks := machines.MachineConfig(document).Section("disks")
 	box := machines.DocString(settings["box"], "")
 	var org, boxName, boxVersion, boxArch string
-	if box != "" {
+	if box != "" && machines.EffectiveBootType(docDisks, settings) == machines.DiskTypeTemplate {
 		var boxOK bool
 		org, boxName, boxOK = strings.Cut(box, "/")
 		if !boxOK || org == "" || boxName == "" {
@@ -364,7 +419,8 @@ func (s *Server) handleCreateMachine(w http.ResponseWriter, r *http.Request) {
 		taskError(w, http.StatusBadRequest, "Invalid JSON body")
 		return
 	}
-	if !s.validateSpec(w, &body.Spec) {
+	specOK, specDiskWarnings := s.validateSpec(w, &body.Spec)
+	if !specOK {
 		return
 	}
 
@@ -422,12 +478,14 @@ func (s *Server) handleCreateMachine(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Pre-flight resource validation (the base's create hook): failing checks
-	// reject BEFORE anything queues; warnings ride the success response.
+	// reject BEFORE anything queues; warnings ride the success response —
+	// the typed-disk rows (bhyve vocabulary, unused settings.box) join them.
 	resourceErrors, resourceWarnings := s.validateCreationResources(r.Context(), document)
 	if len(resourceErrors) > 0 {
 		insufficientResources(w, resourceErrors)
 		return
 	}
+	resourceWarnings = append(diskWarningRows(specDiskWarnings), resourceWarnings...)
 
 	createdBy := auth.FromContext(r.Context()).Name
 	parentID, subTasks, requiresDownload, _, err := s.queueCreateOrchestration(
@@ -604,9 +662,46 @@ func (s *Server) createMultiHostMachines(w http.ResponseWriter, r *http.Request,
 		}
 		seenHomes[homeKey] = true
 
-		// Auto-download is single-host only (M-Q1): every named box must
-		// already be local — the refusal names the box AND the entry.
-		if box := machines.DocString(settings["box"], ""); box != "" {
+		// consoleport pre-flight per entry (converged, sync 2026-07-17): the
+		// entry's RENDERED settings may carry consoleport (the 0.1.31 package
+		// defaults it to server_id) — an out-of-range or non-numeric value
+		// joins the atomic refusal with the entry prefix instead of dying
+		// mid-chain as modifyvm's E_INVALIDARG. Absent stays absent.
+		if value, ok := settings["consoleport"]; ok {
+			if problem := machines.ConsolePortProblem(value); problem != "" {
+				entryError(k, http.StatusBadRequest, problem)
+				return
+			}
+		}
+		// vcpus pre-flight per entry (converged, sync 2026-07-17 —
+		// zoneweaver's proposal, ACKED): the entry's RENDERED settings must
+		// carry a whole number >= 1 when vcpus is present (integral floats
+		// like 2.0 pass); a bad value joins the atomic refusal with the entry
+		// prefix. Absent stays absent (default 2).
+		if value, ok := settings["vcpus"]; ok {
+			if problem := machines.VCPUProblem(value); problem != "" {
+				entryError(k, http.StatusBadRequest, problem)
+				return
+			}
+		}
+		// Typed disk spec per entry (Mark's word, sync 2026-07-17): the
+		// RENDERED entry's disks + settings take the same frozen strings with
+		// the 1-based entry prefix; the never-refuse rows join this machine's
+		// warningsByMachine slot as disks rows.
+		entryDisks := machines.MachineConfig(document).Section("disks")
+		diskProblems, entryDiskWarnings := machines.ValidateDisks(entryDisks, settings)
+		if len(diskProblems) > 0 {
+			entryError(k, http.StatusBadRequest, diskProblems[0])
+			return
+		}
+
+		// Auto-download is single-host only (M-Q1): every box the EFFECTIVE
+		// boot type actually reads (template — the typed disk spec's gate)
+		// must already be local — the refusal names the box AND the entry. A
+		// box under a non-template type is unused (warned above), never
+		// resolved.
+		if box := machines.DocString(settings["box"], ""); box != "" &&
+			machines.EffectiveBootType(entryDisks, settings) == machines.DiskTypeTemplate {
 			org, boxName, boxOK := strings.Cut(box, "/")
 			if !boxOK || org == "" || boxName == "" {
 				entryError(k, http.StatusBadRequest, `settings.box must be "organization/box-name"`)
@@ -629,7 +724,8 @@ func (s *Server) createMultiHostMachines(w http.ResponseWriter, r *http.Request,
 
 		// Per-entry pre-flight resource validation against ITS rendered
 		// document: failures join the atomic refusal (entry + machine
-		// annotated); warnings collect per machine name.
+		// annotated); warnings collect per machine name — the typed-disk
+		// rows ride in front of them.
 		resourceErrors, resourceWarnings := s.validateCreationResources(r.Context(), document)
 		if len(resourceErrors) > 0 {
 			for _, issue := range resourceErrors {
@@ -639,8 +735,9 @@ func (s *Server) createMultiHostMachines(w http.ResponseWriter, r *http.Request,
 			insufficientResources(w, resourceErrors)
 			return
 		}
-		if len(resourceWarnings) > 0 {
-			warningsByMachine[name] = resourceWarnings
+		entryWarnings := append(diskWarningRows(entryDiskWarnings), resourceWarnings...)
+		if len(entryWarnings) > 0 {
+			warningsByMachine[name] = entryWarnings
 		}
 
 		// This machine's spec: the SAME request spec with the entry's own
@@ -817,7 +914,8 @@ func (s *Server) handleCloneMachine(w http.ResponseWriter, r *http.Request) {
 	stripCloneNetworks(spec.Networks, provisioningIPs)
 	spec.StartAfterCreate = false
 
-	if !s.validateSpec(w, spec) {
+	cloneOK, cloneDiskWarnings := s.validateSpec(w, spec)
+	if !cloneOK {
 		return
 	}
 	name, status, problem := s.resolveMachineName(r.Context(), body.Name, spec)
@@ -863,6 +961,8 @@ func (s *Server) handleCloneMachine(w http.ResponseWriter, r *http.Request) {
 		insufficientResources(w, resourceErrors)
 		return
 	}
+	// The typed-disk warning rows join the clone response too.
+	resourceWarnings = append(diskWarningRows(cloneDiskWarnings), resourceWarnings...)
 	createdBy := auth.FromContext(r.Context()).Name
 	parentID, subTasks, requiresDownload, _, err := s.queueCreateOrchestration(
 		r.Context(), name, spec, document, body.StartAfterCreate, createdBy, nil)

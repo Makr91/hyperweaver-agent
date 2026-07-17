@@ -172,9 +172,13 @@ func (e *executors) prepareDocument(ctx context.Context, task *tasks.Task, out *
 		return err
 	}
 	rendered, err := provisioner.RenderHostsFile(&provisioner.GenerateInput{
-		Version:        version,
-		Settings:       settings,
-		Networks:       spec.Networks,
+		Version:  version,
+		Settings: settings,
+		Networks: spec.Networks,
+		// disks in the render context, structured and verbatim — the
+		// networks model exactly (converged, sync 2026-07-17): inert until
+		// a template echoes it.
+		Disks:          spec.Disks,
 		Roles:          roles,
 		UserProperties: spec.Properties,
 		SecretsVars:    e.env.SecretsVars(),
@@ -442,29 +446,64 @@ func (e *executors) createStorage(ctx context.Context, task *tasks.Task, out *ta
 			if cerr := vbox.CloseMedium(context.Background(), vboxExe, media[i], true); cerr != nil {
 				out.Write("stderr", "Rollback of "+media[i]+" failed: "+cerr.Error()+"\n")
 			}
+			// The rollback deletes what this step created + stamped — the
+			// sidecar stamp (when the property write fell back) goes with it.
+			removeMediumSidecar(media[i])
 		}
 	}
 
-	// Boot medium — the base's prepareBootVolume scenarios, VirtualBox terms
-	// (StorageManager.js: existing dataset | template | scratch | diskless):
-	//   boot.path      → attach an EXISTING disk-image file (never rolled back
-	//                    — it is not ours to delete)
-	//   settings.box   → clone the box template's image, grow to boot.size
-	//   boot.size      → create a blank scratch VDI (sparse by default)
-	//   none of those  → DISKLESS — no boot medium at all (PXE/manual)
+	// Typed disk spec re-validation at the RENDERED document (Mark's word,
+	// sync 2026-07-17 — the ZERO-inference model): the packaged-render path
+	// can emit disks the HTTP pre-flight never saw, so the same frozen
+	// strings gate here before any medium materializes. Warnings narrate —
+	// they never fail a build.
+	diskProblems, diskWarnings := ValidateDisks(disks, settings)
+	for _, warning := range diskWarnings {
+		out.Write("stderr", "WARNING: "+warning+"\n")
+	}
+	if len(diskProblems) > 0 {
+		for _, problem := range diskProblems {
+			out.Write("stderr", problem+"\n")
+		}
+		return errors.New(diskProblems[0])
+	}
+
+	// Boot medium — disks.boot.type is the ONLY dispatcher (the typed disk
+	// spec; the old presence-dispatch ladder died with it):
+	//   template → clone settings.box's image, grow to boot.size, stamp
+	//   image    → attach an EXISTING file AS-IS (existence + in-use
+	//              pre-checked; never created/deleted/resized, never stamped)
+	//   blank    → create a fresh VDI (sparse by default), stamp
+	//   none     → DISKLESS — no boot medium at all (PXE/manual)
+	// An ABSENT disks.boot is the spelled default: template when settings.box
+	// is present, none otherwise — exactly the old box/diskless behavior.
 	e.taskProgress(task, 10, "preparing_storage")
 	boot := mapOr(disks["boot"])
 	bootPath := ""
 	boxRef := stringOr(settings["box"], "")
-	switch {
-	case stringOr(boot["path"], "") != "":
+	switch EffectiveBootType(disks, settings) {
+	case DiskTypeImage:
 		bootPath = stringOr(boot["path"], "")
 		if _, serr := os.Stat(bootPath); serr != nil {
-			return fmt.Errorf("boot disk %s does not exist on the agent host: %w", bootPath, serr)
+			return errors.New("disks.boot.path " + bootPath + " does not exist on this host")
 		}
-		out.Write("stdout", "Attaching existing boot medium "+bootPath+"\n")
+		// In-use pre-check: a medium another machine holds is refused unless
+		// the entry carries force: true (the frozen string names the holder).
+		if force, _ := boot["force"].(bool); force {
+			out.Write("stdout", "force: true — skipping the in-use pre-check for "+bootPath+"\n")
+		} else {
+			holder, herr := mediumHolder(ctx, vboxExe, bootPath, task.MachineName)
+			if herr != nil {
+				return herr
+			}
+			if holder != "" {
+				return errors.New("disks.boot.path " + bootPath + " is attached to " + holder +
+					" (set force: true to attach anyway)")
+			}
+		}
+		out.Write("stdout", "Attaching existing boot medium "+bootPath+" (image — attached as-is, never ours to delete)\n")
 
-	case boxRef != "":
+	case DiskTypeTemplate:
 		org, box, ok := strings.Cut(boxRef, "/")
 		if !ok || org == "" || box == "" {
 			return errors.New(`settings.box must be "organization/box-name"`)
@@ -483,13 +522,20 @@ func (e *executors) createStorage(ctx context.Context, task *tasks.Task, out *ta
 			return cerr
 		}
 		media = append(media, bootPath)
+		// Provenance stamp at materialization (property-first, sidecar
+		// fallback): the delete flow destroys stamped media and preserves
+		// everything else.
+		if perr := stampMedium(ctx, vboxExe, bootPath, DiskTypeTemplate, out); perr != nil {
+			rollback()
+			return perr
+		}
 		if sizeMB := sizeToMB(boot["size"]); sizeMB > 0 {
 			if rerr := vbox.ResizeMedium(ctx, vboxExe, bootPath, sizeMB); rerr != nil {
 				out.Write("stderr", "Boot volume resize failed (continuing with template size): "+rerr.Error()+"\n")
 			}
 		}
 
-	case sizeToMB(boot["size"]) > 0:
+	case DiskTypeBlank:
 		e.taskProgress(task, 30, "creating_boot_volume")
 		name := stringOr(boot["volume_name"], "boot")
 		bootPath = filepath.Join(workdir, name+".vdi")
@@ -505,49 +551,75 @@ func (e *executors) createStorage(ctx context.Context, task *tasks.Task, out *ta
 			return cerr
 		}
 		media = append(media, bootPath)
+		if perr := stampMedium(ctx, vboxExe, bootPath, DiskTypeBlank, out); perr != nil {
+			rollback()
+			return perr
+		}
+
+	case DiskTypeNone:
+		out.Write("stdout", "disks.boot.type none — DISKLESS machine (attach media later via modify)\n")
 
 	default:
-		out.Write("stdout", "No box, boot path, or boot size — DISKLESS machine (attach media later via modify)\n")
+		// ValidateDisks refused every invalid/missing type above — defensive.
+		return errors.New("disks.boot.type is required when disks.boot is present (template|image|blank|none)")
 	}
 
 	e.taskProgress(task, 60, "creating_additional_disks")
 	disksDir := filepath.Join(workdir, "disks")
 	for i, entry := range listOr(disks["additional_disks"]) {
 		disk := mapOr(entry)
-		if len(disk) == 0 {
-			continue
-		}
-		// Existing disk-image file (the base's existing_dataset attach): it
-		// is attached by the config phase, never created or rolled back here.
-		if existing := stringOr(disk["path"], ""); existing != "" {
+		// type is the dispatcher here too (image|blank — ValidateDisks
+		// refused everything else above).
+		switch stringOr(disk["type"], "") {
+		case DiskTypeImage:
+			// Attached by the config phase AS-IS — never created, stamped, or
+			// rolled back here. Existence + in-use pre-checks mirror boot's
+			// with the 1-based entry prefix.
+			existing := stringOr(disk["path"], "")
+			label := "disks.additional_disks[" + strconv.Itoa(i+1) + "].path " + existing
 			if _, serr := os.Stat(existing); serr != nil {
 				rollback()
-				return fmt.Errorf("additional disk %s does not exist on the agent host: %w", existing, serr)
+				return errors.New(label + " does not exist on this host")
+			}
+			if force, _ := disk["force"].(bool); force {
+				out.Write("stdout", "force: true — skipping the in-use pre-check for "+existing+"\n")
+			} else {
+				holder, herr := mediumHolder(ctx, vboxExe, existing, task.MachineName)
+				if herr != nil {
+					rollback()
+					return herr
+				}
+				if holder != "" {
+					rollback()
+					return errors.New(label + " is attached to " + holder + " (set force: true to attach anyway)")
+				}
 			}
 			out.Write("stdout", "Additional disk uses existing medium "+existing+"\n")
-			continue
+
+		case DiskTypeBlank:
+			name := stringOr(disk["volume_name"], fmt.Sprintf("disk%d", i+1))
+			sizeMB := sizeToMB(disk["size"])
+			if merr := os.MkdirAll(disksDir, 0o750); merr != nil {
+				rollback()
+				return merr
+			}
+			diskPath := filepath.Join(disksDir, name+".vdi")
+			sparse := true
+			if v, bok := disk["sparse"].(bool); bok {
+				sparse = v
+			}
+			clearStaleMedium(ctx, vboxExe, diskPath, out)
+			out.Write("stdout", fmt.Sprintf("Creating %s (%d MB)\n", diskPath, sizeMB))
+			if cerr := vbox.CreateMedium(ctx, vboxExe, diskPath, sizeMB, sparse); cerr != nil {
+				rollback()
+				return cerr
+			}
+			media = append(media, diskPath)
+			if perr := stampMedium(ctx, vboxExe, diskPath, DiskTypeBlank, out); perr != nil {
+				rollback()
+				return perr
+			}
 		}
-		name := stringOr(disk["volume_name"], fmt.Sprintf("disk%d", i+1))
-		sizeMB := sizeToMB(disk["size"])
-		if sizeMB <= 0 {
-			continue
-		}
-		if merr := os.MkdirAll(disksDir, 0o750); merr != nil {
-			rollback()
-			return merr
-		}
-		diskPath := filepath.Join(disksDir, name+".vdi")
-		sparse := true
-		if v, bok := disk["sparse"].(bool); bok {
-			sparse = v
-		}
-		clearStaleMedium(ctx, vboxExe, diskPath, out)
-		out.Write("stdout", fmt.Sprintf("Creating %s (%d MB)\n", diskPath, sizeMB))
-		if cerr := vbox.CreateMedium(ctx, vboxExe, diskPath, sizeMB, sparse); cerr != nil {
-			rollback()
-			return cerr
-		}
-		media = append(media, diskPath)
 	}
 
 	output.BootdiskPath = bootPath
@@ -574,6 +646,32 @@ func (e *executors) createConfig(ctx context.Context, task *tasks.Task, out *tas
 	}
 	document := parseConfigBytes(output.Document)
 	settings := document.Section("settings")
+
+	// consoleport guard at the RENDERED document (converged, sync 2026-07-17):
+	// the 0.1.31 package defaults consoleport to server_id, which the HTTP
+	// pre-flight never sees — packaged creates render in the task chain. An
+	// out-of-range or non-numeric value fails HERE, before createvm/modifyvm,
+	// instead of surfacing as VRDE's cryptic mid-chain E_INVALIDARG. An absent
+	// consoleport stays exactly as before (no VRDE flags, no invented default).
+	if value, ok := settings["consoleport"]; ok {
+		if problem := ConsolePortProblem(value); problem != "" {
+			out.Write("stderr", "Rendered document carries consoleport "+
+				stringOr(value, fmt.Sprint(value))+": "+problem+"\n")
+			return errors.New(problem)
+		}
+	}
+	// vcpus guard at the RENDERED document (converged, sync 2026-07-17 —
+	// zoneweaver's proposal, ACKED): a present vcpus must be a whole number
+	// >= 1 (the 0.1.31 template renders integral floats like 2.0 — those
+	// pass); anything else fails HERE, before createvm/modifyvm. An absent
+	// vcpus keeps the existing default-2 behavior byte-identical.
+	if value, ok := settings["vcpus"]; ok {
+		if problem := VCPUProblem(value); problem != "" {
+			out.Write("stderr", "Rendered document carries vcpus "+
+				stringOr(value, fmt.Sprint(value))+": "+problem+"\n")
+			return errors.New(problem)
+		}
+	}
 
 	vboxExe := VBoxManagePath(ctx)
 	if vboxExe == "" {
@@ -802,7 +900,9 @@ func modifyFlags(document MachineConfig, hostOnlyAdapter string, sshForwardPort,
 		"--clipboard-file-transfers=enabled",
 		"--vrde-multi-con=on",
 		"--vrde-reuse-con=on",
-		"--cpus=" + strconv.FormatInt(intOr(settings["vcpus"], 2), 10),
+		// VCPUCount, not intOr (converged v2, sync 2026-07-17): a guard-passed
+		// float-string like "4.0" must apply as 4, never the default.
+		"--cpus=" + strconv.FormatInt(VCPUCount(settings["vcpus"], 2), 10),
 		"--memory=" + strconv.FormatInt(memoryToMB(settings["memory"]), 10),
 		"--nic1=nat",
 		// The NAT adapter's fixed marker MAC — Hosts.rb:310 verbatim
@@ -1297,6 +1397,8 @@ func (e *executors) cancelCreateStorage(task *tasks.Task, out *tasks.OutputWrite
 				out.Write("stderr", "Cleanup of "+path+" failed: "+rerr.Error()+"\n")
 			}
 		}
+		// A half-made medium's sidecar stamp goes with it.
+		removeMediumSidecar(path)
 	}
 }
 
@@ -1469,6 +1571,123 @@ func DocString(value any, fallback string) string {
 // reads vcpus through it).
 func DocInt(value any, fallback int64) int64 {
 	return intOr(value, fallback)
+}
+
+// ConsolePortProblem validates a PRESENT settings.consoleport value against
+// the VRDE TCP port range (converged, sync 2026-07-17 — both agents ship the
+// identical refusal): the 0.1.31 package defaults consoleport to server_id,
+// and an id above 65535 otherwise surfaces as a cryptic mid-chain modifyvm
+// E_INVALIDARG. Numbers and numeric strings must be an integer in 1025-65535;
+// anything else answers the refusal with the value verbatim. "" = valid.
+// Absence is the caller's business — an absent consoleport is always fine.
+func ConsolePortProblem(value any) string {
+	refusal := func(text string) string {
+		return "consoleport " + text + " is outside the valid console port range (1025-65535)"
+	}
+	inRange := func(n int64) bool { return n >= 1025 && n <= 65535 }
+	switch v := value.(type) {
+	case int:
+		if !inRange(int64(v)) {
+			return refusal(strconv.Itoa(v))
+		}
+	case int64:
+		if !inRange(v) {
+			return refusal(strconv.FormatInt(v, 10))
+		}
+	case uint64:
+		if v > math.MaxInt64 || !inRange(int64(v)) {
+			return refusal(strconv.FormatUint(v, 10))
+		}
+	case float64:
+		if v != math.Trunc(v) || !inRange(int64(v)) {
+			return refusal(strconv.FormatFloat(v, 'f', -1, 64))
+		}
+	case string:
+		n, err := strconv.ParseInt(strings.TrimSpace(v), 10, 64)
+		if err != nil || !inRange(n) {
+			return refusal(v)
+		}
+	default:
+		return refusal(fmt.Sprint(value))
+	}
+	return ""
+}
+
+// VCPUProblem validates a PRESENT settings.vcpus value (converged, sync
+// 2026-07-17 — zoneweaver's proposal, ACKED; both agents ship the identical
+// refusal): a whole number >= 1. Integers pass; an INTEGRAL float like 2.0
+// PASSES — it is whole, and the 0.1.31 template renders 2.0 from the
+// wizard's integer 2 — while 2.5, zero, negatives, and non-numerics answer
+// the refusal with the value verbatim. Numeric strings parse as floats
+// (ParseInt alone would reject "2.0") and take the same whole-number test.
+// "" = valid. Absence is the caller's business — an absent vcpus keeps the
+// existing default-2 behavior byte-identical.
+func VCPUProblem(value any) string {
+	refusal := func(text string) string {
+		return "vcpus " + text + " is not a valid vCPU count (whole number >= 1)"
+	}
+	wholeAtLeastOne := func(v float64) bool {
+		return !math.IsNaN(v) && !math.IsInf(v, 0) && v == math.Trunc(v) && v >= 1
+	}
+	switch v := value.(type) {
+	case int:
+		if v < 1 {
+			return refusal(strconv.Itoa(v))
+		}
+	case int64:
+		if v < 1 {
+			return refusal(strconv.FormatInt(v, 10))
+		}
+	case uint64:
+		if v < 1 {
+			return refusal(strconv.FormatUint(v, 10))
+		}
+	case float64:
+		if !wholeAtLeastOne(v) {
+			return refusal(strconv.FormatFloat(v, 'f', -1, 64))
+		}
+	case string:
+		n, err := strconv.ParseFloat(strings.TrimSpace(v), 64)
+		if err != nil || !wholeAtLeastOne(n) {
+			return refusal(v)
+		}
+	default:
+		return refusal(fmt.Sprint(value))
+	}
+	return ""
+}
+
+// VCPUCount coerces a guard-passed vcpus value to its canonical INTEGER
+// (converged v2, sync 2026-07-17 — apply-time normalization): the SAME
+// float-tolerant parsing as VCPUProblem, the whole float truncating to int —
+// so a value the guard passed NEVER falls back to the default at apply time
+// (intOr's ParseInt would drop the string "4.0" to the fallback and silently
+// apply the wrong count). Non-parseable answers fallback — the guard already
+// refused those upstream.
+func VCPUCount(value any, fallback int64) int64 {
+	switch v := value.(type) {
+	case int:
+		return int64(v)
+	case int64:
+		return v
+	case uint64:
+		if v > math.MaxInt64 {
+			return fallback
+		}
+		return int64(v)
+	case float64:
+		if math.IsNaN(v) || math.IsInf(v, 0) {
+			return fallback
+		}
+		return int64(v)
+	case string:
+		n, err := strconv.ParseFloat(strings.TrimSpace(v), 64)
+		if err != nil || math.IsNaN(n) || math.IsInf(n, 0) {
+			return fallback
+		}
+		return int64(n)
+	}
+	return fallback
 }
 
 // MemoryToMB exposes the memory size parser (Hosts.rb's rules) for the

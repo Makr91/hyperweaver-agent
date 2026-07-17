@@ -197,6 +197,14 @@ func (e *executors) uploadChunks(ctx context.Context, task *tasks.Task, client *
 	out.Write("stdout", fmt.Sprintf("Uploading %d MB in %d chunk(s)\n",
 		fileSize/(1024*1024), totalChunks))
 
+	// Real byte progress on the upload window (converged, sync 2026-07-17):
+	// bytes sent map into this step's existing 85→95 percents and
+	// progress_info carries {status: "uploading", received_bytes, total_bytes}
+	// — received_bytes is the uniform field name for BOTH directions; total is
+	// the .box file size. Each chunk's reader counts from its own base offset,
+	// so a retried chunk re-reports its range instead of inflating the total.
+	progress := tasks.NewTransferProgress(e.queue.Store(), task.ID, "uploading",
+		85, 95, fileSize)
 	buffer := make([]byte, publishChunkSize)
 	for index := 0; index < totalChunks; index++ {
 		length, rerr := io.ReadFull(file, buffer)
@@ -204,18 +212,18 @@ func (e *executors) uploadChunks(ctx context.Context, task *tasks.Task, client *
 			return rerr
 		}
 		if uerr := e.uploadChunkWithRetry(ctx, client, token, uploadURL, checksum,
-			buffer[:length], index, totalChunks, out); uerr != nil {
+			buffer[:length], index, totalChunks, progress, out); uerr != nil {
 			return uerr
 		}
-		progress := 85 + float64(index+1)/float64(totalChunks)*10
-		e.taskProgress(task, progress, fmt.Sprintf("uploading %d/%d", index+1, totalChunks))
 	}
+	progress.Finish()
 	return nil
 }
 
 // uploadChunkWithRetry sends one chunk, retrying three times (1s/2s/4s).
 func (e *executors) uploadChunkWithRetry(ctx context.Context, client *http.Client,
-	token, uploadURL, checksum string, chunk []byte, index, total int, out *tasks.OutputWriter,
+	token, uploadURL, checksum string, chunk []byte, index, total int,
+	progress *tasks.TransferProgress, out *tasks.OutputWriter,
 ) error {
 	var lastErr error
 	for attempt := 0; attempt < 4; attempt++ {
@@ -229,7 +237,7 @@ func (e *executors) uploadChunkWithRetry(ctx context.Context, client *http.Clien
 			case <-time.After(backoff):
 			}
 		}
-		lastErr = e.uploadChunk(ctx, client, token, uploadURL, checksum, chunk, index, total)
+		lastErr = e.uploadChunk(ctx, client, token, uploadURL, checksum, chunk, index, total, progress)
 		if lastErr == nil {
 			return nil
 		}
@@ -237,16 +245,25 @@ func (e *executors) uploadChunkWithRetry(ctx context.Context, client *http.Clien
 	return fmt.Errorf("chunk %d upload failed after 3 retries: %w", index, lastErr)
 }
 
-// uploadChunk sends one chunk request.
+// uploadChunk sends one chunk request, its body counted through the transfer
+// progress from the chunk's own base offset. Wrapping the *bytes.Reader hides
+// its length from net/http, so ContentLength and GetBody are set by hand
+// (identical wire framing to the unwrapped reader).
 func (e *executors) uploadChunk(ctx context.Context, client *http.Client,
 	token, uploadURL, checksum string, chunk []byte, index, total int,
+	progress *tasks.TransferProgress,
 ) error {
 	requestCtx, cancel := context.WithTimeout(ctx, registryUploadTimeout)
 	defer cancel()
+	base := int64(index) * publishChunkSize
 	request, err := http.NewRequestWithContext(requestCtx, http.MethodPost, uploadURL,
-		bytes.NewReader(chunk))
+		progress.Reader(bytes.NewReader(chunk), base))
 	if err != nil {
 		return err
+	}
+	request.ContentLength = int64(len(chunk))
+	request.GetBody = func() (io.ReadCloser, error) {
+		return io.NopCloser(progress.Reader(bytes.NewReader(chunk), base)), nil
 	}
 	request.Header.Set("Content-Type", "application/octet-stream")
 	request.Header.Set("x-file-name", "vagrant.box")

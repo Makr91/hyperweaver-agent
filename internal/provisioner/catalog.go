@@ -219,7 +219,14 @@ func (e *executors) catalogInstall(ctx context.Context, task *tasks.Task, out *t
 	archivePath := filepath.Join(temp, filename)
 
 	out.Write("stdout", "Downloading "+artifact.URL+"\n")
-	sum, size, err := downloadVerified(ctx, source, artifact.URL, archivePath)
+	// Real byte progress on the archive download (converged, sync 2026-07-17):
+	// this op recorded no intermediate percents at all, so the download maps
+	// bytes into 0→90 and the sha256 verify + import ride after the window at
+	// their existing (unnumbered) percents — the queue's completion write
+	// still lands 100. progress_info carries {status: "downloading",
+	// received_bytes, total_bytes|null}.
+	sum, size, err := downloadVerified(ctx, source, artifact.URL, archivePath,
+		e.queue.Store(), task.ID)
 	if err != nil {
 		return err
 	}
@@ -257,8 +264,13 @@ func resolveCatalogArtifact(document *CatalogDocument, name, version string) (*C
 	return nil, errors.New(name + " is not in the catalog")
 }
 
-// downloadVerified streams one asset to dest, hashing the bytes as they land.
-func downloadVerified(ctx context.Context, source *CatalogSource, assetURL, dest string) (sum string, size int64, err error) {
+// downloadVerified streams one asset to dest, hashing the bytes as they land
+// and mapping them into the task's download window (converged, sync
+// 2026-07-17): total from Content-Length (-1 = unknown parks the percent at
+// the window floor while received_bytes still streams).
+func downloadVerified(ctx context.Context, source *CatalogSource, assetURL, dest string,
+	store *tasks.Store, taskID string,
+) (sum string, size int64, err error) {
 	client, err := catalogClient(source, catalogDownloadTimeout)
 	if err != nil {
 		return "", 0, err
@@ -278,10 +290,14 @@ func downloadVerified(ctx context.Context, source *CatalogSource, assetURL, dest
 		return "", 0, fmt.Errorf("asset download answered HTTP %d", response.StatusCode)
 	}
 
+	progress := tasks.NewTransferProgress(store, taskID, "downloading",
+		0, 90, response.ContentLength)
 	hasher := sha256.New()
-	size, err = safepath.WriteFileFrom(dest, io.TeeReader(response.Body, hasher), 0o600)
+	size, err = safepath.WriteFileFrom(dest,
+		progress.Reader(io.TeeReader(response.Body, hasher), 0), 0o600)
 	if err != nil {
 		return "", size, err
 	}
+	progress.Finish()
 	return hex.EncodeToString(hasher.Sum(nil)), size, nil
 }

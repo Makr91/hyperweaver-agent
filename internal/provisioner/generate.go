@@ -66,6 +66,10 @@ type GenerateInput struct {
 	Settings map[string]any
 	// Networks is the machine's networks array, passed through structured.
 	Networks []any
+	// Disks is the machine's disks section, passed through structured and
+	// VERBATIM — exactly the networks model (converged, sync 2026-07-17):
+	// inert until a template echoes it, the agent guarantees no keys.
+	Disks map[string]any
 	// Roles are the machine's role selections.
 	Roles []RoleInput
 	// UserProperties are the user's form answers, keyed by each field's
@@ -89,7 +93,11 @@ func BuildContext(in *GenerateInput, resolvedAnswers map[string]any) map[string]
 	ctx := map[string]any{
 		"settings": in.Settings,
 		"networks": in.Networks,
-		"roles":    rolesContext(in.Roles),
+		// disks ride structured only, the networks precedent exactly
+		// (converged, sync 2026-07-17): no flattened twins — only settings
+		// flatten to UPPERCASE vars.
+		"disks": in.Disks,
+		"roles": rolesContext(in.Roles),
 	}
 
 	// 1. Server/settings fields, flattened UPPERCASE (SHI's SERVER_* style

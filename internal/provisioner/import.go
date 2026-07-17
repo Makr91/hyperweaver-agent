@@ -103,13 +103,16 @@ func (m *ImportMetadata) Validate() error {
 // package. catalogSources are the configured catalogs the install executor
 // resolves against.
 func RegisterExecutors(queue *tasks.Queue, registry *Registry, gitToken func(name string) string, catalogSources []CatalogSource) {
-	e := &executors{registry: registry, gitToken: gitToken, catalogSources: catalogSources}
+	e := &executors{queue: queue, registry: registry, gitToken: gitToken, catalogSources: catalogSources}
 	queue.Register(OpImport, tasks.Executor{Run: e.importPackage})
 	queue.Register(OpExport, tasks.Executor{Run: e.exportVersion})
 	queue.Register(OpCatalogInstall, tasks.Executor{Run: e.catalogInstall})
 }
 
 type executors struct {
+	// queue reaches the task store for live progress (the catalog install's
+	// transfer progress — converged, sync 2026-07-17).
+	queue          *tasks.Queue
 	registry       *Registry
 	gitToken       func(name string) string
 	catalogSources []CatalogSource

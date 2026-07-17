@@ -369,12 +369,17 @@ func (e *executors) controlAction(operation, action string) func(context.Context
 // every attached medium path through it.
 var attachmentPattern = regexp.MustCompile(`^(.+)-(\d+)-(\d+)$`)
 
-// detachExternalMedia detaches every attached medium whose file lives OUTSIDE
-// the machine's working directory before an unregister --delete can destroy
-// it: user-supplied disk images (boot.path / additional path attaches) are
-// never the agent's to delete. ISO paths outside the workdir are covered by
-// the same rule.
-func (e *executors) detachExternalMedia(ctx context.Context, vboxExe, target string,
+// detachForeignMedia detaches every attached medium WITHOUT a provenance
+// stamp before an unregister --delete can destroy it — the typed disk spec's
+// stamp rule (converged, sync 2026-07-17): a stamp (the hyperweaver:source
+// medium property, or the .hw-source sidecar) marks a medium the agent
+// CREATED (template clone / blank VDI), and cleanup_disks destroys ONLY
+// those; everything unstamped (image attaches, ISOs, pre-stamp media) is
+// foreign — detached and preserved with a narrated skip, WHEREVER it lives.
+// The old workdir-prefix heuristic died with this rule. One honest caveat
+// narrates: cleanup_disks also removes the machine's working directory, so a
+// foreign medium whose FILE lies inside it still goes with the directory.
+func (e *executors) detachForeignMedia(ctx context.Context, vboxExe, target string,
 	info *vbox.Info, workdir string, out *tasks.OutputWriter,
 ) {
 	prefix := strings.ToLower(filepath.Clean(workdir)) + string(filepath.Separator)
@@ -389,15 +394,20 @@ func (e *executors) detachExternalMedia(ctx context.Context, vboxExe, target str
 		if !filepath.IsAbs(value) {
 			continue
 		}
-		if strings.HasPrefix(strings.ToLower(filepath.Clean(value)), prefix) {
-			continue // agent-created medium inside the workdir — deletable
+		if stamp := MediumSourceStamp(ctx, vboxExe, value); stamp != "" {
+			out.Write("stdout", "Medium "+value+" carries stamp "+stamp+" — ours; cleanup_disks destroys it\n")
+			continue
 		}
 		port, perr := strconv.Atoi(match[2])
 		device, derr := strconv.Atoi(match[3])
 		if perr != nil || derr != nil {
 			continue
 		}
-		out.Write("stdout", "Detaching external medium (preserved): "+value+"\n")
+		note := ""
+		if strings.HasPrefix(strings.ToLower(filepath.Clean(value)), prefix) {
+			note = " — NOTE: its file lies inside the working directory, which cleanup_disks removes"
+		}
+		out.Write("stdout", "Detaching unstamped medium (foreign — preserved"+note+"): "+value+"\n")
 		if uerr := vbox.StorageDetachDevice(ctx, vboxExe, target, match[1], port, device); uerr != nil {
 			out.Write("stderr", "Detach of "+value+" failed — VirtualBox may refuse to delete it anyway: "+uerr.Error()+"\n")
 		}
@@ -405,12 +415,14 @@ func (e *executors) detachExternalMedia(ctx context.Context, vboxExe, target str
 }
 
 // deleteMachine destroys a machine: power off if running, detach every
-// out-of-workdir medium (user files are never deleted), unregister —
-// with media deletion when cleanup_disks (default) — remove the working
-// directory (containment-checked), the registry row, and any leftover pending
-// tasks. cleanup_disks=false leaves all medium files and the working
-// directory on disk (the base's keep-datasets default, available here as the
-// explicit flag).
+// UNSTAMPED medium (the typed-disk stamp rule, converged sync 2026-07-17 —
+// only media the agent created carry the provenance stamp and get deleted;
+// foreign media are never the agent's to destroy), unregister — with media
+// deletion when cleanup_disks (default) — remove the working directory
+// (containment-checked), the registry row, and any leftover pending tasks.
+// cleanup_disks=false leaves all medium files and the working directory on
+// disk (the base's keep-datasets default, available here as the explicit
+// flag).
 func (e *executors) deleteMachine(ctx context.Context, task *tasks.Task, out *tasks.OutputWriter) error {
 	machine, vboxExe, err := e.resolve(ctx, task)
 	if err != nil {
@@ -441,8 +453,8 @@ func (e *executors) deleteMachine(ctx context.Context, task *tasks.Task, out *ta
 			workdir = *machine.Home
 		}
 		if meta.CleanupDisks {
-			e.detachExternalMedia(ctx, vboxExe, target, info, workdir, out)
-			out.Write("stdout", "Unregistering "+machine.Name+" from VirtualBox (deleting media)\n")
+			e.detachForeignMedia(ctx, vboxExe, target, info, workdir, out)
+			out.Write("stdout", "Unregistering "+machine.Name+" from VirtualBox (deleting stamped media)\n")
 		} else {
 			out.Write("stdout", "Unregistering "+machine.Name+" from VirtualBox (cleanup_disks=false — all medium files preserved)\n")
 		}

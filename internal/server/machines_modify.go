@@ -314,6 +314,17 @@ func (s *Server) handleModifyMachine(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// vcpus pre-flight (converged, sync 2026-07-17 — zoneweaver's proposal,
+	// ACKED): PUT's vcpus rides TOP-LEVEL in the modify body; when present it
+	// must be a whole number >= 1 (integral floats like 2.0 pass). Refused
+	// BEFORE the DB-immediate fields apply, so a bad request changes nothing.
+	if value, ok := body["vcpus"]; ok {
+		if problem := machines.VCPUProblem(value); problem != "" {
+			taskError(w, http.StatusBadRequest, problem)
+			return
+		}
+	}
+
 	// notes/tags/boot_priority apply immediately (DB only, no task —
 	// boot_priority is orchestration metadata in the spec, the base's
 	// zonecfg-attr analog; VirtualBox never sees it).
@@ -377,6 +388,21 @@ func (s *Server) handleModifyMachine(w http.ResponseWriter, r *http.Request) {
 			taskError(w, http.StatusBadRequest,
 				"provisioner must be a non-empty object — the Hosts.yml host-entry document")
 			return
+		}
+		// consoleport pre-flight (converged, sync 2026-07-17): the modify body
+		// carries settings.consoleport only inside the provisioner document
+		// (merged sections) — when present it must be an integer 1025-65535
+		// (number or numeric string), the same refusal the create pre-flight
+		// answers, BEFORE the document stores. Absent stays absent.
+		if provisionerMap, mok := body["provisioner"].(map[string]any); mok {
+			if settings, sok := provisionerMap["settings"].(map[string]any); sok {
+				if value, vok := settings["consoleport"]; vok {
+					if problem := machines.ConsolePortProblem(value); problem != "" {
+						taskError(w, http.StatusBadRequest, problem)
+						return
+					}
+				}
+			}
 		}
 		if err := s.machines.MergeConfigurationSections(r.Context(), machine.Name,
 			map[string]any{"provisioner": provisionerRaw}); err != nil {

@@ -465,7 +465,9 @@ func modifyAttributeFlags(metadata map[string]any, info *vbox.Info) (flags, note
 		flags = append(flags, "--memory="+strconv.FormatInt(memoryToMB(v), 10))
 	}
 	if v, ok := metadata["vcpus"]; ok {
-		flags = append(flags, "--cpus="+strconv.FormatInt(intOr(v, 2), 10))
+		// VCPUCount, not intOr (converged v2, sync 2026-07-17): a guard-passed
+		// float-string like "4.0" must apply as 4, never the default.
+		flags = append(flags, "--cpus="+strconv.FormatInt(VCPUCount(v, 2), 10))
 	}
 	if v, ok := metadata["os_type"]; ok {
 		if s := stringOr(v, ""); s != "" {

@@ -447,11 +447,19 @@ func (e *executors) templateDownload(ctx context.Context, task *tasks.Task, out 
 	}
 	boxPath := filepath.Join(targetDir, meta.BoxName+".box")
 
+	// Real byte progress on the download window (converged, sync 2026-07-17):
+	// bytes map into this step's existing 10→60 percents and progress_info
+	// carries {status: "downloading", received_bytes, total_bytes|null} —
+	// total from Content-Length (-1 = unknown parks the percent at 10).
+	progress := tasks.NewTransferProgress(e.queue.Store(), task.ID, "downloading",
+		10, 60, response.ContentLength)
 	hasher := sha256.New()
-	size, err := safepath.WriteFileFrom(boxPath, io.TeeReader(response.Body, hasher), 0o600)
+	size, err := safepath.WriteFileFrom(boxPath,
+		progress.Reader(io.TeeReader(response.Body, hasher), 0), 0o600)
 	if err != nil {
 		return err
 	}
+	progress.Finish()
 	checksum := hex.EncodeToString(hasher.Sum(nil))
 	out.Write("stdout", fmt.Sprintf("Downloaded %d bytes (sha256 %s)\n", size, checksum))
 
