@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -140,6 +141,75 @@ func ExtractCredentials(settings map[string]any) Credentials {
 		credentials.SSHKeyPath = key
 	}
 	return credentials
+}
+
+// WinRMSettings is the resolved winrm communicator selection from settings
+// (zoneweaver's shipped winrm shape, sync 2026-07-17: W-Q1..W-Q5): Enabled
+// when the communicator selector says winrm; Port names the GUEST winrm port
+// (ruled, no veto); Transport and SSLPeerVerification carry the document's
+// winrm knobs with zoneweaver's defaults. Credentials stay the existing
+// vagrant_user/vagrant_user_pass pair — the ruled alias scope is the four
+// winrm key pairs ONLY, never the credential keys.
+type WinRMSettings struct {
+	Enabled             bool
+	Port                int
+	Transport           string
+	SSLPeerVerification bool
+}
+
+// ExtractWinRM reads the winrm communicator settings — the alias pairs
+// settings.communicator ≡ settings.vagrant_communicator, winrm_port ≡
+// vagrant_winrm_port, winrm_transport ≡ vagrant_winrm_transport, and
+// winrm_ssl_peer_verification ≡ vagrant_winrm_ssl_peer_verification —
+// resolved at READ time only (stored documents never rewrite). When BOTH
+// spellings ride the document the NEW (non-vagrant_) spelling wins and the
+// shadowed vagrant_* key is reported for the caller's narration channel.
+// Defaults: transport negotiate, ssl_peer_verification true, port 5985 —
+// or 5986 when the RESOLVED transport is ssl and no explicit port exists.
+func ExtractWinRM(settings map[string]any) (winrm WinRMSettings, shadowedKeys []string) {
+	resolve := func(key string) (any, bool) {
+		newValue, newOK := settings[key]
+		oldValue, oldOK := settings["vagrant_"+key]
+		if newOK && oldOK {
+			shadowedKeys = append(shadowedKeys, "vagrant_"+key)
+		}
+		if newOK {
+			return newValue, true
+		}
+		return oldValue, oldOK
+	}
+	winrm = WinRMSettings{Transport: "negotiate", SSLPeerVerification: true}
+	if value, ok := resolve("communicator"); ok {
+		winrm.Enabled = strings.EqualFold(stringOr(value, ""), "winrm")
+	}
+	if value, ok := resolve("winrm_transport"); ok {
+		if transport := stringOr(value, ""); transport != "" {
+			winrm.Transport = strings.ToLower(transport)
+		}
+	}
+	if value, ok := resolve("winrm_ssl_peer_verification"); ok {
+		switch v := value.(type) {
+		case bool:
+			winrm.SSLPeerVerification = v
+		case string:
+			if parsed, perr := strconv.ParseBool(strings.ToLower(v)); perr == nil {
+				winrm.SSLPeerVerification = parsed
+			}
+		}
+	}
+	// Port AFTER transport: the ssl default (5986) keys off the RESOLVED
+	// transport, and an explicit port always wins.
+	if winrm.Transport == "ssl" {
+		winrm.Port = 5986
+	} else {
+		winrm.Port = 5985
+	}
+	if value, ok := resolve("winrm_port"); ok {
+		if port := intOr(value, 0); port > 0 {
+			winrm.Port = int(port)
+		}
+	}
+	return winrm, shadowedKeys
 }
 
 // ExtractControlIP resolves the machine's provisioning IP from networks[]:

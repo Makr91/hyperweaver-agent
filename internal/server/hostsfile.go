@@ -61,7 +61,9 @@ func parseHostsFile(raw string) []hostsEntry {
 	return entries
 }
 
-// handleGetHostsFile mirrors GET /system/hosts.
+// handleGetHostsFile mirrors GET /system/hosts — zoneweaver's shipped wire
+// (Mark's ruling 2026-07-17: Go matches zoneweaver here): the standard
+// success envelope with entries/raw/path spread top-level.
 func (s *Server) handleGetHostsFile(w http.ResponseWriter, _ *http.Request) {
 	path := hostsFilePath()
 	raw, err := os.ReadFile(filepath.Clean(path))
@@ -69,7 +71,7 @@ func (s *Server) handleGetHostsFile(w http.ResponseWriter, _ *http.Request) {
 		errorResponse(w, http.StatusInternalServerError, "Failed to read hosts file", err.Error())
 		return
 	}
-	writeJSON(w, map[string]any{
+	successResponse(w, "Hosts file retrieved successfully", map[string]any{
 		"entries": parseHostsFile(string(raw)),
 		"raw":     string(raw),
 		"path":    path,
@@ -142,7 +144,12 @@ func (s *Server) handleUpdateHostsFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	backup := path + ".backup-" + time.Now().UTC().Format("20060102-150405")
+	// Backup name = zoneweaver's `<file>.bak.<ISO-timestamp>` (the converged
+	// wire, Mark's ruling 2026-07-17) — colons swapped for dashes because a
+	// literal ISO timestamp is an illegal Windows filename; the shape (.bak.
+	// prefix + timestamp) is what the wire promises.
+	backup := path + ".bak." + strings.ReplaceAll(
+		time.Now().UTC().Format(time.RFC3339), ":", "-")
 	if berr := safepath.WriteFile(backup, current, 0o644); berr != nil {
 		errorResponse(w, http.StatusInternalServerError, "Failed to write hosts file",
 			"create backup: "+berr.Error())
@@ -150,6 +157,8 @@ func (s *Server) handleUpdateHostsFile(w http.ResponseWriter, r *http.Request) {
 	}
 	// The hosts file must stay world-readable — every resolver on the
 	// machine reads it (0644, unlike the agent's own 0600 state files).
+	// Internal robustness (atomic temp-rename write, entry validation above)
+	// stays — the ruling converged the WIRE only.
 	if werr := safepath.WriteFile(path, []byte(content), 0o644); werr != nil {
 		errorResponse(w, http.StatusInternalServerError, "Failed to write hosts file", werr.Error())
 		return
@@ -157,8 +166,9 @@ func (s *Server) handleUpdateHostsFile(w http.ResponseWriter, r *http.Request) {
 
 	slog.Info("hosts file updated", "path", path, "backup", filepath.Base(backup),
 		"by", auth.FromContext(r.Context()).Name)
+	// The converged PUT answer carries backup + entries only — no path
+	// (zoneweaver's shipped shape; Mark: Go matches zoneweaver).
 	successResponse(w, "Hosts file updated successfully", map[string]any{
-		"path":    path,
 		"backup":  filepath.Base(backup),
 		"entries": len(parseHostsFile(content)),
 	})

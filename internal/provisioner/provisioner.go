@@ -34,6 +34,26 @@ const (
 	versionManifest    = "provisioner.yml"
 )
 
+// sourceFileName is a family's import-provenance sidecar, beside its
+// collection manifest. Dot-prefixed on purpose: ValidName rejects dot-led
+// entries, so registry scans skip it, and share archives (version-tree only)
+// never carry it — provenance is registry-side state, never package content
+// (converged with zoneweaver, sync 2026-07-17).
+const sourceFileName = ".source.json"
+
+// Source is a family's import provenance — recorded by git imports only.
+// TokenName NAMES a git_api_keys entry in the global secrets store (Mark's
+// private-repo ruling 2026-07-17: private repos ARE refreshable) — the token
+// itself never lands in provenance; refresh-from-source resolves it from the
+// secrets store at RUN time, exactly like the original import.
+// Folder/archive/catalog imports record nothing.
+type Source struct {
+	SourceType string `json:"source_type"`
+	URL        string `json:"url"`
+	Branch     string `json:"branch,omitempty"`
+	TokenName  string `json:"token_name,omitempty"`
+}
+
 // namePattern accepts provisioner family and version directory names,
 // rejecting path- and shell-hostile input (and dot-prefixed entries) before
 // any filesystem use.
@@ -54,6 +74,10 @@ type Collection struct {
 	Valid       bool           `json:"valid"`
 	Metadata    map[string]any `json:"metadata"`
 	Versions    []*Version     `json:"versions"`
+	// Source is the family's git-import provenance (.source.json) — JSON
+	// null, never absent, for families without one (list AND detail expose
+	// it; the converged wire shape).
+	Source *Source `json:"source"`
 }
 
 // Version is one package version. Metadata is the full provisioner.yml —

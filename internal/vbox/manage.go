@@ -114,6 +114,22 @@ func DeleteSnapshot(ctx context.Context, vboxManage, name, snapshot string) erro
 	return runSimple(ctx, vboxManage, "snapshot", name, "delete", snapshot)
 }
 
+// SnapshotEdit renames a snapshot and/or rewrites its description
+// (`VBoxManage snapshot <vm> edit`). Nil pointers omit the flag entirely;
+// a non-nil empty description passes --description= to CLEAR the text
+// (zoneweaver's description-empty-clears rule, converged 2026-07-17).
+// Rename collisions and unknown snapshots surface as VBoxManage's own error.
+func SnapshotEdit(ctx context.Context, vboxManage, name, snapshot string, newName, description *string) error {
+	args := []string{"snapshot", name, "edit", snapshot}
+	if newName != nil {
+		args = append(args, "--name="+*newName)
+	}
+	if description != nil {
+		args = append(args, "--description="+*description)
+	}
+	return runSimple(ctx, vboxManage, args...)
+}
+
 // CloneVM copies a whole machine — CURRENT state included, the piece
 // clonemedium-from-template cannot give (VBoxManage clonevm). snapshot names
 // a source snapshot to clone from (required for linked clones); linked makes

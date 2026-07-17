@@ -48,7 +48,9 @@ const (
 // createExecutionOutput is the _execution_output document children pass
 // forward.
 type createExecutionOutput struct {
-	// Document is the rendered hosts[0] — settings/networks/disks/zones plus
+	// Document is the machine's own rendered hosts[HostIndex] entry
+	// (multi-host converged wire, sync 2026-07-17: M-Q1) —
+	// settings/networks/disks/zones plus
 	// the provisioner sections (folders/provisioning/vars/roles) — as ordered
 	// JSON bytes: the rendered YAML's own key order, which finalize stores
 	// verbatim (a map here would alphabetize it).
@@ -125,7 +127,8 @@ func (e *executors) machineWorkdir(machineName string) string {
 // prepareDocument executes machine_prepare in the create chain (and the
 // provision chain's extract slot): render the package's Hosts.template.yml
 // with the spec, materialize the working directory (package tree, id-files,
-// ssls, hash-verified installer mounts), parse hosts[0], and pass the
+// ssls, hash-verified installer mounts), parse the spec's own hosts[HostIndex]
+// entry (multi-host converged wire, sync 2026-07-17: M-Q1), and pass the
 // document forward.
 func (e *executors) prepareDocument(ctx context.Context, task *tasks.Task, out *tasks.OutputWriter) error {
 	meta, err := readCreateMetadata(task)
@@ -184,7 +187,9 @@ func (e *executors) prepareDocument(ctx context.Context, task *tasks.Task, out *
 			strings.Join(markers, ", ")+") — the package template was never converted to Jinja2\n")
 	}
 
-	document, err := parseHostsDocumentOrdered(rendered)
+	// Each machine reads ITS OWN hosts[] entry (multi-host converged wire,
+	// sync 2026-07-17: M-Q1) — HostIndex is 0 for every single-host spec.
+	document, err := parseHostsDocumentOrdered(rendered, spec.HostIndex)
 	if err != nil {
 		return err
 	}
@@ -265,13 +270,21 @@ func EffectiveSettings(ctx context.Context, spec *Spec, defaultSync, defaultNIC 
 	return settings
 }
 
-// ParseHostsDocument extracts hosts[0] from a rendered Hosts.yml.
+// ParseHostsDocument extracts hosts[0] from a rendered Hosts.yml — the
+// single-host readers' view (index 0 keeps every existing path byte-identical).
 func ParseHostsDocument(rendered []byte) (map[string]any, error) {
-	return parseHostsDocument(rendered)
+	hosts, err := ParseHostsDocuments(rendered)
+	if err != nil {
+		return nil, err
+	}
+	return hosts[0], nil
 }
 
-// parseHostsDocument extracts hosts[0] from a rendered Hosts.yml.
-func parseHostsDocument(rendered []byte) (map[string]any, error) {
+// ParseHostsDocuments extracts EVERY hosts[] entry from a rendered Hosts.yml
+// (multi-host converged wire, sync 2026-07-17: M-Q1): the DOCUMENT is the
+// program — one render may carry N coordinated machines, and the create
+// handler counts and pre-checks them ALL before anything queues.
+func ParseHostsDocuments(rendered []byte) ([]map[string]any, error) {
 	var parsed struct {
 		Hosts []map[string]any `yaml:"hosts"`
 	}
@@ -281,15 +294,17 @@ func parseHostsDocument(rendered []byte) (map[string]any, error) {
 	if len(parsed.Hosts) == 0 {
 		return nil, errors.New("rendered document carries no hosts[] entry")
 	}
-	return parsed.Hosts[0], nil
+	return parsed.Hosts, nil
 }
 
-// parseHostsDocumentOrdered extracts hosts[0] as ordered JSON bytes: the
+// parseHostsDocumentOrdered extracts hosts[index] as ordered JSON bytes: the
 // ordered-map decode keeps every object's keys in the rendered YAML's own
 // order, and the JSON conversion writes them back in that order — the storage
 // ingress the ruling demands (a plain map decode would alphabetize the
-// provisioning:/vars: sections on re-marshal).
-func parseHostsDocumentOrdered(rendered []byte) (json.RawMessage, error) {
+// provisioning:/vars: sections on re-marshal). index is the machine's own
+// hosts[] slot (multi-host converged wire, sync 2026-07-17: M-Q1) — 0 for
+// every single-host document; out of range names the count.
+func parseHostsDocumentOrdered(rendered []byte, index int) (json.RawMessage, error) {
 	var parsed struct {
 		Hosts []any `yaml:"hosts"`
 	}
@@ -299,7 +314,11 @@ func parseHostsDocumentOrdered(rendered []byte) (json.RawMessage, error) {
 	if len(parsed.Hosts) == 0 {
 		return nil, errors.New("rendered document carries no hosts[] entry")
 	}
-	raw, err := orderedYAMLToJSON(parsed.Hosts[0])
+	if index < 0 || index >= len(parsed.Hosts) {
+		return nil, fmt.Errorf("spec asks for hosts[%d] but the rendered document carries %d hosts[] entries",
+			index, len(parsed.Hosts))
+	}
+	raw, err := orderedYAMLToJSON(parsed.Hosts[index])
 	if err != nil {
 		return nil, err
 	}
@@ -607,8 +626,23 @@ func (e *executors) createConfig(ctx context.Context, task *tasks.Task, out *tas
 	}
 	out.Write("stdout", fmt.Sprintf("Provisioning SSH port-forward: 127.0.0.1:%d → guest 22\n", sshPort))
 
+	// winrm communicator (zoneweaver's shipped winrm shape, sync 2026-07-17:
+	// W-Q1..W-Q5): a SECOND natpf1 forward beside the ssh one — the pipeline
+	// dials 127.0.0.1:<forward> for winrm exactly like it does for ssh. The
+	// document's winrm_port names the GUEST port (ruled, no veto).
+	winrmForwardPort := 0
+	if winrm, _ := ExtractWinRM(settings); winrm.Enabled {
+		port, werr := allocateLocalPort(ctx)
+		if werr != nil {
+			return failed("winrm port-forward allocation", werr)
+		}
+		winrmForwardPort = port
+		out.Write("stdout", fmt.Sprintf("Provisioning WinRM port-forward: 127.0.0.1:%d → guest %d\n",
+			winrmForwardPort, winrm.Port))
+	}
+
 	e.taskProgress(task, 40, "configuring_vm")
-	flags, ferr := modifyFlags(document, hostAdapter, sshPort)
+	flags, ferr := modifyFlags(document, hostAdapter, sshPort, winrmForwardPort)
 	if ferr != nil {
 		return failed("modifyvm", ferr)
 	}
@@ -752,7 +786,7 @@ func hasHostNetworks(document MachineConfig) bool {
 // refuses guests with fewer than two interfaces). Document networks occupy
 // adapters 2+ (host-type entries ride hostOnlyAdapter, the provisioning
 // network's interface).
-func modifyFlags(document MachineConfig, hostOnlyAdapter string, sshForwardPort int) ([]string, error) {
+func modifyFlags(document MachineConfig, hostOnlyAdapter string, sshForwardPort, winrmForwardPort int) ([]string, error) {
 	settings := document.Section("settings")
 	flags := []string{
 		// Browser-RDP-era defaults (Mark's directive 2026-07-10, after live
@@ -779,6 +813,14 @@ func modifyFlags(document MachineConfig, hostOnlyAdapter string, sshForwardPort 
 	if sshForwardPort > 0 {
 		flags = append(flags,
 			fmt.Sprintf("--natpf1=ssh,tcp,127.0.0.1,%d,,22", sshForwardPort))
+	}
+	if winrmForwardPort > 0 {
+		// The winrm communicator's transport forward (W-Q1..W-Q5): the guest
+		// port is the RULED winrm_port — re-read here so the rule and its
+		// allocation (createConfig) can never disagree on the document.
+		winrm, _ := ExtractWinRM(settings)
+		flags = append(flags,
+			fmt.Sprintf("--natpf1=winrm,tcp,127.0.0.1,%d,,%d", winrmForwardPort, winrm.Port))
 	}
 	// roles[].port_forwards → --natpf1 rules on the reserved NAT adapter
 	// (core/Hosts.rb:312-320's forwarded_port entries {guest, host, ip};

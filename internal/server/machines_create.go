@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/Makr91/hyperweaver-agent/internal/auth"
@@ -194,6 +195,18 @@ func (s *Server) resolutionDocument(ctx context.Context, spec *machines.Spec) (m
 // the EFFECTIVE settings (template defaults applied) — the box tuple the
 // template registry resolves may come entirely from package defaults.
 func (s *Server) renderForResolution(ctx context.Context, spec *machines.Spec) (map[string]any, error) {
+	hosts, err := s.renderAllHosts(ctx, spec)
+	if err != nil {
+		return nil, err
+	}
+	return hosts[0], nil
+}
+
+// renderAllHosts renders the package template once and returns EVERY hosts[]
+// entry (multi-host converged wire, sync 2026-07-17: M-Q1): the DOCUMENT is
+// the program — one rendered Hosts.yml may carry N>1 coordinated machines,
+// and the create handler decides single vs multi from the count alone.
+func (s *Server) renderAllHosts(ctx context.Context, spec *machines.Spec) ([]map[string]any, error) {
 	version, err := s.provisioners.GetVersion(spec.Provisioner.Name, spec.Provisioner.Version)
 	if err != nil {
 		return nil, err
@@ -209,16 +222,20 @@ func (s *Server) renderForResolution(ctx context.Context, spec *machines.Spec) (
 	if err != nil {
 		return nil, err
 	}
-	return machines.ParseHostsDocument(rendered)
+	return machines.ParseHostsDocuments(rendered)
 }
 
 // queueCreateOrchestration creates the parent + chained children (the base's
 // createZoneCreationSubTasks + handleAutoDownload): template_download first
 // when the box is not local, then prepare → storage → config → finalize
 // (every child carries the spec verbatim), then the optional start child.
+// dependsOn seeds the FIRST chain task's dependency (multi-host converged
+// wire, sync 2026-07-17: M-Q1: machine k+1's first task gates on machine k's
+// last — one queue-level chain across N parents); lastTaskID is that last
+// task (the start child when startAfter, else finalize) for the next link.
 func (s *Server) queueCreateOrchestration(ctx context.Context, name string, spec *machines.Spec,
-	document map[string]any, startAfter bool, createdBy string,
-) (parentID string, subTasks map[string]string, requiresDownload bool, err error) {
+	document map[string]any, startAfter bool, createdBy string, dependsOn *string,
+) (parentID string, subTasks map[string]string, requiresDownload bool, lastTaskID string, err error) {
 	// settings.box is OPTIONAL — the base's model (resolveBoxToTemplate
 	// returns success with no box): a box-less create builds from a scratch
 	// volume, an existing medium, or DISKLESS (a stub — Mark's ruling).
@@ -230,7 +247,7 @@ func (s *Server) queueCreateOrchestration(ctx context.Context, name string, spec
 		var boxOK bool
 		org, boxName, boxOK = strings.Cut(box, "/")
 		if !boxOK || org == "" || boxName == "" {
-			return "", nil, false, errors.New(`settings.box must be "organization/box-name"`)
+			return "", nil, false, "", errors.New(`settings.box must be "organization/box-name"`)
 		}
 		boxVersion = machines.DocString(settings["box_version"], "latest")
 		boxArch = machines.DocString(settings["box_arch"], "amd64")
@@ -241,16 +258,16 @@ func (s *Server) queueCreateOrchestration(ctx context.Context, name string, spec
 		case errors.Is(terr, machines.ErrTemplateNotFound):
 			requiresDownload = true
 			if boxVersion == "" || boxVersion == "latest" {
-				return "", nil, false, errors.New("template " + box + " is not local and box_version is not specific — set settings.box_version to download it")
+				return "", nil, false, "", errors.New("template " + box + " is not local and box_version is not specific — set settings.box_version to download it")
 			}
 		default:
-			return "", nil, false, terr
+			return "", nil, false, "", terr
 		}
 	}
 
 	specDoc, err := json.Marshal(map[string]any{"spec": spec})
 	if err != nil {
-		return "", nil, false, err
+		return "", nil, false, "", err
 	}
 	metadata := string(specDoc)
 
@@ -263,7 +280,7 @@ func (s *Server) queueCreateOrchestration(ctx context.Context, name string, spec
 		Parent:      true,
 	})
 	if err != nil {
-		return "", nil, false, err
+		return "", nil, false, "", err
 	}
 	cancelChain := func() {
 		if _, cerr := s.tasks.Cancel(ctx, parent.ID); cerr != nil {
@@ -272,13 +289,13 @@ func (s *Server) queueCreateOrchestration(ctx context.Context, name string, spec
 	}
 
 	subTasks = map[string]string{}
-	var previous *string
+	previous := dependsOn
 	if requiresDownload {
 		source, serr := machines.FindTemplateSourceForURL(s.templateSources(),
 			machines.DocString(settings["box_url"], ""))
 		if serr != nil {
 			cancelChain()
-			return "", nil, false, serr
+			return "", nil, false, "", serr
 		}
 		downloadMeta, merr := json.Marshal(&machines.TemplateDownloadMetadata{
 			SourceName:   source.Name,
@@ -290,14 +307,14 @@ func (s *Server) queueCreateOrchestration(ctx context.Context, name string, spec
 		})
 		if merr != nil {
 			cancelChain()
-			return "", nil, false, merr
+			return "", nil, false, "", merr
 		}
 		downloadStr := string(downloadMeta)
 		download, derr := s.createChainTask(ctx, "system", machines.OpTemplateDownload,
-			&downloadStr, nil, parent.ID, createdBy)
+			&downloadStr, previous, parent.ID, createdBy)
 		if derr != nil {
 			cancelChain()
-			return "", nil, false, derr
+			return "", nil, false, "", derr
 		}
 		subTasks["template_download"] = download.ID
 		previous = &download.ID
@@ -323,7 +340,7 @@ func (s *Server) queueCreateOrchestration(ctx context.Context, name string, spec
 		child, cerr := s.createChainTask(ctx, name, step.operation, &metadata, previous, parent.ID, createdBy)
 		if cerr != nil {
 			cancelChain()
-			return "", nil, false, cerr
+			return "", nil, false, "", cerr
 		}
 		subTasks[step.key] = child.ID
 		previous = &child.ID
@@ -332,11 +349,12 @@ func (s *Server) queueCreateOrchestration(ctx context.Context, name string, spec
 		start, serr := s.createChainTask(ctx, name, machines.OpStart, nil, previous, parent.ID, createdBy)
 		if serr != nil {
 			cancelChain()
-			return "", nil, false, serr
+			return "", nil, false, "", serr
 		}
 		subTasks["start"] = start.ID
+		previous = &start.ID
 	}
-	return parent.ID, subTasks, requiresDownload, nil
+	return parent.ID, subTasks, requiresDownload, *previous, nil
 }
 
 // handleCreateMachine executes the create mechanism end to end.
@@ -349,6 +367,24 @@ func (s *Server) handleCreateMachine(w http.ResponseWriter, r *http.Request) {
 	if !s.validateSpec(w, &body.Spec) {
 		return
 	}
+
+	// Multi-host detection (multi-host converged wire, sync 2026-07-17: M-Q1):
+	// the DOCUMENT is the program — render once and count hosts[]. N>1 takes
+	// the multi-host branch; N==1 falls through to the single-host path
+	// untouched (it re-renders after the server_id write-back pads settings,
+	// exactly as before — the detection render never feeds a single-host build).
+	if body.HasProvisioner() {
+		hosts, herr := s.renderAllHosts(r.Context(), &body.Spec)
+		if herr != nil {
+			taskError(w, http.StatusBadRequest, "Template render failed: "+herr.Error())
+			return
+		}
+		if len(hosts) > 1 {
+			s.createMultiHostMachines(w, r, &body, hosts)
+			return
+		}
+	}
+
 	name, status, problem := s.resolveMachineName(r.Context(), body.Name, &body.Spec)
 	if problem != "" {
 		taskError(w, status, problem)
@@ -394,8 +430,8 @@ func (s *Server) handleCreateMachine(w http.ResponseWriter, r *http.Request) {
 	}
 
 	createdBy := auth.FromContext(r.Context()).Name
-	parentID, subTasks, requiresDownload, err := s.queueCreateOrchestration(
-		r.Context(), name, &body.Spec, document, body.StartAfterCreate, createdBy)
+	parentID, subTasks, requiresDownload, _, err := s.queueCreateOrchestration(
+		r.Context(), name, &body.Spec, document, body.StartAfterCreate, createdBy, nil)
 	if err != nil {
 		taskError(w, http.StatusBadRequest, err.Error())
 		return
@@ -424,6 +460,258 @@ func (s *Server) handleCreateMachine(w http.ResponseWriter, r *http.Request) {
 	}
 	if len(resourceWarnings) > 0 {
 		response["resource_warnings"] = resourceWarnings
+	}
+	writeJSON(w, response)
+}
+
+// createMultiHostMachines executes the multi-host branch of POST /machines
+// (multi-host converged wire, sync 2026-07-17: M-Q1 — zoneweaver's shipped
+// wire, matched exactly): ONE request whose RENDER produced hosts[] with N>1
+// entries makes N coordinated machines. The DOCUMENT is the program — every
+// machine's name comes from ITS OWN entry's settings (hostname +
+// machine_domain||domain, the server_id prefix rules applied PER ENTRY), join
+// vars are template-rendered document data (the agent injects NOTHING between
+// hosts), and the whole request is ATOMIC: every entry validates and
+// conflict-checks (DB 409, hypervisor 409, workdir collision, in-document
+// duplicates, box locality, resources) BEFORE anything queues — the first
+// problem refuses everything, prefixed "multi-host entry N: " (N = the
+// 1-BASED hosts[] position — the UI's converged ruling; the resource
+// details[] rows carry the same 1-based entry). Machines queue in hosts[]
+// DECLARATION ORDER,
+// machine k+1's first task depends_on machine k's last (start when
+// start_after_create, else finalize) — one queue-level chain across N
+// separate create-orchestration parents, NO meta-parent. Auto-download is
+// single-host only: any entry naming a non-local box refuses the request.
+func (s *Server) createMultiHostMachines(w http.ResponseWriter, r *http.Request,
+	body *createMachineRequest, hosts []map[string]any,
+) {
+	if body.Name != "" {
+		taskError(w, http.StatusBadRequest,
+			"multi-host documents name every machine from their own hosts[] entries — an explicit name is only legal for single-host creates")
+		return
+	}
+	// Entry labels are 1-BASED (the UI's converged ruling, sync 2026-07-17:
+	// details rows carry {entry (1-based), machine_name}; zoneweaver's message
+	// prefixes count the same way).
+	entryError := func(index, status int, problem string) {
+		taskError(w, status, "multi-host entry "+strconv.Itoa(index+1)+": "+problem)
+	}
+
+	prefix := s.cfg.Machines.PrefixMachineNames
+	dbIDs := map[string]string{}
+	if prefix {
+		used, uerr := s.machines.UsedServerIDs(r.Context())
+		if uerr != nil {
+			slog.Error("list server ids", "error", uerr)
+			taskError(w, http.StatusInternalServerError, "Failed to create machines")
+			return
+		}
+		for _, entry := range used {
+			dbIDs[entry.ServerID] = entry.MachineName
+		}
+	}
+
+	type entryPlan struct {
+		name     string
+		spec     *machines.Spec
+		document map[string]any
+	}
+	plans := make([]entryPlan, 0, len(hosts))
+	seenNames := map[string]bool{}
+	seenIDs := map[string]bool{}
+	seenHomes := map[string]bool{}
+	warningsByMachine := map[string]any{}
+	for k, document := range hosts {
+		settings := machines.MachineConfig(document).Section("settings")
+		hostname := machines.DocString(settings["hostname"], "")
+		domain := machines.DocString(settings["domain"], "")
+		machineDomain := machines.DocString(settings["machine_domain"], "")
+		if machineDomain != "" {
+			domain = machineDomain
+		}
+		if hostname == "" || domain == "" {
+			entryError(k, http.StatusBadRequest,
+				"settings.hostname and settings.domain (or machine_domain) are required in every hosts[] entry")
+			return
+		}
+		name := hostname + "." + domain
+		if !validMachineName(name) {
+			entryError(k, http.StatusBadRequest, "Derived machine name "+name+" is not usable")
+			return
+		}
+		serverID := machines.DocString(settings["server_id"], "")
+		if prefix {
+			if serverID == "" {
+				entryError(k, http.StatusBadRequest,
+					"server_id required when prefix_machine_names is enabled — every hosts[] entry needs its own settings.server_id")
+				return
+			}
+			if !serverIDPattern.MatchString(serverID) {
+				entryError(k, http.StatusBadRequest, "server_id must be numeric (1-8 digits)")
+				return
+			}
+			if len(serverID) < 4 {
+				serverID = strings.Repeat("0", 4-len(serverID)) + serverID
+			}
+			if seenIDs[serverID] {
+				entryError(k, http.StatusConflict, "Server ID "+serverID+" appears twice in the document")
+				return
+			}
+			seenIDs[serverID] = true
+			if owner := dbIDs[serverID]; owner != "" {
+				entryError(k, http.StatusConflict, "Server ID "+serverID+" is already in use by "+owner)
+				return
+			}
+			name = serverID + "--" + name
+		}
+		nameKey := strings.ToLower(name)
+		if seenNames[nameKey] {
+			entryError(k, http.StatusConflict, "Machine name "+name+" appears twice in the document")
+			return
+		}
+		seenNames[nameKey] = true
+
+		// The single-host conflict trio, per entry, before anything queues.
+		if _, gerr := s.machines.Get(r.Context(), name); gerr == nil {
+			entryError(k, http.StatusConflict, "Machine "+name+" already exists in database")
+			return
+		} else if !errors.Is(gerr, machines.ErrNotFound) {
+			slog.Error("check machine existence", "machine", name, "error", gerr)
+			taskError(w, http.StatusInternalServerError, "Failed to create machines")
+			return
+		}
+		if exe := machines.VBoxManagePath(r.Context()); exe != "" {
+			if _, verr := vbox.ShowVMInfo(r.Context(), exe, name); verr == nil {
+				entryError(k, http.StatusConflict, "Machine "+name+" already exists on the system")
+				return
+			}
+		}
+		taken, home, terr := s.workdirTaken(r.Context(), name)
+		if terr != nil {
+			taskError(w, http.StatusInternalServerError, "Failed to create machines")
+			return
+		}
+		if taken {
+			entryError(k, http.StatusConflict,
+				"Another machine already uses the working directory "+home+" — pick a name that sanitizes differently")
+			return
+		}
+		homeKey := strings.ToLower(home)
+		if seenHomes[homeKey] {
+			entryError(k, http.StatusConflict,
+				"two hosts[] entries sanitize to the same working directory "+home)
+			return
+		}
+		seenHomes[homeKey] = true
+
+		// Auto-download is single-host only (M-Q1): every named box must
+		// already be local — the refusal names the box AND the entry.
+		if box := machines.DocString(settings["box"], ""); box != "" {
+			org, boxName, boxOK := strings.Cut(box, "/")
+			if !boxOK || org == "" || boxName == "" {
+				entryError(k, http.StatusBadRequest, `settings.box must be "organization/box-name"`)
+				return
+			}
+			_, ferr := s.machines.FindTemplate(r.Context(), org, boxName,
+				machines.DocString(settings["box_version"], "latest"),
+				machines.DocString(settings["box_arch"], "amd64"))
+			if errors.Is(ferr, machines.ErrTemplateNotFound) {
+				entryError(k, http.StatusBadRequest,
+					"box "+box+" is not local — multi-host creates never auto-download; pull it first (POST /templates/pull)")
+				return
+			}
+			if ferr != nil {
+				slog.Error("resolve template for multi-host entry", "box", box, "error", ferr)
+				taskError(w, http.StatusInternalServerError, "Failed to create machines")
+				return
+			}
+		}
+
+		// Per-entry pre-flight resource validation against ITS rendered
+		// document: failures join the atomic refusal (entry + machine
+		// annotated); warnings collect per machine name.
+		resourceErrors, resourceWarnings := s.validateCreationResources(r.Context(), document)
+		if len(resourceErrors) > 0 {
+			for _, issue := range resourceErrors {
+				issue["entry"] = k + 1
+				issue["machine_name"] = name
+			}
+			insufficientResources(w, resourceErrors)
+			return
+		}
+		if len(resourceWarnings) > 0 {
+			warningsByMachine[name] = resourceWarnings
+		}
+
+		// This machine's spec: the SAME request spec with the entry's own
+		// identity written back (the truth resolveMachineName's write-back
+		// keeps for single-host rows) and its hosts[] index stamped so the
+		// prepare child reads ITS OWN entry.
+		specCopy := body.Spec
+		specCopy.Settings = make(map[string]any, len(body.Settings)+3)
+		for key, value := range body.Settings {
+			specCopy.Settings[key] = value
+		}
+		specCopy.Settings["hostname"] = hostname
+		if entryDomain := machines.DocString(settings["domain"], ""); entryDomain != "" {
+			specCopy.Settings["domain"] = entryDomain
+		}
+		if machineDomain != "" {
+			specCopy.Settings["machine_domain"] = machineDomain
+		}
+		if serverID != "" {
+			specCopy.Settings["server_id"] = serverID
+		}
+		specCopy.HostIndex = k
+		plans = append(plans, entryPlan{name: name, spec: &specCopy, document: document})
+	}
+
+	// Every entry passed — queue in hosts[] declaration order, chaining each
+	// machine's first task on the previous machine's last. A mid-queue
+	// failure cancels every parent already queued (the atomic promise held as
+	// far as the queue allows) before the refusal answers.
+	createdBy := auth.FromContext(r.Context()).Name
+	queued := []string{}
+	cancelAll := func() {
+		for _, id := range queued {
+			if _, cerr := s.tasks.Cancel(r.Context(), id); cerr != nil {
+				slog.Warn("cancel half-built multi-host create", "task_id", id, "error", cerr)
+			}
+		}
+	}
+	machinesOut := make([]map[string]any, 0, len(plans))
+	var dependsOn *string
+	for k := range plans {
+		plan := &plans[k]
+		parentID, subTasks, _, lastTaskID, qerr := s.queueCreateOrchestration(r.Context(),
+			plan.name, plan.spec, plan.document, body.StartAfterCreate, createdBy, dependsOn)
+		if qerr != nil {
+			cancelAll()
+			entryError(k, http.StatusBadRequest, qerr.Error())
+			return
+		}
+		queued = append(queued, parentID)
+		last := lastTaskID
+		dependsOn = &last
+		machinesOut = append(machinesOut, map[string]any{
+			"machine_name":   plan.name,
+			"parent_task_id": parentID,
+			"sub_tasks":      subTasks,
+		})
+	}
+
+	slog.Info("multi-host machine creation queued", "count", len(plans),
+		"provisioner", body.Provisioner.Name+"/"+body.Provisioner.Version, "by", createdBy)
+	response := map[string]any{
+		"success":    true,
+		"multi_host": true,
+		"count":      len(plans),
+		"message": "Machine creation queued for " + strconv.Itoa(len(plans)) +
+			" machines (multi-host document)",
+		"machines": machinesOut,
+	}
+	if len(warningsByMachine) > 0 {
+		response["resource_warnings"] = warningsByMachine
 	}
 	writeJSON(w, response)
 }
@@ -576,8 +864,8 @@ func (s *Server) handleCloneMachine(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	createdBy := auth.FromContext(r.Context()).Name
-	parentID, subTasks, requiresDownload, err := s.queueCreateOrchestration(
-		r.Context(), name, spec, document, body.StartAfterCreate, createdBy)
+	parentID, subTasks, requiresDownload, _, err := s.queueCreateOrchestration(
+		r.Context(), name, spec, document, body.StartAfterCreate, createdBy, nil)
 	if err != nil {
 		taskError(w, http.StatusBadRequest, err.Error())
 		return

@@ -112,6 +112,12 @@ type Spec struct {
 	// integration, platform, firmware, recording, vrde, autostart,
 	// serial[], parallel[].
 	Hardware map[string]any `json:"hardware"`
+	// HostIndex selects this machine's hosts[] entry in the rendered document
+	// (multi-host converged wire, sync 2026-07-17: M-Q1): ONE render may carry
+	// N coordinated machines, and each machine's prepare child reads ITS OWN
+	// entry — the multi-host create handler stamps the index into each
+	// machine's spec copy. 0 (omitted) is today's single-host shape.
+	HostIndex int `json:"host_index,omitempty"`
 	// Notes/Tags persist onto the machine row at finalize (the base's
 	// SubTaskExecutors finalize does exactly this).
 	Notes            string   `json:"notes"`

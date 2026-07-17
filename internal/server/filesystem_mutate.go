@@ -40,8 +40,12 @@ func sanitizeFileName(name string) string {
 }
 
 // writeBrowseError maps a filesystem error onto the base's status vocabulary:
-// 403 forbidden, 404 missing, 500 {error, details} otherwise.
+// 403 forbidden, 404 missing, 500 {error, details} otherwise. Every refusal
+// ALSO logs (Mark's go 2026-07-17: a permission denial that lives only in the
+// response body makes agent.log blind to the whole failure class — the OS
+// error text carries the path, so one line here covers every mutate handler).
 func writeBrowseError(w http.ResponseWriter, err error, message string) {
+	slog.Warn("filesystem operation refused", "context", message, "error", err)
 	switch {
 	case errors.Is(err, errBrowseForbidden):
 		taskError(w, http.StatusForbidden, err.Error())

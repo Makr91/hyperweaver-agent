@@ -1,6 +1,7 @@
 package provisioner
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -156,6 +157,7 @@ func (r *Registry) readCollection(name string) (*Collection, error) {
 		// version subdirectories still scan.
 		collection.Description = "invalid " + collectionManifest + ": " + manifestErr.Error()
 	}
+	collection.Source = r.readSource(name)
 
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -191,6 +193,28 @@ func (r *Registry) readCollection(name string) (*Collection, error) {
 	})
 	collection.Valid = len(collection.Versions) > 0
 	return collection, nil
+}
+
+// readSource loads a family's git-import provenance (sourceFileName, written
+// only by git imports — the converged registry-side sidecar, sync
+// 2026-07-17). Absence is the normal case (JSON null on the wire); an
+// unreadable or corrupt sidecar degrades to null with a warning — provenance
+// trouble never fails a scan.
+func (r *Registry) readSource(name string) *Source {
+	raw, err := os.ReadFile(filepath.Clean(filepath.Join(r.dir, name, sourceFileName)))
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		plog().Warn("unreadable provisioner source provenance", "name", name, "error", err)
+		return nil
+	}
+	source := &Source{}
+	if uerr := json.Unmarshal(raw, source); uerr != nil {
+		plog().Warn("corrupt provisioner source provenance", "name", name, "error", uerr)
+		return nil
+	}
+	return source
 }
 
 // compareVersions orders dotted version strings (0.1.24-style): dot/dash

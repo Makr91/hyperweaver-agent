@@ -25,6 +25,7 @@ const (
 	OpSnapshotTake    = "snapshot_take"
 	OpSnapshotRestore = "snapshot_restore"
 	OpSnapshotDelete  = "snapshot_delete"
+	OpSnapshotModify  = "snapshot_modify"
 	OpCloneCurrent    = "machine_clone_current"
 )
 
@@ -245,6 +246,59 @@ func (e *executors) snapshotDelete(ctx context.Context, task *tasks.Task, out *t
 		return serr
 	}
 	out.Write("stdout", "Snapshot "+meta.SnapshotName+" deleted\n")
+	return nil
+}
+
+// snapshotModifyMetadata is snapshot_modify's metadata document. Pointers
+// distinguish absent from empty (zoneweaver's converged rule 2026-07-17):
+// a nil field is untouched, a non-nil empty Description CLEARS the text.
+type snapshotModifyMetadata struct {
+	SnapshotName string  `json:"snapshot_name"`
+	NewName      *string `json:"new_name,omitempty"`
+	Description  *string `json:"description,omitempty"`
+}
+
+// snapshotModify executes snapshot_modify (`VBoxManage snapshot edit`):
+// rename and/or description rewrite. Rename collisions and unknown snapshots
+// surface as VBoxManage's own error, honestly.
+func (e *executors) snapshotModify(ctx context.Context, task *tasks.Task, out *tasks.OutputWriter) error {
+	machine, vboxExe, err := e.resolve(ctx, task)
+	if err != nil {
+		return err
+	}
+	if task.Metadata == nil {
+		return errors.New("snapshot task has no metadata")
+	}
+	var meta snapshotModifyMetadata
+	if uerr := json.Unmarshal([]byte(*task.Metadata), &meta); uerr != nil {
+		return fmt.Errorf("parse snapshot metadata: %w", uerr)
+	}
+	if meta.SnapshotName == "" {
+		return errors.New("snapshot task metadata has no snapshot_name")
+	}
+	if meta.NewName == nil && meta.Description == nil {
+		return errors.New("snapshot modify metadata has neither new_name nor description")
+	}
+
+	changes := []string{}
+	if meta.NewName != nil {
+		changes = append(changes, "rename → "+*meta.NewName)
+	}
+	if meta.Description != nil {
+		if *meta.Description == "" {
+			changes = append(changes, "clear description")
+		} else {
+			changes = append(changes, "set description")
+		}
+	}
+	out.Write("stdout", "Modifying snapshot "+meta.SnapshotName+" of "+machine.Name+
+		" ("+strings.Join(changes, ", ")+")\n")
+	if serr := vbox.SnapshotEdit(ctx, vboxExe, machine.VBoxTarget(),
+		meta.SnapshotName, meta.NewName, meta.Description); serr != nil {
+		out.Write("stderr", "Snapshot modify failed: "+serr.Error()+"\n")
+		return serr
+	}
+	out.Write("stdout", "Snapshot "+meta.SnapshotName+" modified\n")
 	return nil
 }
 

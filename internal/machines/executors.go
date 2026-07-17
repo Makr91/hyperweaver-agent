@@ -74,6 +74,7 @@ func RegisterExecutors(queue *tasks.Queue, store *Store, reconciler *Reconciler,
 	queue.Register(OpSnapshotTake, tasks.Executor{Run: e.snapshotTake})
 	queue.Register(OpSnapshotRestore, tasks.Executor{Run: e.snapshotRestore})
 	queue.Register(OpSnapshotDelete, tasks.Executor{Run: e.snapshotDelete})
+	queue.Register(OpSnapshotModify, tasks.Executor{Run: e.snapshotModify})
 	queue.Register(OpCloneCurrent, tasks.Executor{Run: e.cloneCurrent})
 	queue.Register(OpTemplateDelete, tasks.Executor{Run: e.templateDelete})
 	queue.Register(OpTemplateExport, tasks.Executor{Run: e.templateExport})

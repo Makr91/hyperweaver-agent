@@ -103,6 +103,47 @@ func FindSSHForward(ctx context.Context, machine *Machine) int {
 	return 0
 }
 
+// FindWinRMForward returns the host port of the machine's NAT winrm
+// port-forward — FindSSHForward's winrm twin (zoneweaver's shipped winrm
+// shape, sync 2026-07-17: W-Q1..W-Q5): the same Forwarding(N) parse, the
+// rule NAMED "winrm" winning outright, any other tcp rule whose guest port
+// matches the RULED guest winrm port (the document's winrm_port — no veto)
+// serving as the fallback for pre-name forwards and hand-built machines.
+// 0 when neither exists — callers fall back to the control IP with the
+// ruled guest port.
+func FindWinRMForward(ctx context.Context, machine *Machine, guestPort int) int {
+	vboxExe := VBoxManagePath(ctx)
+	if vboxExe == "" {
+		return 0
+	}
+	info, err := vbox.ShowVMInfo(ctx, vboxExe, machine.VBoxTarget())
+	if err != nil {
+		return 0
+	}
+	fallback := 0
+	for key, value := range info.Raw {
+		if !strings.HasPrefix(key, "Forwarding(") {
+			continue
+		}
+		// name,proto,hostip,hostport,guestip,guestport
+		parts := strings.Split(value, ",")
+		if len(parts) != 6 || parts[1] != "tcp" {
+			continue
+		}
+		port, perr := strconv.Atoi(parts[3])
+		if perr != nil || port <= 0 {
+			continue
+		}
+		if parts[0] == "winrm" {
+			return port
+		}
+		if guestPort > 0 && parts[5] == strconv.Itoa(guestPort) {
+			fallback = port
+		}
+	}
+	return fallback
+}
+
 // removeDHCPLeases removes a machine's fixed-lease configs from the
 // provisioning DHCP server — machine delete's cleanup, run BEFORE the VM
 // unregisters (the individual config is keyed by VM and the --vm reference

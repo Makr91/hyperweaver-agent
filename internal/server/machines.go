@@ -883,6 +883,49 @@ func (s *Server) handleDeleteSnapshot(w http.ResponseWriter, r *http.Request) {
 		"Snapshot delete task queued successfully")
 }
 
+// handleModifySnapshot queues snapshot_modify (PUT — rename and/or
+// description edit, zoneweaver's converged wire 2026-07-17): body {new_name?,
+// description?}, either or both, 400 when neither. Pointers distinguish
+// absent from empty — description present-but-empty ("") CLEARS the text.
+func (s *Server) handleModifySnapshot(w http.ResponseWriter, r *http.Request) {
+	machine := s.findMachine(w, r)
+	if machine == nil {
+		return
+	}
+	name := snapshotNameFromPath(w, r)
+	if name == "" {
+		return
+	}
+	var body struct {
+		NewName     *string `json:"new_name"`
+		Description *string `json:"description"`
+	}
+	if err := decodeBody(r, &body); err != nil {
+		taskError(w, http.StatusBadRequest, "Invalid JSON body")
+		return
+	}
+	if body.NewName == nil && body.Description == nil {
+		taskError(w, http.StatusBadRequest, "new_name or description is required")
+		return
+	}
+	if body.NewName != nil && !snapshotNamePattern.MatchString(*body.NewName) {
+		taskError(w, http.StatusBadRequest, "snapshot name contains unsupported characters")
+		return
+	}
+	raw, err := json.Marshal(struct {
+		SnapshotName string  `json:"snapshot_name"`
+		NewName      *string `json:"new_name,omitempty"`
+		Description  *string `json:"description,omitempty"`
+	}{name, body.NewName, body.Description})
+	if err != nil {
+		taskError(w, http.StatusInternalServerError, "Failed to queue snapshot modify task")
+		return
+	}
+	metadata := string(raw)
+	s.queueMachineOp(w, r, machine, machines.OpSnapshotModify, tasks.PriorityMedium, &metadata,
+		"Snapshot modify task queued successfully")
+}
+
 // handleGuestProperties serves the machine's full guest-property set
 // (VBoxManage guestproperty enumerate) — the post-boot view: guest-additions
 // IPs, OS info, and this agent's cloud-init keys. Read-only, synchronous.

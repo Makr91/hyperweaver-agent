@@ -42,18 +42,26 @@ func (s *Server) templateSources() []machines.TemplateSource {
 }
 
 // provisionValidation is ValidationHelper.validateProvisioningRequest's
-// result: the stored provisioner document, the control IP, and credentials.
+// result: the stored provisioner document, the control IP, credentials, and
+// the resolved communicator (zoneweaver's shipped winrm shape, sync
+// 2026-07-17: W-Q1..W-Q5) — ssh (default) or winrm, with the ruled winrm
+// knobs and the vagrant_* keys the new spellings shadowed (narrated onto the
+// response task_chain[] — zoneweaver's channel).
 type provisionValidation struct {
-	config      machines.MachineConfig
-	provisioner map[string]any
-	ip          string
-	port        int
-	credentials machines.Credentials
+	config       machines.MachineConfig
+	provisioner  map[string]any
+	ip           string
+	port         int
+	credentials  machines.Credentials
+	communicator string
+	winrm        machines.WinRMSettings
+	shadowedKeys []string
 }
 
 // validateProvisionRequest ports validateProvisioningRequest: provisioner
 // config stored (else "set via PUT first"), settings present, vagrant_user
-// required, control IP resolvable.
+// required, control IP resolvable. The communicator resolves at READ time
+// through the hostdoc alias reader — stored documents never rewrite.
 func validateProvisionRequest(machine *machines.Machine) (validation *provisionValidation, problem string) {
 	config := machines.ParseConfiguration(machine)
 	provisionerDoc := config.Provisioner()
@@ -68,6 +76,11 @@ func validateProvisionRequest(machine *machines.Machine) (validation *provisionV
 	if credentials.Username == "" {
 		return nil, "Credentials missing: settings.vagrant_user is required"
 	}
+	winrm, shadowed := machines.ExtractWinRM(settings)
+	communicator := "ssh"
+	if winrm.Enabled {
+		communicator = "winrm"
+	}
 	// The control IP is the FALLBACK transport only — resolveTransport
 	// prefers the provisioning NIC's ssh port-forward and errors when
 	// neither exists.
@@ -79,6 +92,7 @@ func validateProvisionRequest(machine *machines.Machine) (validation *provisionV
 	return &provisionValidation{
 		config: config, provisioner: provisionerDoc,
 		ip: ip, port: port, credentials: credentials,
+		communicator: communicator, winrm: winrm, shadowedKeys: shadowed,
 	}, ""
 }
 
@@ -124,6 +138,20 @@ func (s *Server) hostHooksPreflight(ctx context.Context, machine *machines.Machi
 // adapters — falling back to the document's control IP for machines without
 // a forward (pre-forward creates, user-built VMs).
 func resolveTransport(ctx context.Context, machine *machines.Machine, v *provisionValidation) (problem string) {
+	if v.communicator == "winrm" {
+		// winrm machines prefer 127.0.0.1:<winrm forward> (the same NAT model
+		// as ssh — W-Q1..W-Q5), falling back to the control IP with the RULED
+		// guest winrm port.
+		if port := machines.FindWinRMForward(ctx, machine, v.winrm.Port); port > 0 {
+			v.ip, v.port = "127.0.0.1", port
+			return ""
+		}
+		if v.ip == "" {
+			return "No WinRM transport: machine has no NAT winrm port-forward and no control IP in networks[] (set is_control: true on one network)"
+		}
+		v.port = v.winrm.Port
+		return ""
+	}
 	if port := machines.FindSSHForward(ctx, machine); port > 0 {
 		v.ip, v.port = "127.0.0.1", port
 		return ""
@@ -134,12 +162,23 @@ func resolveTransport(ctx context.Context, machine *machines.Machine, v *provisi
 	return ""
 }
 
-// childMetadata marshals one provision child's metadata document.
+// childMetadata marshals one provision child's metadata document. winrm
+// machines emit communicator + the ruled winrm block into EVERY child's
+// metadata (zoneweaver's exact metadata shape — W-Q1..W-Q5): the SAME ops
+// branch on it at execution time.
 func childMetadata(v *provisionValidation, extra map[string]any) (*string, error) {
 	doc := map[string]any{
 		"ip":          v.ip,
 		"port":        v.port,
 		"credentials": v.credentials,
+	}
+	if v.communicator == "winrm" {
+		doc["communicator"] = "winrm"
+		doc["winrm"] = map[string]any{
+			"port":                  v.winrm.Port,
+			"transport":             v.winrm.Transport,
+			"ssl_peer_verification": v.winrm.SSLPeerVerification,
+		}
 	}
 	for key, value := range extra {
 		doc[key] = value
@@ -172,7 +211,10 @@ func (s *Server) createChainTask(ctx context.Context, machineName, operation str
 
 // walkStep is one planned walk child: its operation, the metadata extras
 // beyond the transport triple, and — on a batch's first entry — the
-// task_chain label and counts the response reports.
+// task_chain label and counts the response reports. An EMPTY operation is a
+// RESPONSE-ONLY entry (zoneweaver's exact named shape — W-Q1..W-Q5): the
+// winrm skips and method_not_executable records land in task_chain[] at
+// their document position but never become tasks.
 type walkStep struct {
 	operation string
 	extra     map[string]any
@@ -233,6 +275,36 @@ func playbookSteps(playbooks []machines.Playbook, skippedCount int) []walkStep {
 	return steps
 }
 
+// winnowLocalPlaybooksForWinRM drops the LOCAL playbooks from a run-filtered
+// batch on winrm guests — in-guest ansible is impossible over winrm
+// (zoneweaver's exact named shape, W-Q1..W-Q5): the drop is a RESPONSE-ONLY
+// task_chain[] entry {step: ansible_local_skipped_winrm, playbook_count} at
+// its document position; remote playbooks STILL RUN. ssh machines pass
+// through untouched.
+func winnowLocalPlaybooksForWinRM(v *provisionValidation, playbooks []machines.Playbook,
+	methods []walkStep,
+) ([]machines.Playbook, []walkStep) {
+	if v.communicator != "winrm" {
+		return playbooks, methods
+	}
+	remote := make([]machines.Playbook, 0, len(playbooks))
+	localCount := 0
+	for i := range playbooks {
+		if playbooks[i].Remote {
+			remote = append(remote, playbooks[i])
+		} else {
+			localCount++
+		}
+	}
+	if localCount > 0 {
+		methods = append(methods, walkStep{
+			step:     "ansible_local_skipped_winrm",
+			stepInfo: map[string]any{"playbook_count": localCount},
+		})
+	}
+	return remote, methods
+}
+
 // planWalk plans the document walk's direct children: pre[] hooks, then the
 // provisioning: methods in the order their KEYS APPEAR in the stored document
 // (each method's entries in list order — Mark's ruling: there are no phases,
@@ -278,11 +350,18 @@ func planWalk(machine *machines.Machine, v *provisionValidation, provisionedBefo
 			playbooks, skipped := machines.FilterPlaybooksByRun(
 				machines.ProvisionerPlaybooks(v.provisioner), provisionedBefore)
 			skippedPlaybooks = append(skippedPlaybooks, skipped...)
+			playbooks, methods = winnowLocalPlaybooksForWinRM(v, playbooks, methods)
 			playbookCount += len(playbooks)
 			methods = append(methods, playbookSteps(playbooks, len(skipped))...)
 		case "docker":
 			enabled, composeFiles := machines.ProvisionerDocker(v.provisioner)
 			if !enabled {
+				continue
+			}
+			if v.communicator == "winrm" {
+				// docker compose rides the SSH transport — skipped whole on
+				// winrm guests (zoneweaver's exact named shape, W-Q1..W-Q5).
+				methods = append(methods, walkStep{step: "docker_skipped_winrm"})
 				continue
 			}
 			for i, file := range composeFiles {
@@ -297,7 +376,13 @@ func planWalk(machine *machines.Machine, v *provisionValidation, provisionedBefo
 				methods = append(methods, step)
 			}
 		default:
+			// Unknown methods keep skipped_methods (Go's already-shipped
+			// wire) PLUS zoneweaver's per-method task_chain[] record.
 			skippedMethods = append(skippedMethods, key)
+			methods = append(methods, walkStep{
+				step:     "method_not_executable",
+				stepInfo: map[string]any{"method": key},
+			})
 		}
 	}
 	// The flat provisioners[] form lives OUTSIDE provisioning: (Hosts.yml's
@@ -308,6 +393,7 @@ func planWalk(machine *machines.Machine, v *provisionValidation, provisionedBefo
 		if flat := machines.ProvisionerPlaybooks(v.provisioner); len(flat) > 0 {
 			playbooks, skipped := machines.FilterPlaybooksByRun(flat, provisionedBefore)
 			skippedPlaybooks = append(skippedPlaybooks, skipped...)
+			playbooks, methods = winnowLocalPlaybooksForWinRM(v, playbooks, methods)
 			playbookCount += len(playbooks)
 			methods = append(methods, playbookSteps(playbooks, len(skipped))...)
 		}
@@ -332,6 +418,17 @@ func (s *Server) buildProvisionChain(ctx context.Context, machine *machines.Mach
 ) (chain []map[string]any, skippedMethods []string, err error) {
 	chain = []map[string]any{}
 	var previous *string
+
+	// Shadowed communicator keys narrate onto the response task_chain[]
+	// (zoneweaver's channel — W-Q1..W-Q5) AND the log; the stored document is
+	// never rewritten.
+	if len(v.shadowedKeys) > 0 {
+		slog.Warn("communicator keys shadowed by their new spellings",
+			"machine", machine.Name, "keys", v.shadowedKeys)
+		chain = append(chain, map[string]any{
+			"step": "communicator_keys_shadowed", "keys": v.shadowedKeys,
+		})
+	}
 
 	// Extract slot: re-render + re-materialize the working copy from the
 	// registry package (SHI regenerates before every provision; zoneweaver
@@ -391,19 +488,37 @@ func (s *Server) buildProvisionChain(ctx context.Context, machine *machines.Mach
 	// the walk's overall LAST task in chain order. When the walk is
 	// completely empty (no folders, no hooks, no methods), nothing stamps: a
 	// document with nothing to execute never marks the machine provisioned.
+	// winrm guests skip both folder brackets (no ssh, no rsync/scp — W-Q1..
+	// W-Q5), so the final owner accounts for the skipped brackets: the walk's
+	// last REAL task carries the stamp. Response-only walk entries (empty
+	// operation) never own final.
+	isWinRM := v.communicator == "winrm"
+	lastRealWalk := -1
+	for i := range walk {
+		if walk[i].operation != "" {
+			lastRealWalk = i
+		}
+	}
 	finalOwner := ""
 	switch {
-	case len(syncbackFolders) > 0:
+	case len(syncbackFolders) > 0 && !isWinRM:
 		finalOwner = "syncback"
-	case len(walk) > 0:
+	case lastRealWalk >= 0:
 		finalOwner = "walk"
-	case len(folders) > 0:
+	case len(folders) > 0 && !isWinRM:
 		finalOwner = "sync"
 	}
 
 	// FOLDER SYNC — the walk's opening bracket by document structure: one
-	// machine_sync per folders[] entry under the sync sub-parent.
-	if len(folders) > 0 {
+	// machine_sync per folders[] entry under the sync sub-parent. winrm
+	// guests skip the bracket whole — a RESPONSE-ONLY task_chain[] entry
+	// (zoneweaver's exact named shape), never a task.
+	if isWinRM && len(folders) > 0 {
+		chain = append(chain, map[string]any{
+			"step": "sync_skipped_winrm", "folder_count": len(folders),
+		})
+	}
+	if !isWinRM && len(folders) > 0 {
 		parentMeta, merr := json.Marshal(map[string]any{"total_folders": len(folders)})
 		if merr != nil {
 			return nil, nil, merr
@@ -444,10 +559,20 @@ func (s *Server) buildProvisionChain(ctx context.Context, machine *machines.Mach
 	}
 
 	// pre[] hooks → methods → post[] hooks: DIRECT children of the
-	// orchestration parent, one linear chain in document order.
+	// orchestration parent, one linear chain in document order. Response-only
+	// entries (winrm skips, method_not_executable) land in task_chain[] at
+	// their document position and never become tasks.
 	for i := range walk {
+		if walk[i].operation == "" {
+			entry := map[string]any{"step": walk[i].step}
+			for key, value := range walk[i].stepInfo {
+				entry[key] = value
+			}
+			chain = append(chain, entry)
+			continue
+		}
 		extra := walk[i].extra
-		if finalOwner == "walk" && i == len(walk)-1 {
+		if finalOwner == "walk" && i == lastRealWalk {
 			extra["final"] = true
 		}
 		stepMeta, ferr := childMetadata(v, extra)
@@ -472,12 +597,20 @@ func (s *Server) buildProvisionChain(ctx context.Context, machine *machines.Mach
 	// SYNCBACK (folders[].syncback — Mark's ruling 2026-07-12, replacing his
 	// Hosts.rb results hack) — the walk's closing bracket by document
 	// structure: one machine_syncback per flagged folder under the syncback
-	// sub-parent, gated on the previous chain element.
-	if syncbackChain, serr := s.buildSyncbackChain(ctx, machine.Name, v,
-		previous, parentID, createdBy, finalOwner == "syncback"); serr != nil {
-		return nil, nil, serr
-	} else if syncbackChain != nil {
-		chain = append(chain, syncbackChain...)
+	// sub-parent, gated on the previous chain element. winrm guests skip the
+	// bracket whole — response-only, like the opening one.
+	if isWinRM && len(syncbackFolders) > 0 {
+		chain = append(chain, map[string]any{
+			"step": "syncback_skipped_winrm", "folder_count": len(syncbackFolders),
+		})
+	}
+	if !isWinRM {
+		if syncbackChain, serr := s.buildSyncbackChain(ctx, machine.Name, v,
+			previous, parentID, createdBy, finalOwner == "syncback"); serr != nil {
+			return nil, nil, serr
+		} else if syncbackChain != nil {
+			chain = append(chain, syncbackChain...)
+		}
 	}
 
 	// The narrate-skip and run-directive records land on the orchestration
@@ -721,6 +854,17 @@ func (s *Server) handleSyncMachine(w http.ResponseWriter, r *http.Request) {
 		taskError(w, http.StatusBadRequest, problem)
 		return
 	}
+	// /sync's winrm gate is a pre-flight 400 (W-Q1..W-Q5): folders only ride
+	// ssh transports. Shadowed keys LOG only here — /sync has no task_chain.
+	if len(validation.shadowedKeys) > 0 {
+		slog.Warn("communicator keys shadowed by their new spellings",
+			"machine", machine.Name, "keys", validation.shadowedKeys)
+	}
+	if validation.communicator == "winrm" {
+		taskError(w, http.StatusBadRequest,
+			"Folder sync needs ssh (rsync/scp) — this machine uses the winrm communicator, which cannot carry folders")
+		return
+	}
 	if problem := resolveTransport(r.Context(), machine, validation); problem != "" {
 		taskError(w, http.StatusBadRequest, problem)
 		return
@@ -817,14 +961,52 @@ func (s *Server) handleRunProvisioners(w http.ResponseWriter, r *http.Request) {
 	}
 	walk, skippedMethods, skippedPlaybooks, playbookCount := planWalk(machine, validation,
 		machines.HasProvisionedBefore(validation.config))
-	if len(walk) == 0 {
-		if len(skippedPlaybooks) > 0 {
-			writeJSON(w, map[string]any{
+
+	// task_chain[] mirrors the provision response's channel (W-Q1..W-Q5):
+	// shadowed-key narration first, then the labeled/skip entries as the
+	// walk lands them.
+	taskChain := []map[string]any{}
+	if len(validation.shadowedKeys) > 0 {
+		slog.Warn("communicator keys shadowed by their new spellings",
+			"machine", machine.Name, "keys", validation.shadowedKeys)
+		taskChain = append(taskChain, map[string]any{
+			"step": "communicator_keys_shadowed", "keys": validation.shadowedKeys,
+		})
+	}
+	lastRealWalk := -1
+	for i := range walk {
+		if walk[i].operation != "" {
+			lastRealWalk = i
+		}
+	}
+	if lastRealWalk < 0 {
+		// Nothing executable. Response-only entries (winrm skips) still
+		// answer a 200 no-op with the narration; the run-directive no-op and
+		// the plain 400 keep their existing branches.
+		for i := range walk {
+			entry := map[string]any{"step": walk[i].step}
+			for key, value := range walk[i].stepInfo {
+				entry[key] = value
+			}
+			taskChain = append(taskChain, entry)
+		}
+		if len(skippedPlaybooks) > 0 || len(walk) > 0 {
+			response := map[string]any{
 				"success":           true,
 				"machine_name":      machine.Name,
 				"message":           "All configured playbooks were skipped by their run directives",
 				"playbooks_skipped": skippedPlaybooks,
-			})
+			}
+			if len(walk) > 0 {
+				response["message"] = "Nothing is executable on this machine's communicator — see task_chain"
+			}
+			if len(taskChain) > 0 {
+				response["task_chain"] = taskChain
+			}
+			if len(skippedMethods) > 0 {
+				response["skipped_methods"] = skippedMethods
+			}
+			writeJSON(w, response)
 			return
 		}
 		taskError(w, http.StatusBadRequest, "No provisioners configured in provisioner metadata")
@@ -854,9 +1036,20 @@ func (s *Server) handleRunProvisioners(w http.ResponseWriter, r *http.Request) {
 	}
 	previous := &provisionParent.ID
 	for i := range walk {
+		if walk[i].operation == "" {
+			// Response-only entries (winrm skips, method_not_executable) —
+			// task_chain[] at document position, never tasks.
+			entry := map[string]any{"step": walk[i].step}
+			for key, value := range walk[i].stepInfo {
+				entry[key] = value
+			}
+			taskChain = append(taskChain, entry)
+			continue
+		}
 		extra := walk[i].extra
-		if i == len(walk)-1 {
-			// The walk's last child carries the whole-walk stamp.
+		if i == lastRealWalk {
+			// The walk's last REAL child carries the whole-walk stamp —
+			// response-only entries never own final.
 			extra["final"] = true
 		}
 		stepMeta, ferr := childMetadata(validation, extra)
@@ -871,6 +1064,13 @@ func (s *Server) handleRunProvisioners(w http.ResponseWriter, r *http.Request) {
 			taskError(w, http.StatusInternalServerError, "Failed to create provisioner tasks")
 			return
 		}
+		if walk[i].step != "" {
+			entry := map[string]any{"step": walk[i].step, "task_id": child.ID}
+			for key, value := range walk[i].stepInfo {
+				entry[key] = value
+			}
+			taskChain = append(taskChain, entry)
+		}
 		previous = &child.ID
 	}
 
@@ -880,6 +1080,9 @@ func (s *Server) handleRunProvisioners(w http.ResponseWriter, r *http.Request) {
 		"parent_task_id":    provisionParent.ID,
 		"playbook_count":    playbookCount,
 		"playbooks_skipped": skippedPlaybooks,
+	}
+	if len(taskChain) > 0 {
+		response["task_chain"] = taskChain
 	}
 	if len(skippedMethods) > 0 {
 		response["skipped_methods"] = skippedMethods

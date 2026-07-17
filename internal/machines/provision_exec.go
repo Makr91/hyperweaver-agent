@@ -48,17 +48,27 @@ const (
 // hook children's metadata — the base's exact shape: {ip, port, credentials,
 // folder?, script?, playbook?, compose_file?, hook?} plus final, marking the
 // walk's overall LAST task (the provisioned-state stamp rides it — the
-// whole-walk stamp ruling).
+// whole-walk stamp ruling). Communicator/WinRM are zoneweaver's exact winrm
+// metadata shape (sync 2026-07-17: W-Q1..W-Q5): communicator "winrm" flips
+// the SAME ops onto their winrm MECHANISM (never new ops), and the winrm
+// block carries the document's RULED knobs — the guest port, transport, and
+// peer-verification the connection vars derive from.
 type provisionTaskMetadata struct {
-	IP          string             `json:"ip"`
-	Port        int                `json:"port"`
-	Credentials sshrun.Credentials `json:"credentials"`
-	Folder      *Folder            `json:"folder,omitempty"`
-	Script      string             `json:"script,omitempty"`
-	Playbook    *Playbook          `json:"playbook,omitempty"`
-	ComposeFile string             `json:"compose_file,omitempty"`
-	Hook        *Hook              `json:"hook,omitempty"`
-	Final       bool               `json:"final,omitempty"`
+	IP           string             `json:"ip"`
+	Port         int                `json:"port"`
+	Credentials  sshrun.Credentials `json:"credentials"`
+	Communicator string             `json:"communicator,omitempty"`
+	WinRM        *struct {
+		Port                int    `json:"port"`
+		Transport           string `json:"transport"`
+		SSLPeerVerification bool   `json:"ssl_peer_verification"`
+	} `json:"winrm,omitempty"`
+	Folder      *Folder   `json:"folder,omitempty"`
+	Script      string    `json:"script,omitempty"`
+	Playbook    *Playbook `json:"playbook,omitempty"`
+	ComposeFile string    `json:"compose_file,omitempty"`
+	Hook        *Hook     `json:"hook,omitempty"`
+	Final       bool      `json:"final,omitempty"`
 }
 
 func readProvisionMetadata(task *tasks.Task) (*provisionTaskMetadata, error) {
@@ -97,6 +107,10 @@ func (e *executors) stampIfFinal(task *tasks.Task, meta *provisionTaskMetadata, 
 
 // waitSSH executes machine_wait_ssh: poll until the guest answers over SSH
 // (config timeouts; the document's settings.setup_wait wins when larger).
+// The SAME op branches on its own metadata (zoneweaver's shipped winrm
+// shape, sync 2026-07-17: W-Q1..W-Q5): communicator winrm polls host-ansible
+// win_ping instead of the SSH loop — same timeout config, same
+// setup_wait-larger-wins rule, same poll interval.
 func (e *executors) waitSSH(ctx context.Context, task *tasks.Task, out *tasks.OutputWriter) error {
 	meta, err := readProvisionMetadata(task)
 	if err != nil {
@@ -117,6 +131,20 @@ func (e *executors) waitSSH(ctx context.Context, task *tasks.Task, out *tasks.Ou
 	interval := e.env.SSHPollInterval
 	if interval <= 0 {
 		interval = 10 * time.Second
+	}
+
+	if meta.Communicator == "winrm" {
+		e.taskProgress(task, 10, "waiting_for_winrm")
+		out.Write("stdout", fmt.Sprintf("Waiting for WinRM on %s:%d (timeout %ds)\n",
+			meta.IP, meta.Port, int(timeout.Seconds())))
+		elapsed, werr := e.waitWinRM(ctx, task, meta, timeout, interval, out)
+		if werr != nil {
+			return werr
+		}
+		e.taskProgress(task, 100, "completed")
+		out.Write("stdout", fmt.Sprintf("WinRM available on %s (%s:%d) after %ds\n",
+			task.MachineName, meta.IP, meta.Port, int(elapsed.Seconds())))
+		return nil
 	}
 
 	e.taskProgress(task, 10, "waiting_for_ssh")
@@ -366,7 +394,13 @@ func (e *executors) runShellScript(ctx context.Context, task *tasks.Task, out *t
 	if meta.Script == "" {
 		return errors.New("script is required in task metadata")
 	}
-	if err := e.runGuestScript(ctx, task, meta, meta.Script, out); err != nil {
+	// The SAME op, the communicator's mechanism (W-Q1..W-Q5): winrm guests
+	// take the win_copy/win_shell/win_file triple instead of SFTP+sudo.
+	runScript := e.runGuestScript
+	if meta.Communicator == "winrm" {
+		runScript = e.runWinRMScript
+	}
+	if err := runScript(ctx, task, meta, meta.Script, out); err != nil {
 		return err
 	}
 	e.stampIfFinal(task, meta, out)
@@ -446,12 +480,18 @@ func (e *executors) runHook(ctx context.Context, task *tasks.Task, out *tasks.Ou
 	hook := meta.Hook
 
 	var runErr error
-	if hook.HostTarget() {
+	switch {
+	case hook.HostTarget():
 		if !e.env.HostHooks {
 			return errors.New("host-target hooks are disabled (provisioning.host_hooks: false)")
 		}
 		runErr = e.runHostHookScript(ctx, task, hook.Script, out)
-	} else {
+	case meta.Communicator == "winrm":
+		// Guest-target hooks on winrm guests ride the winrm script mechanism
+		// (W-Q1..W-Q5); host-target hooks above are UNAFFECTED — they run on
+		// the agent host regardless of the guest's communicator.
+		runErr = e.runWinRMScript(ctx, task, meta, hook.Script, out)
+	default:
 		runErr = e.runGuestScript(ctx, task, meta, hook.Script, out)
 	}
 	if runErr != nil {

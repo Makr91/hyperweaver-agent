@@ -142,10 +142,18 @@ func (e *executors) runImport(ctx context.Context, meta *ImportMetadata, out *ta
 	switch kind {
 	case collectionManifest:
 		out.Write("stdout", "Found provisioner collection at "+root+"\n")
-		return e.importCollection(root, out)
+		name, ierr := e.importCollection(root, out)
+		if ierr != nil {
+			return ierr
+		}
+		return e.recordSource(meta, name, out)
 	case versionManifest:
 		out.Write("stdout", "Found provisioner version at "+root+"\n")
-		return e.importVersion(root, out)
+		name, ierr := e.importVersion(root, out)
+		if ierr != nil {
+			return ierr
+		}
+		return e.recordSource(meta, name, out)
 	default:
 		return errors.New("no " + collectionManifest + " or " + versionManifest +
 			" found within " + strconv.Itoa(rootSearchDepth) + " directory levels of the source")
@@ -246,33 +254,34 @@ func (e *executors) cloneSource(ctx context.Context, meta *ImportMetadata, out *
 // importCollection copies a family into the registry: the collection
 // manifest when absent, then every valid version directory not already
 // present. Existing versions are narrated and skipped — re-importing is
-// idempotent, never destructive.
-func (e *executors) importCollection(root string, out *tasks.OutputWriter) error {
+// idempotent, never destructive. Returns the family name (the provenance
+// stamp's key).
+func (e *executors) importCollection(root string, out *tasks.OutputWriter) (string, error) {
 	manifest, err := readManifest(filepath.Join(root, collectionManifest))
 	if err != nil {
-		return err
+		return "", err
 	}
 	name := metaString(manifest, "name")
 	if !ValidName(name) {
-		return fmt.Errorf("collection manifest carries an unusable name %q", name)
+		return "", fmt.Errorf("collection manifest carries an unusable name %q", name)
 	}
 
 	targetDir, err := safepath.Under(e.registry.Dir(), name)
 	if err != nil {
-		return err
+		return "", err
 	}
 	if merr := os.MkdirAll(targetDir, 0o750); merr != nil {
-		return merr
+		return "", merr
 	}
 	if cerr := copyFileIfAbsent(filepath.Join(root, collectionManifest),
 		filepath.Join(targetDir, collectionManifest)); cerr != nil {
-		return cerr
+		return "", cerr
 	}
 
 	imported, skipped := 0, 0
 	entries, err := os.ReadDir(root)
 	if err != nil {
-		return err
+		return "", err
 	}
 	for _, entry := range entries {
 		if !entry.IsDir() || !ValidName(entry.Name()) {
@@ -292,11 +301,11 @@ func (e *executors) importCollection(root string, out *tasks.OutputWriter) error
 		// definition never enters the registry — the refusal lists every
 		// problem with the author's own values echoed.
 		if problems := LintVersionManifest(versionRoot); len(problems) > 0 {
-			return lintRefusal(name+"/"+entry.Name(), problems, out)
+			return "", lintRefusal(name+"/"+entry.Name(), problems, out)
 		}
 		out.Write("stdout", "Importing "+name+"/"+entry.Name()+"\n")
 		if cerr := copyTree(versionRoot, target); cerr != nil {
-			return cerr
+			return "", cerr
 		}
 		narrateRoleSpecs(target, out)
 		narrateFieldSchema(target, out)
@@ -304,60 +313,93 @@ func (e *executors) importCollection(root string, out *tasks.OutputWriter) error
 	}
 
 	if imported == 0 && skipped == 0 {
-		return errors.New("collection " + name + " holds no importable versions")
+		return "", errors.New("collection " + name + " holds no importable versions")
 	}
 	out.Write("stdout", "Import complete: "+strconv.Itoa(imported)+" version(s) imported, "+
 		strconv.Itoa(skipped)+" already present\n")
-	return nil
+	return name, nil
 }
 
 // importVersion copies a bare version directory into the registry,
 // synthesizing a minimal collection manifest when the family is new (SHI's
-// importProvisionerVersion).
-func (e *executors) importVersion(root string, out *tasks.OutputWriter) error {
+// importProvisionerVersion). Returns the family name (the provenance stamp's
+// key).
+func (e *executors) importVersion(root string, out *tasks.OutputWriter) (string, error) {
 	manifest, err := readManifest(filepath.Join(root, versionManifest))
 	if err != nil {
-		return err
+		return "", err
 	}
 	name := metaString(manifest, "name")
 	version := metaString(manifest, "version")
 	if !ValidName(name) {
-		return fmt.Errorf("provisioner manifest carries an unusable name %q", name)
+		return "", fmt.Errorf("provisioner manifest carries an unusable name %q", name)
 	}
 	if !ValidName(version) {
-		return fmt.Errorf("provisioner manifest carries an unusable version %q", version)
+		return "", fmt.Errorf("provisioner manifest carries an unusable version %q", version)
 	}
 
 	familyDir, err := safepath.Under(e.registry.Dir(), name)
 	if err != nil {
-		return err
+		return "", err
 	}
 	target := filepath.Join(familyDir, version)
 	if _, serr := os.Stat(target); serr == nil {
-		return errors.New(name + "/" + version + " already exists — versions in use are never touched; import a newer version instead")
+		return "", errors.New(name + "/" + version + " already exists — versions in use are never touched; import a newer version instead")
 	}
 	if merr := os.MkdirAll(familyDir, 0o750); merr != nil {
-		return merr
+		return "", merr
 	}
 
 	if _, serr := os.Stat(filepath.Join(familyDir, collectionManifest)); errors.Is(serr, fs.ErrNotExist) {
 		if werr := synthesizeCollectionManifest(familyDir, name, metaString(manifest, "description")); werr != nil {
-			return werr
+			return "", werr
 		}
 		out.Write("stdout", "Created collection manifest for new family "+name+"\n")
 	}
 
 	// Field-DSL lint gate (fail-closed, design §3.1).
 	if problems := LintVersionManifest(root); len(problems) > 0 {
-		return lintRefusal(name+"/"+version, problems, out)
+		return "", lintRefusal(name+"/"+version, problems, out)
 	}
 	out.Write("stdout", "Importing "+name+"/"+version+"\n")
 	if cerr := copyTree(root, target); cerr != nil {
-		return cerr
+		return "", cerr
 	}
 	narrateRoleSpecs(target, out)
 	narrateFieldSchema(target, out)
 	out.Write("stdout", "Import complete: "+name+"/"+version+"\n")
+	return name, nil
+}
+
+// recordSource stamps a family's git provenance beside its collection
+// manifest (sourceFileName — the converged registry-side sidecar, sync
+// 2026-07-17): {source_type, url, branch?, token_name?}. token_name NAMES a
+// secrets-store entry (Mark's private-repo ruling 2026-07-17) — the token
+// itself never lands here; refresh resolves it at run time. Git imports only
+// — folder, archive, and catalog imports return without touching an existing
+// sidecar; a git re-import refreshes it.
+func (e *executors) recordSource(meta *ImportMetadata, name string, out *tasks.OutputWriter) error {
+	if meta.SourceType != SourceGit {
+		return nil
+	}
+	familyDir, err := safepath.Under(e.registry.Dir(), name)
+	if err != nil {
+		return err
+	}
+	raw, err := json.Marshal(&Source{
+		SourceType: SourceGit,
+		URL:        meta.URL,
+		Branch:     meta.Branch,
+		TokenName:  meta.TokenName,
+	})
+	if err != nil {
+		return err
+	}
+	if werr := safepath.WriteFile(filepath.Join(familyDir, sourceFileName),
+		append(raw, '\n'), 0o644); werr != nil {
+		return werr
+	}
+	out.Write("stdout", "Recorded git source for "+name+"\n")
 	return nil
 }
 

@@ -295,6 +295,9 @@ func New(cfg *config.Config, keyStore *keys.Store, trayTokens *auth.TrayTokens, 
 	mux.Handle("GET /machines/{machineName}/snapshots", requireKey(http.HandlerFunc(s.handleListSnapshots)))
 	mux.Handle("POST /machines/{machineName}/snapshots", requireKey(http.HandlerFunc(s.handleTakeSnapshot)))
 	mux.Handle("POST /machines/{machineName}/snapshots/{snapshotName}/restore", requireKey(http.HandlerFunc(s.handleRestoreSnapshot)))
+	// snapshot_modify — rename/description-edit (the converged D14 wire,
+	// sync 2026-07-17: PUT {new_name?, description?}; zoneweaver's op name).
+	mux.Handle("PUT /machines/{machineName}/snapshots/{snapshotName}", requireKey(http.HandlerFunc(s.handleModifySnapshot)))
 	mux.Handle("DELETE /machines/{machineName}/snapshots/{snapshotName}", requireKey(http.HandlerFunc(s.handleDeleteSnapshot)))
 	mux.Handle("GET /machines/{machineName}/vnc/screenshot", requireKey(http.HandlerFunc(s.handleMachineScreenshot)))
 	mux.Handle("GET /machines/{machineName}/vnc", requireKey(http.HandlerFunc(s.handleVncInfo)))
@@ -369,6 +372,7 @@ func New(cfg *config.Config, keyStore *keys.Store, trayTokens *auth.TrayTokens, 
 	mux.Handle("POST /provisioning/provisioners/import", requireKey(http.HandlerFunc(s.handleImportProvisioner)))
 	mux.Handle("POST /provisioning/provisioners/import-upload", requireKey(http.HandlerFunc(s.handleImportUploadProvisioner)))
 	mux.Handle("POST /provisioning/provisioners/refresh-specs", requireKey(http.HandlerFunc(s.handleRefreshProvisionerSpecs)))
+	mux.Handle("POST /provisioning/provisioners/{name}/refresh-from-source", requireKey(http.HandlerFunc(s.handleRefreshProvisionerFromSource)))
 	mux.Handle("GET /provisioning/provisioners/{name}", requireKey(http.HandlerFunc(s.handleProvisionerDetails)))
 	mux.Handle("DELETE /provisioning/provisioners/{name}", requireKey(http.HandlerFunc(s.handleDeleteProvisioner)))
 	mux.Handle("GET /provisioning/provisioners/{name}/versions/{version}", requireKey(http.HandlerFunc(s.handleProvisionerVersion)))

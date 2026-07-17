@@ -141,6 +141,73 @@ func (s *Server) handleImportProvisioner(w http.ResponseWriter, r *http.Request)
 	}
 }
 
+// handleRefreshProvisionerFromSource queues the ORDINARY provisioner_import
+// task against a family's stored git provenance (POST
+// /provisioning/provisioners/{name}/refresh-from-source — converged with
+// zoneweaver, sync 2026-07-17). Non-clobber is the import's own rule:
+// existing versions refuse, new versions land beside. Families without git
+// provenance answer 400 — catalog-installed families update through the
+// catalog, folder/archive imports carry no source to replay.
+func (s *Server) handleRefreshProvisionerFromSource(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	collection, err := s.provisioners.Get(name)
+	if errors.Is(err, provisioner.ErrNotFound) {
+		taskError(w, http.StatusNotFound, "Provisioner not found")
+		return
+	}
+	if err != nil {
+		slog.Error("get provisioner for refresh", "name", name, "error", err)
+		taskError(w, http.StatusInternalServerError, "Failed to queue refresh task")
+		return
+	}
+	if collection.Source == nil || collection.Source.SourceType != provisioner.SourceGit {
+		taskError(w, http.StatusBadRequest,
+			"Provisioner "+name+" has no git source recorded — catalog families update through the catalog")
+		return
+	}
+
+	// token_name replays into the ordinary import, which resolves the actual
+	// token from the secrets store at run time (Mark's private-repo ruling
+	// 2026-07-17) — provenance and task metadata carry the NAME only.
+	raw, err := json.Marshal(&provisioner.ImportMetadata{
+		SourceType: provisioner.SourceGit,
+		URL:        collection.Source.URL,
+		Branch:     collection.Source.Branch,
+		TokenName:  collection.Source.TokenName,
+	})
+	if err != nil {
+		slog.Error("serialize refresh metadata", "name", name, "error", err)
+		taskError(w, http.StatusInternalServerError, "Failed to queue refresh task")
+		return
+	}
+	metadata := string(raw)
+	task, err := s.tasks.Store().Create(r.Context(), &tasks.NewTask{
+		MachineName: "system",
+		Operation:   provisioner.OpImport,
+		Priority:    tasks.PriorityMedium,
+		CreatedBy:   auth.FromContext(r.Context()).Name,
+		Metadata:    &metadata,
+	})
+	if err != nil {
+		slog.Error("queue provisioner refresh-from-source", "name", name, "error", err)
+		taskError(w, http.StatusInternalServerError, "Failed to queue refresh task")
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusAccepted)
+	if werr := json.NewEncoder(w).Encode(map[string]any{
+		"success": true,
+		"task_id": task.ID,
+		"name":    name,
+		"source":  collection.Source,
+		"status":  tasks.StatusPending,
+		"message": "Refresh-from-source task queued for " + name,
+	}); werr != nil {
+		slog.Error("write refresh-from-source response", "error", werr)
+	}
+}
+
 // handleDeleteProvisioner removes a whole family — refused while any machine
 // references any of its versions (SHI rule, minus its built-in
 // special-casing: every package is deletable when unreferenced).

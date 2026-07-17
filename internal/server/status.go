@@ -71,12 +71,16 @@ type statusPayload struct {
 // work with zero guest cooperation (VRDE rdp here; vnc/zlogin on bhyve). The
 // machine SSH terminal rides the guest's own network and credentials, so it
 // advertises as features:ssh — zoneweaver's home, now shared.
+// hosts-file minted 2026-07-17 (Mark's pick on the UI's gating open): the
+// /system/hosts editor ships on BOTH agents with the converged wire, so it
+// advertises as a platform token — the UI gates the Host tab on it (D14's
+// gate-on-tokens-only rule).
 var platformFeatures = []string{
 	"tasks", "machines", "machine-suspend", "machine-create",
 	"machine-modify", "machine-snapshots", "machine-screenshot",
 	"swap", "monitoring", "processes", "provisioning",
 	"provisioner-registry", "secrets", "ssh", "templates",
-	"host-launchers", "host-terminal",
+	"host-launchers", "host-terminal", "hosts-file",
 }
 
 // features derives the advertised token list: platform tokens plus the

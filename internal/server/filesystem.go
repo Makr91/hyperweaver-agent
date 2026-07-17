@@ -123,7 +123,20 @@ func (s *Server) validateBrowsePath(raw string) (string, error) {
 		(strings.Contains(raw, "..") || strings.Contains(raw, "~")) {
 		return "", fmt.Errorf("%w: directory traversal not allowed", errBrowseForbidden)
 	}
-	normalized, err := filepath.Abs(raw)
+	// Wire paths are forward-slash and the file manager roots them at "/"
+	// (the base contract — its "/" IS the illumos root), so a Windows drive
+	// path arrives as "/C:/Users/…". Left as-is, filepath.Abs reads
+	// "\C:\Users\…" as CURRENT-DRIVE-relative and invents "G:\C:\Users\…"
+	// (runtime-proven 2026-07-17: mkdir "G:\C:\Users\Mark\New Folder") —
+	// strip the leading separators when a drive letter follows.
+	native := filepath.FromSlash(raw)
+	if runtime.GOOS == "windows" {
+		trimmed := strings.TrimLeft(native, `\`)
+		if len(trimmed) >= 2 && trimmed[1] == ':' {
+			native = trimmed
+		}
+	}
+	normalized, err := filepath.Abs(native)
 	if err != nil {
 		return "", fmt.Errorf("path validation error: %w", err)
 	}
