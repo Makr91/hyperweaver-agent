@@ -122,6 +122,10 @@ func RegisterExecutors(queue *tasks.Queue, store *Store, reconciler *Reconciler,
 	// /machines/{name}/sync {"syncback": true}).
 	queue.Register(OpSyncbackParent, tasks.Executor{Run: e.parentAnchor})
 	queue.Register(OpSyncbackFolder, tasks.Executor{Run: e.syncbackFolder})
+	// Key rotation (machine_key_rotate — key_rotate proposal, sync
+	// 2026-07-17): after the syncback bracket, adopt the box's rotated
+	// private key into the working copy; never the whole-walk stamp owner.
+	queue.Register(OpKeyRotate, tasks.Executor{Run: e.keyRotate})
 }
 
 type executors struct {

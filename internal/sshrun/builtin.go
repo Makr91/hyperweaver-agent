@@ -250,3 +250,40 @@ func UploadFile(ctx context.Context, ip string, port int, credentials Credential
 	}
 	return nil
 }
+
+// DownloadFile reads ONE remote file's bytes over the sftp subsystem —
+// UploadFile's mirror, added for the key-rotation pull (key_rotate proposal,
+// sync 2026-07-17). The caller lands the bytes itself (safepath, its own
+// mode — a rotated private key wants 0600); a missing remote file answers an
+// error wrapping os.ErrNotExist (pkg/sftp normalizes SSH_FX_NO_SUCH_FILE) so
+// callers can narrate the skip.
+func DownloadFile(ctx context.Context, ip string, port int, credentials Credentials,
+	remotePath, basePath, defaultKeyPath string,
+) ([]byte, error) {
+	sshClient, closeSSH, _, err := connectSSH(ctx, ip, port, credentials, basePath, defaultKeyPath)
+	if err != nil {
+		return nil, err
+	}
+	defer closeSSH()
+
+	ftp, err := sftp.NewClient(sshClient)
+	if err != nil {
+		return nil, fmt.Errorf("open sftp subsystem: %w", err)
+	}
+	defer func() {
+		_ = ftp.Close()
+	}()
+
+	src, err := ftp.Open(remotePath)
+	if err != nil {
+		return nil, fmt.Errorf("open %s: %w", remotePath, err)
+	}
+	defer func() {
+		_ = src.Close()
+	}()
+	raw, err := io.ReadAll(src)
+	if err != nil {
+		return nil, fmt.Errorf("read %s: %w", remotePath, err)
+	}
+	return raw, nil
+}

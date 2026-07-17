@@ -74,6 +74,42 @@ jobs:
           done
           ls -la packaging/provisioners-seed
 
+      - name: Stage STARTcloud PKI from the pinned core driver
+        shell: bash
+        run: |
+          # Shape-A PKI (Mark's ruling, sync 2026-07-17), pulled at build time
+          # from the core_provisioner release pinned in driver.version — the
+          # single source of truth (build-provisioner.yml's exact fetch+verify
+          # mechanics). packaging/ssl is gitignored — nothing is committed;
+          # this step populates it, so a rotation is ONLY a pin bump.
+          # The intermediate key ships passphrase-encrypted; the passphrase is
+          # PUBLIC BY DESIGN (the intermediate mints leaves with no secrets —
+          # only the root key is private, and it stays offline), so decrypting
+          # here is the ruled packaging step, not a leak.
+          TAG="$(tr -d '[:space:]' < driver.version)"
+          VERSION="${TAG#v}"
+          ARCHIVE="core_provisioner-${VERSION}.tar.gz"
+          BASE="https://github.com/STARTcloud/core_provisioner/releases/download/${TAG}"
+          echo "Fetching core driver ${TAG}"
+          curl -fsSL -o "$RUNNER_TEMP/$ARCHIVE" "$BASE/$ARCHIVE"
+          curl -fsSL -o "$RUNNER_TEMP/$ARCHIVE.sha256" "$BASE/$ARCHIVE.sha256"
+          EXPECTED="$(awk '{print $1}' "$RUNNER_TEMP/$ARCHIVE.sha256")"
+          ACTUAL="$(openssl dgst -sha256 -r "$RUNNER_TEMP/$ARCHIVE" | awk '{print $1}')"
+          if [ "$EXPECTED" != "$ACTUAL" ]; then
+            echo "Checksum mismatch for $ARCHIVE: expected $EXPECTED, got $ACTUAL" >&2
+            exit 1
+          fi
+          mkdir -p "$RUNNER_TEMP/core-driver"
+          tar -xzf "$RUNNER_TEMP/$ARCHIVE" -C "$RUNNER_TEMP/core-driver"
+          CA="$RUNNER_TEMP/core-driver/driver/ssls/ca"
+          for f in root-ca.crt ca-certificate.crt ca-certificate.key; do
+            test -f "$CA/$f" || { echo "$f missing from the core driver archive" >&2; exit 1; }
+          done
+          mkdir -p packaging/ssl
+          cp "$CA/root-ca.crt" packaging/ssl/root-ca.crt
+          cp "$CA/ca-certificate.crt" packaging/ssl/ca-certificate.crt
+          openssl pkey -in "$CA/ca-certificate.key" -out packaging/ssl/ca-certificate.key -passin 'pass:STARTcloud24@!'
+
       - name: Embed Windows resources (icon, version info)
         shell: bash
         run: |
@@ -185,6 +221,36 @@ jobs:
           done
           ls -la packaging/provisioners-seed
 
+      - name: Stage STARTcloud PKI from the pinned core driver
+        run: |
+          # Same contract as the Windows job's PKI step: packaging/ssl is
+          # gitignored, populated ONLY from the core_provisioner release
+          # pinned in driver.version; the intermediate key's passphrase is
+          # public by design.
+          TAG="$(tr -d '[:space:]' < driver.version)"
+          VERSION="${TAG#v}"
+          ARCHIVE="core_provisioner-${VERSION}.tar.gz"
+          BASE="https://github.com/STARTcloud/core_provisioner/releases/download/${TAG}"
+          echo "Fetching core driver ${TAG}"
+          curl -fsSL -o "$RUNNER_TEMP/$ARCHIVE" "$BASE/$ARCHIVE"
+          curl -fsSL -o "$RUNNER_TEMP/$ARCHIVE.sha256" "$BASE/$ARCHIVE.sha256"
+          EXPECTED="$(awk '{print $1}' "$RUNNER_TEMP/$ARCHIVE.sha256")"
+          ACTUAL="$(openssl dgst -sha256 -r "$RUNNER_TEMP/$ARCHIVE" | awk '{print $1}')"
+          if [ "$EXPECTED" != "$ACTUAL" ]; then
+            echo "Checksum mismatch for $ARCHIVE: expected $EXPECTED, got $ACTUAL" >&2
+            exit 1
+          fi
+          mkdir -p "$RUNNER_TEMP/core-driver"
+          tar -xzf "$RUNNER_TEMP/$ARCHIVE" -C "$RUNNER_TEMP/core-driver"
+          CA="$RUNNER_TEMP/core-driver/driver/ssls/ca"
+          for f in root-ca.crt ca-certificate.crt ca-certificate.key; do
+            test -f "$CA/$f" || { echo "$f missing from the core driver archive" >&2; exit 1; }
+          done
+          mkdir -p packaging/ssl
+          cp "$CA/root-ca.crt" packaging/ssl/root-ca.crt
+          cp "$CA/ca-certificate.crt" packaging/ssl/ca-certificate.crt
+          openssl pkey -in "$CA/ca-certificate.key" -out packaging/ssl/ca-certificate.key -passin 'pass:STARTcloud24@!'
+
       - name: Build universal binary
         run: |
           mkdir -p bin dist
@@ -204,8 +270,11 @@ jobs:
           mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources/ssl-seed"
           cp bin/hyperweaver-agent "$APP/Contents/MacOS/hyperweaver-agent"
           sed "s/__VERSION__/${{ inputs.version }}/g" packaging/macos/Info.plist > "$APP/Contents/Info.plist"
-          # STARTcloud CA seed: the agent copies it into its config dir on
-          # first TLS start and signs its server certificate from it.
+          # STARTcloud PKI seed (Mark's shape-A ruling, sync 2026-07-17):
+          # root-ca.crt is the trust anchor the postinstall plants; the
+          # intermediate pair signs the agent's certificates (full chain
+          # served).
+          cp packaging/ssl/root-ca.crt "$APP/Contents/Resources/ssl-seed/root-ca.crt"
           cp packaging/ssl/ca-certificate.crt "$APP/Contents/Resources/ssl-seed/ca.crt"
           cp packaging/ssl/ca-certificate.key "$APP/Contents/Resources/ssl-seed/ca.key"
           # Provisioner seed archives (when staged): extracted by the agent on
@@ -320,6 +389,36 @@ jobs:
           done
           ls -la packaging/provisioners-seed
 
+      - name: Stage STARTcloud PKI from the pinned core driver
+        run: |
+          # Same contract as the Windows job's PKI step: packaging/ssl is
+          # gitignored, populated ONLY from the core_provisioner release
+          # pinned in driver.version; the intermediate key's passphrase is
+          # public by design.
+          TAG="$(tr -d '[:space:]' < driver.version)"
+          VERSION="${TAG#v}"
+          ARCHIVE="core_provisioner-${VERSION}.tar.gz"
+          BASE="https://github.com/STARTcloud/core_provisioner/releases/download/${TAG}"
+          echo "Fetching core driver ${TAG}"
+          curl -fsSL -o "$RUNNER_TEMP/$ARCHIVE" "$BASE/$ARCHIVE"
+          curl -fsSL -o "$RUNNER_TEMP/$ARCHIVE.sha256" "$BASE/$ARCHIVE.sha256"
+          EXPECTED="$(awk '{print $1}' "$RUNNER_TEMP/$ARCHIVE.sha256")"
+          ACTUAL="$(openssl dgst -sha256 -r "$RUNNER_TEMP/$ARCHIVE" | awk '{print $1}')"
+          if [ "$EXPECTED" != "$ACTUAL" ]; then
+            echo "Checksum mismatch for $ARCHIVE: expected $EXPECTED, got $ACTUAL" >&2
+            exit 1
+          fi
+          mkdir -p "$RUNNER_TEMP/core-driver"
+          tar -xzf "$RUNNER_TEMP/$ARCHIVE" -C "$RUNNER_TEMP/core-driver"
+          CA="$RUNNER_TEMP/core-driver/driver/ssls/ca"
+          for f in root-ca.crt ca-certificate.crt ca-certificate.key; do
+            test -f "$CA/$f" || { echo "$f missing from the core driver archive" >&2; exit 1; }
+          done
+          mkdir -p packaging/ssl
+          cp "$CA/root-ca.crt" packaging/ssl/root-ca.crt
+          cp "$CA/ca-certificate.crt" packaging/ssl/ca-certificate.crt
+          openssl pkey -in "$CA/ca-certificate.key" -out packaging/ssl/ca-certificate.key -passin 'pass:STARTcloud24@!'
+
       - name: Build
         run: |
           mkdir -p bin dist
@@ -342,8 +441,11 @@ jobs:
                    "$STAGE"/DEBIAN
           cp bin/hyperweaver-agent "$STAGE/usr/bin/"
           cp packaging/config/production-config.yaml "$STAGE/etc/hyperweaver-agent/config.yaml"
-          # STARTcloud CA (the ssl role's bundled ssls/ca pair): the agent
-          # signs its server certificate from it; postinst trusts the cert.
+          # STARTcloud PKI (Mark's shape-A ruling, sync 2026-07-17): the
+          # intermediate pair signs the agent's certificates (full chain
+          # served); root-ca.crt is the trust anchor postinst plants
+          # system-wide.
+          cp packaging/ssl/root-ca.crt "$STAGE/etc/hyperweaver-agent/ssl/root-ca.crt"
           cp packaging/ssl/ca-certificate.crt "$STAGE/etc/hyperweaver-agent/ssl/ca.crt"
           cp packaging/ssl/ca-certificate.key "$STAGE/etc/hyperweaver-agent/ssl/ca.key"
           cp packaging/DEBIAN/systemd/hyperweaver-agent.service "$STAGE/etc/systemd/system/"

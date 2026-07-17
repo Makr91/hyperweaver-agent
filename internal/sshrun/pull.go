@@ -27,12 +27,13 @@ import (
 
 // newCommand builds one transport process, wrapping in sshpass for password
 // auth — the push transports' exact rule (the secret rides the SSHPASS
-// environment variable, never argv). Nil when password auth is requested but
-// sshpass is absent on the agent host.
-func newCommand(ctx context.Context, exe string, args []string, credentials Credentials) *exec.Cmd {
+// environment variable, never argv; password engages ONLY when the resolver
+// found no key file anywhere, so the caller hands its resolved keyPath). Nil
+// when password auth is requested but sshpass is absent on the agent host.
+func newCommand(ctx context.Context, exe string, args []string, credentials Credentials, keyPath string) *exec.Cmd {
 	command := exec.CommandContext(ctx, exe, args...)
 	command.Env = toolEnv(exe)
-	if credentials.Password != "" && credentials.SSHKeyPath == "" {
+	if credentials.Password != "" && keyPath == "" {
 		sshpass, perr := exec.LookPath("sshpass")
 		if perr != nil {
 			return nil
@@ -74,7 +75,8 @@ func SyncFilesPull(ctx context.Context, rsyncExe, ip string, port int, credentia
 		"-o", "LogLevel=ERROR",
 		"-p", strconv.Itoa(port),
 	}
-	if keyPath := credentialKeyPath(credentials, basePath, defaultKeyPath); keyPath != "" {
+	keyPath := credentialKeyPath(credentials, basePath, defaultKeyPath)
+	if keyPath != "" {
 		sshCommand = append(sshCommand, "-i", cygwinPath(keyPath))
 	}
 	args = append(args,
@@ -90,7 +92,7 @@ func SyncFilesPull(ctx context.Context, rsyncExe, ip string, port int, credentia
 	source := fmt.Sprintf("%s@%s:%s", username, ip, strings.TrimSuffix(remoteDir, "/")+"/")
 	args = append(args, source, cygwinPath(localDir))
 
-	command := newCommand(ctx, exe, args, credentials)
+	command := newCommand(ctx, exe, args, credentials, keyPath)
 	if command == nil {
 		return fmt.Errorf("password-auth sync needs sshpass on the agent host")
 	}
@@ -134,7 +136,7 @@ func SCPSyncPull(ctx context.Context, scpExe, ip string, port int, credentials C
 	source := fmt.Sprintf("%s@%s:%s/.", username, ip, strings.TrimSuffix(remoteDir, "/"))
 	args = append(args, source, dest)
 
-	command := newCommand(ctx, exe, args, credentials)
+	command := newCommand(ctx, exe, args, credentials, keyPath)
 	if command == nil {
 		return fmt.Errorf("password-auth sync needs sshpass on the agent host")
 	}

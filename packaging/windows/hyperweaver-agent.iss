@@ -40,9 +40,12 @@ Name: "startupicon"; Description: "Start {#AppName} when Windows starts"; GroupD
 
 [Files]
 Source: "..\..\bin\{#AppExeName}"; DestDir: "{app}"; Flags: ignoreversion
-; STARTcloud CA seed (the ssl role's bundled ssls/ca pair): the agent copies
-; it into <config dir>\ssl on first TLS start and signs its server
-; certificate from it.
+; STARTcloud PKI seed (Mark's shape-A ruling, sync 2026-07-17): root-ca.crt
+; is the OFFLINE root's certificate — the trust anchor; the intermediate pair
+; (public by design, key decrypted at packaging) is what the agent copies
+; into <config dir>\ssl on first TLS start and signs its certificates from,
+; serving the full chain so leaves verify against the trusted root.
+Source: "..\ssl\root-ca.crt"; DestDir: "{app}\ssl-seed"; Flags: ignoreversion
 Source: "..\ssl\ca-certificate.crt"; DestDir: "{app}\ssl-seed"; DestName: "ca.crt"; Flags: ignoreversion
 Source: "..\ssl\ca-certificate.key"; DestDir: "{app}\ssl-seed"; DestName: "ca.key"; Flags: ignoreversion
 ; Provisioner seed archives (staged by CI from the provisioner repos'
@@ -66,8 +69,10 @@ Name: "{group}\{#AppName}"; Filename: "{app}\{#AppExeName}"
 Name: "{userstartup}\{#AppName}"; Filename: "{app}\{#AppExeName}"; Tasks: startupicon
 
 [Run]
-; Trust the STARTcloud CA machine-wide (the ssl role's Windows
-; certificate-store step) so browsers accept the CA-signed agent certificate
-; without warnings.
-Filename: "{sys}\certutil.exe"; Parameters: "-f -addstore Root ""{app}\ssl-seed\ca.crt"""; StatusMsg: "Installing STARTcloud CA certificate..."; Flags: runhidden
+; Plant the STARTcloud PKI machine-wide at the ONE elevated moment (Mark's
+; shape-A ruling, sync 2026-07-17): the OFFLINE root's certificate is the
+; trust anchor — yearly intermediate rotation never re-prompts — and the
+; intermediate lands in the CA store so chains build.
+Filename: "{sys}\certutil.exe"; Parameters: "-f -addstore Root ""{app}\ssl-seed\root-ca.crt"""; StatusMsg: "Installing STARTcloud root CA (trust anchor)..."; Flags: runhidden
+Filename: "{sys}\certutil.exe"; Parameters: "-f -addstore CA ""{app}\ssl-seed\ca.crt"""; StatusMsg: "Installing STARTcloud intermediate CA..."; Flags: runhidden
 Filename: "{app}\{#AppExeName}"; Description: "Launch {#AppName}"; Flags: nowait postinstall skipifsilent

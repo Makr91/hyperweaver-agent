@@ -153,6 +153,11 @@ func (e *executors) waitSSH(ctx context.Context, task *tasks.Task, out *tasks.Ou
 	elapsed, err := sshrun.WaitForSSH(ctx, meta.IP, meta.Port, meta.Credentials,
 		e.machineWorkdir(task.MachineName), e.env.ProvisionKeyPath, timeout, interval, out.Write)
 	if err != nil {
+		// Tier 3 (Mark's three-tier ruling, sync 2026-07-17 — RECOVERY ONLY):
+		// one QGA key recovery, one more wait round; keyrotate_exec.go owns it.
+		elapsed, err = e.rewaitAfterKeyRecovery(ctx, task, meta, timeout, interval, out, err)
+	}
+	if err != nil {
 		return err
 	}
 	e.taskProgress(task, 100, "completed")

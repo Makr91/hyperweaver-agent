@@ -610,6 +610,45 @@ func (s *Server) buildProvisionChain(ctx context.Context, machine *machines.Mach
 			return nil, nil, serr
 		} else if syncbackChain != nil {
 			chain = append(chain, syncbackChain...)
+			// Advance the chain cursor to the syncback TAIL (last_task_id —
+			// the bracket's true tail; the parent anchor completes instantly)
+			// so the key-rotation child below genuinely follows the closing
+			// bracket instead of racing it.
+			if last, ok := syncbackChain[0]["last_task_id"].(string); ok && last != "" {
+				lastID := last
+				previous = &lastID
+			}
+		}
+	}
+
+	// KEY ROTATION (machine_key_rotate — key_rotate proposal, sync
+	// 2026-07-17): when the document sets settings.vagrant_ssh_insert_key —
+	// read via docEnabled, the same on/true/1/yes vocabulary the method gates
+	// use (Hosts.rb reads the raw truthy; docEnabled keeps this agent's one
+	// enabled-word set) — and the communicator is not winrm, ONE child chained
+	// after the syncback bracket adopts the box's rotated key into the
+	// working copy. It NEVER carries final: the whole-walk stamp stays on the
+	// document walk's last task (finalOwner above), never on this
+	// bookkeeping child. winrm guests get the response-only skip entry
+	// (no ssh, no SFTP pull — zoneweaver's named-skip shape).
+	settings := v.config.Section("settings")
+	if docEnabled(settings["vagrant_ssh_insert_key"]) {
+		if isWinRM {
+			chain = append(chain, map[string]any{"step": "key_rotate_skipped_winrm"})
+		} else {
+			rotateKeyPath, _ := settings["vagrant_user_private_key_path"].(string)
+			rotateMeta, merr := childMetadata(v, map[string]any{"key_path": rotateKeyPath})
+			if merr != nil {
+				return nil, nil, merr
+			}
+			rotateTask, terr := s.createChainTask(ctx, machine.Name, machines.OpKeyRotate,
+				rotateMeta, previous, parentID, createdBy)
+			if terr != nil {
+				return nil, nil, terr
+			}
+			// The chain ends here — nothing chains after the rotation child,
+			// so the cursor stops with it.
+			chain = append(chain, map[string]any{"step": "key_rotate", "task_id": rotateTask.ID})
 		}
 	}
 

@@ -22,12 +22,15 @@ if [ -d /etc/hyperweaver-agent/ssl ]; then
     [ -f /etc/hyperweaver-agent/ssl/ca.key ] && chmod 600 /etc/hyperweaver-agent/ssl/ca.key
 fi
 
-# Trust the STARTcloud CA system-wide (the ssl role's trusted-certificates
-# step) so browsers accept the CA-signed agent certificate without warnings.
-if [ -f /etc/hyperweaver-agent/ssl/ca.crt ]; then
+# Plant the STARTcloud trust anchor system-wide (Mark's shape-A ruling, sync
+# 2026-07-17): the OFFLINE root's certificate — yearly intermediate rotation
+# never re-breaks trust. The agent signs with the intermediate pair at
+# ssl/ca.{crt,key} and serves the full chain, so the root is the only anchor
+# Debian's store needs.
+if [ -f /etc/hyperweaver-agent/ssl/root-ca.crt ]; then
     mkdir -p /usr/local/share/ca-certificates/hyperweaver
-    cp /etc/hyperweaver-agent/ssl/ca.crt /usr/local/share/ca-certificates/hyperweaver/ca-certificate.crt
-    chmod 644 /usr/local/share/ca-certificates/hyperweaver/ca-certificate.crt
+    cp /etc/hyperweaver-agent/ssl/root-ca.crt /usr/local/share/ca-certificates/hyperweaver/root-ca.crt
+    chmod 644 /usr/local/share/ca-certificates/hyperweaver/root-ca.crt
     update-ca-certificates || true
 fi
 

@@ -110,6 +110,12 @@ func EnsureCertificates(keyPath, certPath, caCertPath, caKeyPath string) (bool, 
 		Bytes: x509.MarshalPKCS1PrivateKey(serverKey),
 	})
 	certPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})
+	// FULL-CHAIN serving (Mark's shape-A ruling, sync 2026-07-17): the cert
+	// file carries leaf + signing CA, so clients that trust only the OFFLINE
+	// root (the installers plant root-ca.crt as the anchor) chain through the
+	// intermediate. A generated self-anchored CA rides harmlessly — clients
+	// ignore a trailing anchor.
+	certPEM = append(certPEM, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: caCert.Raw})...)
 
 	if werr := safepath.WriteFile(cleanKey, keyPEM, 0o600); werr != nil {
 		return false, fmt.Errorf("write server key: %w", werr)
@@ -120,14 +126,17 @@ func EnsureCertificates(keyPath, certPath, caCertPath, caKeyPath string) (bool, 
 	return true, nil
 }
 
-// SeedCA copies the installer-shipped STARTcloud CA pair into place — the
-// ssl role's "Using STARTcloud Certificate Authority" block (its bundled
-// ssls/ca files copied into the cert dir before signing). The seed is looked
-// up beside the executable (ssl-seed/, where the Windows installer puts it)
-// and in the macOS bundle's Resources/ssl-seed; the Debian package installs
-// the pair directly into /etc/hyperweaver-agent/ssl instead. Existing CA
-// files are never overwritten; no seed found is not an error (a CA gets
-// generated instead).
+// SeedCA copies the installer-shipped STARTcloud PKI into place (Mark's
+// shape-A ruling, sync 2026-07-17): the INTERMEDIATE pair (ca.crt/ca.key —
+// its key decrypted at packaging, public by design) lands at the CA paths
+// for signing, and the OFFLINE root's certificate (root-ca.crt, the trust
+// anchor the installers plant) lands beside the CA cert so working-copy
+// seeding can hand guests the whole chain. The seed is looked up beside the
+// executable (ssl-seed/, where the Windows installer puts it) and in the
+// macOS bundle's Resources/ssl-seed; the Debian package installs the files
+// directly into /etc/hyperweaver-agent/ssl instead. Existing files are never
+// overwritten; no seed found is not an error (a CA gets generated instead —
+// its own anchor, no root file).
 func SeedCA(caCertPath, caKeyPath string) error {
 	cleanCACert, err := safepath.CleanAbs(caCertPath)
 	if err != nil {
@@ -178,6 +187,20 @@ func SeedCA(caCertPath, caKeyPath string) error {
 		}
 		if werr := safepath.WriteFile(cleanCAKey, keyData, 0o600); werr != nil {
 			return fmt.Errorf("seed ca key: %w", werr)
+		}
+		// The OFFLINE root's certificate rides beside the intermediate pair
+		// (shape A): landed next to the CA cert for the working-copy chain
+		// seeding. A seed without one changes nothing.
+		seedRoot := filepath.Clean(filepath.Join(seedDir, "root-ca.crt"))
+		rootDest := filepath.Join(filepath.Dir(cleanCACert), "root-ca.crt")
+		if fileExists(seedRoot) && !fileExists(rootDest) {
+			rootData, rerr := os.ReadFile(seedRoot)
+			if rerr != nil {
+				return fmt.Errorf("seed root ca certificate: %w", rerr)
+			}
+			if werr := safepath.WriteFile(rootDest, rootData, 0o600); werr != nil {
+				return fmt.Errorf("seed root ca certificate: %w", werr)
+			}
 		}
 		return nil
 	}

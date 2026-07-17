@@ -2,14 +2,19 @@
 // ruling: the Go agent recreates zoneweaver's mechanisms exactly): SSH
 // connect/exec/wait against provisioned machines, rsync file sync, and the
 // agent's own provisioning keypair. Key-based auth is preferred; relative key
-// paths resolve against the machine's provisioning base path; the fallback is
-// the agent-generated provisioning key.
+// paths resolve against the machine's provisioning base path; key resolution
+// walks the tiered ladder (Mark's three-tier ruling, sync 2026-07-17): the
+// working copy's own key when its file EXISTS, the packaged bootstrap key
+// under driver/ssh_keys or core/ssh_keys, the agent-generated provisioning
+// key — and password auth ONLY when no key file exists anywhere
+// (zoneweaver's exact ladder, converged 2026-07-17).
 package sshrun
 
 import (
 	"context"
 	"crypto/sha256"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net"
@@ -49,22 +54,90 @@ func resolveKeyPath(keyPath, basePath string) string {
 	return filepath.Join(basePath, keyPath)
 }
 
-// authMethods builds the connection auth in SSHManager's preference order:
-// explicit key → password → the default provisioning key.
-func authMethods(credentials Credentials, basePath, defaultKeyPath string) ([]ssh.AuthMethod, error) {
+// Key-resolution tiers (Mark's three-tier ruling, sync 2026-07-17) — carried
+// alongside the effective path so callers can narrate which rung answered.
+const (
+	keyTierWorkingCopy = "tier 1 (working-copy key)"
+	keyTierPassword    = "password"
+	keyTierPackaged    = "tier 2 (packaged bootstrap key)"
+	keyTierAgent       = "agent provisioning key"
+)
+
+// packagedBootstrapKeys names the bootstrap key candidates INSIDE the working
+// copy — the new driver era first, the legacy mount second (Hosts.rb's
+// "./core/ssh_keys/id_rsa" default). Mark's three-tier ruling, sync
+// 2026-07-17: tier 2 never fetches from the guest.
+func packagedBootstrapKeys(basePath string) []string {
+	if basePath == "" {
+		return nil
+	}
+	return []string{
+		filepath.Join(basePath, "driver", "ssh_keys", "id_rsa"),
+		filepath.Join(basePath, "core", "ssh_keys", "id_rsa"),
+	}
+}
+
+// keyFileExists reports a readable regular file at path.
+func keyFileExists(path string) bool {
+	info, err := os.Stat(filepath.Clean(path))
+	return err == nil && info.Mode().IsRegular()
+}
+
+// effectiveKeyPath walks Mark's three-tier ruling (sync 2026-07-17) and
+// answers the EFFECTIVE key path plus which tier hit — the ONE resolver both
+// the in-process auth (authMethods) and the binary transports
+// (credentialKeyPath) consume. The walk is zoneweaver's shipped
+// resolveConnectKeyPath exactly (source-verified, converged 2026-07-17):
+//
+//	tier 1:   the working copy's vagrant_user_private_key_path — used when
+//	          the file EXISTS (the machine was rotated, or the user supplied
+//	          it).
+//	tier 2:   the packaged bootstrap key inside the working copy, then the
+//	          agent's own provisioning key — first EXISTING file wins; never
+//	          a guest fetch.
+//	password: ONLY when no key file exists anywhere — a key file on disk
+//	          always beats a document password (zoneweaver's exact rule).
+//	last:     no key anywhere, no password — the agent key path answers
+//	          UNCHECKED so the downstream load errors honestly.
+func effectiveKeyPath(credentials Credentials, basePath, defaultKeyPath string) (path, tier string) {
 	if credentials.SSHKeyPath != "" {
-		key, err := loadKey(resolveKeyPath(credentials.SSHKeyPath, basePath))
-		if err != nil {
-			return nil, err
+		named := resolveKeyPath(credentials.SSHKeyPath, basePath)
+		if keyFileExists(named) {
+			return named, keyTierWorkingCopy
 		}
-		return []ssh.AuthMethod{ssh.PublicKeys(key)}, nil
+	}
+	for _, candidate := range packagedBootstrapKeys(basePath) {
+		if keyFileExists(candidate) {
+			plog().Debug("SSH key resolved to the packaged bootstrap key",
+				"path", candidate, "named", credentials.SSHKeyPath)
+			return candidate, keyTierPackaged
+		}
+	}
+	if keyFileExists(defaultKeyPath) {
+		return defaultKeyPath, keyTierAgent
 	}
 	if credentials.Password != "" {
+		return "", keyTierPassword
+	}
+	return defaultKeyPath, keyTierAgent
+}
+
+// authMethods builds the connection auth over the tiered resolver (Mark's
+// three-tier ruling, sync 2026-07-17): working-copy key when its file exists
+// → packaged bootstrap key → the agent's provisioning key → password ONLY
+// when no key file exists anywhere. ONE method per attempt — never
+// key+password on one connection (zoneweaver's exact exclusivity).
+func authMethods(credentials Credentials, basePath, defaultKeyPath string) ([]ssh.AuthMethod, error) {
+	path, tier := effectiveKeyPath(credentials, basePath, defaultKeyPath)
+	if tier == keyTierPassword {
 		return []ssh.AuthMethod{ssh.Password(credentials.Password)}, nil
 	}
-	key, err := loadKey(defaultKeyPath)
+	if path == "" {
+		return nil, errors.New("no credentials, no packaged bootstrap key, and no default provisioning key")
+	}
+	key, err := loadKey(path)
 	if err != nil {
-		return nil, fmt.Errorf("no credentials and no default provisioning key: %w", err)
+		return nil, fmt.Errorf("%s: %w", tier, err)
 	}
 	return []ssh.AuthMethod{ssh.PublicKeys(key)}, nil
 }

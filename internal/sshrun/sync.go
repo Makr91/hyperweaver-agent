@@ -132,7 +132,8 @@ func SyncFiles(ctx context.Context, rsyncExe, ip string, port int, credentials C
 		"-o", "LogLevel=ERROR",
 		"-p", strconv.Itoa(port),
 	}
-	if keyPath := credentialKeyPath(credentials, basePath, defaultKeyPath); keyPath != "" {
+	keyPath := credentialKeyPath(credentials, basePath, defaultKeyPath)
+	if keyPath != "" {
 		// rsync's -e ssh is the sibling Cygwin ssh (toolEnv), so the key path
 		// speaks its dialect too.
 		sshCommand = append(sshCommand, "-i", cygwinPath(keyPath))
@@ -156,9 +157,10 @@ func SyncFiles(ctx context.Context, rsyncExe, ip string, port int, credentials C
 
 	command := exec.CommandContext(ctx, exe, args...)
 	command.Env = toolEnv(exe)
-	if credentials.Password != "" && credentials.SSHKeyPath == "" {
-		// Password auth: sshpass reads SSHPASS from the environment — the
-		// secret never appears on a command line.
+	if credentials.Password != "" && keyPath == "" {
+		// Password auth — the resolver found no key file anywhere (the ladder's
+		// rule): sshpass reads SSHPASS from the environment — the secret never
+		// appears on a command line.
 		sshpass, perr := exec.LookPath("sshpass")
 		if perr != nil {
 			return fmt.Errorf("password-auth sync needs sshpass on the agent host: %w", perr)
@@ -214,7 +216,8 @@ func SCPSync(ctx context.Context, scpExe, ip string, port int, credentials Crede
 
 	command := exec.CommandContext(ctx, exe, args...)
 	command.Env = toolEnv(exe)
-	if credentials.Password != "" && credentials.SSHKeyPath == "" {
+	if credentials.Password != "" && keyPath == "" {
+		// Password auth only when the resolver found no key file anywhere.
 		sshpass, perr := exec.LookPath("sshpass")
 		if perr != nil {
 			return fmt.Errorf("password-auth sync needs sshpass on the agent host: %w", perr)
@@ -226,16 +229,14 @@ func SCPSync(ctx context.Context, scpExe, ip string, port int, credentials Crede
 	return streamCommand(command, stream)
 }
 
-// credentialKeyPath resolves the key the ssh transport uses (explicit →
-// default provisioning key; empty for password auth).
+// credentialKeyPath resolves the key the binary ssh transports (rsync/scp)
+// use — the SAME tiered resolver authMethods walks (Mark's three-tier
+// ruling, sync 2026-07-17: one resolver, two consumers). Empty ONLY when the
+// ladder resolved to password auth (no key file exists anywhere) — the
+// callers' sshpass gate keys off exactly that.
 func credentialKeyPath(credentials Credentials, basePath, defaultKeyPath string) string {
-	if credentials.SSHKeyPath != "" {
-		return resolveKeyPath(credentials.SSHKeyPath, basePath)
-	}
-	if credentials.Password != "" {
-		return ""
-	}
-	return defaultKeyPath
+	path, _ := effectiveKeyPath(credentials, basePath, defaultKeyPath)
+	return path
 }
 
 // streamCommand runs a prepared command, forwarding its output line-streamed.

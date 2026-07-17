@@ -345,6 +345,16 @@ func materializeSSLs(dir, caCertPath, caKeyPath string) error {
 	if err := copyFileIfAbsent(caKeyPath, filepath.Join(root, "ca", "ca-certificate.key")); err != nil {
 		return fmt.Errorf("seed working-copy CA key: %w", err)
 	}
+	// Shape-A hierarchy (Mark's ruling, sync 2026-07-17): the OFFLINE root's
+	// certificate — landed beside the CA pair by sslcert.SeedCA — seeds
+	// ssls/ca/root-ca.crt so guests hold the whole trust chain. A generated
+	// (rootless) CA seeds nothing extra.
+	rootSource := filepath.Join(filepath.Dir(caCertPath), "root-ca.crt")
+	if _, serr := os.Stat(rootSource); serr == nil {
+		if err := copyFileIfAbsent(rootSource, filepath.Join(root, "ca", "root-ca.crt")); err != nil {
+			return fmt.Errorf("seed working-copy root CA certificate: %w", err)
+		}
+	}
 
 	if _, err := sslcert.EnsureCertificates(
 		filepath.Join(root, "key", "default-signed.key"),
