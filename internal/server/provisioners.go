@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/Makr91/hyperweaver-agent/internal/auth"
 	"github.com/Makr91/hyperweaver-agent/internal/machines"
@@ -366,7 +367,11 @@ func (s *Server) handleExportProvisionerVersion(w http.ResponseWriter, r *http.R
 // handleImportUploadProvisioner receives a package archive as multipart
 // form-data (part name "file") and queues the ordinary import task against
 // it — the share contract's receiving half. The temp archive cleans up after
-// the import attempt (cleanup_source).
+// the import attempt (cleanup_source). An optional "checksum" field (sha256
+// of the archive — the converged wire, sync 2026-07-17) rides into the
+// import's pre-extraction verification; like the file-manager precedent,
+// non-file fields must arrive BEFORE the file part — the stream is consumed
+// in order and the task queues the moment the file lands.
 func (s *Server) handleImportUploadProvisioner(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, importUploadMaxBytes)
 	reader, err := r.MultipartReader()
@@ -374,6 +379,7 @@ func (s *Server) handleImportUploadProvisioner(w http.ResponseWriter, r *http.Re
 		taskError(w, http.StatusBadRequest, "multipart/form-data with a file part is required")
 		return
 	}
+	checksum := ""
 	for {
 		part, perr := reader.NextPart()
 		if errors.Is(perr, io.EOF) {
@@ -383,6 +389,15 @@ func (s *Server) handleImportUploadProvisioner(w http.ResponseWriter, r *http.Re
 		if perr != nil {
 			taskError(w, http.StatusBadRequest, "Malformed multipart body: "+perr.Error())
 			return
+		}
+		if part.FormName() == "checksum" {
+			raw, rerr := io.ReadAll(io.LimitReader(part, 4096))
+			if rerr != nil {
+				taskError(w, http.StatusBadRequest, "Malformed multipart body: "+rerr.Error())
+				return
+			}
+			checksum = strings.TrimSpace(string(raw))
+			continue
 		}
 		if part.FormName() != "file" {
 			continue
@@ -413,11 +428,18 @@ func (s *Server) handleImportUploadProvisioner(w http.ResponseWriter, r *http.Re
 			return
 		}
 
-		raw, merr := json.Marshal(&provisioner.ImportMetadata{
+		meta := &provisioner.ImportMetadata{
 			SourceType:    provisioner.SourceArchive,
 			Path:          archivePath,
 			CleanupSource: true,
-		})
+			Checksum:      checksum,
+		}
+		if verr := meta.Validate(); verr != nil {
+			_ = os.RemoveAll(temp)
+			taskError(w, http.StatusBadRequest, verr.Error())
+			return
+		}
+		raw, merr := json.Marshal(meta)
 		if merr != nil {
 			_ = os.RemoveAll(temp)
 			taskError(w, http.StatusInternalServerError, "Failed to queue import task")
@@ -485,7 +507,10 @@ func (s *Server) handleListCatalogSources(w http.ResponseWriter, _ *http.Request
 			"default": source.Default,
 		})
 	}
-	writeJSON(w, map[string]any{"sources": sources})
+	// enabled = zoneweaver's converged field (its provisioning.catalog_sources
+	// carries a subsystem gate); this agent has no catalog kill-switch, so the
+	// honest constant is true.
+	writeJSON(w, map[string]any{"enabled": true, "sources": sources})
 }
 
 // handleGetCatalog fetches one catalog's document live (?source= names a
@@ -503,7 +528,10 @@ func (s *Server) handleGetCatalog(w http.ResponseWriter, r *http.Request) {
 		taskError(w, http.StatusBadGateway, err.Error())
 		return
 	}
-	writeJSON(w, map[string]any{"source": source.Name, "catalog": document})
+	// Parsed relay, the shared wire (UI's 2026-07-17 flag — the wrap was a
+	// bug on BOTH agents once): the catalog document IS the response; the
+	// resolved source rides /provisioning/catalog/sources, never an envelope.
+	writeJSON(w, document)
 }
 
 // handleCatalogInstall queues provisioner_catalog_install: download the
@@ -518,8 +546,17 @@ func (s *Server) handleCatalogInstall(w http.ResponseWriter, r *http.Request) {
 		taskError(w, http.StatusBadRequest, "name and version are required (registry-legal names)")
 		return
 	}
-	if _, err := provisioner.FindCatalogSource(s.catalogSourceList(), body.SourceName); err != nil {
+	source, err := provisioner.FindCatalogSource(s.catalogSourceList(), body.SourceName)
+	if err != nil {
 		taskError(w, http.StatusNotFound, err.Error())
+		return
+	}
+	// Already-present pre-check (zoneweaver's converged wire): versions are
+	// immutable — an install of an existing version answers 409 up front
+	// instead of queueing a task doomed to the import's non-clobber refusal.
+	if _, verr := s.provisioners.GetVersion(body.Name, body.Version); verr == nil {
+		taskError(w, http.StatusConflict,
+			body.Name+"/"+body.Version+" is already in the registry — versions are immutable")
 		return
 	}
 
@@ -541,7 +578,21 @@ func (s *Server) handleCatalogInstall(w http.ResponseWriter, r *http.Request) {
 		taskError(w, http.StatusInternalServerError, "Failed to queue catalog install")
 		return
 	}
-	acceptedTask(w, task.ID, "Catalog install queued for "+body.Name+"/"+body.Version)
+	// The converged 202 body (zoneweaver's shipped shape): name/version/source
+	// ride alongside the task identity.
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusAccepted)
+	if werr := json.NewEncoder(w).Encode(map[string]any{
+		"success": true,
+		"task_id": task.ID,
+		"name":    body.Name,
+		"version": body.Version,
+		"source":  source.Name,
+		"status":  tasks.StatusPending,
+		"message": "Catalog install task queued for " + body.Name + "/" + body.Version,
+	}); werr != nil {
+		slog.Error("write catalog install response", "error", werr)
+	}
 }
 
 // provisionerReferences lists machines whose creation spec references the

@@ -34,7 +34,7 @@
     { "name": "Host Monitoring", "description": "Host telemetry (the monitoring capability token): always-on realtime sampling via gopsutil; monitoring.storage_enabled adds stored time series in per-datatype database files. Illumos-only families (ZFS pools/datasets/ARC, zpool-iostat disk IO, netstat routes) have no analog on this host and are absent." },
     { "name": "Processes", "description": "Host process listing and control (the processes capability token). The zone concept does not exist here: the zone field is absent and ?zone= filters are ignored. Absent by platform: /{pid}/stack, /{pid}/limits (pstack/plimit are illumos tools) and trace/start (DTrace)." },
     { "name": "System Host Management", "description": "Host power management (the host-power capability token, config-gated by host_power.enabled — every endpoint answers 503 and the token disappears from /api/status when disabled). Absent by platform: runlevels, single-user/multi-user transitions, fast reboot, reboot-required tracking (init semantics with no cross-platform analog)." },
-    { "name": "Host Configuration", "description": "System hosts-file control on all three platforms (the hosts-file capability token — a platform token, always advertised; Windows System32\\drivers\\etc\\hosts, /etc/hosts elsewhere). /system/dns is absent by platform: resolv.conf is Unix-only and Windows/macOS manage DNS elsewhere." },
+    { "name": "Host Configuration", "description": "System hosts-file and DNS control on all three platforms (the hosts-file and dns capability tokens — platform tokens, always advertised). Hosts file: Windows System32\\drivers\\etc\\hosts, /etc/hosts elsewhere. DNS (/system/dns, the converged wire, sync 2026-07-17): one wire shape everywhere — nameservers/search_domains/domain/options — with per-OS mechanics: /etc/resolv.conf read/written on Unix; netsh per connected interface on Windows (nameservers only; raw and the resolv.conf-only fields answer 400, backup is \"\"); networksetup per enabled service on macOS (nameservers + search_domains; domain/options/raw answer 400, backup \"\"). Host network configuration (/network/hostname and /network/addresses, the hostname and ip-addresses capability tokens — the converged wire, sync 2026-07-17): zoneweaver's shipped network-controller family, BARE documents (no success/message/timestamp envelope; errors are {error, details?}). Hostname: GET is the live view (persisted name vs live system hostname), PUT queues the async set_hostname task. Addresses: GET is the real live listing over Go's stdlib interface enumeration; every mutation (POST/DELETE/enable/disable) answers an honest 501 on this agent — Mark's scope ruling, a future session expands them." },
     { "name": "Database Management", "description": "SQLite statistics and maintenance across every open database file (tasks.sqlite, agent.sqlite, and the monitoring files when storage is enabled), plus the read-only explorer drill-down (tables with row counts and indexes, then paged rows — zoneweaver's contract, shared wire; no arbitrary SQL, every table and order_by column verified against the database's own catalog)" },
     { "name": "Settings", "description": "Agent configuration over the API (admin only)" },
     { "name": "Secrets", "description": "Global secrets store (the secrets capability token; admin only): SHI's six categories in secrets.yaml beside the config — kept OUT of /settings so that surface stays a pure configuration document. Values are plain text by design (it is the user's local machine; the generated Hosts.yml carries them as SECRETS_* template vars). Independently, Hosts.rb merges the working copy's secrets.yml/.secrets.yml at vagrant runtime — both mechanisms coexist." }
@@ -89,7 +89,7 @@
           "bootstrapAvailable": { "type": "boolean", "example": true },
           "console": { "type": "array", "items": { "type": "string" }, "description": "EMERGENCY consoles only (Mark's placement ruling 2026-07-12 — hypervisor-level surfaces that work with zero guest cooperation): rdp always (base VRDP ships in VirtualBox 7.2 — the IronRDP web client rides the /machines/{name}/rdp-bridge RDCleanPath WebSocket); vnc only when a USABLE VBoxVNC VRDE module is installed (the websockify bridge needs RFB on the VRDE port). The machine SSH terminal is guest-network access and advertises as features 'ssh' instead.", "example": ["rdp"] },
           "shi_mode": { "type": "boolean", "description": "\"I Can't Believe it's not Super.Human.Installer\" presentation toggle (ui.shi_mode): the SPA renders the opinionated SHI-style theme/flow in Direct mode when true. Absent/false on agents without the concept.", "example": false },
-          "features": { "type": "array", "items": { "type": "string" }, "description": "Capability tokens (platform support ∧ config state): host-power is absent when host_power.enabled is false, artifacts when artifact_storage.enabled is false, file-browser when file_browser.enabled is false, guest-agent when guest_agent.enabled is false. provisioner-registry names the SHI-format package registry surface and secrets the global secrets store — finer than the cross-agent provisioning/machine-create tokens, which are true on every provisioning-capable agent regardless of wire shape (Mark's gating ruling, 2026-07-06). machine-modify names PUT's infrastructure-modify surface (the base's zone_modify contract). ssh names the machine SSH-terminal family (POST /machines/{name}/ssh/start + the /ssh/{id} WebSocket) — a FEATURE, not a console, per Mark's placement ruling 2026-07-12: console[] carries emergency consoles only. hosts-file names the /system/hosts editor surface (the converged wire, minted 2026-07-17) — a platform token, always advertised on both agents.", "example": ["tasks", "machines", "machine-suspend", "machine-create", "machine-modify", "machine-snapshots", "machine-screenshot", "swap", "monitoring", "processes", "provisioning", "provisioner-registry", "secrets", "ssh", "templates", "host-launchers", "host-terminal", "host-power", "hosts-file", "artifacts", "file-browser", "guest-agent"] },
+          "features": { "type": "array", "items": { "type": "string" }, "description": "Capability tokens (platform support ∧ config state): host-power is absent when host_power.enabled is false, artifacts when artifact_storage.enabled is false, file-browser when file_browser.enabled is false, guest-agent when guest_agent.enabled is false. provisioner-registry names the SHI-format package registry surface and secrets the global secrets store — finer than the cross-agent provisioning/machine-create tokens, which are true on every provisioning-capable agent regardless of wire shape (Mark's gating ruling, 2026-07-06). machine-modify names PUT's infrastructure-modify surface (the base's zone_modify contract). ssh names the machine SSH-terminal family (POST /machines/{name}/ssh/start + the /ssh/{id} WebSocket) — a FEATURE, not a console, per Mark's placement ruling 2026-07-12: console[] carries emergency consoles only. hosts-file names the /system/hosts editor surface (the converged wire, minted 2026-07-17) — a platform token, always advertised on both agents. dns names the /system/dns surface beside it (minted 2026-07-17, same converged wire — per-OS mechanics, wire identical; the UI's Network-tab DNS section gates on it). hostname names the /network/hostname surface (minted 2026-07-17, the converged wire): GET is the live view, PUT queues the async set_hostname task. ip-addresses names the /network/addresses listing (minted 2026-07-17) — the token advertises the READ surface: the listing is real and always live, while every mutation (POST/DELETE/enable/disable) answers an honest 501 on this agent (Mark's scope ruling — a future session expands them).", "example": ["tasks", "machines", "machine-suspend", "machine-create", "machine-modify", "machine-snapshots", "machine-screenshot", "swap", "monitoring", "processes", "provisioning", "provisioner-registry", "secrets", "ssh", "templates", "host-launchers", "host-terminal", "host-power", "hosts-file", "dns", "hostname", "ip-addresses", "artifacts", "file-browser", "guest-agent"] },
           "uptime": { "type": "integer", "description": "Seconds since the agent started", "example": 86400 }
         }
       },
@@ -142,7 +142,7 @@
         "properties": {
           "id": { "type": "string", "format": "uuid", "example": "123e4567-e89b-12d3-a456-426614174000" },
           "machine_name": { "type": "string", "description": "Target machine name", "example": "domino-01" },
-          "operation": { "type": "string", "description": "Operation kind. Vocabulary: start, stop, suspend, delete, discover, machine_modify (PUT's infrastructure changes), machine_import (OVA/OVF appliance import), machine_move (movevm relocation), machine_unattended_install (VBoxManage answer-file install), restart (never dispatched — a restart is a stop→start chain); create orchestration: machine_create_orchestration (parent), machine_prepare, machine_create_storage, machine_create_config, machine_create_finalize, template_download; provisioning pipeline: machine_provision_orchestration (parent — the document-walk children chain directly under it), machine_wait_ssh, machine_sync_parent, machine_sync (one per folder), machine_hook (one per provisioning.pre[]/post[] sequence-hook entry — pre entries before the first method, post entries after the last), machine_shell (one per provisioning.shell.scripts[] entry, in the document walk), machine_provision (one per ansible local[] playbook entry), machine_provision_remote (one per ansible remote[] entry — ansible-playbook ON the agent host over the guest transport; needs host ansible), machine_docker_compose (one per provisioning.docker.docker_compose[] file — no engine setup; an absent guest engine fails the task honestly), machine_provision_parent (ONLY as the /run-provisioners anchor), machine_syncback_parent, machine_syncback (one per syncback-flagged folder — the post-provision guest→host pull); network: provisioning_network_setup, provisioning_network_teardown; consoles/snapshots: reset, pause, resume, snapshot_take (user takes AND the rotation service's scheduled rows — created_by snapshot_rotation), snapshot_restore, snapshot_delete, snapshot_modify (rename and/or description edit via PUT), machine_clone_current (clonevm current-state clone); templates: template_download, template_delete, template_export, template_upload (publish), template_move; filesystem (machine_name \"filesystem\"): file_move, file_copy, file_archive_create, file_archive_extract; registry/artifacts/system: provisioner_import, provisioner_export (one version → registry-shaped tar.gz + archive sha256 sidecar), provisioner_catalog_install (fetch catalog.json → download the versioned asset → verify sha256 → import), artifact_scan, artifact_download, artifact_upload, artifact_move, artifact_copy, artifact_delete_file, artifact_delete_folder, hcl_download, agent_update.", "example": "start" },
+          "operation": { "type": "string", "description": "Operation kind. Vocabulary: start, stop, suspend, delete, discover, machine_modify (PUT's infrastructure changes), machine_import (OVA/OVF appliance import), machine_move (movevm relocation), machine_unattended_install (VBoxManage answer-file install), restart (never dispatched — a restart is a stop→start chain); create orchestration: machine_create_orchestration (parent), machine_prepare, machine_create_storage, machine_create_config, machine_create_finalize, template_download; provisioning pipeline: machine_provision_orchestration (parent — the document-walk children chain directly under it), machine_wait_ssh, machine_sync_parent, machine_sync (one per folder), machine_hook (one per provisioning.pre[]/post[] sequence-hook entry — pre entries before the first method, post entries after the last), machine_shell (one per provisioning.shell.scripts[] entry, in the document walk), machine_provision (one per ansible local[] playbook entry), machine_provision_remote (one per ansible remote[] entry — ansible-playbook ON the agent host over the guest transport; needs host ansible), machine_docker_compose (one per provisioning.docker.docker_compose[] file — no engine setup; an absent guest engine fails the task honestly), machine_provision_parent (ONLY as the /run-provisioners anchor), machine_syncback_parent, machine_syncback (one per syncback-flagged folder — the post-provision guest→host pull); network: provisioning_network_setup, provisioning_network_teardown; consoles/snapshots: reset, pause, resume, snapshot_take (user takes AND the rotation service's scheduled rows — created_by snapshot_rotation), snapshot_restore, snapshot_delete, snapshot_modify (rename and/or description edit via PUT), machine_clone_current (clonevm current-state clone); templates: template_download, template_delete, template_export, template_upload (publish), template_move; filesystem (machine_name \"filesystem\"): file_move, file_copy, file_archive_create, file_archive_extract; registry/artifacts/system: provisioner_import, provisioner_export (one version → registry-shaped tar.gz + archive sha256 sidecar), provisioner_catalog_install (fetch catalog.json → download the versioned asset → verify sha256 → import), artifact_scan, artifact_download, artifact_upload, artifact_move, artifact_copy, artifact_delete_file, artifact_delete_folder, hcl_download, agent_update, set_hostname (PUT /network/hostname's queued rename — zoneweaver's exact op name, machine_name \"system\"; the converged wire, sync 2026-07-17).", "example": "start" },
           "status": {
             "type": "string",
             "enum": ["pending", "prepared", "running", "completed", "failed", "cancelled", "completed_with_errors"],
@@ -2496,7 +2496,7 @@
       "post": {
         "tags": ["Provisioning"],
         "summary": "Import a provisioner package",
-        "description": "Minimum role: operator. Queues a provisioner_import task (machine_name \"system\", category-locked: one import at a time). Sources: folder (a directory on the agent host holding provisioner-collection.yml, or provisioner.yml for a bare version), archive (.tar.gz/.tgz/.zip on the agent host), or git (http(s) URL, cloned --depth 1 --recursive so nested submodules arrive; optional branch). The package root is searched up to 3 directory levels deep. Every version's Field DSL is LINTED fail-closed before anything copies (design §3.1): an unknown field type, legacy basicFields/advancedFields, a bad show_if operand, a pattern without pattern_error — any problem fails the import with the full annotated list in the task output. Existing versions are never touched — re-importing is idempotent; update = import a newer version beside the old.",
+        "description": "Minimum role: operator. Queues a provisioner_import task (machine_name \"system\", category-locked: one import at a time). Sources: folder (a directory on the agent host holding provisioner-collection.yml, or provisioner.yml for a bare version), archive (.tar.gz/.tgz/.zip on the agent host), or git (http(s) URL, cloned --depth 1 --recursive so nested submodules arrive; optional branch). The package root is searched up to 3 directory levels deep. Archive imports may carry an optional checksum — the sha256 hex digest OF THE ARCHIVE (the converged wire, sync 2026-07-17) — verified against the file BEFORE extraction (compared case-insensitively); a mismatch fails the task honestly, naming expected vs actual, and nothing extracts. Every version's Field DSL is LINTED fail-closed before anything copies (design §3.1): an unknown field type, legacy basicFields/advancedFields, a bad show_if operand, a pattern without pattern_error — any problem fails the import with the full annotated list in the task output. Existing versions are never touched — re-importing is idempotent; update = import a newer version beside the old.",
         "requestBody": {
           "required": true,
           "content": {
@@ -2509,7 +2509,8 @@
                   "path": { "type": "string", "description": "Agent-host path (folder and archive sources)", "example": "C:\\Users\\me\\Downloads\\my_provisioner.tar.gz" },
                   "url": { "type": "string", "description": "http(s) git repository URL (git source)", "example": "https://github.com/STARTcloud/hcl_domino_standalone_provisioner.git" },
                   "branch": { "type": "string", "description": "Optional branch (git source)", "example": "main" },
-                  "token_name": { "type": "string", "description": "Optional git_api_keys secret name for private repositories (git source); the token itself never enters task metadata" }
+                  "token_name": { "type": "string", "description": "Optional git_api_keys secret name for private repositories (git source); the token itself never enters task metadata" },
+                  "checksum": { "type": "string", "description": "Optional sha256 hex digest (64 characters) OF THE ARCHIVE (archive source only): verified before extraction, case-insensitively; a mismatch fails the import task", "example": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855" }
                 }
               }
             }
@@ -2534,7 +2535,7 @@
             }
           },
           "400": {
-            "description": "Invalid body, source_type, path, url, or branch",
+            "description": "Invalid body, source_type, path, url, branch, or checksum (\"checksum must be a 64-character sha256 hex digest\")",
             "content": { "application/json": { "schema": { "type": "object", "properties": { "error": { "type": "string" } } } } }
           }
         }
@@ -2679,14 +2680,14 @@
       "post": {
         "tags": ["Provisioning"],
         "summary": "Upload a package archive and import it",
-        "description": "Minimum role: operator. The share contract's receiving half: multipart/form-data with a \"file\" part (.tar.gz/.tgz/.zip, ≤4 GiB) streams to a temp file and queues the ordinary provisioner_import task against it (same DSL lint gate, same non-clobber rules; the temp archive removes itself after the attempt). Verify the sender's published sha256 yourself before uploading — the wire carries the file, not the expectation.",
+        "description": "Minimum role: operator. The share contract's receiving half: multipart/form-data with a \"file\" part (.tar.gz/.tgz/.zip, ≤4 GiB) streams to a temp file and queues the ordinary provisioner_import task against it (same DSL lint gate, same non-clobber rules; the temp archive removes itself after the attempt). An optional checksum field — the sender's published sha256 OF THE ARCHIVE (64 hex chars; the converged wire, sync 2026-07-17) — rides into the import's pre-extraction verification: a mismatch fails the task honestly, nothing extracts. Like the file-manager upload, non-file fields must arrive BEFORE the file part — the stream is consumed in order and the task queues the moment the file lands.",
         "requestBody": {
           "required": true,
-          "content": { "multipart/form-data": { "schema": { "type": "object", "required": ["file"], "properties": { "file": { "type": "string", "format": "binary" } } } } }
+          "content": { "multipart/form-data": { "schema": { "type": "object", "required": ["file"], "properties": { "checksum": { "type": "string", "description": "Optional sha256 hex digest (64 characters) of the archive, verified before extraction — must precede the file part" }, "file": { "type": "string", "format": "binary" } } } } }
         },
         "responses": {
           "202": { "description": "Import task queued ({success, task_id, filename, size, status, message})" },
-          "400": { "description": "Not multipart, no file part, or not a supported archive name" },
+          "400": { "description": "Not multipart, no file part, not a supported archive name, or an invalid checksum (\"checksum must be a 64-character sha256 hex digest\")" },
           "413": { "description": "Upload exceeds the 4 GiB cap" }
         }
       }
@@ -3820,6 +3821,280 @@
           "500": {
             "description": "Backup or write failure (typically missing OS privilege)",
             "content": { "application/json": { "schema": { "$ref": "#/components/schemas/WrappedError" } } }
+          }
+        }
+      }
+    },
+    "/system/dns": {
+      "get": {
+        "tags": ["Host Configuration"],
+        "summary": "Read the DNS configuration",
+        "description": "Minimum role: viewer (the dns capability token). The converged wire (sync 2026-07-17 — both agents answer the same shape): the standard success envelope with nameservers/search_domains/domain/options plus raw. Per-OS mechanics behind the one shape: Unix parses /etc/resolv.conf (grammar: blanks and #/; comment lines skipped; nameserver appends, search extends, domain sets, options extends; raw = the whole file). Windows has no resolv.conf — nameservers are the unique server IPs (static or DHCP-configured) across CONNECTED interfaces via netsh, search_domains/domain/options stay empty (the honest platform subset; DNS suffixes live elsewhere), raw = the netsh output. macOS resolv.conf is generated and ignored by the resolver — nameservers/search_domains union networksetup's per-enabled-service answers, domain/options stay empty, raw = the concatenated tool output.",
+        "responses": {
+          "200": {
+            "description": "DNS configuration",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": { "type": "boolean", "example": true },
+                    "message": { "type": "string", "example": "DNS configuration retrieved successfully" },
+                    "timestamp": { "type": "string", "format": "date-time" },
+                    "nameservers": { "type": "array", "items": { "type": "string" }, "example": ["1.1.1.1", "8.8.8.8"] },
+                    "search_domains": { "type": "array", "items": { "type": "string" }, "example": ["example.com"] },
+                    "domain": { "type": "string", "nullable": true, "description": "The resolv.conf domain directive; null when absent (always null on Windows/macOS)" },
+                    "options": { "type": "array", "items": { "type": "string" }, "example": ["ndots:2"] },
+                    "raw": { "type": "string", "description": "The whole source text: /etc/resolv.conf on Unix, the platform tool's output on Windows/macOS" }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Failed to read DNS configuration",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/WrappedError" } } }
+          }
+        }
+      },
+      "put": {
+        "tags": ["Host Configuration"],
+        "summary": "Replace the DNS configuration",
+        "description": "Minimum role: operator. The converged wire (sync 2026-07-17): raw WINS when present; a body carrying neither raw nor nameservers answers 400 \"Either nameservers array or raw string is required\". Unix serializes the structured fields into /etc/resolv.conf (manager header, then domain, search, one nameserver per entry, options), backs the current file up beside it first (<file>.bak.<ISO-timestamp>, colons→dashes — the hosts-file precedent), and replaces atomically (0644); the answer carries the backup FILENAME plus the parsed-back view of what was written (no raw on the PUT answer). Windows applies nameservers to EVERY connected interface via netsh (static + primary/add; an empty array reverts to DHCP) — raw and search_domains/domain/options have no analog and answer 400 naming the field, and backup is \"\" (no file to back up, honest absence). macOS applies nameservers (and search_domains when sent) to every enabled service via networksetup — domain/options/raw answer 400, backup \"\". Nameservers must be literal IP addresses everywhere. Writing needs the same OS privilege editing DNS by hand would (root on Unix, Administrator on Windows) — a refusal fails honestly.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "nameservers": { "type": "array", "items": { "type": "string" }, "description": "DNS server IP addresses (required unless raw is present; [] clears — DHCP revert on Windows, Empty on macOS)", "example": ["1.1.1.1", "8.8.8.8"] },
+                  "search_domains": { "type": "array", "items": { "type": "string" }, "description": "Search domains (Unix and macOS; 400 on Windows)" },
+                  "domain": { "type": "string", "description": "The resolv.conf domain directive (Unix only; 400 on Windows/macOS)" },
+                  "options": { "type": "array", "items": { "type": "string" }, "description": "resolv.conf options (Unix only; 400 on Windows/macOS)", "example": ["ndots:2"] },
+                  "raw": { "type": "string", "description": "Raw resolv.conf content, written verbatim (takes precedence; Unix only — 400 on Windows/macOS)" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "DNS configuration updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": { "type": "boolean" },
+                    "message": { "type": "string", "example": "DNS configuration updated successfully" },
+                    "timestamp": { "type": "string", "format": "date-time" },
+                    "backup": { "type": "string", "description": "The backup FILENAME (<file>.bak.<ISO-timestamp>, colons→dashes) on Unix; \"\" on Windows/macOS — there is no file to back up", "example": "resolv.conf.bak.2026-07-17T12-34-56Z" },
+                    "nameservers": { "type": "array", "items": { "type": "string" } },
+                    "search_domains": { "type": "array", "items": { "type": "string" } },
+                    "domain": { "type": "string", "nullable": true },
+                    "options": { "type": "array", "items": { "type": "string" } }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Neither nameservers nor raw present (\"Either nameservers array or raw string is required\"), a non-IP nameserver, invalid token values, or a field the platform cannot honor (raw / search_domains / domain / options per the per-OS rules above — refused by name, never silently dropped)",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/WrappedError" } } }
+          },
+          "500": {
+            "description": "Failed to write DNS configuration (tool failure, backup or write failure — typically missing OS privilege)",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/WrappedError" } } }
+          }
+        }
+      }
+    },
+    "/network/hostname": {
+      "get": {
+        "tags": ["Host Configuration"],
+        "summary": "Read the host's hostname state",
+        "description": "Minimum role: viewer (the hostname capability token). Zoneweaver's shipped network-controller wire (the converged wire, sync 2026-07-17): a BARE document — NO success/message/timestamp envelope; errors on this controller family are {error, details?}. hostname and system_hostname both carry the LIVE system hostname (zoneweaver's semantics). nodename_file is the PERSISTED/configured name — zoneweaver's /etc/nodename read, per-OS here: /etc/hostname content on Linux, the registry's pending ComputerName on Windows (a Rename-Computer awaiting reboot shows here before the live name changes), scutil --get HostName on macOS — null when no persisted source exists or it is unreadable. matches compares persisted against live (case-insensitively on Windows — computer names are case-insensitive; true when nothing persisted exists to compare) and warning narrates a mismatch (Windows gets the pending-rename phrasing) or stays null.",
+        "responses": {
+          "200": {
+            "description": "Hostname state (bare document)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "hostname": { "type": "string", "description": "The live system hostname", "example": "desktop-01" },
+                    "nodename_file": { "type": "string", "nullable": true, "description": "The persisted/configured name (per-OS source above); null when no persisted source exists", "example": "desktop-01" },
+                    "system_hostname": { "type": "string", "description": "The live system hostname again (zoneweaver's shape)", "example": "desktop-01" },
+                    "matches": { "type": "boolean", "description": "persisted == live (case-insensitive on Windows; true when nothing is persisted)", "example": true },
+                    "warning": { "type": "string", "nullable": true, "description": "Mismatch narration (Windows: the pending-rename phrasing); null when consistent", "example": null }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Failed to get hostname",
+            "content": { "application/json": { "schema": { "type": "object", "properties": { "error": { "type": "string", "example": "Failed to get hostname" }, "details": { "type": "string" } } } } }
+          }
+        }
+      },
+      "put": {
+        "tags": ["Host Configuration"],
+        "summary": "Change the host's hostname (task)",
+        "description": "Minimum role: operator. Queues the async set_hostname task (machine_name \"system\", HIGH priority — zoneweaver's exact op name and choice; the converged wire, sync 2026-07-17) and answers 202 with the converged body. Validation is zoneweaver's exact staged gate with its exact messages: the overall shape first (alphanumeric edges, hyphens and dots inside, 1-253 characters), then per label (1-63 characters between dots; alphanumeric start and end). The task applies through the platform's own tooling: Linux hostnamectl set-hostname (persists AND applies live; without hostnamectl the agent writes /etc/hostname and runs hostname(1) — the same end state), macOS scutil --set HostName + LocalHostName (sanitized single label — Bonjour allows one RFC-1123 label) + ComputerName (all three converge, live), Windows PowerShell Rename-Computer -Force — the rename lands at the NEXT REBOOT. requires_reboot is PER-PLATFORM honest (Mark's ruling: surface it honestly where the OS demands it): true on Windows (reboot_reason names why; apply_immediately cannot take effect there — the task output narrates that, never a silent drop), false on Linux/macOS where the apply is live. note narrates the platform's apply_immediately semantics either way.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["hostname"],
+                "properties": {
+                  "hostname": { "type": "string", "description": "The new hostname — RFC-1123 label(s), dots allowed, 253 characters at most", "example": "web-01" },
+                  "apply_immediately": { "type": "boolean", "default": false, "description": "Ask for a live apply. Linux/macOS apply live inherently; Windows cannot (reboot semantics) and narrates that in the task output" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Hostname change task created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": { "type": "boolean", "example": true },
+                    "message": { "type": "string", "example": "Hostname change task created for: web-01" },
+                    "task_id": { "type": "string", "format": "uuid" },
+                    "hostname": { "type": "string", "example": "web-01" },
+                    "apply_immediately": { "type": "boolean" },
+                    "requires_reboot": { "type": "boolean", "description": "true on Windows only — the rename lands at the next reboot; false on Linux/macOS (live apply)" },
+                    "reboot_reason": { "type": "string", "description": "Why a reboot is needed (\"\" when none is)", "example": "Windows applies a computer rename at the next reboot" },
+                    "note": { "type": "string", "description": "The platform's apply_immediately semantics, narrated", "example": "apply_immediately cannot take effect on Windows — the rename lands at the next reboot" }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Zoneweaver's exact refusals, {error} shape: \"hostname is required and must be a string\" (missing/non-string hostname or an unparseable body), \"Invalid hostname format. Must be alphanumeric with hyphens and dots, 1-253 characters\", \"Invalid hostname format. Each part between dots must be 1-63 characters\", or \"Invalid hostname format. Each part must start and end with alphanumeric characters\"",
+            "content": { "application/json": { "schema": { "type": "object", "properties": { "error": { "type": "string", "example": "hostname is required and must be a string" } } } } }
+          },
+          "500": {
+            "description": "Failed to create hostname change task",
+            "content": { "application/json": { "schema": { "type": "object", "properties": { "error": { "type": "string" }, "details": { "type": "string" } } } } }
+          }
+        }
+      }
+    },
+    "/network/addresses": {
+      "get": {
+        "tags": ["Host Configuration"],
+        "summary": "List the host's IP addresses",
+        "description": "Minimum role: viewer (the ip-addresses capability token). Zoneweaver's shipped listing wire (the converged wire, sync 2026-07-17), a BARE document — {addresses, total, source}; errors are {error, details?}. ALWAYS LIVE over Go's stdlib interface enumeration: this agent has no collector database, so ?live is accepted and IGNORED — every answer is the live view, source \"live\" top-level and per entry. Honest vocabulary limits of a Go host: addrobj is SYNTHETIC — Go has no ipadm address-object vocabulary, so entries are named <interface>/v4 or <interface>/v6 (stable, round-trips into the DELETE wildcard); type is INFERRED — the stdlib cannot see DHCP-vs-static, so IPv6 link-locals (fe80::/10) answer addrconf and everything else answers static (dhcp never appears); state is the interface's up/down flag (ok | down). total counts the entries returned (after filters and limit).",
+        "parameters": [
+          { "name": "interface", "in": "query", "schema": { "type": "string" }, "description": "Substring match on the interface name (zoneweaver's partial-match semantics, not exact)" },
+          { "name": "ip_version", "in": "query", "schema": { "type": "string", "enum": ["v4", "v6"] } },
+          { "name": "type", "in": "query", "schema": { "type": "string" }, "description": "Filter by inferred type — this agent produces static and addrconf only (no DHCP visibility)" },
+          { "name": "state", "in": "query", "schema": { "type": "string" }, "description": "Filter by interface state — ok | down on this agent" },
+          { "name": "limit", "in": "query", "schema": { "type": "integer", "default": 100 }, "description": "Cap on returned entries — defaults to 100 (zoneweaver's exact semantics); a positive integer overrides, anything else keeps the default" },
+          { "name": "live", "in": "query", "schema": { "type": "boolean" }, "description": "Accepted for wire parity and IGNORED — this agent is always live (no collector database)" }
+        ],
+        "responses": {
+          "200": {
+            "description": "IP addresses (bare document, always live)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "addresses": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "addrobj": { "type": "string", "description": "Synthetic <interface>/<version> name (Go has no ipadm addrobj vocabulary)", "example": "Ethernet/v4" },
+                          "interface": { "type": "string", "example": "Ethernet" },
+                          "type": { "type": "string", "description": "Inferred: addrconf for IPv6 link-locals (fe80::/10), static otherwise — dhcp never appears here", "example": "static" },
+                          "state": { "type": "string", "description": "The interface's flag: ok (up) | down", "example": "ok" },
+                          "addr": { "type": "string", "description": "CIDR notation", "example": "192.168.1.10/24" },
+                          "ip_version": { "type": "string", "enum": ["v4", "v6"] },
+                          "source": { "type": "string", "example": "live" }
+                        }
+                      }
+                    },
+                    "total": { "type": "integer", "description": "Entries returned (after filters and limit)" },
+                    "source": { "type": "string", "example": "live" }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Failed to get IP addresses",
+            "content": { "application/json": { "schema": { "type": "object", "properties": { "error": { "type": "string", "example": "Failed to get IP addresses" }, "details": { "type": "string" } } } } }
+          }
+        }
+      },
+      "post": {
+        "tags": ["Host Configuration"],
+        "summary": "Create an IP address (not implemented)",
+        "description": "Minimum role: operator. NOT IMPLEMENTED on this agent (Mark's scope ruling, sync 2026-07-17: the listing is real, mutations wait for a future session). The wire path exists and matches zoneweaver's, so the expansion is drop-in — but today every /network/addresses mutation answers this same honest 501; no body is read.",
+        "responses": {
+          "501": {
+            "description": "Not implemented on this agent",
+            "content": { "application/json": { "schema": { "type": "object", "properties": { "error": { "type": "string", "example": "IP address management is not implemented on this agent yet — the listing is read-only (a future session expands it)" } } } } }
+          }
+        }
+      }
+    },
+    "/network/addresses/{addrobj}": {
+      "delete": {
+        "tags": ["Host Configuration"],
+        "summary": "Delete an IP address (not implemented)",
+        "description": "Minimum role: operator. NOT IMPLEMENTED on this agent — same honest 501 as every /network/addresses mutation (Mark's scope ruling, sync 2026-07-17). The route accepts addrobj values carrying slashes (the listing's synthetic <interface>/<version> names round-trip), so the wire path matches zoneweaver's for the drop-in expansion.",
+        "parameters": [
+          { "name": "addrobj", "in": "path", "required": true, "schema": { "type": "string" }, "description": "The listing's addrobj value — may carry a slash (<interface>/v4); the route accepts it", "example": "Ethernet/v4" }
+        ],
+        "responses": {
+          "501": {
+            "description": "Not implemented on this agent",
+            "content": { "application/json": { "schema": { "type": "object", "properties": { "error": { "type": "string", "example": "IP address management is not implemented on this agent yet — the listing is read-only (a future session expands it)" } } } } }
+          }
+        }
+      }
+    },
+    "/network/addresses/{addrobj}/enable": {
+      "put": {
+        "tags": ["Host Configuration"],
+        "summary": "Enable an IP address (not implemented)",
+        "description": "Minimum role: operator. NOT IMPLEMENTED on this agent — same honest 501 as every /network/addresses mutation (Mark's scope ruling, sync 2026-07-17). The agent registers ONE PUT wildcard under /network/addresses/ (Go 1.22 ServeMux forbids literal segments after a trailing wildcard, so enable/disable cannot be their own patterns), and today every PUT shape answers identically; the documented paths are zoneweaver's, so the expansion is drop-in.",
+        "parameters": [
+          { "name": "addrobj", "in": "path", "required": true, "schema": { "type": "string" }, "example": "Ethernet/v4" }
+        ],
+        "responses": {
+          "501": {
+            "description": "Not implemented on this agent",
+            "content": { "application/json": { "schema": { "type": "object", "properties": { "error": { "type": "string", "example": "IP address management is not implemented on this agent yet — the listing is read-only (a future session expands it)" } } } } }
+          }
+        }
+      }
+    },
+    "/network/addresses/{addrobj}/disable": {
+      "put": {
+        "tags": ["Host Configuration"],
+        "summary": "Disable an IP address (not implemented)",
+        "description": "Minimum role: operator. NOT IMPLEMENTED on this agent — same honest 501 as every /network/addresses mutation (Mark's scope ruling, sync 2026-07-17; see the enable path for the one-PUT-wildcard route note). The wire path matches zoneweaver's for the drop-in expansion.",
+        "parameters": [
+          { "name": "addrobj", "in": "path", "required": true, "schema": { "type": "string" }, "example": "Ethernet/v4" }
+        ],
+        "responses": {
+          "501": {
+            "description": "Not implemented on this agent",
+            "content": { "application/json": { "schema": { "type": "object", "properties": { "error": { "type": "string", "example": "IP address management is not implemented on this agent yet — the listing is read-only (a future session expands it)" } } } } }
           }
         }
       }

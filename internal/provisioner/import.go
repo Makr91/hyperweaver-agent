@@ -3,6 +3,8 @@ package provisioner
 import (
 	"bufio"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -14,6 +16,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strconv"
+	"strings"
 
 	"github.com/Makr91/hyperweaver-agent/internal/prereqs"
 	"github.com/Makr91/hyperweaver-agent/internal/procattr"
@@ -43,6 +46,10 @@ var branchPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._/-]{0,254}$`)
 // tokenNamePattern is the secrets store's entry-name rule.
 var tokenNamePattern = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
 
+// checksumPattern is a sha256 hex digest — the archive checksum's only
+// legal shape (the converged wire, sync 2026-07-17).
+var checksumPattern = regexp.MustCompile(`^[0-9a-fA-F]{64}$`)
+
 // ImportMetadata is the provisioner_import task's metadata document — the
 // import request, verbatim. TokenName names a git_api_keys entry in the
 // global secrets store (private-repo imports); the token itself never lands
@@ -56,6 +63,11 @@ type ImportMetadata struct {
 	Branch        string `json:"branch,omitempty"`
 	TokenName     string `json:"token_name,omitempty"`
 	CleanupSource bool   `json:"cleanup_source,omitempty"`
+	// Checksum is an optional sha256 hex digest OF THE ARCHIVE (archive
+	// imports only — the converged wire, sync 2026-07-17; Mark: "add it"):
+	// verified against the archive file before extraction, compared
+	// case-insensitively, mismatch = honest task failure.
+	Checksum string `json:"checksum,omitempty"`
 }
 
 // Validate checks an import request before it becomes a task.
@@ -64,6 +76,9 @@ func (m *ImportMetadata) Validate() error {
 	case SourceFolder, SourceArchive:
 		if m.Path == "" {
 			return errors.New("path is required for " + m.SourceType + " imports")
+		}
+		if m.SourceType == SourceArchive && m.Checksum != "" && !checksumPattern.MatchString(m.Checksum) {
+			return errors.New("checksum must be a 64-character sha256 hex digest")
 		}
 	case SourceGit:
 		parsed, err := url.Parse(m.URL)
@@ -183,6 +198,20 @@ func (e *executors) resolveSource(ctx context.Context, meta *ImportMetadata, out
 		}
 		if !isArchive(clean) {
 			return "", nil, errors.New("archive must be a .tar.gz, .tgz, or .zip file")
+		}
+		// Archive checksum gate (the converged wire, sync 2026-07-17; Mark:
+		// "add it"): verify the sha256 OF THE ARCHIVE before extraction —
+		// a mismatch is an honest failure naming expected vs actual.
+		if meta.Checksum != "" {
+			actual, herr := fileSHA256(clean)
+			if herr != nil {
+				return "", nil, fmt.Errorf("hash archive for checksum verification: %w", herr)
+			}
+			if !strings.EqualFold(actual, meta.Checksum) {
+				return "", nil, errors.New("archive checksum mismatch: expected " +
+					strings.ToLower(meta.Checksum) + ", got " + actual)
+			}
+			out.Write("stdout", "Archive checksum verified\n")
 		}
 		temp, terr := os.MkdirTemp("", "hyperweaver-import-*")
 		if terr != nil {
@@ -559,6 +588,23 @@ func copyFileIfAbsent(src, dst string) error {
 		return err
 	}
 	return copyFile(src, dst, info.Mode().Perm())
+}
+
+// fileSHA256 hashes one file, streaming — the archive-checksum gate's hash
+// (downloadVerified hashes in flight; here the file already sits on disk).
+func fileSHA256(path string) (string, error) {
+	file, err := os.Open(filepath.Clean(path))
+	if err != nil {
+		return "", err
+	}
+	defer func() {
+		_ = file.Close()
+	}()
+	hasher := sha256.New()
+	if _, cerr := io.Copy(hasher, file); cerr != nil {
+		return "", cerr
+	}
+	return hex.EncodeToString(hasher.Sum(nil)), nil
 }
 
 // gitPath returns the validated git path from the prerequisite detector, or

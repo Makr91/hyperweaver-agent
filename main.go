@@ -27,6 +27,7 @@ import (
 	"github.com/Makr91/hyperweaver-agent/internal/auth"
 	"github.com/Makr91/hyperweaver-agent/internal/config"
 	"github.com/Makr91/hyperweaver-agent/internal/db"
+	"github.com/Makr91/hyperweaver-agent/internal/hostname"
 	"github.com/Makr91/hyperweaver-agent/internal/hostpower"
 	"github.com/Makr91/hyperweaver-agent/internal/keepawake"
 	"github.com/Makr91/hyperweaver-agent/internal/keys"
@@ -663,6 +664,10 @@ func setupTasks(cfg *config.Config, secretsStore *secrets.Store) (*agentSystems,
 	// HTTP surface; registering the executors unconditionally is harmless —
 	// no handler queues them while the surface is disabled).
 	hostpower.RegisterExecutors(queue, hostpower.LookupCommand)
+
+	// set_hostname (the /network/hostname surface's async half — the
+	// converged wire, sync 2026-07-17).
+	hostname.RegisterExecutors(queue)
 
 	// Scheduled snapshot rotation (snapshots.enabled — zoneweaver's
 	// Snapshoter.sh replacement, VBox-conservative defaults): visible

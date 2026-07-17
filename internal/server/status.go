@@ -75,12 +75,22 @@ type statusPayload struct {
 // /system/hosts editor ships on BOTH agents with the converged wire, so it
 // advertises as a platform token — the UI gates the Host tab on it (D14's
 // gate-on-tokens-only rule).
+// dns minted 2026-07-17: the /system/dns surface with the converged wire —
+// per-OS mechanics (resolv.conf on Unix, netsh on Windows, networksetup on
+// macOS), wire identical; the UI's Network-tab DNS section gates on it.
+// hostname minted 2026-07-17: the /network/hostname surface (GET live view
+// + PUT queuing set_hostname) with the converged wire.
+// ip-addresses minted 2026-07-17: the /network/addresses listing — the read
+// surface the UI's IP-address section needs; mutations are stubbed 501 on
+// this agent (Mark's scope ruling — a future session expands them), the
+// token advertises the read surface.
 var platformFeatures = []string{
 	"tasks", "machines", "machine-suspend", "machine-create",
 	"machine-modify", "machine-snapshots", "machine-screenshot",
 	"swap", "monitoring", "processes", "provisioning",
 	"provisioner-registry", "secrets", "ssh", "templates",
-	"host-launchers", "host-terminal", "hosts-file",
+	"host-launchers", "host-terminal", "hosts-file", "dns",
+	"hostname", "ip-addresses",
 }
 
 // features derives the advertised token list: platform tokens plus the

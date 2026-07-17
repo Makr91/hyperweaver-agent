@@ -171,10 +171,30 @@ func New(cfg *config.Config, keyStore *keys.Store, trayTokens *auth.TrayTokens, 
 	mux.Handle("POST /system/host/halt", requireKey(s.hostPowerGate(s.handleHostHalt)))
 
 	// System hosts file (Mark's ruling 2026-07-05: the agent controls
-	// /etc/hosts on all three platforms for VM name resolution). /system/dns
-	// is deliberately absent — resolv.conf is Unix-only.
+	// /etc/hosts on all three platforms for VM name resolution) and the DNS
+	// surface beside it (the converged wire, sync 2026-07-17: one wire shape
+	// with zoneweaver, per-OS mechanics — resolv.conf on Unix, netsh on
+	// Windows, networksetup on macOS).
 	mux.Handle("GET /system/hosts", requireKey(http.HandlerFunc(s.handleGetHostsFile)))
 	mux.Handle("PUT /system/hosts", requireKey(http.HandlerFunc(s.handleUpdateHostsFile)))
+	mux.Handle("GET /system/dns", requireKey(http.HandlerFunc(s.handleGetDNS)))
+	mux.Handle("PUT /system/dns", requireKey(http.HandlerFunc(s.handleUpdateDNS)))
+
+	// Host network configuration (converged wire, sync 2026-07-17):
+	// /network/hostname (GET live view, PUT queues set_hostname) and the
+	// /network/addresses family (GET is the real live listing; every
+	// mutation is an honest 501 stub — Mark's scope ruling, a future
+	// session expands it). addrobj values may carry slashes, so DELETE
+	// takes a {addrobj...} wildcard; Go 1.22 ServeMux forbids segments
+	// after "...", so the enable/disable verbs cannot be their own
+	// patterns — PUT registers one {rest...} wildcard and the stub answers
+	// every shape identically.
+	mux.Handle("GET /network/hostname", requireKey(http.HandlerFunc(s.handleGetHostname)))
+	mux.Handle("PUT /network/hostname", requireKey(http.HandlerFunc(s.handleSetHostname)))
+	mux.Handle("GET /network/addresses", requireKey(http.HandlerFunc(s.handleListNetworkAddresses)))
+	mux.Handle("POST /network/addresses", requireKey(http.HandlerFunc(s.handleNetworkAddressStub)))
+	mux.Handle("DELETE /network/addresses/{addrobj...}", requireKey(http.HandlerFunc(s.handleNetworkAddressStub)))
+	mux.Handle("PUT /network/addresses/{rest...}", requireKey(http.HandlerFunc(s.handleNetworkAddressStub)))
 
 	// Database management (Agent API v1 Database Management group), across
 	// every open database file. Mutations admin-only via the central policy.

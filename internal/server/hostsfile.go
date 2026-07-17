@@ -19,8 +19,8 @@ import (
 // the platform can point names at its virtual machines (Mark's ruling,
 // 2026-07-05: "take control of the /etc/hosts file on mac, windows and
 // linux"). A timestamped backup lands beside the file before every write.
-// The /system/dns counterpart is deliberately absent: resolv.conf is
-// Unix-only and Windows/macOS manage DNS elsewhere.
+// The /system/dns counterpart lives in dnsfile.go (the converged wire, sync
+// 2026-07-17): same wire on every platform, per-OS mechanics.
 
 // hostsFilePath returns the platform hosts file location.
 func hostsFilePath() string {
