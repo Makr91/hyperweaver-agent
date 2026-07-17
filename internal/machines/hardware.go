@@ -224,6 +224,56 @@ func KnobValues() map[string][]string {
 	return values
 }
 
+// MachineKnobDefaults publishes the value an UNSET knob effectively runs with
+// (GET /machines/defaults knob_defaults — the companion to knob_current the UI
+// AI asked for 2026-07-12: knob_current shows what is SET, knob_defaults shows
+// what an unset knob runs with, so a blank Edit field can read the effective
+// value instead of "(agent default)"). FLAT DOTTED, one wire shape with
+// zoneweaver, values in PUT's vocabulary and knob_current's own value types
+// (int for ram/vcpus/boot_priority, on|off strings for the toggles).
+//
+// SOURCED FROM THE CREATE PATH, NEVER GUESSED (Mark's don't-invent rule, the
+// same discipline that made zoneweaver read the brand boot program): every
+// entry is a value the AGENT deterministically sets regardless of guest OS
+// type — modifyFlags' forced console baseline, the vcpus/memory fallbacks, and
+// the agent-policy settings defaults. VirtualBox's OS-TYPE RECOMMENDATIONS
+// (bootrom, hostbridge, netif, vram, chipset, audio controller/codec, the
+// firmware and mitigation families…) are DELIBERATELY OMITTED: they vary by
+// guest OS type and are not knowable statically without inventing — knob_current
+// serves each machine's real value live from its .vbox (absence = default,
+// filled as a real value), and the create-time labels read machineCreateDefaults
+// (the zones/settings sections). An omitted key keeps the UI's "(default)"
+// label, exactly as zoneweaver omits bootorder/memreserve.
+func MachineKnobDefaults() map[string]any {
+	defaults := map[string]any{}
+
+	// Resource fallbacks (modifyFlags: --cpus default 2, --memory default 2048 MB).
+	defaults["vcpus"] = 2
+	defaults["ram"] = 2048
+
+	// The forced console baseline modifyFlags emits on EVERY create (Mark's
+	// browser-RDP-era directive 2026-07-10) — an unset field runs with these.
+	// Keys mirror knob_current's own positions (top-level xhci + its
+	// hardware.usb twin, hardware.integration.*, hardware.vrde.*).
+	defaults["xhci"] = "on"
+	defaults["hardware.usb.xhci"] = "on"
+	defaults["hardware.integration.mouse"] = "usbtablet"
+	defaults["hardware.integration.keyboard"] = "usb"
+	defaults["hardware.integration.clipboard_mode"] = "bidirectional"
+	defaults["hardware.integration.clipboard_file_transfers"] = "enabled"
+	defaults["hardware.vrde.multi_con"] = "on"
+	defaults["hardware.vrde.reuse_con"] = "on"
+
+	// Agent-policy defaults: storageControllerKind's default bus, the
+	// orchestration boot priority an unset machine runs at, the sync transport
+	// an unset spec renders with.
+	defaults["diskif"] = "sata"
+	defaults["boot_priority"] = 95
+	defaults["settings.sync_method"] = "rsync"
+
+	return defaults
+}
+
 // hardwareFlags translates a hardware section into modifyvm arguments:
 // sorted k=v knobs, then serial[]/parallel[] multi-arg sequences.
 func hardwareFlags(hardware map[string]any) ([]string, error) {

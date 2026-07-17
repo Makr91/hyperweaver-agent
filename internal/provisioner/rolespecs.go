@@ -36,11 +36,13 @@ type RoleSpecs struct {
 	Roles map[string]RoleSpec `json:"roles" yaml:"roles"`
 }
 
-// RefreshedSpecs is one version's refresh outcome.
+// RefreshedSpecs is one version's refresh outcome. Fields counts the derived
+// schema.json's fields (0 = the package ships no form).
 type RefreshedSpecs struct {
 	Name    string `json:"name"`
 	Version string `json:"version"`
 	Roles   int    `json:"roles"`
+	Fields  int    `json:"fields"`
 }
 
 // deriveRoleSpecs walks the version's shipped ansible_collections and folds
@@ -163,9 +165,10 @@ func ReadRoleSpecs(versionRoot string) *RoleSpecs {
 	return specs
 }
 
-// RefreshAllRoleSpecs re-derives every registry version's cache — the manual
-// refresh for hand-dropped packages and updated specs (imports rebuild
-// automatically).
+// RefreshAllRoleSpecs re-derives every registry version's caches — the
+// role-specs AND the field-DSL schema.json (one refresh covers both derived
+// artifacts) — the manual refresh for hand-dropped packages and updated
+// specs (imports rebuild automatically).
 func (r *Registry) RefreshAllRoleSpecs() ([]RefreshedSpecs, error) {
 	collections, err := r.List()
 	if err != nil {
@@ -179,8 +182,13 @@ func (r *Registry) RefreshAllRoleSpecs() ([]RefreshedSpecs, error) {
 				plog().Warn("role-specs rebuild failed",
 					"name", collection.Name, "version", entry.Version, "error", berr)
 			}
+			fields, ferr := BuildFieldSchema(entry.Root)
+			if ferr != nil {
+				plog().Warn("schema.json rebuild failed (hand-dropped package with an invalid DSL?)",
+					"name", collection.Name, "version", entry.Version, "error", ferr)
+			}
 			refreshed = append(refreshed, RefreshedSpecs{
-				Name: collection.Name, Version: entry.Version, Roles: count,
+				Name: collection.Name, Version: entry.Version, Roles: count, Fields: fields,
 			})
 		}
 	}

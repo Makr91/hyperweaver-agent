@@ -89,6 +89,34 @@ func Seed(provisionersDir string) error {
 	return nil
 }
 
+// SeededFamilies names the provisioner families the INSTALLER ships — read
+// live from the staged seed archives (the artifact contract's `<name>.tar.gz`
+// alias). Seeded packages skip the host-hooks confirmation (design §5:
+// "seeded packages never prompt"); everything else — imports, hand-drops,
+// PUT-built documents — confirms once per machine.
+func SeededFamilies() map[string]bool {
+	families := map[string]bool{}
+	for _, dir := range seedDirs() {
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			continue
+		}
+		for _, entry := range entries {
+			if entry.IsDir() || !isArchive(entry.Name()) {
+				continue
+			}
+			name := entry.Name()
+			for _, ext := range []string{".tar.gz", ".tgz", ".zip"} {
+				name = strings.TrimSuffix(name, ext)
+			}
+			if ValidName(name) {
+				families[name] = true
+			}
+		}
+	}
+	return families
+}
+
 // synthesizeMissingManifests sweeps the registry for families holding valid
 // version trees but no collection manifest and synthesizes one from the
 // first valid version's provisioner.yml. Existing manifests are never

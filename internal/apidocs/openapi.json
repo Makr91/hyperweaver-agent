@@ -142,7 +142,7 @@
         "properties": {
           "id": { "type": "string", "format": "uuid", "example": "123e4567-e89b-12d3-a456-426614174000" },
           "machine_name": { "type": "string", "description": "Target machine name", "example": "domino-01" },
-          "operation": { "type": "string", "description": "Operation kind. Vocabulary: start, stop, suspend, delete, discover, machine_modify (PUT's infrastructure changes), machine_import (OVA/OVF appliance import), machine_move (movevm relocation), machine_unattended_install (VBoxManage answer-file install), restart (never dispatched — a restart is a stop→start chain); create orchestration: machine_create_orchestration (parent), machine_prepare, machine_create_storage, machine_create_config, machine_create_finalize, template_download; provisioning pipeline: machine_provision_orchestration (parent), machine_wait_ssh, machine_sync_parent, machine_sync (one per folder), machine_provision_parent, machine_provision (one per playbook), machine_syncback_parent, machine_syncback (one per syncback-flagged folder — the post-provision guest→host pull); network: provisioning_network_setup, provisioning_network_teardown; consoles/snapshots: reset, pause, resume, snapshot_take (user takes AND the rotation service's scheduled rows — created_by snapshot_rotation), snapshot_restore, snapshot_delete, machine_clone_current (clonevm current-state clone); templates: template_download, template_delete, template_export, template_upload (publish), template_move; filesystem (machine_name \"filesystem\"): file_move, file_copy, file_archive_create, file_archive_extract; registry/artifacts/system: provisioner_import, artifact_scan, artifact_download, artifact_upload, artifact_move, artifact_copy, artifact_delete_file, artifact_delete_folder, hcl_download, agent_update.", "example": "start" },
+          "operation": { "type": "string", "description": "Operation kind. Vocabulary: start, stop, suspend, delete, discover, machine_modify (PUT's infrastructure changes), machine_import (OVA/OVF appliance import), machine_move (movevm relocation), machine_unattended_install (VBoxManage answer-file install), restart (never dispatched — a restart is a stop→start chain); create orchestration: machine_create_orchestration (parent), machine_prepare, machine_create_storage, machine_create_config, machine_create_finalize, template_download; provisioning pipeline: machine_provision_orchestration (parent — the document-walk children chain directly under it), machine_wait_ssh, machine_sync_parent, machine_sync (one per folder), machine_hook (one per provisioning.pre[]/post[] sequence-hook entry — pre entries before the first method, post entries after the last), machine_shell (one per provisioning.shell.scripts[] entry, in the document walk), machine_provision (one per ansible local[] playbook entry), machine_provision_remote (one per ansible remote[] entry — ansible-playbook ON the agent host over the guest transport; needs host ansible), machine_docker_compose (one per provisioning.docker.docker_compose[] file — no engine setup; an absent guest engine fails the task honestly), machine_provision_parent (ONLY as the /run-provisioners anchor), machine_syncback_parent, machine_syncback (one per syncback-flagged folder — the post-provision guest→host pull); network: provisioning_network_setup, provisioning_network_teardown; consoles/snapshots: reset, pause, resume, snapshot_take (user takes AND the rotation service's scheduled rows — created_by snapshot_rotation), snapshot_restore, snapshot_delete, machine_clone_current (clonevm current-state clone); templates: template_download, template_delete, template_export, template_upload (publish), template_move; filesystem (machine_name \"filesystem\"): file_move, file_copy, file_archive_create, file_archive_extract; registry/artifacts/system: provisioner_import, provisioner_export (one version → registry-shaped tar.gz + archive sha256 sidecar), provisioner_catalog_install (fetch catalog.json → download the versioned asset → verify sha256 → import), artifact_scan, artifact_download, artifact_upload, artifact_move, artifact_copy, artifact_delete_file, artifact_delete_folder, hcl_download, agent_update.", "example": "start" },
           "status": {
             "type": "string",
             "enum": ["pending", "prepared", "running", "completed", "failed", "cancelled", "completed_with_errors"],
@@ -198,7 +198,7 @@
       },
       "MachineSpec": {
         "type": "object",
-        "description": "The machine-create document (the Hosts.yml-shaped structure, design §4), stored verbatim on the machine row. The provisioner reference is OPTIONAL — a machine is just a machine, provisioning is optional (the base's provisioner-free create). WITH a provisioner: machine_prepare renders the package's Jinja2 templates/Hosts.template.yml — at create and again before every provision — and the rendered hosts[0] drives everything: its settings/networks/disks build the VM natively (VBoxManage), and its folders/provisioning/vars/roles become the stored provisioner document the pipeline consumes. WITHOUT one: no prepare/render step exists, the spec's own settings/networks build the VM directly, finalize persists no provisioner, and a provisioner document can attach later via PUT /machines/{name} + POST /provision. Template context precedence (package-based creates): settings (also flattened UPPERCASE) → per-role <ROLE>_INSTALLER/_INSTALLER_HASH/_INSTALLER_VERSION/_FIXPACK*/_HOTFIX* vars + boolean role flags (both casings) → package configuration.basicFields/advancedFields defaults → properties/advanced_properties (exact field names) → SECRETS_* vars. Structured settings/networks/roles ride alongside.",
+        "description": "The machine-create document (the Hosts.yml-shaped structure, design §4), stored verbatim on the machine row. The provisioner reference is OPTIONAL — a machine is just a machine, provisioning is optional (the base's provisioner-free create). WITH a provisioner: machine_prepare renders the package's Jinja2 templates/Hosts.template.yml — at create and again before every provision — and the rendered hosts[0] drives everything: its settings/networks/disks build the VM natively (VBoxManage), and its folders/provisioning/vars/roles become the stored provisioner document the pipeline consumes. WITHOUT one: no prepare/render step exists, the spec's own settings/networks build the VM directly, finalize persists no provisioner, and a provisioner document can attach later via PUT /machines/{name} + POST /provision. Template context precedence (package-based creates): settings (also flattened UPPERCASE) → per-role <ROLE>_INSTALLER/_INSTALLER_HASH/_INSTALLER_VERSION/_FIXPACK*/_HOTFIX* vars + boolean role flags (both casings) → the Field DSL's contribution (metadata.configuration {groups, fields} — defaults merge BEFORE conditional evaluation, answers apply by exact field name, hidden fields are ABSENT from the context) → SECRETS_* vars. Structured settings/networks/roles ride alongside. Answers are validated authoritatively pre-render: a failing create answers 422 whose body IS the {FIELD: message} map (design §3.1, ruled 2026-07-16).",
         "properties": {
           "provisioner": {
             "type": "object",
@@ -251,8 +251,7 @@
               }
             }
           },
-          "properties": { "type": "object", "description": "User entries for the package's configuration.basicFields, keyed by each field's exact name" },
-          "advanced_properties": { "type": "object", "description": "User entries for the package's configuration.advancedFields" },
+          "properties": { "type": "object", "description": "THE answers map — one flat map keyed by each Field-DSL field's EXACT name (multiselect answers are native lists). The old basic/advanced split (advanced_properties) died in the one cut. Validated authoritatively pre-render: failures answer 422 {FIELD: message}." },
           "sync_method": { "type": "string", "enum": ["rsync", "scp"], "description": "Per-machine file-sync preference (SHI's Rsync/SCP setting), default rsync. Platform rules apply at render time: forced rsync on Windows hosts; macOS auto-falls back to SCP when the system rsync is the ancient Apple 2.x build. The EFFECTIVE value reaches the template context as settings.sync_method / SYNC_METHOD; the stored spec keeps the preference." },
           "safe_id_path": { "type": "string", "description": "Agent-host path of a Domino safe-ID file, placed under id-files per the package's id_files metadata (safe_id_dir, keep_original_name)" },
           "start_after_create": { "type": "boolean", "description": "POST /machines only: queue the first start immediately" }
@@ -322,7 +321,7 @@
       },
       "ProvisionerVersion": {
         "type": "object",
-        "description": "One provisioner package version. metadata is the full provisioner.yml — metadata.roles and configuration.basicFields/advancedFields drive the machine-create forms exactly as in SHI's custom-provisioner stack. The VERSION-DETAIL read additionally carries role_specs (Mark's argument-specs ruling 2026-07-12, shared wire with zoneweaver): every shipped role's meta/argument_specs.yml folded into role_specs.roles[<name>] = {collection, short_description, options} — derived into a role-specs.yml cache beside provisioner.yml at import (self-healing at read for hand-dropped packages; POST /provisioning/provisioners/refresh-specs re-derives everything). The UI builds its per-role knob FORMS from options; absent when the package ships no specs.",
+        "description": "One provisioner package version. metadata is the full provisioner.yml — metadata.roles plus the Field DSL (metadata.configuration = {groups, fields}, design §3.1: the closed 12-type set, ordered groups with an advanced toggle, the closed show_if grammar, validate blocks) drive the machine-create forms; metadata.presentation and metadata.forked_from ride through verbatim. Imports LINT the DSL fail-closed (unknown type = refusal listing every problem) and derive schema.json (JSON Schema 2020-12) beside role-specs.yml. The VERSION-DETAIL read additionally carries role_specs (Mark's argument-specs ruling 2026-07-12, shared wire with zoneweaver): every shipped role's meta/argument_specs.yml folded into role_specs.roles[<name>] = {collection, short_description, options} — derived into a role-specs.yml cache beside provisioner.yml at import (self-healing at read for hand-dropped packages; POST /provisioning/provisioners/refresh-specs re-derives everything). The UI builds its per-role knob FORMS from options; absent when the package ships no specs.",
         "properties": {
           "version": { "type": "string", "description": "The manifest's version field (falls back to the directory name)", "example": "0.1.24" },
           "dir": { "type": "string", "description": "Version directory name — the URL segment", "example": "0.1.24" },
@@ -416,22 +415,6 @@
           "custom_resource_url": { "type": "array", "items": { "type": "object", "properties": { "name": { "type": "string" }, "url": { "type": "string" }, "useAuth": { "type": "boolean" }, "user": { "type": "string" }, "pass": { "type": "string" } } } },
           "docker_hub": { "type": "array", "items": { "type": "object", "properties": { "name": { "type": "string" }, "docker_hub_user": { "type": "string" }, "docker_hub_token": { "type": "string" } } } },
           "ssh_keys": { "type": "array", "items": { "type": "object", "properties": { "name": { "type": "string" }, "key": { "type": "string", "description": "PEM private key" } } } }
-        }
-      },
-      "ProvisioningProfile": {
-        "type": "object",
-        "description": "One reusable provisioning profile (the base's model, minus the zlogin-only recipe_id): the UI composes provisioning without a bundled Hosts.yml or provisioner package and applies it into a machine's provisioner document.",
-        "properties": {
-          "id": { "type": "integer", "readOnly": true },
-          "name": { "type": "string", "example": "debian-web-servers" },
-          "description": { "type": "string" },
-          "default_credentials": { "type": "object", "description": "{username, password?, ssh_key_path?} — the vagrant_user vocabulary" },
-          "default_sync_folders": { "type": "array", "items": { "type": "object" }, "description": "folders[] entries ({map, to, type, ...})" },
-          "default_provisioners": { "type": "array", "items": { "type": "object" }, "description": "playbook entries ({playbook, run, ...})" },
-          "default_variables": { "type": "object", "description": "vars merged into extra_vars.role_vars" },
-          "created_by": { "type": "string", "readOnly": true },
-          "created_at": { "type": "string", "format": "date-time", "readOnly": true },
-          "updated_at": { "type": "string", "format": "date-time", "readOnly": true }
         }
       },
       "MonitoringSampling": {
@@ -1243,7 +1226,8 @@
             }
           },
           "400": { "description": "Invalid spec, provisioner reference, server_id, safe_id_path, box reference, template render failure, or Insufficient resources ({error, details[]} — the pre-flight resource validation rejection, machines.resource_validation)" },
-          "409": { "description": "Machine name (DB or hypervisor), server_id, or working directory already in use" }
+          "409": { "description": "Machine name (DB or hypervisor), server_id, or working directory already in use" },
+          "422": { "description": "Form answers fail the package's Field DSL — the body IS the {FIELD: message} map (design §3.1)", "content": { "application/json": { "schema": { "type": "object", "additionalProperties": { "type": "string" }, "example": { "os_password": "must be at least 8 characters", "domino_hostname": "required" } } } } }
         }
       },
       "get": {
@@ -1277,11 +1261,11 @@
       "get": {
         "tags": ["Machine Management"],
         "summary": "Create-time defaults",
-        "description": "Minimum role: viewer. What a create spec that OMITS each field actually gets — the wizard's \"(default: …)\" labels. Two classes, both listed: the agent's own fallbacks (settings.vcpus/memory/os_type) and VirtualBox's own defaults the agent passes no flag for (zones.bootrom/hostbridge/vnc/acpi/xhci/netif). knob_values is the ENUM-DROPDOWN FEED (Mark's ruling 2026-07-09): every closed-vocabulary knob's allowed values as FLAT DOTTED KEYS mapping to string arrays — the ONE wire shape, shared with zoneweaver (the 2026-07-12 one-wire ruling); never nested objects. Keys: knob_values[\"hardware.<section>.<key>\"] (all on|off knobs list [\"on\",\"off\"]; the usage dump's enums e.g. hardware.graphics.controller none|vboxvga|vmsvga|vboxsvga|qemuramfb, hardware.integration.clipboard_mode disabled|hosttoguest|guesttohost|bidirectional, hardware.audio.driver, hardware.platform.chipset/iommu/tpm_type/paravirt_provider/vm_process_priority/vm_execution_engine, hardware.firmware.boot_menu/apic, hardware.vrde.auth_type, hardware.cpu.profile, hardware.serial.type), knob_values[\"zones.<key>\"] (bootrom/hostbridge/vnc/acpi/xhci/netif/diskif), knob_values[\"nics.<key>\"] (promisc/nic_type/cable_connected), knob_values[\"disks.controller_type\"], knob_values[\"boot_order\"] (entry values), knob_values[\"settings.sync_method\"]. A knob present there renders a dropdown; absent means free-form or numeric. Values still pass to VirtualBox unvalidated. notes carries the per-section caveats.",
+        "description": "Minimum role: viewer. What a create spec that OMITS each field actually gets — the wizard's \"(default: …)\" labels. Two classes, both listed: the agent's own fallbacks (settings.vcpus/memory/os_type) and VirtualBox's own defaults the agent passes no flag for (zones.bootrom/hostbridge/vnc/acpi/xhci/netif). knob_values is the ENUM-DROPDOWN FEED (Mark's ruling 2026-07-09): every closed-vocabulary knob's allowed values as FLAT DOTTED KEYS mapping to string arrays — the ONE wire shape, shared with zoneweaver (the 2026-07-12 one-wire ruling); never nested objects. Keys: knob_values[\"hardware.<section>.<key>\"] (all on|off knobs list [\"on\",\"off\"]; the usage dump's enums e.g. hardware.graphics.controller none|vboxvga|vmsvga|vboxsvga|qemuramfb, hardware.integration.clipboard_mode disabled|hosttoguest|guesttohost|bidirectional, hardware.audio.driver, hardware.platform.chipset/iommu/tpm_type/paravirt_provider/vm_process_priority/vm_execution_engine, hardware.firmware.boot_menu/apic, hardware.vrde.auth_type, hardware.cpu.profile, hardware.serial.type), knob_values[\"zones.<key>\"] (bootrom/hostbridge/vnc/acpi/xhci/netif/diskif), knob_values[\"nics.<key>\"] (promisc/nic_type/cable_connected), knob_values[\"disks.controller_type\"], knob_values[\"boot_order\"] (entry values), knob_values[\"settings.sync_method\"]. A knob present there renders a dropdown; absent means free-form or numeric. Values still pass to VirtualBox unvalidated. knob_defaults is the companion to the detail GET's knob_current (current = what is SET, knob_defaults = what an unset knob RUNS with): the same flat dotted keys, values in knob_current's own types (int ram/vcpus/boot_priority, on|off strings). It is SOURCED FROM THE CREATE PATH, never a guessed VirtualBox internal — the agent's forced console baseline (xhci on, usbtablet mouse, usb keyboard, bidirectional clipboard, VRDE multi/reuse-con), the vcpus/memory fallbacks, and agent-policy defaults (diskif sata, boot_priority 95, sync_method rsync). VirtualBox's OS-type recommendations (bootrom/hostbridge/netif/vram/chipset/audio/firmware/mitigations) are DELIBERATELY ABSENT: they vary by guest OS type, knob_current serves each machine's real value live, and the create-time labels for those read the zones/settings sections. An absent key keeps the UI's own default label. notes carries the per-section caveats.",
         "responses": {
           "200": {
             "description": "Defaults document",
-            "content": { "application/json": { "schema": { "type": "object", "properties": { "settings": { "type": "object", "example": { "vcpus": 2, "memory": "2048M", "os_type": "Debian_64", "box_arch": "amd64", "box_version": "latest", "boot_priority": 95, "sync_method": "rsync" } }, "zones": { "type": "object", "example": { "bootrom": "bios", "hostbridge": "piix3", "vnc": "off", "acpi": "on", "xhci": "off", "netif": "e1000", "diskif": "sata", "autostart": false } }, "disks": { "type": "object", "example": { "sparse": true, "controller": "SATA Controller" } }, "knob_values": { "type": "object", "additionalProperties": { "type": "array", "items": { "type": "string" } }, "description": "Enum vocabularies — FLAT DOTTED keys mapping to string arrays (one wire shape with zoneweaver): \"hardware.<section>.<key>\", \"zones.<key>\", \"nics.<key>\", \"disks.controller_type\", \"boot_order\", \"settings.sync_method\". Never nested objects.", "example": { "hardware.graphics.controller": ["none", "vboxvga", "vmsvga", "vboxsvga", "qemuramfb"], "hardware.graphics.accelerate_3d": ["on", "off"], "hardware.serial.type": ["16450", "16550A", "16750"], "zones.vnc": ["on", "off"], "zones.diskif": ["ide", "sata", "scsi", "sas", "nvme", "virtio", "usb", "floppy"], "nics.promisc": ["deny", "allow-vms", "allow-all"], "disks.controller_type": ["ide", "sata", "scsi", "sas", "nvme", "virtio", "usb", "floppy"], "boot_order": ["floppy", "dvd", "disk", "net", "none"], "settings.sync_method": ["rsync", "scp"] } }, "notes": { "type": "object" } } } } }
+            "content": { "application/json": { "schema": { "type": "object", "properties": { "settings": { "type": "object", "example": { "vcpus": 2, "memory": "2048M", "os_type": "Debian_64", "box_arch": "amd64", "box_version": "latest", "boot_priority": 95, "sync_method": "rsync" } }, "zones": { "type": "object", "example": { "bootrom": "bios", "hostbridge": "piix3", "vnc": "off", "acpi": "on", "xhci": "on", "netif": "e1000", "diskif": "sata", "autostart": false } }, "disks": { "type": "object", "example": { "sparse": true, "controller": "SATA Controller" } }, "knob_values": { "type": "object", "additionalProperties": { "type": "array", "items": { "type": "string" } }, "description": "Enum vocabularies — FLAT DOTTED keys mapping to string arrays (one wire shape with zoneweaver): \"hardware.<section>.<key>\", \"zones.<key>\", \"nics.<key>\", \"disks.controller_type\", \"boot_order\", \"settings.sync_method\". Never nested objects.", "example": { "hardware.graphics.controller": ["none", "vboxvga", "vmsvga", "vboxsvga", "qemuramfb"], "hardware.graphics.accelerate_3d": ["on", "off"], "hardware.serial.type": ["16450", "16550A", "16750"], "zones.vnc": ["on", "off"], "zones.diskif": ["ide", "sata", "scsi", "sas", "nvme", "virtio", "usb", "floppy"], "nics.promisc": ["deny", "allow-vms", "allow-all"], "disks.controller_type": ["ide", "sata", "scsi", "sas", "nvme", "virtio", "usb", "floppy"], "boot_order": ["floppy", "dvd", "disk", "net", "none"], "settings.sync_method": ["rsync", "scp"] } }, "knob_defaults": { "type": "object", "description": "The value an UNSET knob effectively runs with — FLAT DOTTED, the companion to knob_current (current = SET, this = runs-with). Sourced from the create path, never a guessed VirtualBox internal; VirtualBox's OS-type recommendations are deliberately absent (see the endpoint description).", "example": { "vcpus": 2, "ram": 2048, "xhci": "on", "hardware.usb.xhci": "on", "hardware.integration.mouse": "usbtablet", "hardware.integration.keyboard": "usb", "hardware.integration.clipboard_mode": "bidirectional", "hardware.integration.clipboard_file_transfers": "enabled", "hardware.vrde.multi_con": "on", "hardware.vrde.reuse_con": "on", "diskif": "sata", "boot_priority": 95, "settings.sync_method": "rsync" } }, "notes": { "type": "object" } } } } }
           }
         }
       }
@@ -1647,21 +1631,22 @@
       "post": {
         "tags": ["Machine Management"],
         "summary": "Start the provisioning pipeline",
-        "description": "Minimum role: operator. Orchestrates the full pipeline against the STORED provisioner document (the zoneweaver mechanism): machine_prepare (re-render + refresh the working copy — regenerated before every provision) → boot (the plain start operation as a child, skipped when running or skip_boot) → machine_wait_ssh (credentials = settings.vagrant_user/vagrant_user_pass/vagrant_user_private_key_path, agent provisioning key as last-resort fallback; transport = the provisioning NIC's NAT ssh port-forward at 127.0.0.1 when the machine carries one — vagrant's model, immune to guest network reconfiguration — else the control IP from networks[] is_control → provisional → first; neither existing is a 400) → machine_sync_parent + one machine_sync per folders[] entry (transport per folder.type: rsync | scp, each with a pure-Go fallback when the binary is absent — embedded rsync client / SFTP, loudly narrated in the task output; vagrant is optional; disabled entries skipped; type virtualbox registers a REAL VirtualBox shared folder instead of copying — hot-added with automount, guest-mounted via vboxsf when Guest Additions run, a failed guest mount narrates and never fails the pipeline) → machine_provision_parent + one machine_provision per playbook, RUN-FILTERED first (always = every run; not_first = only after a prior success; once/unset = only when never provisioned — judged by configuration.provisioner_state.last_provisioned_at, stamped only when the run's FINAL playbook succeeds: a partial run never marks the machine provisioned, Hosts.rb's results.yml semantics) → when any folder carries syncback: true, a SYNCBACK phase (machine_syncback_parent + one machine_syncback per flagged folder, gated on the last playbook child) pulls those folders guest→host — the post-provision results landing (folder.to → folder.map reversed; delete never honored on a pull, no chown). The extra_vars networks[] carry each adapter's LIVE MAC when the document leaves mac auto/empty (adapter = network index + 2; resolved into the run's variable document only — the stored document is never modified). Prerequisites: provisioner config stored (create auto-fills it; PUT overrides) and a control IP in networks[].",
+        "description": "Minimum role: operator. Orchestrates the full provisioning run against the STORED provisioner document (the zoneweaver mechanism). THERE ARE NO PHASES: the run executes the stored document's provisioning: section AS WRITTEN — method keys in the order they appear in the stored document, entries within each method in list order — bracketed by the folder sync (outermost) and the pre[]/post[] hooks; the method children chain DIRECTLY under the orchestration parent. The chain: machine_prepare (re-render + refresh the working copy — regenerated before every provision) → boot (the plain start operation as a child, skipped when running or skip_boot) → machine_wait_ssh (credentials = settings.vagrant_user/vagrant_user_pass/vagrant_user_private_key_path, agent provisioning key as last-resort fallback; transport = the provisioning NIC's NAT ssh port-forward at 127.0.0.1 when the machine carries one — vagrant's model, immune to guest network reconfiguration — else the control IP from networks[] is_control → provisional → first; neither existing is a 400) → machine_sync_parent + one machine_sync per folders[] entry (transport per folder.type: rsync | scp, each with a pure-Go fallback when the binary is absent — embedded rsync client / SFTP, loudly narrated in the task output; vagrant is optional; disabled entries skipped; type virtualbox registers a REAL VirtualBox shared folder instead of copying — hot-added with automount, guest-mounted via vboxsf when Guest Additions run, a failed guest mount narrates and never fails the pipeline) → one machine_hook per provisioning.pre[] SEQUENCE HOOK entry, before the first method ({script, target: host|guest default guest, on_failure: abort|continue default abort, run: always|once default always} — design §5's ruled shape: guest hooks upload+sudo-run like shell scripts, host hooks run the working-copy script ON THE AGENT HOST gated by provisioning.host_hooks (default ON here), on_failure continue narrates and proceeds, run once skips after the first successful provision) → THE METHOD WALK — provisioning:'s keys in stored-document order, entries in list order: shell → one machine_shell per scripts[] string (the package-relative path resolves against the working copy, uploads over the built-in SFTP to a /tmp path, chmod +x, runs with sudo — shebang honored — then removes itself; a nonzero exit fails the task; bare string entries carry no run directive and execute every time the walk reaches them); ansible → groups in list order, each group's local[] then its remote[] per its own lists — ONE chain, each entry local (machine_provision) or remote (machine_provision_remote — design §5: ansible-playbook ON THE AGENT HOST dialing the guest over the pipeline transport, inventory pinned to the resolved ip/port, credentials from the stored settings with the agent provisioning key as fallback, ANSIBLE_CONFIG/ANSIBLE_COLLECTIONS_PATH resolved against the working copy, remote_collections galaxy-installs host-side; NO host ansible-playbook fails honestly — Windows hosts stay in the design matrix's WSL-LATER row) per its OWN list, never all-locals-then-all-remotes; run directives filter PER ENTRY (always = every run; not_first = only after a prior success; once/unset = only when never provisioned — judged by configuration.provisioner_state.last_provisioned_at); docker → one machine_docker_compose per docker_compose[] (or docker-compose[]) file (guest path, `up -d`, compose v2 plugin first then docker-compose) — NO engine installation: an absent guest engine fails the task honestly, and compose entries carry no run pin; UNKNOWN method keys SURVIVE in the stored document and are narrate-skipped by the walk — named loudly in the response and the parent's metadata, never a failure → one machine_hook per provisioning.post[] entry, after the last method → when any folder carries syncback: true, machine_syncback_parent + one machine_syncback per flagged folder pulls those folders guest→host — the post-provision results landing (folder.to → folder.map reversed; delete never honored on a pull, no chown). THE STAMP: provisioner_state.last_provisioned_at records ONLY when the ENTIRE walk succeeds, whatever type its last entry is — it rides the chain's final task, and the linear chain makes that equivalent to whole-run success; a partial run never marks the machine provisioned. The extra_vars networks[] carry each adapter's LIVE MAC when the document leaves mac auto/empty (adapter = network index + 2; resolved into the run's variable document only — the stored document is never modified). Prerequisites: provisioner config stored (create auto-fills it; PUT overrides) and a control IP in networks[].",
         "parameters": [
           { "name": "machineName", "in": "path", "required": true, "schema": { "type": "string" } }
         ],
         "requestBody": {
           "required": false,
-          "content": { "application/json": { "schema": { "type": "object", "properties": { "skip_boot": { "type": "boolean", "default": false } } } } }
+          "content": { "application/json": { "schema": { "type": "object", "properties": { "skip_boot": { "type": "boolean", "default": false }, "confirm_host_hooks": { "type": "boolean", "default": false, "description": "Answers the one-time host-hooks confirmation (design §5): a document carrying host-target sequence hooks from a NON-SEEDED package answers 409 needs_confirmation first; re-POST with true records the confirmation on the machine (once, configuration.host_hooks_confirmed) and proceeds. Installer-seeded packages never prompt." } } } } }
         },
         "responses": {
           "200": {
             "description": "Provisioning pipeline started",
             "content": { "application/json": { "schema": { "type": "object", "properties": { "success": { "type": "boolean" }, "message": { "type": "string" }, "machine_name": { "type": "string" }, "parent_task_id": { "type": "string", "format": "uuid" }, "steps": { "type": "integer" }, "task_chain": { "type": "array", "items": { "type": "object", "properties": { "step": { "type": "string", "example": "wait_ssh" }, "task_id": { "type": "string" } } } } } } } }
           },
-          "400": { "description": "No provisioner config stored, missing settings.vagrant_user, or no control IP in networks[]" },
-          "404": { "description": "Machine not found" }
+          "400": { "description": "No provisioner config stored, missing settings.vagrant_user, no control IP in networks[], or host-target hooks while provisioning.host_hooks is false" },
+          "404": { "description": "Machine not found" },
+          "409": { "description": "Host-target hooks need the one-time confirmation — STRICTLY pre-flight, never a mid-sequence failure", "content": { "application/json": { "schema": { "type": "object", "properties": { "needs_confirmation": { "type": "boolean", "example": true }, "reason": { "type": "string" }, "confirm_with": { "type": "string", "example": "re-POST with {\"confirm_host_hooks\": true} (recorded once per machine)" } } } } } }
         }
       }
     },
@@ -1686,7 +1671,7 @@
       "post": {
         "tags": ["Machine Management"],
         "summary": "Run provisioners ad-hoc",
-        "description": "Minimum role: operator. Runs the stored document's playbooks (run-filtered) without the rest of the pipeline — the machine must be running with SSH reachable. All playbooks skipped by their run directives answers a 200 no-op carrying the skipped list; no playbooks configured at all is a 400.",
+        "description": "Minimum role: operator. The SAME document walk as POST /provision minus the infra and folder brackets, under a machine_provision_parent anchor: one machine_hook per provisioning.pre[] entry, then the stored document's provisioning: method keys in the order they appear (shell scripts, ansible local/remote entries — run-filtered per entry, and docker compose entries all execute here too), then one machine_hook per post[] entry. The machine must be running with SSH reachable. The whole-walk stamp rides the final task — last_provisioned_at records only when the ENTIRE walk succeeds. All entries skipped by their run directives answers a 200 no-op carrying the skipped list; an empty provisioning: section is a 400.",
         "parameters": [
           { "name": "machineName", "in": "path", "required": true, "schema": { "type": "string" } }
         ],
@@ -1704,7 +1689,7 @@
       "post": {
         "tags": ["Machine Management"],
         "summary": "Sync folders to a machine ad-hoc",
-        "description": "Minimum role: operator. Creates the parentless sync chain: one machine_sync per folders[] entry from the stored document (transport per folder.type), independent of the full pipeline — the machine must be running with SSH reachable. Body {\"syncback\": true} REVERSES it (folders[].syncback — the on-demand half of the syncback contract): ONLY the syncback-flagged folders pull guest→host (guest folder.to → host folder.map, one machine_syncback per folder; folder.delete is never honored on a pull, no chown, args/exclude apply on the rsync path; the remote sender runs sudo rsync so root-owned results are readable). The provision pipeline runs the same syncback phase automatically AFTER its provision phase when any folder carries the flag.",
+        "description": "Minimum role: operator. Creates the parentless sync chain: one machine_sync per folders[] entry from the stored document (transport per folder.type), independent of the full pipeline — the machine must be running with SSH reachable. Body {\"syncback\": true} REVERSES it (folders[].syncback — the on-demand half of the syncback contract): ONLY the syncback-flagged folders pull guest→host (guest folder.to → host folder.map, one machine_syncback per folder; folder.delete is never honored on a pull, no chown, args/exclude apply on the rsync path; the remote sender runs sudo rsync so root-owned results are readable). The provision walk ends with this same syncback (after the post[] hooks) when any folder carries the flag.",
         "parameters": [
           { "name": "machineName", "in": "path", "required": true, "schema": { "type": "string" } }
         ],
@@ -2469,60 +2454,6 @@
         }
       }
     },
-    "/provisioning/profiles": {
-      "get": {
-        "tags": ["Provisioning"],
-        "summary": "List provisioning profiles",
-        "description": "Minimum role: viewer. Reusable bundles of credentials, sync folders, provisioners, and variables — composed in the UI without bundling a Hosts.yml or provisioner package, applied by feeding the pieces into a machine's provisioner document (PUT /machines/{name}).",
-        "responses": {
-          "200": { "description": "Profiles", "content": { "application/json": { "schema": { "type": "object", "properties": { "success": { "type": "boolean" }, "count": { "type": "integer" }, "profiles": { "type": "array", "items": { "$ref": "#/components/schemas/ProvisioningProfile" } } } } } } }
-        }
-      },
-      "post": {
-        "tags": ["Provisioning"],
-        "summary": "Create a provisioning profile",
-        "description": "Minimum role: operator. name is required and unique.",
-        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ProvisioningProfile" } } } },
-        "responses": {
-          "201": { "description": "Profile created", "content": { "application/json": { "schema": { "type": "object", "properties": { "success": { "type": "boolean" }, "profile": { "$ref": "#/components/schemas/ProvisioningProfile" } } } } } },
-          "400": { "description": "Missing name" },
-          "409": { "description": "Profile name already exists" }
-        }
-      }
-    },
-    "/provisioning/profiles/{profileId}": {
-      "get": {
-        "tags": ["Provisioning"],
-        "summary": "Profile details",
-        "description": "Minimum role: viewer.",
-        "parameters": [ { "name": "profileId", "in": "path", "required": true, "schema": { "type": "integer" } } ],
-        "responses": {
-          "200": { "description": "The profile" },
-          "404": { "description": "Profile not found" }
-        }
-      },
-      "put": {
-        "tags": ["Provisioning"],
-        "summary": "Update a provisioning profile",
-        "description": "Minimum role: operator. Only submitted fields change.",
-        "parameters": [ { "name": "profileId", "in": "path", "required": true, "schema": { "type": "integer" } } ],
-        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ProvisioningProfile" } } } },
-        "responses": {
-          "200": { "description": "Profile updated" },
-          "404": { "description": "Profile not found" }
-        }
-      },
-      "delete": {
-        "tags": ["Provisioning"],
-        "summary": "Delete a provisioning profile",
-        "description": "Minimum role: operator.",
-        "parameters": [ { "name": "profileId", "in": "path", "required": true, "schema": { "type": "integer" } } ],
-        "responses": {
-          "200": { "description": "Profile deleted" },
-          "404": { "description": "Profile not found" }
-        }
-      }
-    },
     "/provisioning/provisioners": {
       "get": {
         "tags": ["Provisioning"],
@@ -2549,10 +2480,10 @@
     "/provisioning/provisioners/refresh-specs": {
       "post": {
         "tags": ["Provisioning"],
-        "summary": "Re-derive every version's role-specs cache",
-        "description": "Minimum role: operator. Walks each registry version's shipped roles and rebuilds role-specs.yml from their meta/argument_specs.yml — the manual refresh for hand-dropped packages and updated specs (imports rebuild it automatically). Synchronous.",
+        "summary": "Re-derive every version's caches (role-specs + schema.json)",
+        "description": "Minimum role: operator. Walks each registry version and rebuilds BOTH derived artifacts: role-specs.yml from the shipped roles' meta/argument_specs.yml, and the Field DSL's schema.json (JSON Schema 2020-12) from metadata.configuration — the manual refresh for hand-dropped packages and updated specs (imports rebuild them automatically). Synchronous.",
         "responses": {
-          "200": { "description": "Per-version refresh summary", "content": { "application/json": { "schema": { "type": "object", "properties": { "success": { "type": "boolean" }, "refreshed": { "type": "array", "items": { "type": "object", "properties": { "name": { "type": "string" }, "version": { "type": "string" }, "roles": { "type": "integer" } } } }, "total": { "type": "integer" } } } } } },
+          "200": { "description": "Per-version refresh summary", "content": { "application/json": { "schema": { "type": "object", "properties": { "success": { "type": "boolean" }, "refreshed": { "type": "array", "items": { "type": "object", "properties": { "name": { "type": "string" }, "version": { "type": "string" }, "roles": { "type": "integer" }, "fields": { "type": "integer", "description": "Fields in the derived schema.json (0 = no form)" } } } }, "total": { "type": "integer" } } } } } },
           "500": { "description": "Registry scan failed" }
         }
       }
@@ -2561,7 +2492,7 @@
       "post": {
         "tags": ["Provisioning"],
         "summary": "Import a provisioner package",
-        "description": "Minimum role: operator. Queues a provisioner_import task (machine_name \"system\", category-locked: one import at a time). Sources: folder (a directory on the agent host holding provisioner-collection.yml, or provisioner.yml for a bare version), archive (.tar.gz/.tgz/.zip on the agent host), or git (http(s) URL, cloned --depth 1 --recursive so nested submodules arrive; optional branch). The package root is searched up to 3 directory levels deep. Existing versions are never touched — re-importing is idempotent; update = import a newer version beside the old.",
+        "description": "Minimum role: operator. Queues a provisioner_import task (machine_name \"system\", category-locked: one import at a time). Sources: folder (a directory on the agent host holding provisioner-collection.yml, or provisioner.yml for a bare version), archive (.tar.gz/.tgz/.zip on the agent host), or git (http(s) URL, cloned --depth 1 --recursive so nested submodules arrive; optional branch). The package root is searched up to 3 directory levels deep. Every version's Field DSL is LINTED fail-closed before anything copies (design §3.1): an unknown field type, legacy basicFields/advancedFields, a bad show_if operand, a pattern without pattern_error — any problem fails the import with the full annotated list in the task output. Existing versions are never touched — re-importing is idempotent; update = import a newer version beside the old.",
         "requestBody": {
           "required": true,
           "content": {
@@ -2690,6 +2621,78 @@
               }
             }
           }
+        }
+      }
+    },
+    "/provisioning/provisioners/{name}/versions/{version}/export": {
+      "post": {
+        "tags": ["Provisioning"],
+        "summary": "Export a version as a shareable archive",
+        "description": "Minimum role: operator. Queues provisioner_export (design §7's host-to-host share): the version becomes ONE tar.gz — REGISTRY-SHAPED (<name>/<version>/… inside the tar, so the receiving agent's ordinary import consumes it) — under <registry>/exports, with the sha256 OF THE ARCHIVE (whole-file only) in the task output and a `<file>.sha256` sidecar beside it. Symlinks and specials never enter the archive.",
+        "parameters": [
+          { "name": "name", "in": "path", "required": true, "schema": { "type": "string" } },
+          { "name": "version", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "202": { "description": "Export task queued" },
+          "404": { "description": "Provisioner or version not found" }
+        }
+      }
+    },
+    "/provisioning/provisioners/import-upload": {
+      "post": {
+        "tags": ["Provisioning"],
+        "summary": "Upload a package archive and import it",
+        "description": "Minimum role: operator. The share contract's receiving half: multipart/form-data with a \"file\" part (.tar.gz/.tgz/.zip, ≤4 GiB) streams to a temp file and queues the ordinary provisioner_import task against it (same DSL lint gate, same non-clobber rules; the temp archive removes itself after the attempt). Verify the sender's published sha256 yourself before uploading — the wire carries the file, not the expectation.",
+        "requestBody": {
+          "required": true,
+          "content": { "multipart/form-data": { "schema": { "type": "object", "required": ["file"], "properties": { "file": { "type": "string", "format": "binary" } } } } }
+        },
+        "responses": {
+          "202": { "description": "Import task queued ({success, task_id, filename, size, status, message})" },
+          "400": { "description": "Not multipart, no file part, or not a supported archive name" },
+          "413": { "description": "Upload exceeds the 4 GiB cap" }
+        }
+      }
+    },
+    "/provisioning/catalog/sources": {
+      "get": {
+        "tags": ["Provisioning"],
+        "summary": "List configured provisioner catalogs",
+        "description": "Minimum role: viewer. The enabled catalog_sources definitions (name, url, default) — the HACS model's registries; fork the catalog repo and add your own as another source. CA bundles are never returned.",
+        "responses": {
+          "200": { "description": "Enabled catalogs", "content": { "application/json": { "schema": { "type": "object", "properties": { "sources": { "type": "array", "items": { "type": "object", "properties": { "name": { "type": "string" }, "url": { "type": "string" }, "default": { "type": "boolean" } } } } } } } } }
+        }
+      }
+    },
+    "/provisioning/catalog": {
+      "get": {
+        "tags": ["Provisioning"],
+        "summary": "Browse a provisioner catalog",
+        "description": "Minimum role: viewer. Fetches the source's catalog.json LIVE (?source= names a configured catalog; empty = the default), validates format_version 1, and relays the parsed document: {name, format_version, updated, provisioners: [{name, repo, description, versions: [{version, artifacts: [{url, checksum_type, checksum}]}]}]} — versions semver-DESC, artifact URLs OPAQUE (release tags carry slashes; never parse or construct them). Versions may disappear between fetches when an author deletes a release.",
+        "parameters": [
+          { "name": "source", "in": "query", "schema": { "type": "string" }, "description": "A configured catalog source; empty = the default" }
+        ],
+        "responses": {
+          "200": { "description": "The catalog document", "content": { "application/json": { "schema": { "type": "object", "properties": { "source": { "type": "string" }, "catalog": { "type": "object" } } } } } },
+          "404": { "description": "No such (or no default) enabled catalog source" },
+          "502": { "description": "Catalog unreachable, unparseable, or wrong format_version" }
+        }
+      }
+    },
+    "/provisioning/catalog/install": {
+      "post": {
+        "tags": ["Provisioning"],
+        "summary": "Install a provisioner from a catalog",
+        "description": "Minimum role: operator. Queues provisioner_catalog_install: the executor fetches the catalog FRESH (a stale pin would 404 anyway; published checksums never change), downloads the named version's immutable VERSIONED asset, verifies its sha256 DURING the stream (mismatch = loud failure, nothing imported), then runs the ordinary import path — DSL lint gate, non-clobber, role-specs + schema.json derivation all included. Serialized with imports (one registry write at a time).",
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "type": "object", "required": ["name", "version"], "properties": { "source_name": { "type": "string", "description": "A configured catalog source; empty = the default" }, "name": { "type": "string", "example": "startcloud_generic_provisioner" }, "version": { "type": "string", "example": "0.1.27" } } } } }
+        },
+        "responses": {
+          "202": { "description": "Catalog install task queued" },
+          "400": { "description": "Missing/unusable name or version" },
+          "404": { "description": "No such (or no default) enabled catalog source" }
         }
       }
     },

@@ -603,6 +603,11 @@ var settingsSchema = map[string]any{
 				"default":     300,
 				"min":         60,
 			},
+			"host_hooks": map[string]any{
+				"type":        "boolean",
+				"description": "Allow sequence hooks (provisioning.pre[]/post[] in a machine's document) with target: host to run scripts ON THIS HOST; guest-target hooks are always allowed. Machines rendered from packages the installer did NOT ship additionally confirm once per machine before host hooks run",
+				"default":     true,
+			},
 			"ssh": map[string]any{
 				"type":        "object",
 				"description": "Provisioning SSH access to guests",
@@ -683,6 +688,18 @@ var settingsSchema = map[string]any{
 				"items":       "object",
 				"description": "Configured Vagrant/BoxVault-compatible registries: {name, url, enabled, default, auth_token, ca_file}. The entry flagged default serves requests that name no source; names are display-only. auth_token is the registry API key (a BoxVault service-account token), sent as Bearer on every call — the ONLY credential. ca_file adds a PEM CA bundle to the trust store for self-signed registries (verification always stays on)",
 				"default":     []map[string]any{{"name": "STARTcloud BoxVault", "url": "https://boxvault.startcloud.com", "enabled": true, "default": true, "auth_token": "", "ca_file": ""}},
+			},
+		},
+	},
+	"catalog_sources": map[string]any{
+		"description":      "Provisioner catalogs (the HACS model): agents fetch catalog.json, list families/versions, download the immutable versioned asset, verify its sha256, and import into the local registry. Fork the catalog repo as a template to run your own and add it as another source",
+		"requires_restart": true,
+		"properties": map[string]any{
+			"sources": map[string]any{
+				"type":        "array",
+				"items":       "object",
+				"description": "Configured catalogs: {name, url, enabled, default, ca_file}. The entry flagged default serves requests that name no source. ca_file adds a PEM CA bundle to the trust store for self-hosted forks (verification always stays on)",
+				"default":     []map[string]any{{"name": "STARTcloud Provisioner Catalog", "url": "https://provisioner-catalog.startcloud.com/catalog.json", "enabled": true, "default": true, "ca_file": ""}},
 			},
 		},
 	},

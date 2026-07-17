@@ -12,9 +12,9 @@ import (
 )
 
 // The syncback executor — folders[].syncback (Mark's ruling 2026-07-12,
-// replacing his Hosts.rb results hack): flagged folders pull guest→host at
-// the pipeline's chosen points — a syncback phase AFTER the provision phase,
-// and ad-hoc via POST /machines/{name}/sync {"syncback": true}. One folder
+// replacing his Hosts.rb results hack): flagged folders pull guest→host as
+// the document walk's CLOSING BRACKET by document structure (after the post
+// hooks), and ad-hoc via POST /machines/{name}/sync {"syncback": true}. One folder
 // per task, the exact reverse of machine_sync: guest folder.to → host
 // folder.map, transport per the folder's own ladder. Two deliberate
 // asymmetries against the push: folder.delete is NEVER honored (a pull must
@@ -77,6 +77,7 @@ func (e *executors) syncbackFolder(ctx context.Context, task *tasks.Task, out *t
 	if terr := e.runFolderPullTransport(ctx, meta, folder, dest, workdir, out); terr != nil {
 		return terr
 	}
+	e.stampIfFinal(task, meta, out)
 	e.taskProgress(task, 100, "completed")
 	return nil
 }

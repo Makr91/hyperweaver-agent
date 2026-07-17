@@ -4,12 +4,16 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"log/slog"
 	"net/http"
+	"os"
+	"path/filepath"
 
 	"github.com/Makr91/hyperweaver-agent/internal/auth"
 	"github.com/Makr91/hyperweaver-agent/internal/machines"
 	"github.com/Makr91/hyperweaver-agent/internal/provisioner"
+	"github.com/Makr91/hyperweaver-agent/internal/safepath"
 	"github.com/Makr91/hyperweaver-agent/internal/tasks"
 	"github.com/Makr91/hyperweaver-agent/internal/vbox"
 )
@@ -245,6 +249,232 @@ func (s *Server) refuseReferencedProvisioner(ctx context.Context, w http.Respons
 		return false
 	}
 	return true
+}
+
+// importUploadMaxBytes caps one provisioner import-upload body — far above
+// any real package archive.
+const importUploadMaxBytes = int64(4) << 30
+
+// handleExportProvisionerVersion queues provisioner_export (design §7's
+// share half): the version → one registry-shaped tar.gz + the archive's
+// sha256 (task output + .sha256 sidecar) under <registry>/exports.
+func (s *Server) handleExportProvisionerVersion(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	version, err := s.provisioners.GetVersion(name, r.PathValue("version"))
+	if errors.Is(err, provisioner.ErrNotFound) {
+		taskError(w, http.StatusNotFound, "Provisioner not found")
+		return
+	}
+	if errors.Is(err, provisioner.ErrVersionNotFound) {
+		taskError(w, http.StatusNotFound, "Provisioner version not found")
+		return
+	}
+	if err != nil {
+		slog.Error("get provisioner version for export", "name", name, "error", err)
+		taskError(w, http.StatusInternalServerError, "Failed to queue export task")
+		return
+	}
+
+	raw, err := json.Marshal(&provisioner.ExportMetadata{Name: name, Version: version.Version})
+	if err != nil {
+		taskError(w, http.StatusInternalServerError, "Failed to queue export task")
+		return
+	}
+	metadata := string(raw)
+	task, err := s.tasks.Store().Create(r.Context(), &tasks.NewTask{
+		MachineName: "system",
+		Operation:   provisioner.OpExport,
+		Priority:    tasks.PriorityMedium,
+		CreatedBy:   auth.FromContext(r.Context()).Name,
+		Metadata:    &metadata,
+	})
+	if err != nil {
+		slog.Error("queue provisioner export", "name", name, "error", err)
+		taskError(w, http.StatusInternalServerError, "Failed to queue export task")
+		return
+	}
+	acceptedTask(w, task.ID, "Export task queued for "+name+"/"+version.Version)
+}
+
+// handleImportUploadProvisioner receives a package archive as multipart
+// form-data (part name "file") and queues the ordinary import task against
+// it — the share contract's receiving half. The temp archive cleans up after
+// the import attempt (cleanup_source).
+func (s *Server) handleImportUploadProvisioner(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, importUploadMaxBytes)
+	reader, err := r.MultipartReader()
+	if err != nil {
+		taskError(w, http.StatusBadRequest, "multipart/form-data with a file part is required")
+		return
+	}
+	for {
+		part, perr := reader.NextPart()
+		if errors.Is(perr, io.EOF) {
+			taskError(w, http.StatusBadRequest, `no "file" part in the upload`)
+			return
+		}
+		if perr != nil {
+			taskError(w, http.StatusBadRequest, "Malformed multipart body: "+perr.Error())
+			return
+		}
+		if part.FormName() != "file" {
+			continue
+		}
+		filename := filepath.Base(part.FileName())
+		if filename == "" || filename == "." || !provisioner.IsArchiveName(filename) {
+			taskError(w, http.StatusBadRequest, "the uploaded file must be a .tar.gz, .tgz, or .zip package archive")
+			return
+		}
+
+		temp, terr := os.MkdirTemp("", "hyperweaver-upload-*")
+		if terr != nil {
+			slog.Error("create upload temp dir", "error", terr)
+			taskError(w, http.StatusInternalServerError, "Failed to receive upload")
+			return
+		}
+		archivePath := filepath.Join(temp, filename)
+		size, werr := safepath.WriteFileFrom(archivePath, part, 0o600)
+		if werr != nil {
+			_ = os.RemoveAll(temp)
+			var tooLarge *http.MaxBytesError
+			if errors.As(werr, &tooLarge) {
+				taskError(w, http.StatusRequestEntityTooLarge, "Upload exceeds the import size cap")
+				return
+			}
+			slog.Error("receive provisioner upload", "error", werr)
+			taskError(w, http.StatusInternalServerError, "Failed to receive upload")
+			return
+		}
+
+		raw, merr := json.Marshal(&provisioner.ImportMetadata{
+			SourceType:    provisioner.SourceArchive,
+			Path:          archivePath,
+			CleanupSource: true,
+		})
+		if merr != nil {
+			_ = os.RemoveAll(temp)
+			taskError(w, http.StatusInternalServerError, "Failed to queue import task")
+			return
+		}
+		metadata := string(raw)
+		task, cerr := s.tasks.Store().Create(r.Context(), &tasks.NewTask{
+			MachineName: "system",
+			Operation:   provisioner.OpImport,
+			Priority:    tasks.PriorityMedium,
+			CreatedBy:   auth.FromContext(r.Context()).Name,
+			Metadata:    &metadata,
+		})
+		if cerr != nil {
+			_ = os.RemoveAll(temp)
+			slog.Error("queue uploaded provisioner import", "error", cerr)
+			taskError(w, http.StatusInternalServerError, "Failed to queue import task")
+			return
+		}
+		slog.Info("provisioner upload received", "filename", filename, "bytes", size,
+			"task_id", task.ID, "by", auth.FromContext(r.Context()).Name)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusAccepted)
+		if werr := json.NewEncoder(w).Encode(map[string]any{
+			"success":  true,
+			"task_id":  task.ID,
+			"filename": filename,
+			"size":     size,
+			"status":   tasks.StatusPending,
+			"message":  "Provisioner import task queued from upload",
+		}); werr != nil {
+			slog.Error("write import-upload response", "error", werr)
+		}
+		return
+	}
+}
+
+// catalogSourceList converts the configured catalogs into the provisioner
+// package's source shape.
+func (s *Server) catalogSourceList() []provisioner.CatalogSource {
+	sources := make([]provisioner.CatalogSource, 0, len(s.cfg.CatalogSources.Sources))
+	for _, source := range s.cfg.CatalogSources.Sources {
+		sources = append(sources, provisioner.CatalogSource{
+			Name:    source.Name,
+			URL:     source.URL,
+			Enabled: source.Enabled,
+			Default: source.Default,
+			CAFile:  source.CAFile,
+		})
+	}
+	return sources
+}
+
+// handleListCatalogSources lists the enabled catalog definitions (the
+// templates/sources shape — never the CA file path).
+func (s *Server) handleListCatalogSources(w http.ResponseWriter, _ *http.Request) {
+	sources := []map[string]any{}
+	for _, source := range s.catalogSourceList() {
+		if !source.Enabled {
+			continue
+		}
+		sources = append(sources, map[string]any{
+			"name":    source.Name,
+			"url":     source.URL,
+			"default": source.Default,
+		})
+	}
+	writeJSON(w, map[string]any{"sources": sources})
+}
+
+// handleGetCatalog fetches one catalog's document live (?source= names a
+// configured catalog; empty = the default) — parsed, format_version-gated,
+// relayed with the source name.
+func (s *Server) handleGetCatalog(w http.ResponseWriter, r *http.Request) {
+	source, err := provisioner.FindCatalogSource(s.catalogSourceList(), r.URL.Query().Get("source"))
+	if err != nil {
+		taskError(w, http.StatusNotFound, err.Error())
+		return
+	}
+	document, err := provisioner.FetchCatalog(r.Context(), source)
+	if err != nil {
+		slog.Error("fetch provisioner catalog", "source", source.Name, "error", err)
+		taskError(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	writeJSON(w, map[string]any{"source": source.Name, "catalog": document})
+}
+
+// handleCatalogInstall queues provisioner_catalog_install: download the
+// named family/version's VERSIONED asset, verify its sha256, import.
+func (s *Server) handleCatalogInstall(w http.ResponseWriter, r *http.Request) {
+	var body provisioner.CatalogInstallMetadata
+	if err := decodeBody(r, &body); err != nil {
+		taskError(w, http.StatusBadRequest, "Invalid JSON body")
+		return
+	}
+	if !provisioner.ValidName(body.Name) || !provisioner.ValidName(body.Version) {
+		taskError(w, http.StatusBadRequest, "name and version are required (registry-legal names)")
+		return
+	}
+	if _, err := provisioner.FindCatalogSource(s.catalogSourceList(), body.SourceName); err != nil {
+		taskError(w, http.StatusNotFound, err.Error())
+		return
+	}
+
+	raw, err := json.Marshal(&body)
+	if err != nil {
+		taskError(w, http.StatusInternalServerError, "Failed to queue catalog install")
+		return
+	}
+	metadata := string(raw)
+	task, err := s.tasks.Store().Create(r.Context(), &tasks.NewTask{
+		MachineName: "system",
+		Operation:   provisioner.OpCatalogInstall,
+		Priority:    tasks.PriorityMedium,
+		CreatedBy:   auth.FromContext(r.Context()).Name,
+		Metadata:    &metadata,
+	})
+	if err != nil {
+		slog.Error("queue catalog install", "name", body.Name, "error", err)
+		taskError(w, http.StatusInternalServerError, "Failed to queue catalog install")
+		return
+	}
+	acceptedTask(w, task.ID, "Catalog install queued for "+body.Name+"/"+body.Version)
 }
 
 // provisionerReferences lists machines whose creation spec references the

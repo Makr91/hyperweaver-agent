@@ -68,23 +68,24 @@ type GenerateInput struct {
 	Networks []any
 	// Roles are the machine's role selections.
 	Roles []RoleInput
-	// UserProperties/AdvancedProperties are the user's per-field entries
-	// from the package's configuration.basicFields/advancedFields forms,
-	// keyed by each field's EXACT unprefixed name (SHI rule).
-	UserProperties     map[string]any
-	AdvancedProperties map[string]any
+	// UserProperties are the user's form answers, keyed by each field's
+	// EXACT name (one flat map — the Field DSL's contract; the old
+	// basic/advanced split died in the one cut).
+	UserProperties map[string]any
 	// SecretsVars are the global SECRETS_* template variables
 	// (secrets.Store.TemplateVars — D-C: injected plain, by design).
 	SecretsVars map[string]string
 }
 
-// BuildContext assembles the template context in CustomProvisioner
-// precedence order, generalized (design §5): settings fields → per-role
-// installer/hash/version vars + role-enable flags → package field defaults →
-// user-entered dynamic properties → global secrets. Later writers win.
-// Structured views (settings, networks, roles) ride alongside the flattened
-// UPPERCASE vars so converted SHI templates and richer Jinja2 both work.
-func BuildContext(in *GenerateInput) map[string]any {
+// BuildContext assembles the template context in the ruled precedence order
+// (design §4): settings fields → per-role installer/hash/version vars +
+// role-enable flags → the Field DSL's contribution (defaults merged BEFORE
+// conditional evaluation, answers by exact name, hidden fields ABSENT) →
+// global secrets. Later writers win. Structured views (settings, networks,
+// roles) ride alongside the flattened UPPERCASE vars. resolvedAnswers is
+// ResolveAnswers' output — computed by RenderHostsFile so the DSL parses
+// once and an invalid one refuses the render instead of half-applying.
+func BuildContext(in *GenerateInput, resolvedAnswers map[string]any) map[string]any {
 	ctx := map[string]any{
 		"settings": in.Settings,
 		"networks": in.Networks,
@@ -109,30 +110,13 @@ func BuildContext(in *GenerateInput) map[string]any {
 		roleFileVars(ctx, upper, &role.Files)
 	}
 
-	// 3. Package field defaults (metadata.configuration.basicFields/
-	// advancedFields) fill only what nothing set yet.
-	if in.Version != nil {
-		for _, field := range configurationFields(in.Version.Metadata) {
-			name, _ := field["name"].(string)
-			if name == "" {
-				continue
-			}
-			if _, present := ctx[name]; !present {
-				ctx[name] = field["defaultValue"]
-			}
-		}
-	}
-
-	// 4. User-entered dynamic properties, exact unprefixed names (SHI rule:
-	// stored and applied by the field's own name).
-	for key, value := range in.UserProperties {
-		ctx[key] = value
-	}
-	for key, value := range in.AdvancedProperties {
+	// 3. The Field DSL's contribution: defaults + answers, visibility
+	// applied (a DSL-less package passed the answers through verbatim).
+	for key, value := range resolvedAnswers {
 		ctx[key] = value
 	}
 
-	// 5. Global secrets as SECRETS_* vars.
+	// 4. Global secrets as SECRETS_* vars.
 	for key, value := range in.SecretsVars {
 		ctx[key] = value
 	}
@@ -147,11 +131,15 @@ func RenderHostsFile(in *GenerateInput) ([]byte, error) {
 	if in.Version == nil {
 		return nil, errors.New("no provisioner version to render from")
 	}
+	resolvedAnswers, err := ResolveAnswers(in.Version, in.Roles, in.UserProperties)
+	if err != nil {
+		return nil, err
+	}
 	templatesDir := filepath.Join(in.Version.Root, "templates")
 	templatePath := filepath.Join(templatesDir, hostsTemplateName)
-	if _, err := os.Stat(templatePath); err != nil {
+	if _, serr := os.Stat(templatePath); serr != nil {
 		return nil, fmt.Errorf("package %s/%s has no templates/%s: %w",
-			in.Version.Name, in.Version.Version, hostsTemplateName, err)
+			in.Version.Name, in.Version.Version, hostsTemplateName, serr)
 	}
 
 	template, err := exec.NewTemplate(hostsTemplateName,
@@ -159,7 +147,7 @@ func RenderHostsFile(in *GenerateInput) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("parse %s: %w", hostsTemplateName, err)
 	}
-	rendered, err := template.ExecuteToBytes(exec.NewContext(BuildContext(in)))
+	rendered, err := template.ExecuteToBytes(exec.NewContext(BuildContext(in, resolvedAnswers)))
 	if err != nil {
 		return nil, fmt.Errorf("render %s: %w", hostsTemplateName, err)
 	}
@@ -238,25 +226,6 @@ func roleFileVars(ctx map[string]any, upper string, files *RoleFiles) {
 	assign("_HOTFIX", files.Hotfix)
 	assign("_HOTFIX_HASH", files.HotfixHash)
 	assign("_HOTFIX_VERSION", files.HotfixVersion)
-}
-
-// configurationFields flattens metadata.configuration.basicFields +
-// advancedFields into one field list.
-func configurationFields(metadata map[string]any) []map[string]any {
-	fields := []map[string]any{}
-	configuration, _ := metadata["configuration"].(map[string]any)
-	if configuration == nil {
-		return fields
-	}
-	for _, group := range []string{"basicFields", "advancedFields"} {
-		list, _ := configuration[group].([]any)
-		for _, entry := range list {
-			if field, ok := entry.(map[string]any); ok {
-				fields = append(fields, field)
-			}
-		}
-	}
-	return fields
 }
 
 // legacyMarkerPattern spots SHI's ::TOKEN:: haxe.Template markers — dead

@@ -22,9 +22,12 @@ const (
 // (SHI's per-server ExecutorManager model — a global lifecycle category
 // would forbid parallel machine builds).
 var operationCategories = map[string]string{
-	// One import at a time: imports copy large trees into the shared
-	// provisioner registry directory.
-	"provisioner_import": CategorySystem,
+	// One registry mutation at a time: imports and catalog installs copy
+	// large trees into the shared provisioner registry directory, and exports
+	// read a version tree that must not change mid-archive.
+	"provisioner_import":          CategorySystem,
+	"provisioner_export":          CategorySystem,
+	"provisioner_catalog_install": CategorySystem,
 	// One storage mutation at a time: scans, transfers, and deletions write
 	// the same registry rows and location trees.
 	"artifact_scan":          CategoryArtifact,

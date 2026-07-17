@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/goccy/go-yaml"
@@ -16,6 +17,11 @@ import (
 // (settings/zones/networks/disks/metadata — stored by create's finalize child)
 // plus `provisioner` (stored verbatim by PUT /machines/{name}) and
 // `provisioner_state` (stamped by successful provision runs).
+//
+// Every Store configuration write here is SURGICAL (rawdoc.go): the untouched
+// sections ride as verbatim bytes and only the section being written
+// re-encodes — a whole-map round-trip would alphabetize the stored
+// provisioner document's key order, and the document is the program.
 
 // Configuration keys the agent owns — discovery merges the live hypervisor
 // view AROUND these; they are never clobbered (zoneweaver's zone sync merges
@@ -23,7 +29,7 @@ import (
 var preservedConfigKeys = []string{
 	"settings", "zones", "networks", "disks", "metadata",
 	"provisioner", "provisioner_state", "pending_changes", "guest_info",
-	"snapshots",
+	"snapshots", "host_hooks_confirmed",
 }
 
 // Credentials is the SSH credential triple extracted from settings
@@ -55,19 +61,24 @@ type Folder struct {
 	Syncback    bool     `json:"syncback,omitempty"`
 }
 
-// Playbook is one provisioning.ansible.playbooks.local[] entry
-// (zone_provision metadata shape).
+// Playbook is one provisioning.ansible.playbooks entry (zone_provision
+// metadata shape). Remote is WHICH MECHANISM executes it — in-guest ansible
+// (local) or ansible-playbook on the agent host (remote) — set by the reader
+// from the list the document declared it in; it is never an ordering.
 type Playbook struct {
-	Playbook         string   `json:"playbook"`
-	Run              string   `json:"run,omitempty"`
-	InstallMode      string   `json:"install_mode,omitempty"`
-	ConfigFile       string   `json:"config_file,omitempty"`
-	ProvisioningPath string   `json:"provisioning_path,omitempty"`
-	Collections      []string `json:"collections,omitempty"`
-	// RemoteCollections gates the in-guest ansible-galaxy install —
-	// Hosts.rb's contract (Mark's ruling 2026-07-07): false (the packages'
-	// own setting) means the collections ship INSIDE the provisioner and
-	// ride the folder sync; only true fetches them from the galaxy.
+	Playbook          string   `json:"playbook"`
+	Remote            bool     `json:"remote,omitempty"`
+	Run               string   `json:"run,omitempty"`
+	InstallMode       string   `json:"install_mode,omitempty"`
+	ConfigFile        string   `json:"config_file,omitempty"`
+	ProvisioningPath  string   `json:"provisioning_path,omitempty"`
+	Verbose           any      `json:"verbose,omitempty"`
+	CompatibilityMode string   `json:"compatibility_mode,omitempty"`
+	Collections       []string `json:"collections,omitempty"`
+	// RemoteCollections gates the ansible-galaxy install (in-guest for local
+	// playbooks, on the agent host for remote ones) — Hosts.rb's contract
+	// (Mark's ruling 2026-07-07): false (the packages' own setting) means the
+	// collections ship INSIDE the provisioner; only true fetches the galaxy.
 	RemoteCollections bool   `json:"remote_collections,omitempty"`
 	Callbacks         any    `json:"callbacks,omitempty"`
 	SSHPipelining     any    `json:"ssh_pipelining,omitempty"`
@@ -181,37 +192,160 @@ func ProvisionerFolders(provisioner map[string]any) []Folder {
 	return folders
 }
 
-// ProvisionerPlaybooks reads the local playbooks from the provisioner
-// document — BOTH real-world shapes: `provisioning.ansible.playbooks.local`
-// as an object (zoneweaver's stored configs) and `playbooks` as a LIST of
-// `{local: [...]}` entries (the package templates and Hosts.rb's own
-// iteration), falling back to a flat provisioners[] list.
+// ProvisionerPlaybooks reads EVERY playbook in the order the DOCUMENT
+// prescribes (Mark's ruling 2026-07-17): the `playbooks:` groups in LIST
+// ORDER, each group's local entries then its remote entries — local/remote
+// is each entry's execution MECHANISM, never a phase, and the list an entry
+// sits in is what sets Remote (a stray `remote:` key on the entry itself
+// never does). Both real-world shapes: the object form
+// (`playbooks: {local: [...], remote: [...]}`) is one group; the flat
+// provisioners[] fallback is all-local.
 func ProvisionerPlaybooks(provisioner map[string]any) []Playbook {
-	raw := []any{}
+	playbooks := []Playbook{}
+	appendGroup := func(group map[string]any) {
+		for _, entry := range listOr(group["local"]) {
+			playbook := decodeInto[Playbook](entry)
+			playbook.Remote = false
+			playbooks = append(playbooks, playbook)
+		}
+		for _, entry := range listOr(group["remote"]) {
+			playbook := decodeInto[Playbook](entry)
+			playbook.Remote = true
+			playbooks = append(playbooks, playbook)
+		}
+	}
 	if provisioning, ok := provisioner["provisioning"].(map[string]any); ok {
 		if ansible, aok := provisioning["ansible"].(map[string]any); aok {
-			switch playbooks := ansible["playbooks"].(type) {
+			switch groups := ansible["playbooks"].(type) {
 			case map[string]any:
-				raw, _ = playbooks["local"].([]any)
+				appendGroup(groups)
 			case []any:
-				for _, group := range playbooks {
+				for _, group := range groups {
 					if entry, gok := group.(map[string]any); gok {
-						if local, lok := entry["local"].([]any); lok {
-							raw = append(raw, local...)
-						}
+						appendGroup(entry)
 					}
 				}
 			}
 		}
 	}
-	if len(raw) == 0 {
-		raw, _ = provisioner["provisioners"].([]any)
-	}
-	playbooks := make([]Playbook, 0, len(raw))
-	for _, entry := range raw {
-		playbooks = append(playbooks, decodeInto[Playbook](entry))
+	if len(playbooks) == 0 {
+		for _, entry := range listOr(provisioner["provisioners"]) {
+			playbook := decodeInto[Playbook](entry)
+			playbook.Remote = false
+			playbooks = append(playbooks, playbook)
+		}
 	}
 	return playbooks
+}
+
+// Hook is one provisioning.pre[]/post[] sequence-hook entry (design §5's
+// ruled shape, 2026-07-16): a script wrapping the WHOLE provision run.
+// Defaults: target guest, on_failure abort, run always.
+type Hook struct {
+	Script    string `json:"script"`
+	Target    string `json:"target,omitempty"`     // host | guest
+	OnFailure string `json:"on_failure,omitempty"` // abort | continue
+	Run       string `json:"run,omitempty"`        // always | once
+}
+
+// HostTarget reports a host-side hook.
+func (h *Hook) HostTarget() bool {
+	return strings.EqualFold(h.Target, "host")
+}
+
+// ProvisionerHooks reads one hook phase ("pre" | "post") from the document,
+// defaults applied. Script-less entries drop.
+func ProvisionerHooks(provisioner map[string]any, phase string) []Hook {
+	provisioning, _ := provisioner["provisioning"].(map[string]any)
+	raw, _ := provisioning[phase].([]any)
+	hooks := make([]Hook, 0, len(raw))
+	for _, entry := range raw {
+		hook := decodeInto[Hook](entry)
+		if hook.Script == "" {
+			continue
+		}
+		if hook.Target == "" {
+			hook.Target = "guest"
+		}
+		if hook.OnFailure == "" {
+			hook.OnFailure = "abort"
+		}
+		if hook.Run == "" {
+			hook.Run = "always"
+		}
+		hooks = append(hooks, hook)
+	}
+	return hooks
+}
+
+// FilterHooksByRun applies the hook run vocabulary: once fires only while the
+// machine has never provisioned; always (the default) fires every run.
+func FilterHooksByRun(hooks []Hook, provisionedBefore bool) []Hook {
+	out := make([]Hook, 0, len(hooks))
+	for i := range hooks {
+		if hooks[i].Run == "once" && provisionedBefore {
+			continue
+		}
+		out = append(out, hooks[i])
+	}
+	return out
+}
+
+// HasHostHooks reports whether the document carries ANY host-target hook —
+// the pre-flight confirmation's trigger.
+func HasHostHooks(provisioner map[string]any) bool {
+	for _, phase := range []string{"pre", "post"} {
+		for _, hook := range ProvisionerHooks(provisioner, phase) {
+			if hook.HostTarget() {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// ProvisionerDocker reads provisioning.docker — Hosts.rb:591-598's docker
+// provisioner block (design §5: docker/docker_compose EXECUTED now): enabled
+// gates the family; compose files come from docker_compose[], with Hosts.rb's
+// own hyphen/underscore key tolerance preserved (its gate checks
+// 'docker-compose', its loop reads 'docker_compose').
+func ProvisionerDocker(provisioner map[string]any) (enabled bool, composeFiles []string) {
+	provisioning, _ := provisioner["provisioning"].(map[string]any)
+	docker, _ := provisioning["docker"].(map[string]any)
+	if onOff(docker["enabled"]) != "on" {
+		return false, nil
+	}
+	raw, ok := docker["docker_compose"].([]any)
+	if !ok {
+		raw, _ = docker["docker-compose"].([]any)
+	}
+	for _, entry := range raw {
+		if file := stringOr(entry, ""); file != "" {
+			composeFiles = append(composeFiles, file)
+		}
+	}
+	return true, composeFiles
+}
+
+// ProvisionerShellScripts reads provisioning.shell.scripts[] — Hosts.yml's
+// shell-provisioner section (core/Hosts.rb:493-497 runs them as vagrant shell
+// provisioners; Mark's go 2026-07-13): the package-relative script paths, in
+// list order, gated on provisioning.shell.enabled (the on/true/1/yes
+// vocabulary). Disabled, absent, or empty answers nil.
+func ProvisionerShellScripts(provisioner map[string]any) []string {
+	provisioning, _ := provisioner["provisioning"].(map[string]any)
+	shell, _ := provisioning["shell"].(map[string]any)
+	if onOff(shell["enabled"]) != "on" {
+		return nil
+	}
+	raw, _ := shell["scripts"].([]any)
+	scripts := make([]string, 0, len(raw))
+	for _, entry := range raw {
+		if script := stringOr(entry, ""); script != "" {
+			scripts = append(scripts, script)
+		}
+	}
+	return scripts
 }
 
 // decodeInto round-trips a generic YAML/JSON value into a typed struct.
@@ -298,36 +432,48 @@ func loadSecretsFromFiles(basePath string) map[string]any {
 // BuildExtraVars assembles the complete Ansible extra_vars document —
 // buildExtraVarsFromZone verbatim: settings + networks + disks + secrets
 // (base-path files then API overrides) + role_vars + provision_roles +
-// pre/post tasks + the three version fields.
-func BuildExtraVars(config MachineConfig, provisioner map[string]any, basePath string) map[string]any {
+// pre/post tasks + the three version fields. The ruled-verbatim payloads
+// (vars/roles/pre_tasks/post_tasks) ride as the stored document's RAW BYTES
+// — json.Marshal emits RawMessage byte-verbatim, so their key order survives
+// into the ansible --extra-vars JSON (a map value would alphabetize).
+func BuildExtraVars(machine *Machine, config MachineConfig, basePath string) map[string]any {
+	provisionerMap := config.Provisioner()
+	provisionerRaw := RawObject(RawProvisioner(machine))
 	secrets := loadSecretsFromFiles(basePath)
-	if apiSecrets, ok := provisioner["secrets"].(map[string]any); ok {
+	if apiSecrets, ok := provisionerMap["secrets"].(map[string]any); ok {
 		for key, value := range apiSecrets {
 			secrets[key] = value
 		}
 	}
 
-	roleVars, _ := provisioner["vars"].(map[string]any)
-	if roleVars == nil {
-		roleVars = map[string]any{}
-	}
-	provisionRoles := provisioner["roles"]
-	if provisionRoles == nil {
-		provisionRoles = []any{}
+	// The ruled-verbatim payloads, absent sections defaulting to their empty
+	// JSON shape.
+	rawOr := func(key, empty string) json.RawMessage {
+		if raw, ok := provisionerRaw[key]; ok {
+			return raw
+		}
+		return json.RawMessage(empty)
 	}
 
+	// Everything below the raw four stays the map view DELIBERATELY:
+	// settings/disks are agent-composed infrastructure sections, not the
+	// ruled-verbatim payloads; networks NEEDS the map — fillLiveMACs resolves
+	// live MACs into the RUN's variable document only (the ruled live-MAC
+	// mechanism mutates this map; the stored document is never modified);
+	// secrets is the merge product (base-path files + the document's secrets
+	// section); the version fields keep their orDefault reads.
 	return map[string]any{
 		"settings":                 config.Section("settings"),
 		"networks":                 config.List("networks"),
 		"disks":                    config.Section("disks"),
 		"secrets":                  secrets,
-		"role_vars":                roleVars,
-		"provision_roles":          provisionRoles,
-		"provision_pre_tasks":      orEmptyList(provisioner["pre_tasks"]),
-		"provision_post_tasks":     orEmptyList(provisioner["post_tasks"]),
-		"core_provisioner_version": orDefault(provisioner["core_provisioner_version"], "0.0.1"),
-		"provisioner_name":         orDefault(provisioner["provisioner_name"], "hyperweaver"),
-		"provisioner_version":      orDefault(provisioner["provisioner_version"], "0.0.1"),
+		"role_vars":                rawOr("vars", "{}"),
+		"provision_roles":          rawOr("roles", "[]"),
+		"provision_pre_tasks":      rawOr("pre_tasks", "[]"),
+		"provision_post_tasks":     rawOr("post_tasks", "[]"),
+		"core_provisioner_version": orDefault(provisionerMap["core_provisioner_version"], "0.0.1"),
+		"provisioner_name":         orDefault(provisionerMap["provisioner_name"], "hyperweaver"),
+		"provisioner_version":      orDefault(provisionerMap["provisioner_version"], "0.0.1"),
 	}
 }
 
@@ -353,13 +499,6 @@ func BuildPlaybookExtraVars(base map[string]any, playbook *Playbook) map[string]
 	return vars
 }
 
-func orEmptyList(value any) any {
-	if value == nil {
-		return []any{}
-	}
-	return value
-}
-
 func orDefault(value any, fallback string) string {
 	if s, ok := value.(string); ok && s != "" {
 		return s
@@ -369,21 +508,26 @@ func orDefault(value any, fallback string) string {
 
 // StampProvisionerState records a successful provision on the machine row —
 // the base's fresh-read + merge rule: parse failure never clobbers the
-// configuration document.
+// configuration document. Only the provisioner_state section re-encodes;
+// every other section's bytes ride verbatim.
 func (s *Store) StampProvisionerState(ctx context.Context, name string) error {
 	machine, err := s.Get(ctx, name)
 	if err != nil {
 		return err
 	}
-	config := ParseConfiguration(machine)
-	state := config.Section("provisioner_state")
+	sections := ParseRawConfiguration(machine)
+	state := rawSectionMap(sections, "provisioner_state")
 	state["last_provisioned_at"] = time.Now().UTC().Format(time.RFC3339)
-	config["provisioner_state"] = state
-	raw, err := json.Marshal(config)
+	raw, err := json.Marshal(state)
 	if err != nil {
 		return err
 	}
-	return s.SetConfiguration(ctx, name, raw)
+	sections["provisioner_state"] = raw
+	merged, err := marshalRawConfig(sections)
+	if err != nil {
+		return err
+	}
+	return s.SetConfiguration(ctx, name, merged)
 }
 
 // SetGuestInfo records the discovery sweep's guest-agent observation on the
@@ -397,20 +541,24 @@ func (s *Store) SetGuestInfo(ctx context.Context, name string, info map[string]a
 	if err != nil {
 		return err
 	}
-	config := ParseConfiguration(machine)
+	sections := ParseRawConfiguration(machine)
 	if info == nil {
-		if _, ok := config["guest_info"]; !ok {
+		if _, ok := sections["guest_info"]; !ok {
 			return nil
 		}
-		delete(config, "guest_info")
+		delete(sections, "guest_info")
 	} else {
-		config["guest_info"] = info
+		raw, merr := json.Marshal(info)
+		if merr != nil {
+			return merr
+		}
+		sections["guest_info"] = raw
 	}
-	raw, err := json.Marshal(config)
+	merged, err := marshalRawConfig(sections)
 	if err != nil {
 		return err
 	}
-	return s.SetConfiguration(ctx, name, raw)
+	return s.SetConfiguration(ctx, name, merged)
 }
 
 // SetSnapshotPolicy stores (or clears, on nil) the machine's per-machine
@@ -423,40 +571,50 @@ func (s *Store) SetSnapshotPolicy(ctx context.Context, name string, policy map[s
 	if err != nil {
 		return err
 	}
-	config := ParseConfiguration(machine)
+	sections := ParseRawConfiguration(machine)
 	if policy == nil {
-		if _, ok := config["snapshots"]; !ok {
+		if _, ok := sections["snapshots"]; !ok {
 			return nil
 		}
-		delete(config, "snapshots")
+		delete(sections, "snapshots")
 	} else {
-		config["snapshots"] = policy
+		raw, merr := json.Marshal(policy)
+		if merr != nil {
+			return merr
+		}
+		sections["snapshots"] = raw
 	}
-	raw, err := json.Marshal(config)
+	merged, err := marshalRawConfig(sections)
 	if err != nil {
 		return err
 	}
-	return s.SetConfiguration(ctx, name, raw)
+	return s.SetConfiguration(ctx, name, merged)
 }
 
 // MergeConfigurationSections merges document sections into a machine's
 // configuration (create-finalize's storeInfrastructureConfig and PUT's
 // provisioner store share it): existing keys survive unless the update
-// carries them.
-func (s *Store) MergeConfigurationSections(ctx context.Context, name string, sections map[string]any) error {
+// carries them. Each incoming value marshals INDIVIDUALLY — a
+// json.RawMessage value passes through byte-verbatim, which is how the PUT
+// provisioner path stores the request's own key order.
+func (s *Store) MergeConfigurationSections(ctx context.Context, name string, updates map[string]any) error {
 	machine, err := s.Get(ctx, name)
 	if err != nil {
 		return err
 	}
-	config := ParseConfiguration(machine)
-	for key, value := range sections {
-		config[key] = value
+	sections := ParseRawConfiguration(machine)
+	for key, value := range updates {
+		raw, merr := json.Marshal(value)
+		if merr != nil {
+			return merr
+		}
+		sections[key] = raw
 	}
-	raw, err := json.Marshal(config)
+	merged, err := marshalRawConfig(sections)
 	if err != nil {
 		return err
 	}
-	return s.SetConfiguration(ctx, name, raw)
+	return s.SetConfiguration(ctx, name, merged)
 }
 
 // MergeSettingsKeys merges individual keys INTO configuration.settings (PUT's
@@ -468,8 +626,8 @@ func (s *Store) MergeSettingsKeys(ctx context.Context, name string, keys map[str
 	if err != nil {
 		return err
 	}
-	config := ParseConfiguration(machine)
-	settings := config.Section("settings")
+	sections := ParseRawConfiguration(machine)
+	settings := rawSectionMap(sections, "settings")
 	for key, value := range keys {
 		if value == nil {
 			delete(settings, key)
@@ -481,12 +639,16 @@ func (s *Store) MergeSettingsKeys(ctx context.Context, name string, keys map[str
 		}
 		settings[key] = value
 	}
-	config["settings"] = settings
-	raw, err := json.Marshal(config)
+	raw, err := json.Marshal(settings)
 	if err != nil {
 		return err
 	}
-	return s.SetConfiguration(ctx, name, raw)
+	sections["settings"] = raw
+	merged, err := marshalRawConfig(sections)
+	if err != nil {
+		return err
+	}
+	return s.SetConfiguration(ctx, name, merged)
 }
 
 // MergePendingChanges merges an accrued modify body into
@@ -498,8 +660,8 @@ func (s *Store) MergePendingChanges(ctx context.Context, name string, updates ma
 	if err != nil {
 		return nil, err
 	}
-	config := ParseConfiguration(machine)
-	pending := config.Section("pending_changes")
+	sections := ParseRawConfiguration(machine)
+	pending := rawSectionMap(sections, "pending_changes")
 	for key, value := range updates {
 		if key != "hardware" {
 			pending[key] = value
@@ -527,12 +689,16 @@ func (s *Store) MergePendingChanges(ctx context.Context, name string, updates ma
 		}
 		pending["hardware"] = hardware
 	}
-	config["pending_changes"] = pending
-	raw, err := json.Marshal(config)
+	raw, err := json.Marshal(pending)
 	if err != nil {
 		return nil, err
 	}
-	return pending, s.SetConfiguration(ctx, name, raw)
+	sections["pending_changes"] = raw
+	merged, err := marshalRawConfig(sections)
+	if err != nil {
+		return nil, err
+	}
+	return pending, s.SetConfiguration(ctx, name, merged)
 }
 
 // ClearPendingChanges drops the accrued set (the cancel path, and the
@@ -542,30 +708,32 @@ func (s *Store) ClearPendingChanges(ctx context.Context, name string) error {
 	if err != nil {
 		return err
 	}
-	config := ParseConfiguration(machine)
-	if _, ok := config["pending_changes"]; !ok {
+	sections := ParseRawConfiguration(machine)
+	if _, ok := sections["pending_changes"]; !ok {
 		return nil
 	}
-	delete(config, "pending_changes")
-	raw, err := json.Marshal(config)
+	delete(sections, "pending_changes")
+	merged, err := marshalRawConfig(sections)
 	if err != nil {
 		return err
 	}
-	return s.SetConfiguration(ctx, name, raw)
+	return s.SetConfiguration(ctx, name, merged)
 }
 
 // MergeLiveConfiguration overlays the hypervisor's live view onto a stored
 // configuration document, preserving the agent-owned section keys — the zone
 // sync's merge rule: discovery refreshes reality, never the stored document.
+// Preserved keys copy as RAW bytes from the existing document, so the stored
+// provisioner sections never re-encode (and never alphabetize) on a sweep.
 func MergeLiveConfiguration(existing, live json.RawMessage) json.RawMessage {
-	merged := map[string]any{}
+	merged := map[string]json.RawMessage{}
 	if len(live) > 0 {
 		if err := json.Unmarshal(live, &merged); err != nil {
-			merged = map[string]any{}
+			merged = map[string]json.RawMessage{}
 		}
 	}
 	if len(existing) > 0 {
-		previous := map[string]any{}
+		previous := map[string]json.RawMessage{}
 		if err := json.Unmarshal(existing, &previous); err == nil {
 			for _, key := range preservedConfigKeys {
 				if value, ok := previous[key]; ok {
@@ -576,7 +744,7 @@ func MergeLiveConfiguration(existing, live json.RawMessage) json.RawMessage {
 			}
 		}
 	}
-	raw, err := json.Marshal(merged)
+	raw, err := marshalRawConfig(merged)
 	if err != nil {
 		return existing
 	}

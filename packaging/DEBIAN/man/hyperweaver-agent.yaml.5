@@ -327,6 +327,15 @@ Timeout for one in-guest ansible-playbook run, minimum 60 (default: 21600).
 .It Cm ansible_install_timeout_seconds
 Timeout for the in-guest ansible/collection installation steps, minimum 60
 (default: 300).
+.It Cm host_hooks
+Boolean allowing sequence hooks — the
+.Cm provisioning.pre[]/post[]
+entries of a machine's document — with target: host to run scripts ON THIS
+HOST. Guest-target hooks are always allowed. Machines rendered from packages
+the installer did NOT ship additionally require a one-time per-machine
+confirmation (POST /machines/{name}/provision answers needs_confirmation;
+re-POST with confirm_host_hooks: true) before host hooks run
+(default: true).
 .It Cm ssh.key_path
 The agent's own provisioning private key — the SSH-auth fallback when the
 machine's document supplies neither a key nor a password; generated
@@ -385,6 +394,20 @@ service-account token, sent as Bearer on every call) — the only credential;
 it authenticates private boxes and never enters task metadata. ca_file adds
 a PEM CA bundle to the trust store for self-signed registries; certificate
 verification always stays on (default: the STARTcloud BoxVault registry).
+.El
+.Ss catalog_sources
+Provisioner catalogs (the HACS model): the agent fetches
+.Pa catalog.json ,
+lists families and versions, downloads the immutable versioned release
+asset, verifies its sha256, and imports it into the local registry
+(POST /provisioning/catalog/install). Fork the catalog repository as a
+template to run your own and add it as another source.
+.Bl -tag -width "sources"
+.It Cm sources
+List of catalogs: name, url, enabled, default, ca_file. The entry flagged
+default serves requests that name no source. ca_file adds a PEM CA bundle to
+the trust store for self-hosted forks; certificate verification always stays
+on (default: the STARTcloud Provisioner Catalog).
 .El
 .Ss artifact_storage
 The merged artifact system (the artifacts capability token): typed storage

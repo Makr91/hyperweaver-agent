@@ -97,14 +97,28 @@ func RegisterExecutors(queue *tasks.Queue, store *Store, reconciler *Reconciler,
 	queue.Register(OpNetworkSetup, tasks.Executor{Run: e.networkSetup})
 	queue.Register(OpNetworkTeardown, tasks.Executor{Run: e.networkTeardown})
 
-	// Provision-pipeline children.
+	// Provision-chain children — the ONE document walk (Mark's ruling
+	// 2026-07-17: there are no phases): the stored provisioning: section's
+	// methods and hooks chain directly under the orchestration parent in
+	// document order; sync/syncback keep their sub-parents as the walk's
+	// outer brackets.
 	queue.Register(OpWaitSSH, tasks.Executor{Run: e.waitSSH})
 	queue.Register(OpSyncParent, tasks.Executor{Run: e.parentAnchor})
 	queue.Register(OpSyncFolder, tasks.Executor{Run: e.syncFolder})
+	queue.Register(OpShellScript, tasks.Executor{Run: e.runShellScript})
+	// OpProvisionParent survives ONLY as the /run-provisioners anchor.
 	queue.Register(OpProvisionParent, tasks.Executor{Run: e.parentAnchor})
 	queue.Register(OpProvisionPlaybook, tasks.Executor{Run: e.provisionPlaybook})
-	// Syncback (folders[].syncback — guest→host pulls after the provision
-	// phase, and ad-hoc via POST /machines/{name}/sync {"syncback": true}).
+	// local/remote is an entry's execution MECHANISM (in-guest ansible vs
+	// ansible-playbook on the agent host), never a phase.
+	queue.Register(OpRemotePlaybook, tasks.Executor{Run: e.runRemotePlaybook})
+	queue.Register(OpDockerCompose, tasks.Executor{Run: e.dockerCompose})
+	// Sequence hooks (provisioning.pre[]/post[]) — ONE operation; the entry's
+	// own target picks guest or host.
+	queue.Register(OpHook, tasks.Executor{Run: e.runHook})
+	// Syncback (folders[].syncback — guest→host pulls, the walk's closing
+	// bracket by document structure, and ad-hoc via POST
+	// /machines/{name}/sync {"syncback": true}).
 	queue.Register(OpSyncbackParent, tasks.Executor{Run: e.parentAnchor})
 	queue.Register(OpSyncbackFolder, tasks.Executor{Run: e.syncbackFolder})
 }

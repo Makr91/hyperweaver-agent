@@ -61,7 +61,8 @@ func (s *Server) validateSpec(w http.ResponseWriter, spec *machines.Spec) bool {
 		return false
 	}
 	if spec.HasProvisioner() {
-		if _, err := s.provisioners.GetVersion(spec.Provisioner.Name, spec.Provisioner.Version); err != nil {
+		version, err := s.provisioners.GetVersion(spec.Provisioner.Name, spec.Provisioner.Version)
+		if err != nil {
 			if errors.Is(err, provisioner.ErrNotFound) || errors.Is(err, provisioner.ErrVersionNotFound) {
 				taskError(w, http.StatusBadRequest,
 					"provisioner "+spec.Provisioner.Name+"/"+spec.Provisioner.Version+" is not in the registry")
@@ -69,6 +70,18 @@ func (s *Server) validateSpec(w http.ResponseWriter, spec *machines.Spec) bool {
 			}
 			slog.Error("resolve provisioner for machine spec", "error", err)
 			taskError(w, http.StatusInternalServerError, "Failed to resolve provisioner")
+			return false
+		}
+		// Authoritative pre-render answer validation (Field DSL, design §3.1):
+		// the ruled wire is a 422 whose body IS the {FIELD: message} map.
+		problems, derr := provisioner.ValidateVersionAnswers(version, spec.Roles,
+			spec.Properties, nil, false)
+		if derr != nil {
+			taskError(w, http.StatusBadRequest, derr.Error())
+			return false
+		}
+		if len(problems) > 0 {
+			writeJSONStatus(w, http.StatusUnprocessableEntity, problems)
 			return false
 		}
 	}
@@ -186,13 +199,12 @@ func (s *Server) renderForResolution(ctx context.Context, spec *machines.Spec) (
 		return nil, err
 	}
 	rendered, err := provisioner.RenderHostsFile(&provisioner.GenerateInput{
-		Version:            version,
-		Settings:           machines.EffectiveSettings(ctx, spec, s.cfg.Provisioning.DefaultSyncMethod, s.cfg.Provisioning.DefaultNetworkInterface),
-		Networks:           spec.Networks,
-		Roles:              spec.Roles,
-		UserProperties:     spec.Properties,
-		AdvancedProperties: spec.AdvancedProperties,
-		SecretsVars:        s.secrets.TemplateVars(),
+		Version:        version,
+		Settings:       machines.EffectiveSettings(ctx, spec, s.cfg.Provisioning.DefaultSyncMethod, s.cfg.Provisioning.DefaultNetworkInterface),
+		Networks:       spec.Networks,
+		Roles:          spec.Roles,
+		UserProperties: spec.Properties,
+		SecretsVars:    s.secrets.TemplateVars(),
 	})
 	if err != nil {
 		return nil, err

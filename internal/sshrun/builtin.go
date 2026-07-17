@@ -209,3 +209,44 @@ func SFTPSync(ctx context.Context, ip string, port int, credentials Credentials,
 	}
 	return nil
 }
+
+// UploadFile lands ONE local file at a remote path over the sftp subsystem —
+// the shell-provisioner transport (scripts upload the way vagrant's shell
+// provisioner does, never relying on a folder sync to have carried them).
+func UploadFile(ctx context.Context, ip string, port int, credentials Credentials,
+	localPath, remotePath, basePath, defaultKeyPath string,
+) error {
+	sshClient, closeSSH, _, err := connectSSH(ctx, ip, port, credentials, basePath, defaultKeyPath)
+	if err != nil {
+		return err
+	}
+	defer closeSSH()
+
+	ftp, err := sftp.NewClient(sshClient)
+	if err != nil {
+		return fmt.Errorf("open sftp subsystem: %w", err)
+	}
+	defer func() {
+		_ = ftp.Close()
+	}()
+
+	src, err := os.Open(filepath.Clean(localPath))
+	if err != nil {
+		return err
+	}
+	defer func() {
+		_ = src.Close()
+	}()
+	dst, err := ftp.Create(remotePath)
+	if err != nil {
+		return fmt.Errorf("create %s: %w", remotePath, err)
+	}
+	if _, err := io.Copy(dst, src); err != nil {
+		_ = dst.Close()
+		return fmt.Errorf("copy %s: %w", remotePath, err)
+	}
+	if err := dst.Close(); err != nil {
+		return fmt.Errorf("close %s: %w", remotePath, err)
+	}
+	return nil
+}

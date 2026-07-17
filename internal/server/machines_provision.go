@@ -7,18 +7,21 @@ import (
 	"log/slog"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/Makr91/hyperweaver-agent/internal/auth"
 	"github.com/Makr91/hyperweaver-agent/internal/machines"
+	"github.com/Makr91/hyperweaver-agent/internal/provisioner"
 	"github.com/Makr91/hyperweaver-agent/internal/tasks"
 )
 
-// The provisioning pipeline surface — zoneweaver's
-// ProvisioningPipelineController/ProvisioningSyncController/
-// ProvisioningProvisionerController + TaskChainBuilder ported: POST
-// /machines/{name}/provision orchestrates extract → boot → wait_ssh →
-// per-folder sync → run-filtered per-playbook provision against the STORED
-// provisioner document; /sync and /run-provisioners are the ad-hoc slices;
+// The provisioning surface — POST /machines/{name}/provision runs the ONE
+// document walk (Mark's ruling 2026-07-17: THERE ARE NO PHASES — the stored
+// provisioner document is the program, executed AS WRITTEN): extract → boot
+// → wait_ssh → folder sync → pre[] hooks → the provisioning: methods in
+// stored-document KEY ORDER (each method's entries in list order) → post[]
+// hooks → syncback. /sync is the ad-hoc folder slice; /run-provisioners is
+// the SAME walk minus prepare/boot/wait_ssh/sync/syncback;
 // /provision/status reports the pipeline's state.
 
 // templateSources converts the configured registries into the machines
@@ -53,8 +56,8 @@ type provisionValidation struct {
 // required, control IP resolvable.
 func validateProvisionRequest(machine *machines.Machine) (validation *provisionValidation, problem string) {
 	config := machines.ParseConfiguration(machine)
-	provisioner := config.Provisioner()
-	if len(provisioner) == 0 {
+	provisionerDoc := config.Provisioner()
+	if len(provisionerDoc) == 0 {
 		return nil, "No provisioner configuration found. Set provisioner config via PUT /machines/{name} first."
 	}
 	settings := config.Section("settings")
@@ -70,13 +73,49 @@ func validateProvisionRequest(machine *machines.Machine) (validation *provisionV
 	// neither exists.
 	ip := machines.ExtractControlIP(config.List("networks"))
 	port := 22
-	if p, ok := provisioner["ssh_port"].(float64); ok && p > 0 {
+	if p, ok := provisionerDoc["ssh_port"].(float64); ok && p > 0 {
 		port = int(p)
 	}
 	return &provisionValidation{
-		config: config, provisioner: provisioner,
+		config: config, provisioner: provisionerDoc,
 		ip: ip, port: port, credentials: credentials,
 	}, ""
+}
+
+// hostHooksPreflight is the design §5 confirmation gate, STRICTLY pre-flight
+// (a running sequence is never aborted by this check): a document carrying
+// host-target hooks needs provisioning.host_hooks on, and — unless the
+// machine's package is INSTALLER-SEEDED — a one-time per-machine
+// confirmation. confirm records it (configuration.host_hooks_confirmed);
+// needsConfirmation asks the caller to answer the needs-confirmation shape.
+func (s *Server) hostHooksPreflight(ctx context.Context, machine *machines.Machine,
+	v *provisionValidation, confirm bool,
+) (problem string, needsConfirmation bool) {
+	if !machines.HasHostHooks(v.provisioner) {
+		return "", false
+	}
+	if !s.cfg.Provisioning.HostHooks {
+		return "This machine's document carries host-target hooks and provisioning.host_hooks is false on this agent — remove the hooks or enable the gate", false
+	}
+	if confirmed, _ := v.config["host_hooks_confirmed"].(bool); confirmed {
+		return "", false
+	}
+	if spec, serr := machines.ParseSpec(machine); serr == nil && spec.HasProvisioner() {
+		if provisioner.SeededFamilies()[spec.Provisioner.Name] {
+			// Installer-shipped packages never prompt (design §5).
+			return "", false
+		}
+	}
+	if !confirm {
+		return "", true
+	}
+	if merr := s.machines.MergeConfigurationSections(ctx, machine.Name,
+		map[string]any{"host_hooks_confirmed": true}); merr != nil {
+		slog.Error("record host-hooks confirmation", "machine", machine.Name, "error", merr)
+		return "Failed to record the host-hooks confirmation", false
+	}
+	slog.Info("host hooks confirmed for machine", "machine", machine.Name)
+	return "", false
 }
 
 // resolveTransport picks the pipeline's SSH target (Mark's architecture,
@@ -131,16 +170,167 @@ func (s *Server) createChainTask(ctx context.Context, machineName, operation str
 	return s.tasks.Store().Create(ctx, &nt)
 }
 
-// buildProvisionChain ports buildProvisioningTaskChain: extract (our
-// machine_prepare — render + materialize, the provisioning-content step) →
-// boot (the plain start op as a child when not running) → wait_ssh →
-// sync_parent + one machine_sync per folder → provision_parent + one
-// machine_provision per run-filtered playbook. Per-machine queue exclusivity
-// serializes the chain exactly like the base's one-task-per-zone rule.
+// walkStep is one planned walk child: its operation, the metadata extras
+// beyond the transport triple, and — on a batch's first entry — the
+// task_chain label and counts the response reports.
+type walkStep struct {
+	operation string
+	extra     map[string]any
+	step      string
+	stepInfo  map[string]any
+}
+
+// docEnabled reads a method section's enabled gate in the document's own
+// on/true/1/yes vocabulary (mirrors machines.onOff — the same words the
+// shell/docker readers accept).
+func docEnabled(value any) bool {
+	if b, ok := value.(bool); ok {
+		return b
+	}
+	s, _ := value.(string)
+	switch strings.ToLower(s) {
+	case "on", "true", "1", "yes":
+		return true
+	}
+	return false
+}
+
+// hookSteps plans one hook bracket (pre[] | post[]) — one machine_hook child
+// per run-filtered entry, list order.
+func hookSteps(hooks []machines.Hook, label string) []walkStep {
+	steps := make([]walkStep, 0, len(hooks))
+	for i := range hooks {
+		step := walkStep{operation: machines.OpHook, extra: map[string]any{"hook": hooks[i]}}
+		if i == 0 {
+			step.step = label
+			step.stepInfo = map[string]any{"hook_count": len(hooks)}
+		}
+		steps = append(steps, step)
+	}
+	return steps
+}
+
+// playbookSteps plans one run-filtered playbook batch — entries exactly as
+// the document lists them: the list an entry sits in (local | remote) picks
+// its execution mechanism, never its position.
+func playbookSteps(playbooks []machines.Playbook, skippedCount int) []walkStep {
+	steps := make([]walkStep, 0, len(playbooks))
+	for i := range playbooks {
+		operation := machines.OpProvisionPlaybook
+		if playbooks[i].Remote {
+			operation = machines.OpRemotePlaybook
+		}
+		step := walkStep{operation: operation, extra: map[string]any{"playbook": playbooks[i]}}
+		if i == 0 {
+			step.step = "method:ansible"
+			step.stepInfo = map[string]any{
+				"playbook_count":    len(playbooks),
+				"playbooks_skipped": skippedCount,
+			}
+		}
+		steps = append(steps, step)
+	}
+	return steps
+}
+
+// planWalk plans the document walk's direct children: pre[] hooks, then the
+// provisioning: methods in the order their KEYS APPEAR in the stored document
+// (each method's entries in list order — Mark's ruling: there are no phases,
+// the document executes AS WRITTEN), then post[] hooks. sync/syncback are the
+// walk's outer brackets and ride their own sub-parents. Unknown method keys
+// NARRATE-SKIP into skippedMethods — named loudly, never a failure.
+func planWalk(machine *machines.Machine, v *provisionValidation, provisionedBefore bool,
+) (walk []walkStep, skippedMethods []string, skippedPlaybooks []machines.SkippedPlaybook, playbookCount int) {
+	skippedPlaybooks = []machines.SkippedPlaybook{}
+	walk = append(walk, hookSteps(machines.FilterHooksByRun(
+		machines.ProvisionerHooks(v.provisioner, "pre"), provisionedBefore), "pre_hooks")...)
+
+	// The method key order comes from the stored document's RAW bytes — the
+	// map view alphabetizes; only the arrays inside each method survive maps.
+	provisioningRaw := machines.RawObject(machines.RawProvisioner(machine))["provisioning"]
+	methodKeys := machines.OrderedKeys(provisioningRaw)
+	provisioning, _ := v.provisioner["provisioning"].(map[string]any)
+	methods := []walkStep{}
+	for _, key := range methodKeys {
+		switch key {
+		case "pre", "post":
+			// The walk's brackets — planned above/below, never methods.
+		case "shell":
+			scripts := machines.ProvisionerShellScripts(v.provisioner)
+			for i, script := range scripts {
+				step := walkStep{
+					operation: machines.OpShellScript,
+					extra:     map[string]any{"script": script},
+				}
+				if i == 0 {
+					step.step = "method:shell"
+					step.stepInfo = map[string]any{"script_count": len(scripts)}
+				}
+				methods = append(methods, step)
+			}
+		case "ansible":
+			// Hosts.rb:501's gate — provisioning.ansible.enabled, the same
+			// enabled vocabulary the shell/docker readers apply.
+			ansible, _ := provisioning["ansible"].(map[string]any)
+			if !docEnabled(ansible["enabled"]) {
+				continue
+			}
+			playbooks, skipped := machines.FilterPlaybooksByRun(
+				machines.ProvisionerPlaybooks(v.provisioner), provisionedBefore)
+			skippedPlaybooks = append(skippedPlaybooks, skipped...)
+			playbookCount += len(playbooks)
+			methods = append(methods, playbookSteps(playbooks, len(skipped))...)
+		case "docker":
+			enabled, composeFiles := machines.ProvisionerDocker(v.provisioner)
+			if !enabled {
+				continue
+			}
+			for i, file := range composeFiles {
+				step := walkStep{
+					operation: machines.OpDockerCompose,
+					extra:     map[string]any{"compose_file": file},
+				}
+				if i == 0 {
+					step.step = "method:docker"
+					step.stepInfo = map[string]any{"compose_count": len(composeFiles)}
+				}
+				methods = append(methods, step)
+			}
+		default:
+			skippedMethods = append(skippedMethods, key)
+		}
+	}
+	// The flat provisioners[] form lives OUTSIDE provisioning: (Hosts.yml's
+	// simplest shape) — no method keys, but ProvisionerPlaybooks still
+	// answers entries; they plan as the sole method batch. No ansible.enabled
+	// gate applies: there is no ansible section.
+	if len(methodKeys) == 0 {
+		if flat := machines.ProvisionerPlaybooks(v.provisioner); len(flat) > 0 {
+			playbooks, skipped := machines.FilterPlaybooksByRun(flat, provisionedBefore)
+			skippedPlaybooks = append(skippedPlaybooks, skipped...)
+			playbookCount += len(playbooks)
+			methods = append(methods, playbookSteps(playbooks, len(skipped))...)
+		}
+	}
+	walk = append(walk, methods...)
+
+	walk = append(walk, hookSteps(machines.FilterHooksByRun(
+		machines.ProvisionerHooks(v.provisioner, "post"), provisionedBefore), "post_hooks")...)
+	return walk, skippedMethods, skippedPlaybooks, playbookCount
+}
+
+// buildProvisionChain queues the provision pipeline: extract (machine_prepare
+// — render + materialize the working copy) → boot (the plain start op when
+// not running) → wait_ssh → the document walk: folder sync under its
+// sub-parent, then pre[] hooks, methods, post[] hooks as DIRECT children of
+// the orchestration parent, then syncback under its sub-parent. The walk is
+// PLANNED first and created second so the final flag lands on its overall
+// last task. Per-machine queue exclusivity serializes the chain exactly like
+// the base's one-task-per-zone rule.
 func (s *Server) buildProvisionChain(ctx context.Context, machine *machines.Machine,
 	v *provisionValidation, skipBoot bool, parentID, createdBy string,
-) ([]map[string]any, error) {
-	chain := []map[string]any{}
+) (chain []map[string]any, skippedMethods []string, err error) {
+	chain = []map[string]any{}
 	var previous *string
 
 	// Extract slot: re-render + re-materialize the working copy from the
@@ -149,15 +339,15 @@ func (s *Server) buildProvisionChain(ctx context.Context, machine *machines.Mach
 	// provisioner-less machines have nothing to render (their document
 	// arrived via PUT and is consumed as stored, the base's model).
 	if spec, serr := machines.ParseSpec(machine); serr == nil && spec.HasProvisioner() {
-		specMeta, err := json.Marshal(map[string]any{"spec": machine.Spec})
-		if err != nil {
-			return nil, err
+		specMeta, merr := json.Marshal(map[string]any{"spec": machine.Spec})
+		if merr != nil {
+			return nil, nil, merr
 		}
 		metadata := string(specMeta)
 		task, terr := s.createChainTask(ctx, machine.Name, machines.OpPrepare,
 			&metadata, nil, parentID, createdBy)
 		if terr != nil {
-			return nil, terr
+			return nil, nil, terr
 		}
 		chain = append(chain, map[string]any{"step": "extract", "task_id": task.ID})
 		previous = &task.ID
@@ -165,10 +355,10 @@ func (s *Server) buildProvisionChain(ctx context.Context, machine *machines.Mach
 
 	// Boot: the plain start operation queued as a child.
 	if !skipBoot && machine.Status != machines.StatusRunning {
-		task, err := s.createChainTask(ctx, machine.Name, machines.OpStart,
+		task, terr := s.createChainTask(ctx, machine.Name, machines.OpStart,
 			nil, previous, parentID, createdBy)
-		if err != nil {
-			return nil, err
+		if terr != nil {
+			return nil, nil, terr
 		}
 		chain = append(chain, map[string]any{"step": "boot", "task_id": task.ID})
 		previous = &task.ID
@@ -177,46 +367,74 @@ func (s *Server) buildProvisionChain(ctx context.Context, machine *machines.Mach
 	// Wait for SSH.
 	sshMeta, err := childMetadata(v, nil)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	sshTask, err := s.createChainTask(ctx, machine.Name, machines.OpWaitSSH,
 		sshMeta, previous, parentID, createdBy)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	chain = append(chain, map[string]any{"step": "wait_ssh", "task_id": sshTask.ID})
 	previous = &sshTask.ID
 
-	// Per-folder sync under a sync parent.
+	// The walk, PLANNED before any of its tasks exist.
+	provisionedBefore := machines.HasProvisionedBefore(v.config)
 	folders := machines.ProvisionerFolders(v.provisioner)
+	syncbackFolders := machines.SyncbackFolders(folders)
+	walk, skippedMethods, skippedPlaybooks, _ := planWalk(machine, v, provisionedBefore)
+	if len(skippedPlaybooks) > 0 {
+		slog.Info("playbooks skipped by run directive",
+			"machine", machine.Name, "skipped", len(skippedPlaybooks))
+	}
+
+	// FINAL flag: exactly ONE task in the whole chain carries final: true —
+	// the walk's overall LAST task in chain order. When the walk is
+	// completely empty (no folders, no hooks, no methods), nothing stamps: a
+	// document with nothing to execute never marks the machine provisioned.
+	finalOwner := ""
+	switch {
+	case len(syncbackFolders) > 0:
+		finalOwner = "syncback"
+	case len(walk) > 0:
+		finalOwner = "walk"
+	case len(folders) > 0:
+		finalOwner = "sync"
+	}
+
+	// FOLDER SYNC — the walk's opening bracket by document structure: one
+	// machine_sync per folders[] entry under the sync sub-parent.
 	if len(folders) > 0 {
 		parentMeta, merr := json.Marshal(map[string]any{"total_folders": len(folders)})
 		if merr != nil {
-			return nil, merr
+			return nil, nil, merr
 		}
 		metadata := string(parentMeta)
 		syncParent, serr := s.createChainTask(ctx, machine.Name, machines.OpSyncParent,
 			&metadata, previous, parentID, createdBy)
 		if serr != nil {
-			return nil, serr
+			return nil, nil, serr
 		}
 		chain = append(chain, map[string]any{
 			"step": "sync_parent", "task_id": syncParent.ID, "folder_count": len(folders),
 		})
 		childPrevious := &syncParent.ID
 		for i := range folders {
-			folderMeta, ferr := childMetadata(v, map[string]any{"folder": folders[i]})
+			extra := map[string]any{"folder": folders[i]}
+			if finalOwner == "sync" && i == len(folders)-1 {
+				extra["final"] = true
+			}
+			folderMeta, ferr := childMetadata(v, extra)
 			if ferr != nil {
-				return nil, ferr
+				return nil, nil, ferr
 			}
 			child, cerr := s.createChainTask(ctx, machine.Name, machines.OpSyncFolder,
 				folderMeta, childPrevious, syncParent.ID, createdBy)
 			if cerr != nil {
-				return nil, cerr
+				return nil, nil, cerr
 			}
 			childPrevious = &child.ID
 		}
-		// The provision phase gates on the LAST sync child, not the sync
+		// The next chain element gates on the LAST sync child, not the sync
 		// parent: the parent anchor completes instantly, so depending on it
 		// let a playbook overtake the folder syncs (runtime-proven
 		// 2026-07-07 — "playbook not found" while its sync was still
@@ -225,73 +443,72 @@ func (s *Server) buildProvisionChain(ctx context.Context, machine *machines.Mach
 		previous = childPrevious
 	}
 
-	// Per-playbook provision under a provision parent, run-filtered first.
-	playbooks, skipped := machines.FilterPlaybooksByRun(
-		machines.ProvisionerPlaybooks(v.provisioner),
-		machines.HasProvisionedBefore(v.config))
-	if len(skipped) > 0 {
-		slog.Info("playbooks skipped by run directive",
-			"machine", machine.Name, "skipped", len(skipped))
-	}
-	if len(playbooks) > 0 {
-		parentMeta, merr := json.Marshal(map[string]any{
-			"total_playbooks":   len(playbooks),
-			"skipped_playbooks": skipped,
-		})
-		if merr != nil {
-			return nil, merr
+	// pre[] hooks → methods → post[] hooks: DIRECT children of the
+	// orchestration parent, one linear chain in document order.
+	for i := range walk {
+		extra := walk[i].extra
+		if finalOwner == "walk" && i == len(walk)-1 {
+			extra["final"] = true
 		}
-		metadata := string(parentMeta)
-		provisionParent, perr := s.createChainTask(ctx, machine.Name, machines.OpProvisionParent,
-			&metadata, previous, parentID, createdBy)
-		if perr != nil {
-			return nil, perr
+		stepMeta, ferr := childMetadata(v, extra)
+		if ferr != nil {
+			return nil, nil, ferr
 		}
-		chain = append(chain, map[string]any{
-			"step": "provision_parent", "task_id": provisionParent.ID,
-			"playbook_count": len(playbooks), "playbooks_skipped": len(skipped),
-		})
-		childPrevious := &provisionParent.ID
-		for i := range playbooks {
-			extra := map[string]any{"playbook": playbooks[i]}
-			if i == len(playbooks)-1 {
-				// The last playbook carries the provisioned-state stamp
-				// (Hosts.rb's results.yml semantics — never a partial run).
-				extra["final"] = true
-			}
-			playbookMeta, ferr := childMetadata(v, extra)
-			if ferr != nil {
-				return nil, ferr
-			}
-			child, cerr := s.createChainTask(ctx, machine.Name, machines.OpProvisionPlaybook,
-				playbookMeta, childPrevious, provisionParent.ID, createdBy)
-			if cerr != nil {
-				return nil, cerr
-			}
-			childPrevious = &child.ID
+		child, cerr := s.createChainTask(ctx, machine.Name, walk[i].operation,
+			stepMeta, previous, parentID, createdBy)
+		if cerr != nil {
+			return nil, nil, cerr
 		}
-		previous = childPrevious
+		if walk[i].step != "" {
+			entry := map[string]any{"step": walk[i].step, "task_id": child.ID}
+			for key, value := range walk[i].stepInfo {
+				entry[key] = value
+			}
+			chain = append(chain, entry)
+		}
+		previous = &child.ID
 	}
 
-	// The syncback phase (folders[].syncback — Mark's ruling 2026-07-12,
-	// replacing his Hosts.rb results hack): flagged folders pull guest→host
-	// AFTER the provision phase — one machine_syncback per flagged folder
-	// under a syncback parent, gated on the LAST playbook child (the same
-	// last-child rule the provision phase rides).
+	// SYNCBACK (folders[].syncback — Mark's ruling 2026-07-12, replacing his
+	// Hosts.rb results hack) — the walk's closing bracket by document
+	// structure: one machine_syncback per flagged folder under the syncback
+	// sub-parent, gated on the previous chain element.
 	if syncbackChain, serr := s.buildSyncbackChain(ctx, machine.Name, v,
-		previous, parentID, createdBy); serr != nil {
-		return nil, serr
+		previous, parentID, createdBy, finalOwner == "syncback"); serr != nil {
+		return nil, nil, serr
 	} else if syncbackChain != nil {
 		chain = append(chain, syncbackChain...)
 	}
-	return chain, nil
+
+	// The narrate-skip and run-directive records land on the orchestration
+	// parent's metadata (the POST /provision response carries them too).
+	if len(skippedMethods) > 0 || len(skippedPlaybooks) > 0 {
+		doc := map[string]any{"ip": v.ip, "port": v.port}
+		if len(skippedMethods) > 0 {
+			doc["skipped_methods"] = skippedMethods
+		}
+		if len(skippedPlaybooks) > 0 {
+			doc["skipped_playbooks"] = skippedPlaybooks
+		}
+		raw, merr := json.Marshal(doc)
+		if merr != nil {
+			return nil, nil, merr
+		}
+		if uerr := s.tasks.Store().UpdateMetadata(ctx, parentID, string(raw)); uerr != nil {
+			slog.Warn("record walk skips on orchestration parent",
+				"task_id", parentID, "error", uerr)
+		}
+	}
+	return chain, skippedMethods, nil
 }
 
 // buildSyncbackChain queues the syncback parent + one machine_syncback child
 // per flagged folder (nil when the document flags none). Shared by the
-// provision pipeline's post-provision phase and the ad-hoc sync handler.
+// provision walk's closing bracket and the ad-hoc sync handler. stampFinal
+// marks the LAST child final: true — the whole-walk stamp rides it when the
+// syncback closes a provision walk; the ad-hoc handler never stamps.
 func (s *Server) buildSyncbackChain(ctx context.Context, machineName string,
-	v *provisionValidation, previous *string, parentID, createdBy string,
+	v *provisionValidation, previous *string, parentID, createdBy string, stampFinal bool,
 ) ([]map[string]any, error) {
 	syncbackFolders := machines.SyncbackFolders(machines.ProvisionerFolders(v.provisioner))
 	if len(syncbackFolders) == 0 {
@@ -307,13 +524,13 @@ func (s *Server) buildSyncbackChain(ctx context.Context, machineName string,
 	if err != nil {
 		return nil, err
 	}
-	chain := []map[string]any{{
-		"step": "syncback_parent", "task_id": syncbackParent.ID,
-		"folder_count": len(syncbackFolders),
-	}}
 	childPrevious := &syncbackParent.ID
 	for i := range syncbackFolders {
-		folderMeta, ferr := childMetadata(v, map[string]any{"folder": syncbackFolders[i]})
+		extra := map[string]any{"folder": syncbackFolders[i]}
+		if stampFinal && i == len(syncbackFolders)-1 {
+			extra["final"] = true
+		}
+		folderMeta, ferr := childMetadata(v, extra)
 		if ferr != nil {
 			return nil, ferr
 		}
@@ -324,7 +541,12 @@ func (s *Server) buildSyncbackChain(ctx context.Context, machineName string,
 		}
 		childPrevious = &child.ID
 	}
-	return chain, nil
+	// last_task_id = the LAST child — the chain's true tail (the parent
+	// anchor completes instantly); the response reports it.
+	return []map[string]any{{
+		"step": "syncback_parent", "task_id": syncbackParent.ID,
+		"folder_count": len(syncbackFolders), "last_task_id": *childPrevious,
+	}}, nil
 }
 
 // startProvisionPipeline creates the provision orchestration parent and its
@@ -333,12 +555,12 @@ func (s *Server) buildSyncbackChain(ctx context.Context, machineName string,
 // half-built parent before the error returns.
 func (s *Server) startProvisionPipeline(ctx context.Context, machine *machines.Machine,
 	validation *provisionValidation, skipBoot bool, createdBy string,
-) (parentID string, chain []map[string]any, err error) {
+) (parentID string, chain []map[string]any, skippedMethods []string, err error) {
 	metadata, err := json.Marshal(map[string]any{
 		"ip": validation.ip, "port": validation.port,
 	})
 	if err != nil {
-		return "", nil, err
+		return "", nil, nil, err
 	}
 	metadataStr := string(metadata)
 	parent, err := s.tasks.Store().Create(ctx, &tasks.NewTask{
@@ -350,17 +572,17 @@ func (s *Server) startProvisionPipeline(ctx context.Context, machine *machines.M
 		Parent:      true,
 	})
 	if err != nil {
-		return "", nil, err
+		return "", nil, nil, err
 	}
 
-	chain, err = s.buildProvisionChain(ctx, machine, validation, skipBoot, parent.ID, createdBy)
+	chain, skippedMethods, err = s.buildProvisionChain(ctx, machine, validation, skipBoot, parent.ID, createdBy)
 	if err != nil {
 		if _, cerr := s.tasks.Cancel(ctx, parent.ID); cerr != nil {
 			slog.Warn("cancel half-built provision chain", "task_id", parent.ID, "error", cerr)
 		}
-		return "", nil, err
+		return "", nil, nil, err
 	}
-	return parent.ID, chain, nil
+	return parent.ID, chain, skippedMethods, nil
 }
 
 // provisionOnStartPipeline queues the full provision pipeline for a start
@@ -389,7 +611,16 @@ func (s *Server) provisionOnStartPipeline(ctx context.Context, machine *machines
 			"machine", machine.Name, "reason", problem)
 		return "", false
 	}
-	parent, _, err := s.startProvisionPipeline(ctx, machine, validation, false, createdBy)
+	// Host-hooks confirmation is an INTERACTIVE gate — auto-provisioning
+	// never answers it, so the machine boots plainly and POST /provision
+	// carries the confirmation flow.
+	if problem, needsConfirmation := s.hostHooksPreflight(ctx, machine,
+		validation, false); problem != "" || needsConfirmation {
+		slog.Info("provision_on_start skipped — plain start queued (host hooks need confirmation or the gate is off)",
+			"machine", machine.Name)
+		return "", false
+	}
+	parent, _, _, err := s.startProvisionPipeline(ctx, machine, validation, false, createdBy)
 	if err != nil {
 		slog.Error("provision_on_start pipeline failed — plain start queued",
 			"machine", machine.Name, "error", err)
@@ -408,6 +639,9 @@ func (s *Server) handleProvisionMachine(w http.ResponseWriter, r *http.Request) 
 	}
 	var body struct {
 		SkipBoot bool `json:"skip_boot"`
+		// ConfirmHostHooks answers the one-time host-hooks confirmation
+		// (design §5): true on the retry records it per machine and proceeds.
+		ConfirmHostHooks bool `json:"confirm_host_hooks"`
 	}
 	if r.ContentLength > 0 {
 		if err := decodeBody(r, &body); err != nil {
@@ -424,24 +658,44 @@ func (s *Server) handleProvisionMachine(w http.ResponseWriter, r *http.Request) 
 		taskError(w, http.StatusBadRequest, problem)
 		return
 	}
+	// Host-hooks pre-flight (design §5's ruled shape): the refusal is UP
+	// FRONT and clearly needs-confirmation — never a mid-sequence failure.
+	if problem, needsConfirmation := s.hostHooksPreflight(r.Context(), machine,
+		validation, body.ConfirmHostHooks); problem != "" {
+		taskError(w, http.StatusBadRequest, problem)
+		return
+	} else if needsConfirmation {
+		writeJSONStatus(w, http.StatusConflict, map[string]any{
+			"needs_confirmation": true,
+			"reason":             "This machine's document carries host-target sequence hooks from a NON-SEEDED package — they run scripts on the agent host itself",
+			"confirm_with":       `re-POST with {"confirm_host_hooks": true} (recorded once per machine)`,
+		})
+		return
+	}
 
 	createdBy := auth.FromContext(r.Context()).Name
-	parentID, chain, err := s.startProvisionPipeline(r.Context(), machine, validation,
-		body.SkipBoot, createdBy)
+	parentID, chain, skippedMethods, err := s.startProvisionPipeline(r.Context(), machine,
+		validation, body.SkipBoot, createdBy)
 	if err != nil {
 		slog.Error("start provision pipeline", "machine", machine.Name, "error", err)
 		taskError(w, http.StatusInternalServerError, "Failed to start provisioning pipeline")
 		return
 	}
 
-	writeJSON(w, map[string]any{
+	response := map[string]any{
 		"success":        true,
 		"message":        "Provisioning pipeline started for " + machine.Name,
 		"machine_name":   machine.Name,
 		"parent_task_id": parentID,
 		"steps":          len(chain),
 		"task_chain":     chain,
-	})
+	}
+	// The QG2 narrate-skip: unknown provisioning: method keys are named
+	// loudly, never a failure.
+	if len(skippedMethods) > 0 {
+		response["skipped_methods"] = skippedMethods
+	}
+	writeJSON(w, response)
 }
 
 // handleSyncMachine creates the ad-hoc parentless sync chain (syncZone).
@@ -473,8 +727,9 @@ func (s *Server) handleSyncMachine(w http.ResponseWriter, r *http.Request) {
 	}
 	if body.Syncback {
 		createdBy := auth.FromContext(r.Context()).Name
+		// stampFinal false: an ad-hoc syncback is never a provision walk.
 		chain, serr := s.buildSyncbackChain(r.Context(), machine.Name, validation,
-			nil, "", createdBy)
+			nil, "", createdBy, false)
 		if serr != nil {
 			slog.Error("create syncback chain", "machine", machine.Name, "error", serr)
 			taskError(w, http.StatusInternalServerError, "Failed to create syncback task chain")
@@ -540,9 +795,12 @@ func (s *Server) handleSyncMachine(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// handleRunProvisioners runs the run-filtered playbooks ad-hoc
-// (runProvisioners): configured-but-empty is a 400, all-skipped answers a
-// 200 no-op with the skipped list.
+// handleRunProvisioners runs the SAME document walk ad-hoc — minus
+// prepare/boot/wait_ssh/sync/syncback — under ONE machine_provision_parent
+// anchor (its only surviving role): pre[] hooks → the provisioning: methods
+// in stored-document key order → post[] hooks; the last planned child
+// carries the whole-walk stamp. Nothing configured is a 400; everything
+// run-skipped answers a 200 no-op with the skipped list.
 func (s *Server) handleRunProvisioners(w http.ResponseWriter, r *http.Request) {
 	machine := s.findMachine(w, r)
 	if machine == nil {
@@ -557,28 +815,31 @@ func (s *Server) handleRunProvisioners(w http.ResponseWriter, r *http.Request) {
 		taskError(w, http.StatusBadRequest, problem)
 		return
 	}
-	configured := machines.ProvisionerPlaybooks(validation.provisioner)
-	if len(configured) == 0 {
-		taskError(w, http.StatusBadRequest, "No provisioners configured in provisioner metadata")
-		return
-	}
-	playbooks, skipped := machines.FilterPlaybooksByRun(configured,
+	walk, skippedMethods, skippedPlaybooks, playbookCount := planWalk(machine, validation,
 		machines.HasProvisionedBefore(validation.config))
-	if len(playbooks) == 0 {
-		writeJSON(w, map[string]any{
-			"success":           true,
-			"machine_name":      machine.Name,
-			"message":           "All configured playbooks were skipped by their run directives",
-			"playbooks_skipped": skipped,
-		})
+	if len(walk) == 0 {
+		if len(skippedPlaybooks) > 0 {
+			writeJSON(w, map[string]any{
+				"success":           true,
+				"machine_name":      machine.Name,
+				"message":           "All configured playbooks were skipped by their run directives",
+				"playbooks_skipped": skippedPlaybooks,
+			})
+			return
+		}
+		taskError(w, http.StatusBadRequest, "No provisioners configured in provisioner metadata")
 		return
 	}
 
 	createdBy := auth.FromContext(r.Context()).Name
-	parentMeta, err := json.Marshal(map[string]any{
-		"total_playbooks":   len(playbooks),
-		"skipped_playbooks": skipped,
-	})
+	parentDoc := map[string]any{
+		"total_playbooks":   playbookCount,
+		"skipped_playbooks": skippedPlaybooks,
+	}
+	if len(skippedMethods) > 0 {
+		parentDoc["skipped_methods"] = skippedMethods
+	}
+	parentMeta, err := json.Marshal(parentDoc)
 	if err != nil {
 		taskError(w, http.StatusInternalServerError, "Failed to create provisioner tasks")
 		return
@@ -592,19 +853,19 @@ func (s *Server) handleRunProvisioners(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	previous := &provisionParent.ID
-	for i := range playbooks {
-		extra := map[string]any{"playbook": playbooks[i]}
-		if i == len(playbooks)-1 {
-			// The stamp rides the run's last playbook (Hosts.rb semantics).
+	for i := range walk {
+		extra := walk[i].extra
+		if i == len(walk)-1 {
+			// The walk's last child carries the whole-walk stamp.
 			extra["final"] = true
 		}
-		playbookMeta, ferr := childMetadata(validation, extra)
+		stepMeta, ferr := childMetadata(validation, extra)
 		if ferr != nil {
 			taskError(w, http.StatusInternalServerError, "Failed to create provisioner tasks")
 			return
 		}
-		child, cerr := s.createChainTask(r.Context(), machine.Name,
-			machines.OpProvisionPlaybook, playbookMeta, previous, provisionParent.ID, createdBy)
+		child, cerr := s.createChainTask(r.Context(), machine.Name, walk[i].operation,
+			stepMeta, previous, provisionParent.ID, createdBy)
 		if cerr != nil {
 			slog.Error("create provision child", "machine", machine.Name, "error", cerr)
 			taskError(w, http.StatusInternalServerError, "Failed to create provisioner tasks")
@@ -613,13 +874,17 @@ func (s *Server) handleRunProvisioners(w http.ResponseWriter, r *http.Request) {
 		previous = &child.ID
 	}
 
-	writeJSON(w, map[string]any{
+	response := map[string]any{
 		"success":           true,
 		"machine_name":      machine.Name,
 		"parent_task_id":    provisionParent.ID,
-		"playbook_count":    len(playbooks),
-		"playbooks_skipped": skipped,
-	})
+		"playbook_count":    playbookCount,
+		"playbooks_skipped": skippedPlaybooks,
+	}
+	if len(skippedMethods) > 0 {
+		response["skipped_methods"] = skippedMethods
+	}
+	writeJSON(w, response)
 }
 
 // handleProvisionStatus reports the pipeline state (getProvisioningStatus):
@@ -638,7 +903,11 @@ func (s *Server) handleProvisionStatus(w http.ResponseWriter, r *http.Request) {
 	for _, operation := range []string{
 		machines.OpProvisionOrchestration, machines.OpPrepare, machines.OpWaitSSH,
 		machines.OpSyncParent, machines.OpSyncFolder,
+		machines.OpShellScript,
 		machines.OpProvisionParent, machines.OpProvisionPlaybook,
+		machines.OpRemotePlaybook, machines.OpDockerCompose,
+		machines.OpSyncbackParent, machines.OpSyncbackFolder,
+		machines.OpHook,
 	} {
 		filter := tasks.ListFilter{MachineName: machine.Name, Operation: operation, Limit: 20}
 		list, err := s.tasks.Store().List(r.Context(), &filter)

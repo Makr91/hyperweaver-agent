@@ -199,6 +199,11 @@ provisioning:
   playbook_timeout_seconds: 21600
   # Timeout for the in-guest ansible/collection installation steps.
   ansible_install_timeout_seconds: 300
+  # Allow sequence hooks (provisioning.pre[]/post[] in a machine's document)
+  # with target: host to run scripts ON THIS HOST. Guest-target hooks are
+  # always allowed. Machines rendered from packages the installer did NOT
+  # ship additionally confirm once per machine before host hooks run.
+  host_hooks: true
   ssh:
     # The agent's own provisioning private key — the SSH-auth fallback when
     # the machine's document supplies neither a key nor a password; generated
@@ -243,6 +248,19 @@ template_sources:
       enabled: true
       default: true
       auth_token: ''
+
+catalog_sources:
+  # Provisioner catalogs (the HACS model): agents fetch catalog.json, list
+  # families/versions, download the immutable versioned asset, verify its
+  # sha256, and import into the local registry. Fork the catalog repo as a
+  # template to run your own and add it here (ca_file trusts a private CA;
+  # certificate verification always stays on).
+  sources:
+    - name: STARTcloud Provisioner Catalog
+      url: https://provisioner-catalog.startcloud.com/catalog.json
+      enabled: true
+      default: true
+      ca_file: ''
 
 artifact_storage:
   # The merged artifact system (the artifacts capability token): typed

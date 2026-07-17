@@ -416,6 +416,12 @@ type ProvisioningConfig struct {
 	// AnsibleInstallTimeoutSeconds bounds the in-guest ansible/collection
 	// installation steps.
 	AnsibleInstallTimeoutSeconds int `yaml:"ansible_install_timeout_seconds" json:"ansible_install_timeout_seconds"`
+	// HostHooks allows sequence hooks (provisioning.pre[]/post[] in a
+	// machine's document) with target: host to run scripts ON THE AGENT HOST
+	// (design §5, ruled 2026-07-16 — default ON for this agent; zoneweaver
+	// defaults OFF, its hosts are shared). Guest-target hooks are always
+	// allowed. Non-seeded packages additionally confirm once per machine.
+	HostHooks bool `yaml:"host_hooks" json:"host_hooks"`
 	// SSH is the pipeline's guest-access configuration.
 	SSH ProvisioningSSHConfig `yaml:"ssh" json:"ssh"`
 	// Network is the dedicated provisioning network.
@@ -451,6 +457,24 @@ type TemplateSourcesConfig struct {
 	// Sources are the configured registries; the entry flagged default
 	// serves requests that name no source (names are display-only).
 	Sources []TemplateSourceConfig `yaml:"sources" json:"sources"`
+}
+
+// CatalogSourceConfig is one configured provisioner catalog (design §7 —
+// the HACS model; the second door is a forked catalog repo added here).
+type CatalogSourceConfig struct {
+	Name    string `yaml:"name"    json:"name"`
+	URL     string `yaml:"url"     json:"url"`
+	Enabled bool   `yaml:"enabled" json:"enabled"`
+	Default bool   `yaml:"default" json:"default"`
+	// CAFile adds a PEM CA bundle to the trust store for this catalog —
+	// self-hosted forks behind private CAs. Verification always stays on.
+	CAFile string `yaml:"ca_file" json:"ca_file"`
+}
+
+// CatalogSourcesConfig controls the provisioner catalog client (mirrors the
+// template-sources pattern).
+type CatalogSourcesConfig struct {
+	Sources []CatalogSourceConfig `yaml:"sources" json:"sources"`
 }
 
 // ArtifactPathConfig is one artifact_storage.paths[] entry — an
@@ -637,6 +661,7 @@ type Config struct {
 	Machines        MachinesConfig        `yaml:"machines"         json:"machines"`
 	Provisioning    ProvisioningConfig    `yaml:"provisioning"     json:"provisioning"`
 	TemplateSources TemplateSourcesConfig `yaml:"template_sources" json:"template_sources"`
+	CatalogSources  CatalogSourcesConfig  `yaml:"catalog_sources"  json:"catalog_sources"`
 	ArtifactStorage ArtifactStorageConfig `yaml:"artifact_storage" json:"artifact_storage"`
 	FileBrowser     FileBrowserConfig     `yaml:"file_browser"     json:"file_browser"`
 	GuestAgent      GuestAgentConfig      `yaml:"guest_agent"      json:"guest_agent"`
@@ -748,6 +773,7 @@ func Default() *Config {
 			DefaultSyncMethod:            "rsync",
 			PlaybookTimeoutSeconds:       21600,
 			AnsibleInstallTimeoutSeconds: 300,
+			HostHooks:                    true,
 			SSH: ProvisioningSSHConfig{
 				TimeoutSeconds:      300,
 				PollIntervalSeconds: 10,
@@ -769,6 +795,14 @@ func Default() *Config {
 			Sources: []TemplateSourceConfig{{
 				Name:    "STARTcloud BoxVault",
 				URL:     "https://boxvault.startcloud.com",
+				Enabled: true,
+				Default: true,
+			}},
+		},
+		CatalogSources: CatalogSourcesConfig{
+			Sources: []CatalogSourceConfig{{
+				Name:    "STARTcloud Provisioner Catalog",
+				URL:     "https://provisioner-catalog.startcloud.com/catalog.json",
 				Enabled: true,
 				Default: true,
 			}},

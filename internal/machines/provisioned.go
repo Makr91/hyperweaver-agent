@@ -83,12 +83,13 @@ type ProvisionerRef struct {
 // hostname/domain are required — box, disks, provisioner, everything else is
 // optional, and a three-field spec makes a stub machine (Mark's ruling).
 type Spec struct {
-	Provisioner        ProvisionerRef          `json:"provisioner"`
-	Settings           map[string]any          `json:"settings"`
-	Networks           []any                   `json:"networks"`
-	Roles              []provisioner.RoleInput `json:"roles"`
-	Properties         map[string]any          `json:"properties"`
-	AdvancedProperties map[string]any          `json:"advanced_properties"`
+	Provisioner ProvisionerRef          `json:"provisioner"`
+	Settings    map[string]any          `json:"settings"`
+	Networks    []any                   `json:"networks"`
+	Roles       []provisioner.RoleInput `json:"roles"`
+	// Properties is THE answers map — one flat map keyed by exact field name
+	// (the Field DSL's contract; advanced_properties died in the one cut).
+	Properties map[string]any `json:"properties"`
 	// Disks is the document's disks section at create (the base's
 	// disks{boot{...}, additional[]} + cdroms, in the Hosts.yml vocabulary
 	// the executors consume: boot{path|size|sparse|volume_name},
@@ -159,6 +160,10 @@ type ProvisionEnv struct {
 	// GuestAgentEnabled wires the QEMU guest-agent UART (COM2 → host pipe)
 	// into every created machine (guest_agent.enabled).
 	GuestAgentEnabled bool
+	// HostHooks allows sequence hooks with target: host to run scripts ON THE
+	// AGENT HOST (provisioning.host_hooks — design §5, default ON for this
+	// agent; zoneweaver defaults OFF). false refuses them.
+	HostHooks bool
 	// VRDECertRoot is where per-machine VRDE TLS material lives
 	// (<config dir>/ssl/vrde) — create mints each machine's certificate there
 	// and sets the Enhanced-security properties from birth (Mark's zero-click

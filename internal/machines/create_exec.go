@@ -1,6 +1,7 @@
 package machines
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -10,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -47,8 +49,10 @@ const (
 // forward.
 type createExecutionOutput struct {
 	// Document is the rendered hosts[0] — settings/networks/disks/zones plus
-	// the provisioner sections (folders/provisioning/vars/roles).
-	Document map[string]any `json:"document"`
+	// the provisioner sections (folders/provisioning/vars/roles) — as ordered
+	// JSON bytes: the rendered YAML's own key order, which finalize stores
+	// verbatim (a map here would alphabetize it).
+	Document json.RawMessage `json:"document"`
 	// BootdiskPath is the machine's cloned boot medium.
 	BootdiskPath string `json:"bootdisk_path,omitempty"`
 	// MediaCreated tracks created media for reverse-order rollback.
@@ -141,19 +145,36 @@ func (e *executors) prepareDocument(ctx context.Context, task *tasks.Task, out *
 		return fmt.Errorf("provisioner %s/%s: %w", spec.Provisioner.Name, spec.Provisioner.Version, err)
 	}
 
+	// Authoritative answer validation before every render (the Field DSL's
+	// agent half; the HTTP 422 already gated the create — this catches
+	// hand-edited specs and re-provisions against a stricter package).
+	if problems, verr := provisioner.ValidateVersionAnswers(version, spec.Roles,
+		spec.Properties, nil, false); verr != nil {
+		return verr
+	} else if len(problems) > 0 {
+		keys := make([]string, 0, len(problems))
+		for key := range problems {
+			keys = append(keys, key)
+		}
+		sort.Strings(keys)
+		for _, key := range keys {
+			out.Write("stderr", "answer "+key+": "+problems[key]+"\n")
+		}
+		return fmt.Errorf("%d form answer(s) fail the package's field validation (listed in the task output)", len(problems))
+	}
+
 	settings := effectiveSettings(ctx, e.env, spec)
 	mounts, roles, err := e.resolveInstallerFiles(ctx, spec, out)
 	if err != nil {
 		return err
 	}
 	rendered, err := provisioner.RenderHostsFile(&provisioner.GenerateInput{
-		Version:            version,
-		Settings:           settings,
-		Networks:           spec.Networks,
-		Roles:              roles,
-		UserProperties:     spec.Properties,
-		AdvancedProperties: spec.AdvancedProperties,
-		SecretsVars:        e.env.SecretsVars(),
+		Version:        version,
+		Settings:       settings,
+		Networks:       spec.Networks,
+		Roles:          roles,
+		UserProperties: spec.Properties,
+		SecretsVars:    e.env.SecretsVars(),
 	})
 	if err != nil {
 		return err
@@ -163,7 +184,7 @@ func (e *executors) prepareDocument(ctx context.Context, task *tasks.Task, out *
 			strings.Join(markers, ", ")+") — the package template was never converted to Jinja2\n")
 	}
 
-	document, err := parseHostsDocument(rendered)
+	document, err := parseHostsDocumentOrdered(rendered)
 	if err != nil {
 		return err
 	}
@@ -263,6 +284,94 @@ func parseHostsDocument(rendered []byte) (map[string]any, error) {
 	return parsed.Hosts[0], nil
 }
 
+// parseHostsDocumentOrdered extracts hosts[0] as ordered JSON bytes: the
+// ordered-map decode keeps every object's keys in the rendered YAML's own
+// order, and the JSON conversion writes them back in that order — the storage
+// ingress the ruling demands (a plain map decode would alphabetize the
+// provisioning:/vars: sections on re-marshal).
+func parseHostsDocumentOrdered(rendered []byte) (json.RawMessage, error) {
+	var parsed struct {
+		Hosts []any `yaml:"hosts"`
+	}
+	if err := yaml.UnmarshalWithOptions(rendered, &parsed, yaml.UseOrderedMap()); err != nil {
+		return nil, fmt.Errorf("parse rendered document: %w", err)
+	}
+	if len(parsed.Hosts) == 0 {
+		return nil, errors.New("rendered document carries no hosts[] entry")
+	}
+	raw, err := orderedYAMLToJSON(parsed.Hosts[0])
+	if err != nil {
+		return nil, err
+	}
+	return raw, nil
+}
+
+// orderedYAMLToJSON converts an ordered-map YAML value into JSON bytes,
+// objects keeping their yaml.MapSlice key order. MapSlice keys may be any
+// scalar type — non-strings render through fmt (JSON object keys must be
+// strings). map[string]interface{} should never appear under an ordered
+// decode; it marshals defensively (alphabetized, order already lost upstream).
+func orderedYAMLToJSON(value any) ([]byte, error) {
+	switch v := value.(type) {
+	case yaml.MapSlice:
+		var buf bytes.Buffer
+		buf.WriteByte('{')
+		for i := range v {
+			if i > 0 {
+				buf.WriteByte(',')
+			}
+			key, ok := v[i].Key.(string)
+			if !ok {
+				key = fmt.Sprint(v[i].Key)
+			}
+			keyJSON, kerr := json.Marshal(key)
+			if kerr != nil {
+				return nil, kerr
+			}
+			buf.Write(keyJSON)
+			buf.WriteByte(':')
+			encoded, verr := orderedYAMLToJSON(v[i].Value)
+			if verr != nil {
+				return nil, verr
+			}
+			buf.Write(encoded)
+		}
+		buf.WriteByte('}')
+		return buf.Bytes(), nil
+	case []any:
+		var buf bytes.Buffer
+		buf.WriteByte('[')
+		for i := range v {
+			if i > 0 {
+				buf.WriteByte(',')
+			}
+			encoded, verr := orderedYAMLToJSON(v[i])
+			if verr != nil {
+				return nil, verr
+			}
+			buf.Write(encoded)
+		}
+		buf.WriteByte(']')
+		return buf.Bytes(), nil
+	default:
+		return json.Marshal(value)
+	}
+}
+
+// parseConfigBytes reads the ordered document bytes back into the map view
+// the executors' reads use (empty on failure) — reads never need order, only
+// storage does.
+func parseConfigBytes(raw json.RawMessage) MachineConfig {
+	config := MachineConfig{}
+	if len(raw) == 0 {
+		return config
+	}
+	if err := json.Unmarshal(raw, &config); err != nil {
+		return MachineConfig{}
+	}
+	return config
+}
+
 // createStorage executes machine_create_storage: resolve the template
 // (post-download re-resolution included), clone its disk image as the boot
 // medium, grow it to disks.boot.size, create the additional media — every
@@ -283,10 +392,16 @@ func (e *executors) createStorage(ctx context.Context, task *tasks.Task, out *ta
 		// No prepare child ran — the base's shape (its chain has no render
 		// step; the create body IS the document): build the document straight
 		// from the spec. Provisioning attaches later via PUT, never here.
+		// Marshal order is irrelevant on this path — no provisioner section
+		// exists (only the provisioner document's key order is load-bearing).
 		out.Write("stdout", "Provisioner-less create — building the document from the spec\n")
-		output = &createExecutionOutput{Document: specDocument(ctx, e.env, meta.Spec)}
+		raw, merr := json.Marshal(specDocument(ctx, e.env, meta.Spec))
+		if merr != nil {
+			return merr
+		}
+		output = &createExecutionOutput{Document: raw}
 	}
-	document := MachineConfig(output.Document)
+	document := parseConfigBytes(output.Document)
 	settings := document.Section("settings")
 	disks := document.Section("disks")
 
@@ -438,7 +553,7 @@ func (e *executors) createConfig(ctx context.Context, task *tasks.Task, out *tas
 	if err != nil {
 		return err
 	}
-	document := MachineConfig(output.Document)
+	document := parseConfigBytes(output.Document)
 	settings := document.Section("settings")
 
 	vboxExe := VBoxManagePath(ctx)
@@ -665,6 +780,16 @@ func modifyFlags(document MachineConfig, hostOnlyAdapter string, sshForwardPort 
 		flags = append(flags,
 			fmt.Sprintf("--natpf1=ssh,tcp,127.0.0.1,%d,,22", sshForwardPort))
 	}
+	// roles[].port_forwards → --natpf1 rules on the reserved NAT adapter
+	// (core/Hosts.rb:312-320's forwarded_port entries {guest, host, ip};
+	// implemented per the 2026-07-16 parity ruling, superseding the earlier
+	// TODO-only one). Rule names carry the ports, so two roles forwarding the
+	// same pair collide loudly in VirtualBox instead of silently doubling.
+	portForwards, pfErr := rolePortForwardFlags(document.List("roles"))
+	if pfErr != nil {
+		return nil, pfErr
+	}
+	flags = append(flags, portForwards...)
 	if port := intOr(settings["consoleport"], 0); port > 0 {
 		flags = append(flags, "--vrde=on",
 			"--vrde-port="+strconv.FormatInt(port, 10))
@@ -763,6 +888,34 @@ func modifyFlags(document MachineConfig, hostOnlyAdapter string, sshForwardPort 
 		directive := mapOr(entry)
 		if name := stringOr(directive["directive"], ""); name != "" {
 			flags = append(flags, "--"+name+"="+stringOr(directive["value"], ""))
+		}
+	}
+	return flags, nil
+}
+
+// rolePortForwardFlags reads the document's roles[].port_forwards[] entries
+// ({guest, host, ip?} — Hosts.rb:312-320's vocabulary) into --natpf1 rules.
+// Malformed ports are a hard error: a forward the author asked for must
+// never silently vanish.
+func rolePortForwardFlags(roles []any) ([]string, error) {
+	flags := []string{}
+	for _, entry := range roles {
+		role := mapOr(entry)
+		roleName := stringOr(role["name"], "role")
+		for _, raw := range listOr(role["port_forwards"]) {
+			forward := mapOr(raw)
+			if len(forward) == 0 {
+				continue
+			}
+			guest := intOr(forward["guest"], 0)
+			host := intOr(forward["host"], 0)
+			if guest < 1 || guest > 65535 || host < 1 || host > 65535 {
+				return nil, fmt.Errorf("role %s port_forwards entries need guest and host ports 1-65535 (got guest=%v host=%v)",
+					roleName, forward["guest"], forward["host"])
+			}
+			hostIP := stringOr(forward["ip"], "")
+			flags = append(flags, fmt.Sprintf("--natpf1=pf-%d-%d,tcp,%s,%d,,%d",
+				host, guest, hostIP, host, guest))
 		}
 	}
 	return flags, nil
@@ -1136,7 +1289,8 @@ func (e *executors) createFinalize(ctx context.Context, task *tasks.Task, out *t
 	if err != nil {
 		return err
 	}
-	document := MachineConfig(output.Document)
+	documentRaw := output.Document
+	document := parseConfigBytes(documentRaw)
 
 	e.taskProgress(task, 20, "creating_database_record")
 	hostname, herr := os.Hostname()
@@ -1159,28 +1313,28 @@ func (e *executors) createFinalize(ctx context.Context, task *tasks.Task, out *t
 	}
 
 	e.taskProgress(task, 60, "storing_configuration")
+	// Sections store as the RAW document's own bytes — MergeConfigurationSections
+	// passes json.RawMessage values through verbatim, so key order survives.
+	rawSections := RawObject(documentRaw)
 	sections := map[string]any{}
 	for _, key := range []string{"settings", "zones", "networks", "disks", "metadata"} {
-		if value, ok := document[key]; ok {
+		if value, ok := rawSections[key]; ok {
 			sections[key] = value
 		}
 	}
-	// The rendered document's provisioning half IS the provisioner document
-	// (folders/provisioning/vars/roles) — stored exactly where PUT stores it;
-	// a later PUT overrides it verbatim. Package-based creates ONLY: the
-	// base's finalize persists no provisioner (storeInfrastructureConfig
-	// stores settings/zones/networks/disks/metadata and nothing else) —
-	// provisioner-less machines gain a document via PUT when the user wants
-	// one, never here.
+	// The rendered document's non-infrastructure half IS the provisioner
+	// document — stored exactly where PUT stores it; a later PUT overrides it
+	// verbatim. Package-based creates ONLY: the base's finalize persists no
+	// provisioner (storeInfrastructureConfig stores settings/zones/networks/
+	// disks/metadata and nothing else) — provisioner-less machines gain a
+	// document via PUT when the user wants one, never here. EVERY top-level
+	// key that is not one of the five infra keys rides in, in DOCUMENT ORDER
+	// — unknown keys survive (the ruling; the old six-key whitelist dropped
+	// them).
 	if meta.Spec.HasProvisioner() {
-		provisionerDoc := map[string]any{
-			"provisioner_name":    meta.Spec.Provisioner.Name,
-			"provisioner_version": meta.Spec.Provisioner.Version,
-		}
-		for _, key := range []string{"folders", "provisioning", "vars", "roles", "pre_tasks", "post_tasks"} {
-			if value, ok := document[key]; ok {
-				provisionerDoc[key] = value
-			}
+		provisionerDoc, perr := buildProvisionerDocRaw(meta.Spec, documentRaw, rawSections)
+		if perr != nil {
+			return perr
 		}
 		sections["provisioner"] = provisionerDoc
 	}
@@ -1213,6 +1367,54 @@ func (e *executors) createFinalize(ctx context.Context, task *tasks.Task, out *t
 	e.taskProgress(task, 100, "completed")
 	out.Write("stdout", "Machine "+task.MachineName+" finalized\n")
 	return nil
+}
+
+// createInfraKeys are the document's infrastructure sections — stored as
+// their own configuration sections, never inside the provisioner document.
+var createInfraKeys = map[string]bool{
+	"settings": true, "zones": true, "networks": true, "disks": true, "metadata": true,
+}
+
+// buildProvisionerDocRaw assembles the stored provisioner document's JSON
+// MANUALLY, in DOCUMENT ORDER: the spec's package identity first, then every
+// non-infrastructure top-level key of hosts[0] with its bytes verbatim — a
+// map here would alphabetize, and duplicate identity keys from the document
+// itself are skipped (the spec's values win, the previous behavior).
+func buildProvisionerDocRaw(spec *Spec, documentRaw json.RawMessage,
+	rawSections map[string]json.RawMessage,
+) (json.RawMessage, error) {
+	nameJSON, err := json.Marshal(spec.Provisioner.Name)
+	if err != nil {
+		return nil, err
+	}
+	versionJSON, err := json.Marshal(spec.Provisioner.Version)
+	if err != nil {
+		return nil, err
+	}
+	var buf bytes.Buffer
+	buf.WriteString(`{"provisioner_name":`)
+	buf.Write(nameJSON)
+	buf.WriteString(`,"provisioner_version":`)
+	buf.Write(versionJSON)
+	for _, key := range OrderedKeys(documentRaw) {
+		if createInfraKeys[key] || key == "provisioner_name" || key == "provisioner_version" {
+			continue
+		}
+		value, ok := rawSections[key]
+		if !ok {
+			continue
+		}
+		keyJSON, kerr := json.Marshal(key)
+		if kerr != nil {
+			return nil, kerr
+		}
+		buf.WriteByte(',')
+		buf.Write(keyJSON)
+		buf.WriteByte(':')
+		buf.Write(value)
+	}
+	buf.WriteByte('}')
+	return json.RawMessage(buf.Bytes()), nil
 }
 
 // DocString coerces a document value to string (the handlers read the

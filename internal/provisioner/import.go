@@ -46,13 +46,16 @@ var tokenNamePattern = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
 // ImportMetadata is the provisioner_import task's metadata document — the
 // import request, verbatim. TokenName names a git_api_keys entry in the
 // global secrets store (private-repo imports); the token itself never lands
-// in task metadata.
+// in task metadata. CleanupSource removes the archive FILE (never its
+// directory) after the attempt — set by the import-upload handler on its own
+// temp archives, harmless on a user path but never directory-destructive.
 type ImportMetadata struct {
-	SourceType string `json:"source_type"`
-	Path       string `json:"path,omitempty"`
-	URL        string `json:"url,omitempty"`
-	Branch     string `json:"branch,omitempty"`
-	TokenName  string `json:"token_name,omitempty"`
+	SourceType    string `json:"source_type"`
+	Path          string `json:"path,omitempty"`
+	URL           string `json:"url,omitempty"`
+	Branch        string `json:"branch,omitempty"`
+	TokenName     string `json:"token_name,omitempty"`
+	CleanupSource bool   `json:"cleanup_source,omitempty"`
 }
 
 // Validate checks an import request before it becomes a task.
@@ -82,21 +85,23 @@ func (m *ImportMetadata) Validate() error {
 // RegisterExecutors wires the provisioner operations into the task queue.
 // gitToken resolves a git_api_keys secret by name ("" when absent) — a
 // function, not the store, so this package stays uncoupled from the secrets
-// package.
-func RegisterExecutors(queue *tasks.Queue, registry *Registry, gitToken func(name string) string) {
-	e := &executors{registry: registry, gitToken: gitToken}
+// package. catalogSources are the configured catalogs the install executor
+// resolves against.
+func RegisterExecutors(queue *tasks.Queue, registry *Registry, gitToken func(name string) string, catalogSources []CatalogSource) {
+	e := &executors{registry: registry, gitToken: gitToken, catalogSources: catalogSources}
 	queue.Register(OpImport, tasks.Executor{Run: e.importPackage})
+	queue.Register(OpExport, tasks.Executor{Run: e.exportVersion})
+	queue.Register(OpCatalogInstall, tasks.Executor{Run: e.catalogInstall})
 }
 
 type executors struct {
-	registry *Registry
-	gitToken func(name string) string
+	registry       *Registry
+	gitToken       func(name string) string
+	catalogSources []CatalogSource
 }
 
-// importPackage executes one provisioner_import task: resolve the source to
-// a directory (extracting or cloning first), find the package root, and copy
-// versions into the registry — never touching versions already present
-// (update = re-import newer version beside old, SHI semantics).
+// importPackage executes one provisioner_import task: parse the request and
+// hand it to the shared import path.
 func (e *executors) importPackage(ctx context.Context, task *tasks.Task, out *tasks.OutputWriter) error {
 	var meta ImportMetadata
 	if task.Metadata == nil {
@@ -105,11 +110,27 @@ func (e *executors) importPackage(ctx context.Context, task *tasks.Task, out *ta
 	if err := json.Unmarshal([]byte(*task.Metadata), &meta); err != nil {
 		return fmt.Errorf("parse import metadata: %w", err)
 	}
+	return e.runImport(ctx, &meta, out)
+}
+
+// runImport is the import path itself — shared by the import task and the
+// catalog installer: resolve the source to a directory (extracting or
+// cloning first), find the package root, and copy versions into the registry
+// — never touching versions already present (update = re-import newer
+// version beside old, SHI semantics).
+func (e *executors) runImport(ctx context.Context, meta *ImportMetadata, out *tasks.OutputWriter) error {
 	if err := meta.Validate(); err != nil {
 		return err
 	}
+	if meta.CleanupSource && meta.SourceType == SourceArchive {
+		if clean, cerr := safepath.CleanAbs(meta.Path); cerr == nil {
+			defer func() {
+				_ = os.Remove(clean)
+			}()
+		}
+	}
 
-	source, cleanup, err := e.resolveSource(ctx, &meta, out)
+	source, cleanup, err := e.resolveSource(ctx, meta, out)
 	if err != nil {
 		return err
 	}
@@ -267,11 +288,18 @@ func (e *executors) importCollection(root string, out *tasks.OutputWriter) error
 			skipped++
 			continue
 		}
+		// Field-DSL lint gate (fail-closed, design §3.1): an invalid form
+		// definition never enters the registry — the refusal lists every
+		// problem with the author's own values echoed.
+		if problems := LintVersionManifest(versionRoot); len(problems) > 0 {
+			return lintRefusal(name+"/"+entry.Name(), problems, out)
+		}
 		out.Write("stdout", "Importing "+name+"/"+entry.Name()+"\n")
 		if cerr := copyTree(versionRoot, target); cerr != nil {
 			return cerr
 		}
 		narrateRoleSpecs(target, out)
+		narrateFieldSchema(target, out)
 		imported++
 	}
 
@@ -319,13 +347,43 @@ func (e *executors) importVersion(root string, out *tasks.OutputWriter) error {
 		out.Write("stdout", "Created collection manifest for new family "+name+"\n")
 	}
 
+	// Field-DSL lint gate (fail-closed, design §3.1).
+	if problems := LintVersionManifest(root); len(problems) > 0 {
+		return lintRefusal(name+"/"+version, problems, out)
+	}
 	out.Write("stdout", "Importing "+name+"/"+version+"\n")
 	if cerr := copyTree(root, target); cerr != nil {
 		return cerr
 	}
 	narrateRoleSpecs(target, out)
+	narrateFieldSchema(target, out)
 	out.Write("stdout", "Import complete: "+name+"/"+version+"\n")
 	return nil
+}
+
+// lintRefusal narrates every DSL lint problem and fails the import — the
+// fail-closed rule: nothing partial ever lands.
+func lintRefusal(label string, problems []string, out *tasks.OutputWriter) error {
+	out.Write("stderr", label+": field DSL rejected ("+strconv.Itoa(len(problems))+" problem(s)):\n")
+	for _, problem := range problems {
+		out.Write("stderr", "  - "+problem+"\n")
+	}
+	return errors.New(label + " has an invalid field DSL — fix the manifest and re-import (" +
+		strconv.Itoa(len(problems)) + " problem(s) listed in the task output)")
+}
+
+// narrateFieldSchema derives the imported version's schema.json (design
+// §3.1's interop artifact); failures narrate, never fail the import — the
+// lint already proved the DSL parses.
+func narrateFieldSchema(versionRoot string, out *tasks.OutputWriter) {
+	count, err := BuildFieldSchema(versionRoot)
+	if err != nil {
+		out.Write("stderr", "schema.json derivation failed: "+err.Error()+"\n")
+		return
+	}
+	if count > 0 {
+		out.Write("stdout", "Derived schema.json for "+strconv.Itoa(count)+" field(s)\n")
+	}
 }
 
 // narrateRoleSpecs builds the imported version's role-specs cache (Mark's

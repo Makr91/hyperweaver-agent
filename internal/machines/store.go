@@ -41,6 +41,16 @@ var Migrations = []string{
 	`ALTER TABLE machines ADD COLUMN spec TEXT;`,
 }
 
+// ProfileTombstone holds provisioning-profiles' migration slots after the
+// feature's removal (design §9, ruled 2026-07-16: consumed by nothing in any
+// repo). The agent.sqlite migration list is POSITIONAL (user_version), so the
+// original CREATE slot cannot simply be deleted — an existing database would
+// read as "newer than this build understands" and fail to open (db.migrate's
+// guard). main.go keeps the slot with this DROP in its place (new databases:
+// nothing to drop) and appends the SAME statement at the list's end (existing
+// databases drop the table there — the standing tables-drop-freely rule).
+var ProfileTombstone = []string{`DROP TABLE IF EXISTS provisioning_profiles;`}
+
 // timeLayout is the stored timestamp format: fixed-width UTC so lexicographic
 // order is chronological (same convention as the tasks store).
 const timeLayout = "2006-01-02T15:04:05.000000000Z"

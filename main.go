@@ -451,10 +451,14 @@ func setupTasks(cfg *config.Config, secretsStore *secrets.Store) (*agentSystems,
 	// agent.sqlite carries every core-state family in ONE ordered list —
 	// user_version tracking is positional, so new scripts APPEND at the end
 	// (the artifact merge rebuild rides last for exactly that reason).
+	// ProfileTombstone appears TWICE by design: once holding the removed
+	// feature's original slot (position must survive removal), once appended
+	// so existing databases actually drop the table.
 	agentMigrations := append(append([]string{}, machines.Migrations...), assets.Migrations...)
 	agentMigrations = append(agentMigrations, machines.TemplateMigrations...)
-	agentMigrations = append(agentMigrations, machines.ProfileMigrations...)
+	agentMigrations = append(agentMigrations, machines.ProfileTombstone...)
 	agentMigrations = append(agentMigrations, assets.MergeMigrations...)
+	agentMigrations = append(agentMigrations, machines.ProfileTombstone...)
 	agentDB, err := openDB(agentPath, agentMigrations)
 	if err != nil {
 		_ = tasksDB.Close()
@@ -465,7 +469,7 @@ func setupTasks(cfg *config.Config, secretsStore *secrets.Store) (*agentSystems,
 	// them all, and the closer releases them in reverse-open order.
 	handles := []server.DBHandle{
 		{Name: "tasks.sqlite", Path: tasksPath, DB: tasksDB, Tables: []string{"tasks"}},
-		{Name: "agent.sqlite", Path: agentPath, DB: agentDB, Tables: []string{"machines", "artifacts", "artifact_locations", "templates", "provisioning_profiles"}},
+		{Name: "agent.sqlite", Path: agentPath, DB: agentDB, Tables: []string{"machines", "artifacts", "artifact_locations", "templates"}},
 	}
 	closer := func() {
 		for i := len(handles) - 1; i >= 0; i-- {
@@ -540,7 +544,17 @@ func setupTasks(cfg *config.Config, secretsStore *secrets.Store) (*agentSystems,
 		return nil, err
 	}
 	provisioners := provisioner.NewRegistry(provisionersDir)
-	provisioner.RegisterExecutors(queue, provisioners, secretsStore.GitToken)
+	catalogSources := make([]provisioner.CatalogSource, 0, len(cfg.CatalogSources.Sources))
+	for _, source := range cfg.CatalogSources.Sources {
+		catalogSources = append(catalogSources, provisioner.CatalogSource{
+			Name:    source.Name,
+			URL:     source.URL,
+			Enabled: source.Enabled,
+			Default: source.Default,
+			CAFile:  source.CAFile,
+		})
+	}
+	provisioner.RegisterExecutors(queue, provisioners, secretsStore.GitToken, catalogSources)
 
 	// The merged artifact system (artifact_storage.enabled): typed storage
 	// locations + the hash-verified registry every mounted file passes
@@ -624,6 +638,7 @@ func setupTasks(cfg *config.Config, secretsStore *secrets.Store) (*agentSystems,
 			CAKeyPath:               cfg.SSLCAKeyPath(),
 			DefaultSyncMethod:       cfg.Provisioning.DefaultSyncMethod,
 			GuestAgentEnabled:       cfg.GuestAgent.Enabled,
+			HostHooks:               cfg.Provisioning.HostHooks,
 			VRDECertRoot:            cfg.VRDECertRoot(),
 			DefaultNetworkInterface: cfg.Provisioning.DefaultNetworkInterface,
 			TemplatesDir:            templatesDir,

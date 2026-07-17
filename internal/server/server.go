@@ -365,20 +365,20 @@ func New(cfg *config.Config, keyStore *keys.Store, trayTokens *auth.TrayTokens, 
 	mux.Handle("GET /provisioning/network/status", requireKey(http.HandlerFunc(s.handleProvisioningNetworkStatus)))
 	mux.Handle("POST /provisioning/network/setup", requireKey(http.HandlerFunc(s.handleProvisioningNetworkSetup)))
 	mux.Handle("DELETE /provisioning/network/teardown", requireKey(http.HandlerFunc(s.handleProvisioningNetworkTeardown)))
-	// Provisioning profiles (the base's reusable credential/folder/playbook
-	// bundles — composed in the UI, applied via PUT /machines/{name}).
-	mux.Handle("GET /provisioning/profiles", requireKey(http.HandlerFunc(s.handleListProfiles)))
-	mux.Handle("POST /provisioning/profiles", requireKey(http.HandlerFunc(s.handleCreateProfile)))
-	mux.Handle("GET /provisioning/profiles/{profileId}", requireKey(http.HandlerFunc(s.handleGetProfile)))
-	mux.Handle("PUT /provisioning/profiles/{profileId}", requireKey(http.HandlerFunc(s.handleUpdateProfile)))
-	mux.Handle("DELETE /provisioning/profiles/{profileId}", requireKey(http.HandlerFunc(s.handleDeleteProfile)))
 	mux.Handle("GET /provisioning/provisioners", requireKey(http.HandlerFunc(s.handleListProvisioners)))
 	mux.Handle("POST /provisioning/provisioners/import", requireKey(http.HandlerFunc(s.handleImportProvisioner)))
+	mux.Handle("POST /provisioning/provisioners/import-upload", requireKey(http.HandlerFunc(s.handleImportUploadProvisioner)))
 	mux.Handle("POST /provisioning/provisioners/refresh-specs", requireKey(http.HandlerFunc(s.handleRefreshProvisionerSpecs)))
 	mux.Handle("GET /provisioning/provisioners/{name}", requireKey(http.HandlerFunc(s.handleProvisionerDetails)))
 	mux.Handle("DELETE /provisioning/provisioners/{name}", requireKey(http.HandlerFunc(s.handleDeleteProvisioner)))
 	mux.Handle("GET /provisioning/provisioners/{name}/versions/{version}", requireKey(http.HandlerFunc(s.handleProvisionerVersion)))
 	mux.Handle("DELETE /provisioning/provisioners/{name}/versions/{version}", requireKey(http.HandlerFunc(s.handleDeleteProvisionerVersion)))
+	// Share + catalog (design §7): export a version as one verified archive;
+	// browse configured catalogs and install from them.
+	mux.Handle("POST /provisioning/provisioners/{name}/versions/{version}/export", requireKey(http.HandlerFunc(s.handleExportProvisionerVersion)))
+	mux.Handle("GET /provisioning/catalog", requireKey(http.HandlerFunc(s.handleGetCatalog)))
+	mux.Handle("GET /provisioning/catalog/sources", requireKey(http.HandlerFunc(s.handleListCatalogSources)))
+	mux.Handle("POST /provisioning/catalog/install", requireKey(http.HandlerFunc(s.handleCatalogInstall)))
 
 	// The merged artifact system (the `artifacts` token, config-gated by
 	// artifact_storage.enabled — Mark's ruling 2026-07-09): zoneweaver's

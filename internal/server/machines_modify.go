@@ -1,7 +1,9 @@
 package server
 
 import (
+	"bytes"
 	"encoding/json"
+	"io"
 	"log/slog"
 	"net/http"
 
@@ -273,10 +275,27 @@ func (s *Server) handleModifyMachine(w http.ResponseWriter, r *http.Request) {
 	if machine == nil {
 		return
 	}
-	body := map[string]any{}
-	if err := decodeBody(r, &body); err != nil {
+	// The body bytes are read ONCE and unmarshaled twice: the map view drives
+	// the field logic, the raw view carries the provisioner document's OWN
+	// bytes into storage (a re-marshaled map would alphabetize its key order
+	// — the document is the program). decodeBody's empty-body-as-empty-object
+	// contract is preserved.
+	bodyBytes, rerr := io.ReadAll(r.Body)
+	if rerr != nil {
 		taskError(w, http.StatusBadRequest, "Invalid JSON body")
 		return
+	}
+	body := map[string]any{}
+	rawBody := map[string]json.RawMessage{}
+	if len(bytes.TrimSpace(bodyBytes)) > 0 {
+		if err := json.Unmarshal(bodyBytes, &body); err != nil {
+			taskError(w, http.StatusBadRequest, "Invalid JSON body")
+			return
+		}
+		if err := json.Unmarshal(bodyBytes, &rawBody); err != nil {
+			taskError(w, http.StatusBadRequest, "Invalid JSON body")
+			return
+		}
 	}
 
 	present := func(field string) bool {
@@ -350,14 +369,17 @@ func (s *Server) handleModifyMachine(w http.ResponseWriter, r *http.Request) {
 	// The provisioner document stores immediately (the base's rule: available
 	// to /provision without waiting for the task).
 	if present("provisioner") {
-		provisioner, ok := body["provisioner"].(map[string]any)
-		if !ok || len(provisioner) == 0 {
+		// The RAW request bytes store — key order is the document's program
+		// order. Validation decodes one object level only.
+		provisionerRaw := rawBody["provisioner"]
+		provisionerDoc := map[string]json.RawMessage{}
+		if uerr := json.Unmarshal(provisionerRaw, &provisionerDoc); uerr != nil || len(provisionerDoc) == 0 {
 			taskError(w, http.StatusBadRequest,
 				"provisioner must be a non-empty object — the Hosts.yml host-entry document")
 			return
 		}
 		if err := s.machines.MergeConfigurationSections(r.Context(), machine.Name,
-			map[string]any{"provisioner": provisioner}); err != nil {
+			map[string]any{"provisioner": provisionerRaw}); err != nil {
 			slog.Error("store provisioner document", "machine", machine.Name, "error", err)
 			taskError(w, http.StatusInternalServerError, "Failed to store provisioner configuration")
 			return
