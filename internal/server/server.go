@@ -384,6 +384,8 @@ func New(cfg *config.Config, keyStore *keys.Store, trayTokens *auth.TrayTokens, 
 	mux.Handle("GET /templates/sources", requireKey(http.HandlerFunc(s.handleListTemplateSources)))
 	mux.Handle("GET /templates/remote/{sourceName}", requireKey(http.HandlerFunc(s.handleRemoteTemplates)))
 	mux.Handle("GET /templates/remote/{sourceName}/{org}/{boxName}", requireKey(http.HandlerFunc(s.handleRemoteTemplateDetails)))
+	mux.Handle("GET /machines/{machineName}/hosts-yml", requireKey(http.HandlerFunc(s.handleGetHostsYAML)))
+	mux.Handle("PUT /machines/{machineName}/hosts-yml", requireKey(http.HandlerFunc(s.handlePutHostsYAML)))
 	mux.Handle("GET /machines/{machineName}/notes", requireKey(http.HandlerFunc(s.handleGetMachineNotes)))
 	mux.Handle("PUT /machines/{machineName}/notes", requireKey(http.HandlerFunc(s.handleUpdateMachineNotes)))
 	mux.Handle("GET /machines/{machineName}/tags", requireKey(http.HandlerFunc(s.handleGetMachineTags)))

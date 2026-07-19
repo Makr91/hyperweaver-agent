@@ -1866,6 +1866,34 @@
         }
       }
     },
+    "/machines/{machineName}/hosts-yml": {
+      "get": {
+        "tags": ["Machine Management"],
+        "summary": "The stored document as YAML",
+        "description": "Minimum role: viewer. The raw-YAML document surface (the FROZEN cross-agent contract, sync 2026-07-19 — identical route and shapes on both agents): the machine's stored document sections serialized as YAML text, key order preserved. SCOPE: exactly the six document sections — settings, zones, networks, disks, provisioner, metadata; agent bookkeeping (provisioner_state, pending_changes, guest_info, snapshots, host_hooks_confirmed) and the live hypervisor view never appear. On packaged machines this is the STORED document — the pipeline and extra_vars run from it; the working copy's Hosts.yml FILE regenerates from the package render at each provision (a manual vagrant run reads the render).",
+        "parameters": [ { "name": "machineName", "in": "path", "required": true, "schema": { "type": "string" } } ],
+        "responses": {
+          "200": { "description": "The document as YAML", "content": { "application/json": { "schema": { "type": "object", "properties": { "machine_name": { "type": "string" }, "yaml": { "type": "string", "description": "The stored document sections as YAML text" } } } } } },
+          "404": { "description": "Machine not found" },
+          "500": { "description": "Serialization failure" }
+        }
+      },
+      "put": {
+        "tags": ["Machine Management"],
+        "summary": "Replace the stored document from raw YAML",
+        "description": "Minimum role: operator. The raw-YAML edit half (the FROZEN cross-agent contract, sync 2026-07-19 — the emergency hatch: missing vars, extra roles, hand edits between create-without-start and provision). Body {yaml}. Refusals, nothing stored: unparseable YAML → 400 {error, line, column} (numeric, editor-jumpable); impossible section shapes (root/settings/zones/disks/provisioner/metadata not mappings, networks not a list) → 400 {error}; the converged document pre-flights still gate — consoleport 1025-65535, vcpus whole ≥ 1, the typed-disk frozen strings — the YAML door bypasses NOTHING; a bookkeeping key named in the YAML (provisioner_state, pending_changes, guest_info, snapshots, host_hooks_confirmed) or any unknown top-level key → 400 {error} (it would silently die at the next discovery merge — loud beats silent loss). Otherwise the document stores VERBATIM with KEY ORDER PRESERVED (comments die; the document is the program — provisioning: method keys execute in document order): the six sections replace wholesale, a section ABSENT from the YAML is REMOVED, bookkeeping and the live view survive untouched. 200 {warnings: []} — non-blocking string advisories (bhyve-vocabulary disk keys, no control IP, ...). Unknown keys INSIDE sections ride verbatim.",
+        "parameters": [ { "name": "machineName", "in": "path", "required": true, "schema": { "type": "string" } } ],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "type": "object", "required": ["yaml"], "properties": { "yaml": { "type": "string", "description": "The whole document as raw YAML — the six sections, nothing else" } } } } }
+        },
+        "responses": {
+          "200": { "description": "Document stored", "content": { "application/json": { "schema": { "type": "object", "properties": { "warnings": { "type": "array", "items": { "type": "string" }, "description": "Non-blocking advisories, shown verbatim" } } } } } },
+          "400": { "description": "Refused, nothing stored — parse error ({error, line, column}), impossible shape, converged pre-flight, bookkeeping/unknown top-level key ({error})", "content": { "application/json": { "schema": { "type": "object", "properties": { "error": { "type": "string" }, "line": { "type": "integer", "description": "Parse errors only" }, "column": { "type": "integer", "description": "Parse errors only" } } } } } },
+          "404": { "description": "Machine not found" }
+        }
+      }
+    },
     "/machines/{machineName}/notes": {
       "get": {
         "tags": ["Machine Management"],
