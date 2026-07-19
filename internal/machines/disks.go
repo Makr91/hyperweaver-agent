@@ -32,10 +32,18 @@ const (
 	DiskTypeNone     = "none"
 )
 
+// The disks.boot.clone_strategy vocabulary (frozen, sync 2026-07-19).
+const (
+	CloneStrategyCopy  = "copy"
+	CloneStrategyClone = "clone"
+)
+
+const cloneBaseName = "clone-base.vdi"
+
 // bhyveDiskKeys are the other-hypervisor keys a disks entry may carry —
 // bhyve vocabulary with no effect here: warned (never refused) and preserved
 // verbatim in the stored document (converged, sync 2026-07-17).
-var bhyveDiskKeys = []string{"pool", "dataset", "diskif", "clone_strategy"}
+var bhyveDiskKeys = []string{"pool", "dataset", "diskif"}
 
 // verbatimValue renders a document value for a refusal/warning string —
 // strings ride verbatim (even empty), everything else through fmt.
@@ -102,6 +110,25 @@ func ValidateDisks(disks, settings map[string]any) (problems, warnings []string)
 		if _, has := boot["path"]; has {
 			refuse("disks.boot.type template does not take path")
 		}
+		if raw, has := boot["clone_strategy"]; has {
+			switch strategy := verbatimValue(raw); strategy {
+			case CloneStrategyCopy:
+			case CloneStrategyClone:
+				if _, hasSize := boot["size"]; hasSize {
+					refuse("disks.boot.clone_strategy clone does not take size (a differencing disk keeps the template's size)")
+				}
+				if _, hasDir := boot["directory"]; hasDir {
+					refuse("disks.boot.clone_strategy clone does not take directory (the differencing disk lives in the machine folder)")
+				}
+				if _, hasVolume := boot["volume_name"]; hasVolume {
+					refuse("disks.boot.clone_strategy clone does not take volume_name (VirtualBox names the differencing disk)")
+				}
+			case "localize":
+				refuse("disks.boot.clone_strategy localize is zfs vocabulary with no analog on this hypervisor (clone|copy)")
+			default:
+				refuse("disks.boot.clone_strategy " + strategy + " is not a valid clone strategy (clone|copy)")
+			}
+		}
 	case DiskTypeImage:
 		// The file attaches AS-IS — never created, deleted, or resized.
 		if stringOr(boot["path"], "") == "" {
@@ -131,6 +158,9 @@ func ValidateDisks(disks, settings map[string]any) (problems, warnings []string)
 				break
 			}
 		}
+	}
+	if _, has := boot["clone_strategy"]; has && declared != "" && declared != DiskTypeTemplate {
+		refuse("disks.boot.clone_strategy requires disks.boot.type template")
 	}
 
 	// additional_disks[] — type REQUIRED, image|blank only, same per-type
@@ -194,6 +224,10 @@ func ValidateDisks(disks, settings map[string]any) (problems, warnings []string)
 	}
 	for _, entry := range listOr(disks["additional_disks"]) {
 		scanBhyveKeys(mapOr(entry))
+		if _, has := mapOr(entry)["clone_strategy"]; has && !seenBhyveKeys["clone_strategy"] {
+			seenBhyveKeys["clone_strategy"] = true
+			warnings = append(warnings, "clone_strategy has no effect on additional disks")
+		}
 	}
 	if effective := EffectiveBootType(disks, settings); box != "" &&
 		effective != "" && effective != DiskTypeTemplate {

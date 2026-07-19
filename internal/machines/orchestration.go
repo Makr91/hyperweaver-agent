@@ -99,8 +99,8 @@ func GroupByPriority(entries []PriorityEntry) []PriorityGroup {
 // StartupOrchestration queues start tasks for autostart machines in priority
 // order, highest first (the base's startZoneOrchestration: plain start tasks,
 // created_by orchestration_startup; the queue's ordering keys preserve the
-// creation order). Autostart = the spec's zones.autostart; machines already
-// running (live-checked) are skipped.
+// creation order). Autostart = the spec's vbox.autostart.enabled;
+// machines already running (live-checked) are skipped.
 func StartupOrchestration(ctx context.Context, store *Store, queue *tasks.Queue) {
 	list, err := store.List(ctx, &ListFilter{})
 	if err != nil {
@@ -127,7 +127,7 @@ func StartupOrchestration(ctx context.Context, store *Store, queue *tasks.Queue)
 		if perr != nil {
 			continue
 		}
-		if autostart, _ := spec.Zones["autostart"].(bool); !autostart {
+		if onOff(mapOr(spec.Vbox["autostart"])["enabled"]) != "on" {
 			continue
 		}
 		if running[machine.Name] || (machine.UUID != nil && running[*machine.UUID]) ||

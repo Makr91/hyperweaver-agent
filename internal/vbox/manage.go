@@ -310,6 +310,31 @@ func SetMediumProperty(ctx context.Context, vboxManage, path, key, value string)
 		"--property", key+"="+value)
 }
 
+// SetMediumType changes a medium's type (`modifymedium disk <path> --type`).
+func SetMediumType(ctx context.Context, vboxManage, path, mediumType string) error {
+	return runSimple(ctx, vboxManage, "modifymedium", "disk", path,
+		"--type", mediumType)
+}
+
+// MediumType reads a medium's type from `showmediuminfo disk <path>`.
+func MediumType(ctx context.Context, vboxManage, path string) (string, error) {
+	cmd := exec.CommandContext(ctx, vboxManage, "showmediuminfo", "disk", path)
+	cmd.SysProcAttr = procattr.NoConsole()
+	out, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("VBoxManage showmediuminfo: %w", err)
+	}
+	for _, line := range strings.Split(string(out), "\n") {
+		if rest, found := strings.CutPrefix(strings.TrimSpace(line), "Type:"); found {
+			fields := strings.Fields(rest)
+			if len(fields) > 0 {
+				return strings.ToLower(fields[0]), nil
+			}
+		}
+	}
+	return "", nil
+}
+
 // GetMediumProperty reads one custom medium property back. Mechanism:
 // `showmediuminfo disk <path>` — its "Property: key=value" lines are the only
 // CLI read for medium properties (modifymedium sets, never gets). "" when the
@@ -341,11 +366,13 @@ type HDD struct {
 	// registry-hygiene close targets it (closing a stale entry by PATH
 	// re-opens the file and dies on the very UUID mismatch being cleaned).
 	// Never on the /media wire (the frozen shape carries no uuid).
-	UUID      string   `json:"-"`
-	Path      string   `json:"path"`
-	Format    string   `json:"format"`
-	SizeBytes int64    `json:"size_bytes"`
-	InUseBy   []string `json:"in_use_by"`
+	UUID string `json:"-"`
+	// ParentUUID links a differencing child to its base ("" for base media).
+	ParentUUID string   `json:"-"`
+	Path       string   `json:"path"`
+	Format     string   `json:"format"`
+	SizeBytes  int64    `json:"size_bytes"`
+	InUseBy    []string `json:"in_use_by"`
 }
 
 // hddInUseVM matches the VM references the "In use by VMs:" lines carry —
@@ -393,6 +420,12 @@ func ListHDDs(ctx context.Context, vboxManage string) ([]HDD, error) {
 			continue
 		}
 		switch {
+		case strings.HasPrefix(trimmed, "Parent UUID:"):
+			parent := strings.TrimSpace(strings.TrimPrefix(trimmed, "Parent UUID:"))
+			if !strings.EqualFold(parent, "base") {
+				current.ParentUUID = parent
+			}
+			inUseBlock = false
 		case strings.HasPrefix(trimmed, "Location:"):
 			current.Path = strings.TrimSpace(strings.TrimPrefix(trimmed, "Location:"))
 			inUseBlock = false

@@ -103,15 +103,13 @@ type Spec struct {
 	// CloudInit is the document's cloud_init section at create
 	// (enabled/dns_domain/password/resolvers/sshkey — the base's vocabulary).
 	CloudInit map[string]any `json:"cloud_init"`
-	// Vbox is the document's vbox section at create — its directives[] list
-	// is the generic modifyvm passthrough (the base's zone attr map analog:
-	// any --flag=value, so hostbridge/netif/acpi/xhci-class fields ride it).
+	// Vbox is the document's vbox section at create — VirtualBox's own
+	// per-hypervisor key (Mark's ruling, sync 2026-07-19): the first-class
+	// knob vocabulary (vbox.<section>.<key> — cpu, memory, graphics, audio,
+	// usb, integration, platform, firmware, recording, vrde, autostart,
+	// serial[], parallel[]), the directives[] passthrough, and the
+	// guest_agent/post_provision_boot booleans.
 	Vbox map[string]any `json:"vbox"`
-	// Hardware is the first-class modifyvm knob vocabulary (hardware.go):
-	// hardware.<section>.<key> — cpu, memory, graphics, audio, usb,
-	// integration, platform, firmware, recording, vrde, autostart,
-	// serial[], parallel[].
-	Hardware map[string]any `json:"hardware"`
 	// HostIndex selects this machine's hosts[] entry in the rendered document
 	// (multi-host converged wire, sync 2026-07-17: M-Q1): ONE render may carry
 	// N coordinated machines, and each machine's prepare child reads ITS OWN

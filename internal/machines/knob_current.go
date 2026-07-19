@@ -1,6 +1,8 @@
 package machines
 
 import (
+	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -128,14 +130,104 @@ func KnobCurrent(machine *Machine, raw map[string]string, osTypeID string, file 
 		hardware["parallel"] = parallel
 	}
 	if len(hardware) > 0 {
-		current["hardware"] = hardware
+		current["vbox"] = hardware
 	}
 
 	if len(nics) > 0 {
 		annotateTransportNics(machine, raw, nics)
 		current["nics"] = nics
 	}
+	current["devices"] = devicesCurrent(raw)
 	return current
+}
+
+// devicesCurrent serves the structured device tree (the UI's ruled shape,
+// sync 2026-07-18 — kills its nic/controller/attachment regexes over the
+// flat showvminfo map): controllers by index, attachments by the
+// "<Controller>-<port>-<device>" keys (kind cdrom = emptydrive or .iso,
+// else disk; an empty drive answers path ""), nics per enabled adapter.
+func devicesCurrent(raw map[string]string) map[string]any {
+	controllers := []any{}
+	names := map[string]bool{}
+	for n := 0; ; n++ {
+		name, ok := raw["storagecontrollername"+strconv.Itoa(n)]
+		if !ok {
+			break
+		}
+		emitted := raw["storagecontrollertype"+strconv.Itoa(n)]
+		kind := reverseControllerType(emitted)
+		if kind == "" {
+			kind = emitted
+		}
+		names[name] = true
+		controllers = append(controllers, map[string]any{"name": name, "type": kind})
+	}
+
+	type attachment struct {
+		controller   string
+		port, device int
+		path, kind   string
+	}
+	rows := []attachment{}
+	for key, value := range raw {
+		if value == "none" || value == "" || strings.Contains(key, "ImageUUID") {
+			continue
+		}
+		match := attachmentPattern.FindStringSubmatch(key)
+		if len(match) < 4 || !names[match[1]] {
+			continue
+		}
+		port, perr := strconv.Atoi(match[2])
+		device, derr := strconv.Atoi(match[3])
+		if perr != nil || derr != nil {
+			continue
+		}
+		row := attachment{controller: match[1], port: port, device: device, path: value, kind: "disk"}
+		if value == "emptydrive" {
+			row.path, row.kind = "", "cdrom"
+		} else if strings.EqualFold(filepath.Ext(value), ".iso") {
+			row.kind = "cdrom"
+		}
+		rows = append(rows, row)
+	}
+	sort.Slice(rows, func(i, j int) bool {
+		if rows[i].controller != rows[j].controller {
+			return rows[i].controller < rows[j].controller
+		}
+		if rows[i].port != rows[j].port {
+			return rows[i].port < rows[j].port
+		}
+		return rows[i].device < rows[j].device
+	})
+	attachments := make([]any, 0, len(rows))
+	for _, row := range rows {
+		attachments = append(attachments, map[string]any{
+			"controller": row.controller, "port": row.port, "device": row.device,
+			"path": row.path, "kind": row.kind,
+		})
+	}
+
+	deviceNics := []any{}
+	for adapter := 1; adapter <= maxNICSlots; adapter++ {
+		n := strconv.Itoa(adapter)
+		mode, ok := raw["nic"+n]
+		if !ok || mode == "none" {
+			continue
+		}
+		entry := map[string]any{"adapter": adapter, "mode": mode}
+		bridge := raw["bridgeadapter"+n]
+		if bridge == "" {
+			bridge = raw["hostonlyadapter"+n]
+		}
+		if bridge != "" {
+			entry["bridge"] = bridge
+		}
+		if mac := raw["macaddress"+n]; mac != "" {
+			entry["mac"] = mac
+		}
+		deviceNics = append(deviceNics, entry)
+	}
+	return map[string]any{"controllers": controllers, "attachments": attachments, "nics": deviceNics}
 }
 
 // annotateTransportNics stamps the transport/provisional markers onto the

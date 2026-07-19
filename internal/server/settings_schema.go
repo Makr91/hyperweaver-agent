@@ -847,12 +847,12 @@ var settingsSchema = map[string]any{
 		},
 	},
 	"guest_agent": map[string]any{
-		"description":      "QEMU guest-agent channel (/machines/{name}/guest/*, the guest-agent capability token): guests run qemu-ga on a COM2 UART → host pipe — credential-less live IPs, exec, and clean shutdown without SSH or Guest Additions. The UART is a per-machine option: zones.guest_agent at create (default false — the Proxmox model, shared with zoneweaver) or POST /machines/{name}/guest-agent/setup",
+		"description":      "QEMU guest-agent channel (/machines/{name}/guest/*, the guest-agent capability token): guests run qemu-ga on a COM2 UART → host pipe — credential-less live IPs, exec, and clean shutdown without SSH or Guest Additions. The UART is a per-machine option: vbox.guest_agent at create (default false — the Proxmox model) or POST /machines/{name}/guest-agent/setup",
 		"requires_restart": true,
 		"properties": map[string]any{
 			"enabled": map[string]any{
 				"type":        "boolean",
-				"description": "MASTER gate: allow per-machine UART wiring (zones.guest_agent / the setup endpoint), serve /machines/{name}/guest/*, and advertise the guest-agent token; false disables wiring and removes the surface entirely",
+				"description": "MASTER gate: allow per-machine UART wiring (vbox.guest_agent / the setup endpoint), serve /machines/{name}/guest/*, and advertise the guest-agent token; false disables wiring and removes the surface entirely",
 				"default":     true,
 			},
 		},

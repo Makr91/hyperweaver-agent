@@ -733,31 +733,31 @@ func (s *Store) MergePendingChanges(ctx context.Context, name string, updates ma
 	sections := ParseRawConfiguration(machine)
 	pending := rawSectionMap(sections, "pending_changes")
 	for key, value := range updates {
-		if key != "hardware" {
+		if key != "vbox" {
 			pending[key] = value
 			continue
 		}
-		hardware, _ := pending["hardware"].(map[string]any)
-		if hardware == nil {
-			hardware = map[string]any{}
+		vboxSection, _ := pending["vbox"].(map[string]any)
+		if vboxSection == nil {
+			vboxSection = map[string]any{}
 		}
 		for sectionName, raw := range mapOr(value) {
-			// serial[]/parallel[] are arrays — they replace whole.
+			// serial[]/parallel[]/directives are arrays — they replace whole.
 			section, ok := raw.(map[string]any)
 			if !ok {
-				hardware[sectionName] = raw
+				vboxSection[sectionName] = raw
 				continue
 			}
-			merged, _ := hardware[sectionName].(map[string]any)
+			merged, _ := vboxSection[sectionName].(map[string]any)
 			if merged == nil {
 				merged = map[string]any{}
 			}
 			for k, v := range section {
 				merged[k] = v
 			}
-			hardware[sectionName] = merged
+			vboxSection[sectionName] = merged
 		}
-		pending["hardware"] = hardware
+		pending["vbox"] = vboxSection
 	}
 	raw, err := json.Marshal(pending)
 	if err != nil {

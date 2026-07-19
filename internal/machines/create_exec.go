@@ -55,8 +55,11 @@ type createExecutionOutput struct {
 	// JSON bytes: the rendered YAML's own key order, which finalize stores
 	// verbatim (a map here would alphabetize it).
 	Document json.RawMessage `json:"document"`
-	// BootdiskPath is the machine's cloned boot medium.
+	// BootdiskPath is the machine's cloned boot medium (for a clone-strategy
+	// boot: the shared multiattach base).
 	BootdiskPath string `json:"bootdisk_path,omitempty"`
+	// BootdiskMultiattach marks a clone-strategy boot.
+	BootdiskMultiattach bool `json:"bootdisk_multiattach,omitempty"`
 	// MediaCreated tracks created media for reverse-order rollback.
 	MediaCreated []string `json:"media_created,omitempty"`
 	// UUID is the VirtualBox identity createvm reported.
@@ -197,7 +200,6 @@ func (e *executors) prepareDocument(ctx context.Context, task *tasks.Task, out *
 	if err != nil {
 		return err
 	}
-
 	workdir := e.machineWorkdir(task.MachineName)
 	e.taskProgress(task, 50, "materializing_workdir")
 	out.Write("stdout", "Materializing working directory "+workdir+"\n")
@@ -245,7 +247,6 @@ func specDocument(ctx context.Context, env *ProvisionEnv, spec *Spec) map[string
 		"zones":      spec.Zones,
 		"cloud_init": spec.CloudInit,
 		"vbox":       spec.Vbox,
-		"hardware":   spec.Hardware,
 	} {
 		if len(section) > 0 {
 			document[key] = section
@@ -547,41 +548,76 @@ func (e *executors) createStorage(ctx context.Context, task *tasks.Task, out *ta
 			return fmt.Errorf("template %s/%s: %w (download it first — POST /templates/pull or let create chain it)", org, box, terr)
 		}
 		e.taskProgress(task, 30, "importing_template")
-		bootDir, derr := diskDirectory(boot, workdir, "disks.boot")
-		if derr != nil {
-			return derr
-		}
-		// The cloned file takes the entry's volume_name (zoneweaver names the
-		// cloned zvol by it — the native mirror); absent = the spelled "boot"
-		// default. The template's own format keeps its extension.
-		bootPath = filepath.Join(bootDir,
-			stringOr(boot["volume_name"], "boot")+filepath.Ext(template.DiskPath))
-		clearStaleMedium(ctx, vboxExe, bootPath, out)
-		e.clearStaleSourceRegistration(ctx, vboxExe, template.DiskPath, out)
-		out.Write("stdout", "Cloning template "+template.DiskPath+" → "+bootPath+"\n")
-		if cerr := vbox.CloneMedium(ctx, vboxExe, template.DiskPath, bootPath, ""); cerr != nil {
-			rollback()
-			return cerr
-		}
-		// Release the SOURCE's fresh registration immediately: clonemedium
-		// registers the source, and a lingering entry goes STALE — packer's
-		// stream-optimized VMDKs never take the UUID VirtualBox assigns, so
-		// the NEXT clone dies on an E_FAIL UUID mismatch (Mark's live failure,
-		// 2026-07-17). Failures narrate; the clone already succeeded.
-		if cerr := vbox.CloseMedium(ctx, vboxExe, template.DiskPath, false); cerr != nil {
-			out.Write("stderr", "Releasing the template from the media registry failed (harmless when unregistered): "+cerr.Error()+"\n")
-		}
-		media = append(media, bootPath)
-		// Provenance stamp at materialization (property-first, sidecar
-		// fallback): the delete flow destroys stamped media and preserves
-		// everything else.
-		if perr := stampMedium(ctx, vboxExe, bootPath, DiskTypeTemplate, out); perr != nil {
-			rollback()
-			return perr
-		}
-		if sizeMB := sizeToMB(boot["size"]); sizeMB > 0 {
-			if rerr := vbox.ResizeMedium(ctx, vboxExe, bootPath, sizeMB); rerr != nil {
-				out.Write("stderr", "Boot volume resize failed (continuing with template size): "+rerr.Error()+"\n")
+		if stringOr(boot["clone_strategy"], CloneStrategyCopy) == CloneStrategyClone {
+			basePath := filepath.Join(filepath.Dir(template.DiskPath), cloneBaseName)
+			if _, serr := os.Stat(basePath); serr != nil {
+				e.clearStaleSourceRegistration(ctx, vboxExe, basePath, out)
+				e.clearStaleSourceRegistration(ctx, vboxExe, template.DiskPath, out)
+				out.Write("stdout", "Creating the shared clone base "+basePath+" (one-time full copy of "+template.DiskPath+")\n")
+				if cerr := vbox.CloneMedium(ctx, vboxExe, template.DiskPath, basePath, "VDI"); cerr != nil {
+					rollback()
+					return cerr
+				}
+				if cerr := vbox.CloseMedium(ctx, vboxExe, template.DiskPath, false); cerr != nil {
+					out.Write("stderr", "Releasing the template from the media registry failed (harmless when unregistered): "+cerr.Error()+"\n")
+				}
+				if perr := stampMedium(ctx, vboxExe, basePath, DiskTypeTemplate, out); perr != nil {
+					rollback()
+					return perr
+				}
+			}
+			mediumType, terr2 := vbox.MediumType(ctx, vboxExe, basePath)
+			if terr2 != nil {
+				rollback()
+				return terr2
+			}
+			if mediumType != "multiattach" {
+				if merr := vbox.SetMediumType(ctx, vboxExe, basePath, "multiattach"); merr != nil {
+					rollback()
+					return fmt.Errorf("clone base %s could not be made multiattach: %w", basePath, merr)
+				}
+			}
+			e.sweepOrphanCloneChildren(ctx, vboxExe, basePath, out)
+			bootPath = basePath
+			output.BootdiskMultiattach = true
+			out.Write("stdout", "Boot links from the shared clone base (differencing disk created at attach)\n")
+		} else {
+			bootDir, derr := diskDirectory(boot, workdir, "disks.boot")
+			if derr != nil {
+				return derr
+			}
+			// The cloned file takes the entry's volume_name (zoneweaver names the
+			// cloned zvol by it — the native mirror); absent = the spelled "boot"
+			// default. The template's own format keeps its extension.
+			bootPath = filepath.Join(bootDir,
+				stringOr(boot["volume_name"], "boot")+filepath.Ext(template.DiskPath))
+			clearStaleMedium(ctx, vboxExe, bootPath, out)
+			e.clearStaleSourceRegistration(ctx, vboxExe, template.DiskPath, out)
+			out.Write("stdout", "Cloning template "+template.DiskPath+" → "+bootPath+"\n")
+			if cerr := vbox.CloneMedium(ctx, vboxExe, template.DiskPath, bootPath, ""); cerr != nil {
+				rollback()
+				return cerr
+			}
+			// Release the SOURCE's fresh registration immediately: clonemedium
+			// registers the source, and a lingering entry goes STALE — packer's
+			// stream-optimized VMDKs never take the UUID VirtualBox assigns, so
+			// the NEXT clone dies on an E_FAIL UUID mismatch (Mark's live failure,
+			// 2026-07-17). Failures narrate; the clone already succeeded.
+			if cerr := vbox.CloseMedium(ctx, vboxExe, template.DiskPath, false); cerr != nil {
+				out.Write("stderr", "Releasing the template from the media registry failed (harmless when unregistered): "+cerr.Error()+"\n")
+			}
+			media = append(media, bootPath)
+			// Provenance stamp at materialization (property-first, sidecar
+			// fallback): the delete flow destroys stamped media and preserves
+			// everything else.
+			if perr := stampMedium(ctx, vboxExe, bootPath, DiskTypeTemplate, out); perr != nil {
+				rollback()
+				return perr
+			}
+			if sizeMB := sizeToMB(boot["size"]); sizeMB > 0 {
+				if rerr := vbox.ResizeMedium(ctx, vboxExe, bootPath, sizeMB); rerr != nil {
+					out.Write("stderr", "Boot volume resize failed (continuing with template size): "+rerr.Error()+"\n")
+				}
 			}
 		}
 
@@ -815,9 +851,8 @@ func (e *executors) createConfig(ctx context.Context, task *tasks.Task, out *tas
 	// the guest_agent.enabled master gate — ConfigurationManager.js's
 	// buildExtraAttrCommand). A document claiming serial port 2 itself wins;
 	// QGA steps aside. Opt-in later via POST /machines/{name}/guest-agent/setup.
-	guestAgent, _ := document.Section("zones")["guest_agent"].(bool)
-	if e.env.GuestAgentEnabled && guestAgent {
-		if serialPortClaimed(document.Section("hardware"), 2) {
+	if e.env.GuestAgentEnabled && onOff(document.Section("vbox")["guest_agent"]) == "on" {
+		if serialPortClaimed(document.Section("vbox"), 2) {
 			out.Write("stderr", "Document claims serial port 2 — guest-agent UART skipped\n")
 		} else {
 			pipe := qga.PipePath(e.machineWorkdir(task.MachineName), task.MachineName)
@@ -1012,44 +1047,6 @@ func modifyFlags(document MachineConfig, hostOnlyAdapter string, sshForwardPort,
 	// the order is exactly what the document says.
 	flags = append(flags, bootOrderFlags(settings["boot_order"])...)
 
-	// The base's zone attrs at CREATE (Mark's proper-tab ruling — the same
-	// named vocabulary the modify executor translates, buildZoneAttributeMap's
-	// set): bootrom→firmware, hostbridge→chipset (i440fx→piix3), vnc→VRDE,
-	// acpi/xhci direct, netif→each DOCUMENT adapter's hardware type (the
-	// reserved NAT adapter keeps VirtualBox's default — vagrant's exact
-	// layout is the provisioning contract). diskif has no modifyvm analog —
-	// it selects the storage CONTROLLER type, consumed by attachStorage.
-	zones := document.Section("zones")
-	if autostart, ok := zones["autostart"].(bool); ok && autostart {
-		flags = append(flags, "--autostart-enabled=on")
-	}
-	if v, ok := zones["bootrom"]; ok {
-		firmware := "bios"
-		if strings.Contains(strings.ToLower(stringOr(v, "")), "efi") {
-			firmware = "efi"
-		}
-		flags = append(flags, "--firmware="+firmware)
-	}
-	if v, ok := zones["hostbridge"]; ok {
-		chipset := strings.ToLower(stringOr(v, ""))
-		if chipset == "i440fx" {
-			chipset = "piix3"
-		}
-		if chipset != "" {
-			flags = append(flags, "--chipset="+chipset)
-		}
-	}
-	if v, ok := zones["vnc"]; ok {
-		flags = append(flags, "--vrde="+onOff(v))
-	}
-	if v, ok := zones["acpi"]; ok {
-		flags = append(flags, "--acpi="+onOff(v))
-	}
-	if v, ok := zones["xhci"]; ok {
-		flags = append(flags, "--usb-xhci="+onOff(v))
-	}
-	nicType := vboxNICType(stringOr(zones["netif"], ""))
-
 	// Document networks from adapter 2 — adapter 1 is the reserved NAT.
 	for i, entry := range document.List("networks") {
 		network := mapOr(entry)
@@ -1066,22 +1063,14 @@ func modifyFlags(document MachineConfig, hostOnlyAdapter string, sshForwardPort,
 				flags = append(flags, "--bridge-adapter"+n+"="+bridge)
 			}
 		}
-		// zones.netif's coarse type, unless the entry carries its own raw
-		// nic_type (nicExtraFlags emits it with the other per-NIC knobs).
-		if nicType != "" && stringOr(network["nic_type"], "") == "" {
-			flags = append(flags, "--nic-type"+n+"="+nicType)
-		}
 		if mac := stringOr(network["mac"], ""); mac != "" && !strings.EqualFold(mac, "auto") {
 			flags = append(flags, "--mac-address"+n+"="+strings.ReplaceAll(mac, ":", ""))
 		}
 		flags = append(flags, nicExtraFlags(network, n)...)
 	}
 
-	// The first-class hardware vocabulary (Mark's ALL-knobs ruling
-	// 2026-07-09): hardware.<section>.<key> — emitted after the legacy
-	// zones/settings flags so a hardware twin of the same knob wins.
-	if hardware := document.Section("hardware"); len(hardware) > 0 {
-		hwFlags, herr := hardwareFlags(hardware)
+	if vboxSection := document.Section("vbox"); len(vboxSection) > 0 {
+		hwFlags, herr := hardwareFlags(vboxSection)
 		if herr != nil {
 			return nil, herr
 		}
@@ -1229,7 +1218,7 @@ func storageControllers(document MachineConfig) ([]*controllerPlan, error) {
 	if len(plans) == 0 {
 		plans = append(plans, &controllerPlan{
 			name:     sataController,
-			kind:     storageControllerKind(stringOr(document.Section("zones")["diskif"], "")),
+			kind:     "sata",
 			bootable: true,
 		})
 	}
@@ -1306,6 +1295,11 @@ func (e *executors) attachStorage(ctx context.Context, vboxExe, name string,
 		device := int(intOr(boot["device"], 0))
 		if aerr := vbox.StorageAttach(ctx, vboxExe, name, plan.name, port, device, "hdd", output.BootdiskPath); aerr != nil {
 			return aerr
+		}
+		if output.BootdiskMultiattach {
+			if serr := e.stampDifferencingChild(ctx, vboxExe, name, output.BootdiskPath, out); serr != nil {
+				return serr
+			}
 		}
 		if port >= plan.nextPort {
 			plan.nextPort = port + 1
@@ -1443,6 +1437,61 @@ func (e *executors) clearStaleSourceRegistration(ctx context.Context, vboxExe, s
 		}
 		return
 	}
+}
+
+func (e *executors) sweepOrphanCloneChildren(ctx context.Context, vboxExe, basePath string, out *tasks.OutputWriter) {
+	hdds, err := vbox.ListHDDs(ctx, vboxExe)
+	if err != nil {
+		out.Write("stderr", "Media-registry listing failed (orphan-child sweep skipped): "+err.Error()+"\n")
+		return
+	}
+	baseUUID := ""
+	want := filepath.Clean(basePath)
+	for i := range hdds {
+		if strings.EqualFold(filepath.Clean(hdds[i].Path), want) {
+			baseUUID = hdds[i].UUID
+			break
+		}
+	}
+	if baseUUID == "" {
+		return
+	}
+	for i := range hdds {
+		if hdds[i].ParentUUID != baseUUID || len(hdds[i].InUseBy) > 0 {
+			continue
+		}
+		out.Write("stdout", "Removing orphaned differencing child from a previous attempt: "+hdds[i].Path+"\n")
+		if cerr := vbox.CloseMedium(ctx, vboxExe, hdds[i].UUID, true); cerr != nil {
+			out.Write("stderr", "Orphan child removal failed: "+cerr.Error()+"\n")
+		}
+	}
+}
+
+func (e *executors) stampDifferencingChild(ctx context.Context, vboxExe, machineName, basePath string, out *tasks.OutputWriter) error {
+	hdds, err := vbox.ListHDDs(ctx, vboxExe)
+	if err != nil {
+		return fmt.Errorf("media registry listing for the differencing-child stamp: %w", err)
+	}
+	baseUUID := ""
+	want := filepath.Clean(basePath)
+	for i := range hdds {
+		if strings.EqualFold(filepath.Clean(hdds[i].Path), want) {
+			baseUUID = hdds[i].UUID
+			break
+		}
+	}
+	for i := range hdds {
+		if hdds[i].ParentUUID != baseUUID || baseUUID == "" {
+			continue
+		}
+		for _, holder := range hdds[i].InUseBy {
+			if strings.EqualFold(holder, machineName) {
+				out.Write("stdout", "Stamping differencing boot disk "+hdds[i].Path+"\n")
+				return stampMedium(ctx, vboxExe, hdds[i].Path, DiskTypeTemplate, out)
+			}
+		}
+	}
+	return fmt.Errorf("differencing child of %s for machine %s not found in the media registry", basePath, machineName)
 }
 
 // clearStaleMedium makes a create retry idempotent: a previous failed run

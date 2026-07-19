@@ -98,8 +98,8 @@ func (e *executors) modifyMachine(ctx context.Context, task *tasks.Task, out *ta
 	// request wins (the create-time collision rule).
 	if raw, ok := metadata["guest_agent"]; ok {
 		e.taskProgress(task, 45, "modifying_guest_agent")
-		if serialPortClaimed(mapOr(metadata["hardware"]), 2) {
-			out.Write("stderr", "guest_agent skipped — hardware.serial claims port 2 in the same request (the document wins)\n")
+		if serialPortClaimed(mapOr(metadata["vbox"]), 2) {
+			out.Write("stderr", "guest_agent skipped — vbox.serial claims port 2 in the same request (the document wins)\n")
 		} else {
 			var uartFlags []string
 			if onOff(raw) == "on" {
@@ -592,21 +592,17 @@ func modifyAttributeFlags(metadata map[string]any, info *vbox.Info) (flags, note
 			notes = append(notes, "boot_order carries no usable entries (floppy|dvd|disk|net|none) — skipped")
 		}
 	}
-	// hardware.<section>.<key> — the full knob vocabulary (hardware.go).
-	if hardware := mapOr(metadata["hardware"]); len(hardware) > 0 {
-		hwFlags, herr := hardwareFlags(hardware)
+	if vboxSection := mapOr(metadata["vbox"]); len(vboxSection) > 0 {
+		hwFlags, herr := hardwareFlags(vboxSection)
 		if herr != nil {
 			return nil, nil, herr
 		}
 		flags = append(flags, hwFlags...)
-	}
-	// The vbox.directives passthrough at MODIFY — the same generic modifyvm
-	// attribute list create accepts (the zonecfg attr-map analog): any
-	// --flag=value the Edit surface wants to reach.
-	for _, entry := range listOr(mapOr(metadata["vbox"])["directives"]) {
-		directive := mapOr(entry)
-		if name := stringOr(directive["directive"], ""); name != "" {
-			flags = append(flags, "--"+name+"="+stringOr(directive["value"], ""))
+		for _, entry := range listOr(vboxSection["directives"]) {
+			directive := mapOr(entry)
+			if name := stringOr(directive["directive"], ""); name != "" {
+				flags = append(flags, "--"+name+"="+stringOr(directive["value"], ""))
+			}
 		}
 	}
 	return flags, notes, nil

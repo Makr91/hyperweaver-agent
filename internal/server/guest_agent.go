@@ -369,7 +369,7 @@ func (s *Server) handleGuestAgentSetup(w http.ResponseWriter, r *http.Request) {
 	}
 
 	doc := map[string]any{
-		"hardware": map[string]any{
+		"vbox": map[string]any{
 			"serial": []any{map[string]any{
 				"port":    2,
 				"io_base": "0x2F8",

@@ -89,6 +89,7 @@ var hardwareVocabulary = map[string]map[string]hardwareKnob{
 		"keyboard":                 {"keyboard", hwString},
 	},
 	"platform": {
+		"acpi":                {"acpi", hwOnOff},
 		"chipset":             {"chipset", hwString},
 		"iommu":               {"iommu", hwString},
 		"tpm_type":            {"tpm-type", hwString},
@@ -190,34 +191,30 @@ var hardwareEnumValues = map[string]map[string][]string{
 // dropdown feed, Mark's enum ruling 2026-07-09). Keys are FLAT DOTTED, one
 // wire shape with zoneweaver (the 2026-07-12 one-wire ruling): literal
 // hardware.<section>.<key> derived from the modifyvm vocabulary (on|off knobs
-// + the usage dump's enums), plus the document-level zones.<key>, nics.<key>,
-// disks.controller_type, boot_order (entry values), settings.sync_method.
-// Free-form and numeric knobs are absent — presence in the map MEANS dropdown.
+// + the usage dump's enums), plus the document-level nics.<key>,
+// disks.controller_type, disks.boot.clone_strategy, boot_order (entry
+// values), settings.sync_method, settings.firmware_type. Free-form and
+// numeric knobs are absent — presence in the map MEANS dropdown.
 func KnobValues() map[string][]string {
 	values := map[string][]string{
-		"hardware.serial.type":  {"16450", "16550A", "16750"},
-		"zones.bootrom":         {"bios", "efi"},
-		"zones.hostbridge":      {"i440fx", "piix3", "ich9", "armv8virtual"},
-		"zones.vnc":             {"on", "off"},
-		"zones.acpi":            {"on", "off"},
-		"zones.xhci":            {"on", "off"},
-		"zones.netif":           {"virtio", "e1000"},
-		"zones.diskif":          {"ide", "sata", "scsi", "sas", "nvme", "virtio", "usb", "floppy"},
-		"nics.promisc":          {"deny", "allow-vms", "allow-all"},
-		"nics.nic_type":         {"Am79C970A", "Am79C973", "82540EM", "82543GC", "82545EM", "virtio", "usbnet"},
-		"nics.cable_connected":  {"on", "off"},
-		"disks.controller_type": {"ide", "sata", "scsi", "sas", "nvme", "virtio", "usb", "floppy"},
-		"boot_order":            {"floppy", "dvd", "disk", "net", "none"},
-		"settings.sync_method":  {"rsync", "scp"},
+		"vbox.serial.type":       {"16450", "16550A", "16750"},
+		"nics.promisc":           {"deny", "allow-vms", "allow-all"},
+		"nics.nic_type":          {"Am79C970A", "Am79C973", "82540EM", "82543GC", "82545EM", "virtio", "usbnet"},
+		"nics.cable_connected":   {"on", "off"},
+		"disks.controller_type":  {"ide", "sata", "scsi", "sas", "nvme", "virtio", "usb", "floppy"},
+		"boot_order":             {"floppy", "dvd", "disk", "net", "none"},
+		"settings.sync_method":   {"rsync", "scp"},
+		"settings.firmware_type": {"BIOS", "UEFI"},
 	}
+	values["disks.boot.clone_strategy"] = []string{"clone", "copy"}
 	for sectionName, section := range hardwareVocabulary {
 		for key, knob := range section {
 			if knob.kind == hwOnOff {
-				values["hardware."+sectionName+"."+key] = []string{"on", "off"}
+				values["vbox."+sectionName+"."+key] = []string{"on", "off"}
 				continue
 			}
 			if enum, ok := hardwareEnumValues[sectionName][key]; ok {
-				values["hardware."+sectionName+"."+key] = enum
+				values["vbox."+sectionName+"."+key] = enum
 			}
 		}
 	}
@@ -254,15 +251,15 @@ func MachineKnobDefaults() map[string]any {
 	// The forced console baseline modifyFlags emits on EVERY create (Mark's
 	// browser-RDP-era directive 2026-07-10) — an unset field runs with these.
 	// Keys mirror knob_current's own positions (top-level xhci + its
-	// hardware.usb twin, hardware.integration.*, hardware.vrde.*).
+	// vbox.usb twin, vbox.integration.*, vbox.vrde.*).
 	defaults["xhci"] = "on"
-	defaults["hardware.usb.xhci"] = "on"
-	defaults["hardware.integration.mouse"] = "usbtablet"
-	defaults["hardware.integration.keyboard"] = "usb"
-	defaults["hardware.integration.clipboard_mode"] = "bidirectional"
-	defaults["hardware.integration.clipboard_file_transfers"] = "enabled"
-	defaults["hardware.vrde.multi_con"] = "on"
-	defaults["hardware.vrde.reuse_con"] = "on"
+	defaults["vbox.usb.xhci"] = "on"
+	defaults["vbox.integration.mouse"] = "usbtablet"
+	defaults["vbox.integration.keyboard"] = "usb"
+	defaults["vbox.integration.clipboard_mode"] = "bidirectional"
+	defaults["vbox.integration.clipboard_file_transfers"] = "enabled"
+	defaults["vbox.vrde.multi_con"] = "on"
+	defaults["vbox.vrde.reuse_con"] = "on"
 
 	// Agent-policy defaults: storageControllerKind's default bus, the
 	// orchestration boot priority an unset machine runs at, the sync transport
@@ -278,6 +275,10 @@ func MachineKnobDefaults() map[string]any {
 	// serves true (the datacenter model).
 	defaults["transport.remove_on_completion"] = false
 
+	defaults["settings.firmware_type"] = "BIOS"
+	defaults["vbox.guest_agent"] = false
+	defaults["vbox.post_provision_boot"] = false
+
 	// VirtualBox constructor defaults already encoded in this agent's own
 	// settings-file reader, plus the spelled disk defaults (UI defaults ask,
 	// sync 2026-07-18).
@@ -286,6 +287,7 @@ func MachineKnobDefaults() map[string]any {
 	defaults["nics.speed"] = 0
 	defaults["nics.boot_prio"] = 0
 	defaults["disks.controller_type"] = "sata"
+	defaults["disks.boot.clone_strategy"] = "copy"
 	defaults["disks.sparse"] = true
 	defaults["disks.volume_name"] = "boot | disk<N>"
 	defaults["disks.directory"] = "machine folder"
@@ -300,6 +302,8 @@ func hardwareFlags(hardware map[string]any) ([]string, error) {
 	sequences := []string{}
 	for sectionName, raw := range hardware {
 		switch sectionName {
+		case "directives", "guest_agent", "post_provision_boot":
+			continue
 		case "serial":
 			serial, err := serialFlags(listOr(raw))
 			if err != nil {

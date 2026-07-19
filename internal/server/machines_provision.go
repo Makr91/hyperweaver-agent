@@ -658,14 +658,14 @@ func (s *Server) buildProvisionChain(ctx context.Context, machine *machines.Mach
 	// removal — settings.remove_transport_on_completion or any networks[]
 	// entry's remove_on_completion (absent = this agent's ruled default
 	// FALSE) — gets stop → machine_transport_remove → start as pipeline
-	// steps, so the removal takes effect immediately. zones.post_provision_boot
-	// (the live Hosts.yml documents' existing cycle-after-provisioning knob)
+	// steps, so the removal takes effect immediately. settings.post_provision_boot
+	// (the cycle-after-provisioning knob — rehomed from zones, sync 2026-07-19)
 	// triggers the SAME stop→start cycle without the removal step — reused,
 	// never a second sequencing. The post-cycle boot gates on NOTHING: no
 	// wait_ssh, no reconnect check — the transport is gone by design and the
 	// run is COMPLETE at the boot.
 	removalFlagged := machines.TransportRemovalFlagged(v.config)
-	if removalFlagged || docEnabled(v.config.Section("zones")["post_provision_boot"]) {
+	if removalFlagged || docEnabled(v.config.Section("vbox")["post_provision_boot"]) {
 		stopTask, terr := s.createChainTask(ctx, machine.Name, machines.OpStop,
 			nil, previous, parentID, createdBy)
 		if terr != nil {

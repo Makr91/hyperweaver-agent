@@ -225,6 +225,52 @@ func (e *executors) templateDelete(ctx context.Context, task *tasks.Task, out *t
 	out.Write("stdout", fmt.Sprintf("Deleting template %s/%s v%s (%s)\n",
 		template.Organization, template.BoxName, template.Version, template.DiskPath))
 
+	basePath := filepath.Join(filepath.Dir(template.DiskPath), cloneBaseName)
+	if _, serr := os.Stat(basePath); serr == nil {
+		vboxExe := VBoxManagePath(ctx)
+		if vboxExe == "" {
+			return errors.New("template has a clone base but VirtualBox is not installed — cannot verify no machine still links from it")
+		}
+		hdds, herr := vbox.ListHDDs(ctx, vboxExe)
+		if herr != nil {
+			return fmt.Errorf("media registry listing for the clone-base children gate: %w", herr)
+		}
+		baseUUID := ""
+		want := filepath.Clean(basePath)
+		for i := range hdds {
+			if strings.EqualFold(filepath.Clean(hdds[i].Path), want) {
+				baseUUID = hdds[i].UUID
+				break
+			}
+		}
+		holders := []string{}
+		for i := range hdds {
+			if baseUUID == "" || hdds[i].ParentUUID != baseUUID {
+				continue
+			}
+			if len(hdds[i].InUseBy) == 0 {
+				out.Write("stdout", "Removing orphaned differencing child: "+hdds[i].Path+"\n")
+				if cerr := vbox.CloseMedium(ctx, vboxExe, hdds[i].UUID, true); cerr != nil {
+					out.Write("stderr", "Orphan child removal failed: "+cerr.Error()+"\n")
+				}
+				continue
+			}
+			holders = append(holders, hdds[i].InUseBy...)
+		}
+		if len(holders) > 0 {
+			return errors.New("template clone base is still linked by machine(s): " +
+				strings.Join(holders, ", ") + " — delete those machines first")
+		}
+		out.Write("stdout", "Removing clone base "+basePath+"\n")
+		if cerr := vbox.CloseMedium(ctx, vboxExe, basePath, true); cerr != nil {
+			out.Write("stderr", "Clone base close failed — removing the file directly: "+cerr.Error()+"\n")
+			if rerr := os.Remove(basePath); rerr != nil {
+				out.Write("stderr", "Clone base removal failed (continuing): "+rerr.Error()+"\n")
+			}
+		}
+		removeMediumSidecar(basePath)
+	}
+
 	if _, serr := os.Stat(template.DiskPath); serr == nil {
 		vboxExe := VBoxManagePath(ctx)
 		removed := false
