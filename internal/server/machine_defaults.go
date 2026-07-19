@@ -18,13 +18,19 @@ import (
 // the create path's fallbacks change.
 var machineCreateDefaults = map[string]any{
 	"settings": map[string]any{
-		"vcpus":         2,
-		"memory":        "2048M",
-		"os_type":       "Debian_64",
-		"box_arch":      "amd64",
-		"box_version":   "latest",
-		"boot_priority": 95,
-		"sync_method":   "rsync",
+		"vcpus":                       2,
+		"memory":                      "2048M",
+		"os_type":                     "Debian_64",
+		"box_arch":                    "amd64",
+		"box_version":                 "latest",
+		"boot_priority":               95,
+		"sync_method":                 "rsync",
+		"firmware_type":               "BIOS",
+		"vagrant_ssh_insert_key":      false,
+		"communicator":                "ssh",
+		"winrm_port":                  5985,
+		"winrm_transport":             "negotiate",
+		"winrm_ssl_peer_verification": true,
 	},
 	"zones": map[string]any{
 		"bootrom":     "bios",
@@ -52,7 +58,7 @@ var machineCreateDefaults = map[string]any{
 	"notes": map[string]any{
 		"sync_method":   "Platform rules apply on top: forced rsync on Windows hosts; macOS auto-falls back to scp when the system rsync is the ancient Apple build.",
 		"zones":         "bootrom/hostbridge/vnc/acpi/netif are VirtualBox's own defaults (the agent passes no flag when the field is omitted); xhci is force-set on for a usable USB-tablet console. guest_agent (boolean, default false) opts the machine into the QEMU guest-agent UART (per-machine, under the guest_agent.enabled master gate — the Proxmox model, shared with zoneweaver).",
-		"settings":      "vcpus/memory/os_type are this agent's fallbacks, applied when the field is omitted.",
+		"settings":      "vcpus/memory/os_type are this agent's fallbacks, applied when the field is omitted. winrm_port's default becomes 5986 when winrm_transport is ssl and no explicit port is set.",
 		"disks":         "Omitting disks.controllers[] creates one controller named \"SATA Controller\" of zones.diskif's type; media default onto it, sparse, at the next free port.",
 		"knob_values":   "Value vocabularies for enum knobs. Keys are FLAT DOTTED strings, never nested objects — knob_values[\"hardware.<section>.<key>\"], [\"zones.<key>\"], [\"nics.<key>\"], [\"disks.controller_type\"], [\"boot_order\"] (entry values), [\"settings.sync_method\"]; each value is a string array. A knob present here is a dropdown; a knob absent is free-form or numeric. Values pass to VirtualBox unvalidated — unknown values stay legal (VirtualBox answers).",
 		"knob_defaults": "The value an UNSET knob effectively runs with (the companion to the detail GET's knob_current — current shows what is SET, this shows what a blank field runs with). Flat dotted, same key vocabulary as knob_values, values in knob_current's own types (int ram/vcpus/boot_priority, on|off strings). SOURCED FROM THE CREATE PATH, never a guessed VirtualBox internal: the agent's forced console baseline (xhci on, usbtablet mouse, usb keyboard, bidirectional clipboard, VRDE multi/reuse-con), the vcpus/memory fallbacks, and agent-policy defaults (diskif sata, boot_priority 95, sync_method rsync). VirtualBox's OS-type recommendations (bootrom/hostbridge/netif/vram/chipset/audio/firmware/mitigations) are DELIBERATELY ABSENT — they vary by guest OS type and knob_current serves each machine's real value live; the create-time labels for those read the zones/settings sections above. An absent key keeps the UI's own default label.",

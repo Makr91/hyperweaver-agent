@@ -271,6 +271,25 @@ func MachineKnobDefaults() map[string]any {
 	defaults["boot_priority"] = 95
 	defaults["settings.sync_method"] = "rsync"
 
+	// The remove-on-completion default feed (the converged flip wire, sync
+	// 2026-07-18 — UI's Q3: knob_defaults['transport.remove_on_completion']):
+	// the value an ABSENT flag runs with on THIS agent — Mark's per-agent
+	// ruling: Go keeps the transport (false, the home/dev model); zoneweaver
+	// serves true (the datacenter model).
+	defaults["transport.remove_on_completion"] = false
+
+	// VirtualBox constructor defaults already encoded in this agent's own
+	// settings-file reader, plus the spelled disk defaults (UI defaults ask,
+	// sync 2026-07-18).
+	defaults["nics.cable_connected"] = "on"
+	defaults["nics.promisc"] = "deny"
+	defaults["nics.speed"] = 0
+	defaults["nics.boot_prio"] = 0
+	defaults["disks.controller_type"] = "sata"
+	defaults["disks.sparse"] = true
+	defaults["disks.volume_name"] = "boot | disk<N>"
+	defaults["disks.directory"] = "machine folder"
+
 	return defaults
 }
 

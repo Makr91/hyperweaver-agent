@@ -646,10 +646,48 @@ func (s *Server) buildProvisionChain(ctx context.Context, machine *machines.Mach
 			if terr != nil {
 				return nil, nil, terr
 			}
-			// The chain ends here — nothing chains after the rotation child,
-			// so the cursor stops with it.
 			chain = append(chain, map[string]any{"step": "key_rotate", "task_id": rotateTask.ID})
+			previous = &rotateTask.ID
 		}
+	}
+
+	// THE PIPELINE-OWNED POWER CYCLE (MARK'S EXECUTION RULING, sync
+	// 2026-07-18 — remove-on-completion + the reconciled
+	// zones.post_provision_boot vocabulary): AFTER the whole-walk stamp (it
+	// rode the walk's final task above), a machine flagged for transport
+	// removal — settings.remove_transport_on_completion or any networks[]
+	// entry's remove_on_completion (absent = this agent's ruled default
+	// FALSE) — gets stop → machine_transport_remove → start as pipeline
+	// steps, so the removal takes effect immediately. zones.post_provision_boot
+	// (the live Hosts.yml documents' existing cycle-after-provisioning knob)
+	// triggers the SAME stop→start cycle without the removal step — reused,
+	// never a second sequencing. The post-cycle boot gates on NOTHING: no
+	// wait_ssh, no reconnect check — the transport is gone by design and the
+	// run is COMPLETE at the boot.
+	removalFlagged := machines.TransportRemovalFlagged(v.config)
+	if removalFlagged || docEnabled(v.config.Section("zones")["post_provision_boot"]) {
+		stopTask, terr := s.createChainTask(ctx, machine.Name, machines.OpStop,
+			nil, previous, parentID, createdBy)
+		if terr != nil {
+			return nil, nil, terr
+		}
+		chain = append(chain, map[string]any{"step": "post_provision_stop", "task_id": stopTask.ID})
+		previous = &stopTask.ID
+		if removalFlagged {
+			removeTask, rerr := s.createChainTask(ctx, machine.Name, machines.OpTransportRemove,
+				nil, previous, parentID, createdBy)
+			if rerr != nil {
+				return nil, nil, rerr
+			}
+			chain = append(chain, map[string]any{"step": "transport_remove", "task_id": removeTask.ID})
+			previous = &removeTask.ID
+		}
+		bootTask, berr := s.createChainTask(ctx, machine.Name, machines.OpStart,
+			nil, previous, parentID, createdBy)
+		if berr != nil {
+			return nil, nil, berr
+		}
+		chain = append(chain, map[string]any{"step": "post_provision_boot", "task_id": bootTask.ID})
 	}
 
 	// The narrate-skip and run-directive records land on the orchestration

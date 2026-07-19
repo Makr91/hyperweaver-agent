@@ -162,11 +162,54 @@ func (e *executors) modifyMachine(ctx context.Context, task *tasks.Task, out *ta
 }
 
 // ValidateModifyDocument dry-runs the modify translation — the accrue path's
-// PUT-time validation: unknown hardware sections/knobs and malformed
-// serial/parallel entries reject at the PUT instead of at apply time.
+// PUT-time validation: unknown hardware sections/knobs, malformed
+// serial/parallel entries, and untyped add_disks reject at the PUT instead
+// of at apply time.
 func ValidateModifyDocument(metadata map[string]any, info *vbox.Info) error {
+	if err := ValidateAddDisks(listOr(metadata["add_disks"])); err != nil {
+		return err
+	}
 	_, _, err := modifyAttributeFlags(metadata, info)
 	return err
+}
+
+// ValidateAddDisks enforces the typed disk entries on the modify add_disks
+// family (the frozen create strings with this surface's own prefix, sync
+// 2026-07-18 — the old presence-dispatch dialect died with the cut). Path
+// existence and the in-use check stay task-time, like create.
+func ValidateAddDisks(entries []any) error {
+	for i, entry := range entries {
+		disk := mapOr(entry)
+		prefix := fmt.Sprintf("add_disks[%d]", i+1)
+		raw, present := disk["type"]
+		if !present {
+			return errors.New(prefix + ".type is required (image|blank)")
+		}
+		switch entryType := verbatimValue(raw); entryType {
+		case DiskTypeImage:
+			if stringOr(disk["path"], "") == "" {
+				return errors.New(prefix + ".type image requires path")
+			}
+			_, hasSize := disk["size"]
+			_, hasVolumeName := disk["volume_name"]
+			if hasSize || hasVolumeName {
+				return errors.New(prefix + ".type image does not take size or volume_name (an image attaches as-is)")
+			}
+			if _, has := disk["directory"]; has {
+				return errors.New(prefix + ".type image does not take directory")
+			}
+		case DiskTypeBlank:
+			if sizeToMB(disk["size"]) <= 0 {
+				return errors.New(prefix + ".type blank requires size")
+			}
+			if _, has := disk["path"]; has {
+				return errors.New(prefix + ".type blank does not take path")
+			}
+		default:
+			return errors.New(prefix + ".type " + entryType + " is not a valid additional disk type (image|blank)")
+		}
+	}
+	return nil
 }
 
 // modifyNetworks handles add_nics/remove_nics (handleNetworkModifications):
@@ -294,32 +337,60 @@ func (e *executors) modifyStorage(ctx context.Context, task *tasks.Task, vboxExe
 
 	if addDisks := listOr(metadata["add_disks"]); len(addDisks) > 0 {
 		e.taskProgress(task, 60, "adding_disks")
+		if verr := ValidateAddDisks(addDisks); verr != nil {
+			return verr
+		}
 		disksDir := filepath.Join(e.machineWorkdir(machineName), "disks")
-		for _, entry := range addDisks {
+		for i, entry := range addDisks {
 			disk := mapOr(entry)
+			prefix := fmt.Sprintf("add_disks[%d]", i+1)
 			controller := stringOr(disk["controller"], sataController)
 			used := usedOn(controller)
 			port := int(intOr(disk["port"], int64(nextFreePort(used, 1))))
 			device := int(intOr(disk["device"], 0))
-			path := stringOr(disk["path"], "")
-			if path == "" {
+			var path string
+			switch verbatimValue(disk["type"]) {
+			case DiskTypeImage:
+				path = stringOr(disk["path"], "")
+				if _, serr := os.Stat(path); serr != nil {
+					return errors.New(prefix + ".path " + path + " does not exist on this host")
+				}
+				if force, _ := disk["force"].(bool); force {
+					out.Write("stdout", "force: true — skipping the in-use pre-check for "+path+"\n")
+				} else {
+					holder, herr := mediumHolder(ctx, vboxExe, path, machineName)
+					if herr != nil {
+						return herr
+					}
+					if holder != "" {
+						return errors.New(prefix + ".path " + path + " is attached to " + holder +
+							" (set force: true to attach anyway)")
+					}
+				}
+				out.Write("stdout", "Attaching existing medium "+path+" (image — attached as-is, never ours to delete)\n")
+			case DiskTypeBlank:
 				name := stringOr(disk["volume_name"], fmt.Sprintf("disk%d", port))
-				sizeMB := sizeToMB(disk["size"])
-				if sizeMB <= 0 {
-					sizeMB = 50 * 1024 // the base's 50G default
+				targetDir, derr := diskDirectory(disk, disksDir, prefix)
+				if derr != nil {
+					return derr
 				}
-				if merr := os.MkdirAll(disksDir, 0o750); merr != nil {
-					return merr
+				if targetDir == disksDir {
+					if merr := os.MkdirAll(disksDir, 0o750); merr != nil {
+						return merr
+					}
 				}
-				path = filepath.Join(disksDir, name+".vdi")
+				path = filepath.Join(targetDir, name+".vdi")
 				sparse := true
 				if v, ok := disk["sparse"].(bool); ok {
 					sparse = v
 				}
 				clearStaleMedium(ctx, vboxExe, path, out)
-				out.Write("stdout", fmt.Sprintf("Creating %s (%d MB)\n", path, sizeMB))
-				if cerr := vbox.CreateMedium(ctx, vboxExe, path, sizeMB, sparse); cerr != nil {
+				out.Write("stdout", fmt.Sprintf("Creating %s (%d MB)\n", path, sizeToMB(disk["size"])))
+				if cerr := vbox.CreateMedium(ctx, vboxExe, path, sizeToMB(disk["size"]), sparse); cerr != nil {
 					return fmt.Errorf("failed to create disk volume: %w", cerr)
+				}
+				if perr := stampMedium(ctx, vboxExe, path, DiskTypeBlank, out); perr != nil {
+					return perr
 				}
 			}
 			out.Write("stdout", fmt.Sprintf("Attaching %s at %s port %d device %d\n", path, controller, port, device))

@@ -195,6 +195,10 @@ func New(cfg *config.Config, keyStore *keys.Store, trayTokens *auth.TrayTokens, 
 	mux.Handle("POST /network/addresses", requireKey(http.HandlerFunc(s.handleNetworkAddressStub)))
 	mux.Handle("DELETE /network/addresses/{addrobj...}", requireKey(http.HandlerFunc(s.handleNetworkAddressStub)))
 	mux.Handle("PUT /network/addresses/{rest...}", requireKey(http.HandlerFunc(s.handleNetworkAddressStub)))
+	// Static-IP picker feed (the converged cross-agent wire, sync 2026-07-18):
+	// free host addresses on the default-route subnet, ARP/document-informed,
+	// ADVISORY only. GET = viewer via the central policy; no capability token.
+	mux.Handle("GET /network/ip-suggestions", requireKey(http.HandlerFunc(s.handleIPSuggestions)))
 
 	// Database management (Agent API v1 Database Management group), across
 	// every open database file. Mutations admin-only via the central policy.

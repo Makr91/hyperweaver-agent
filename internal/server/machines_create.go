@@ -2,11 +2,9 @@ package server
 
 import (
 	"context"
-	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"log/slog"
-	"net"
 	"net/http"
 	"os"
 	"regexp"
@@ -871,8 +869,14 @@ func (s *Server) handleCloneMachine(w http.ResponseWriter, r *http.Request) {
 	switch body.Source {
 	case "", "template", "current":
 	default:
-		taskError(w, http.StatusBadRequest, `source must be "template" (spec rebuild) or "current" (clonevm of today's disk state)`)
+		taskError(w, http.StatusBadRequest, `source must be "current" (data-complete clonevm, the default) or "template" (explicit spec rebuild)`)
 		return
+	}
+	// Clones are DATA-COMPLETE by default (Mark's ruling, sync 2026-07-18: a
+	// clone carries the same data, every disk, never blank) — template is the
+	// explicit opt-in rebuild.
+	if body.Source == "" {
+		body.Source = "current"
 	}
 	if hostname, _ := body.Settings["hostname"].(string); hostname == "" {
 		taskError(w, http.StatusBadRequest,
@@ -897,21 +901,7 @@ func (s *Server) handleCloneMachine(w http.ResponseWriter, r *http.Request) {
 	for key, value := range body.Overrides {
 		spec.Settings[key] = value
 	}
-	provisionalCount := 0
-	for _, entry := range spec.Networks {
-		if network, ok := entry.(map[string]any); ok {
-			if provisional, _ := network["provisional"].(bool); provisional {
-				provisionalCount++
-			}
-		}
-	}
-	provisioningIPs, aerr := s.allocateProvisioningIPs(r.Context(), provisionalCount)
-	if aerr != nil {
-		slog.Error("allocate provisioning IPs", "error", aerr)
-		taskError(w, http.StatusInternalServerError, "Failed to clone machine")
-		return
-	}
-	stripCloneNetworks(spec.Networks, provisioningIPs)
+	stripCloneNetworks(spec.Networks)
 	spec.StartAfterCreate = false
 
 	cloneOK, cloneDiskWarnings := s.validateSpec(w, spec)
@@ -1044,15 +1034,11 @@ func (s *Server) queueCloneCurrent(w http.ResponseWriter, r *http.Request,
 	writeJSON(w, response)
 }
 
-// stripCloneNetworks removes identity and addressing from cloned network
-// entries so source and clone can never collide — the base's rule with its
-// provisional exception (ZoneCloneController.buildCloneMetadata): provisional
-// entries receive a FRESH address from the provisioning DHCP range instead of
-// losing addressing (an exhausted range leaves it empty, the base's own
-// behavior). mac always strips: the document's networks[] carry the adapter
-// identity here.
-func stripCloneNetworks(networks, provisioningIPs []any) {
-	next := 0
+// stripCloneNetworks removes identity and addressing so source and clone can
+// never collide (converged clone conformance, sync 2026-07-18): provisional
+// entries clone as dhcp4 with NO address — the provisioning dhcpd allocates
+// on first boot; the static clone-time allocator died with the ruling.
+func stripCloneNetworks(networks []any) {
 	for _, entry := range networks {
 		network, ok := entry.(map[string]any)
 		if !ok {
@@ -1060,87 +1046,12 @@ func stripCloneNetworks(networks, provisioningIPs []any) {
 		}
 		delete(network, "mac")
 		if provisional, _ := network["provisional"].(bool); provisional {
-			address := ""
-			if next < len(provisioningIPs) {
-				address, _ = provisioningIPs[next].(string)
-				next++
-			}
-			network["address"] = address
+			delete(network, "address")
+			network["dhcp4"] = true
 			continue
 		}
 		for _, key := range []string{"address", "gateway", "netmask", "dns"} {
 			delete(network, key)
 		}
 	}
-}
-
-// allocateProvisioningIPs is the base's batch allocator
-// (ZoneCloneController.allocateProvisioningIPs): one pass over the stored
-// configurations collects the provisional addresses in use, then count unused
-// IPs come from the configured DHCP range (empty when the network is disabled
-// or unconfigured — the base's warn-and-continue).
-func (s *Server) allocateProvisioningIPs(ctx context.Context, count int) ([]any, error) {
-	allocated := []any{}
-	if count == 0 {
-		return allocated, nil
-	}
-	network := s.cfg.Provisioning.Network
-	if !network.Enabled || network.DHCPRangeStart == "" || network.DHCPRangeEnd == "" {
-		slog.Warn("provisioning DHCP range not configured — clone provisional networks get no address")
-		return allocated, nil
-	}
-	start := ipToLong(network.DHCPRangeStart)
-	end := ipToLong(network.DHCPRangeEnd)
-	if start == 0 || end == 0 {
-		return allocated, nil
-	}
-
-	list, err := s.machines.List(ctx, &machines.ListFilter{})
-	if err != nil {
-		return nil, err
-	}
-	used := map[string]bool{}
-	for _, machine := range list {
-		config := machines.ParseConfiguration(machine)
-		for _, entry := range config.List("networks") {
-			network, ok := entry.(map[string]any)
-			if !ok {
-				continue
-			}
-			if provisional, _ := network["provisional"].(bool); !provisional {
-				continue
-			}
-			if address, _ := network["address"].(string); address != "" {
-				used[address] = true
-			}
-		}
-	}
-
-	for ip := start; ip <= end && len(allocated) < count; ip++ {
-		candidate := longToIP(ip)
-		if !used[candidate] {
-			allocated = append(allocated, candidate)
-			used[candidate] = true
-		}
-	}
-	return allocated, nil
-}
-
-// ipToLong/longToIP are the base's IPv4 <-> integer helpers (0 on non-IPv4).
-func ipToLong(s string) uint32 {
-	ip := net.ParseIP(s)
-	if ip == nil {
-		return 0
-	}
-	ip = ip.To4()
-	if ip == nil {
-		return 0
-	}
-	return binary.BigEndian.Uint32(ip)
-}
-
-func longToIP(v uint32) string {
-	ip := make(net.IP, 4)
-	binary.BigEndian.PutUint32(ip, v)
-	return ip.String()
 }

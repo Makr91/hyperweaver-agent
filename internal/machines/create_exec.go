@@ -238,7 +238,7 @@ func specDocument(ctx context.Context, env *ProvisionEnv, spec *Spec) map[string
 		"settings": effectiveSettings(ctx, env, spec),
 	}
 	if len(spec.Networks) > 0 {
-		document["networks"] = spec.Networks
+		document["networks"] = normalizeNetworkDNS(spec.Networks)
 	}
 	for key, section := range map[string]map[string]any{
 		"disks":      spec.Disks,
@@ -252,6 +252,39 @@ func specDocument(ctx context.Context, env *ProvisionEnv, spec *Spec) map[string
 		}
 	}
 	return document
+}
+
+// normalizeNetworkDNS declares wire-string dns entries into the document's
+// map shape [{nameserver: ip}] (converged contract, sync 2026-07-18 — the
+// networking role hard-consumes dns[0]['nameserver']). Empty strings drop;
+// map entries ride untouched.
+func normalizeNetworkDNS(networks []any) []any {
+	for _, entry := range networks {
+		network, ok := entry.(map[string]any)
+		if !ok {
+			continue
+		}
+		list, lok := network["dns"].([]any)
+		if !lok {
+			continue
+		}
+		changed := false
+		normalized := make([]any, 0, len(list))
+		for _, item := range list {
+			if s, sok := item.(string); sok {
+				changed = true
+				if s != "" {
+					normalized = append(normalized, map[string]any{"nameserver": s})
+				}
+				continue
+			}
+			normalized = append(normalized, item)
+		}
+		if changed {
+			network["dns"] = normalized
+		}
+	}
+	return networks
 }
 
 // EffectiveSettings builds the render-time settings document from a spec —
@@ -1597,6 +1630,20 @@ func (e *executors) createFinalize(ctx context.Context, task *tasks.Task, out *t
 	if output.UUID != "" {
 		if uerr := e.store.SetUUID(ctx, task.MachineName, output.UUID); uerr != nil {
 			return uerr
+		}
+	}
+
+	// The transport-removal signal (the converged cross-agent flag, sync
+	// 2026-07-18): the create body's remove_transport_on_completion persists
+	// into configuration.settings — the ONE effective-flag home knob_current,
+	// the PUT flip, and the provision chain's removal cycle all read. Absent
+	// stores nothing: this agent's ruled default (false — keep) applies by
+	// omission.
+	if meta.Spec.RemoveTransportOnCompletion != nil {
+		if serr := e.store.MergeSettingsKeys(ctx, task.MachineName, map[string]any{
+			"remove_transport_on_completion": *meta.Spec.RemoveTransportOnCompletion,
+		}); serr != nil {
+			return serr
 		}
 	}
 

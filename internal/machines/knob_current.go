@@ -132,9 +132,57 @@ func KnobCurrent(machine *Machine, raw map[string]string, osTypeID string, file 
 	}
 
 	if len(nics) > 0 {
+		annotateTransportNics(machine, raw, nics)
 		current["nics"] = nics
 	}
 	return current
+}
+
+// annotateTransportNics stamps the transport/provisional markers onto the
+// nics[] rows (the converged flip wire, sync 2026-07-18 — UI's badge +
+// toggle feed): adapter 1 gets provisional: true + the EFFECTIVE
+// remove_on_completion (settings.remove_transport_on_completion, absent =
+// this agent's ruled default false) when it IS the provisioning NAT
+// transport (attachment nat with the marker MAC — 00FF00FF00FF, Hosts.rb's
+// own vagrant-NAT identity); adapters 2+ mirror their document networks[]
+// entry's provisional flag and — on provisional or explicitly-flagged
+// entries — the effective remove_on_completion. The declared pairing rule:
+// nics[] row adapter N ↔ networks[N-2].
+func annotateTransportNics(machine *Machine, raw map[string]string, nics []any) {
+	config := ParseConfiguration(machine)
+	settings := config.Section("settings")
+	networks := config.List("networks")
+	transportFlag, _ := settings["remove_transport_on_completion"].(bool)
+	for _, entry := range nics {
+		nic, ok := entry.(map[string]any)
+		if !ok {
+			continue
+		}
+		adapter, _ := nic["adapter"].(int)
+		if adapter == 1 {
+			if raw["nic1"] == "nat" && strings.EqualFold(raw["macaddress1"], "00FF00FF00FF") {
+				nic["provisional"] = true
+				nic["remove_on_completion"] = transportFlag
+			}
+			continue
+		}
+		index := adapter - 2
+		if index < 0 || index >= len(networks) {
+			continue
+		}
+		network := mapOr(networks[index])
+		provisional, _ := network["provisional"].(bool)
+		if provisional {
+			nic["provisional"] = true
+		}
+		if flag, has := network["remove_on_completion"].(bool); has {
+			nic["remove_on_completion"] = flag
+		} else if provisional {
+			// The effective value of an absent flag — this agent's ruled
+			// default (false: keep).
+			nic["remove_on_completion"] = false
+		}
+	}
 }
 
 // applySettingsFile fills the showvminfo-gap knobs from the .vbox settings,

@@ -126,6 +126,11 @@ func RegisterExecutors(queue *tasks.Queue, store *Store, reconciler *Reconciler,
 	// 2026-07-17): after the syncback bracket, adopt the box's rotated
 	// private key into the working copy; never the whole-walk stamp owner.
 	queue.Register(OpKeyRotate, tasks.Executor{Run: e.keyRotate})
+	// Transport removal (machine_transport_remove — the remove-on-completion
+	// flag, converged sync 2026-07-18): between the pipeline-owned stop and
+	// boot after the whole-walk stamp, remove the flagged adapters and update
+	// the document to match.
+	queue.Register(OpTransportRemove, tasks.Executor{Run: e.transportRemove})
 }
 
 type executors struct {

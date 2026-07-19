@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -367,6 +368,32 @@ func (e *executors) cloneCurrent(ctx context.Context, task *tasks.Task, out *tas
 	cloneInfo, err := vbox.ShowVMInfo(ctx, vboxExe, task.MachineName)
 	if err != nil {
 		return cleanup("clone inspection", err)
+	}
+
+	// Clones are DATA-COMPLETE (Mark's ruling, sync 2026-07-18): clonevm
+	// copied every attached disk into the clone's own folder — those copies
+	// are the clone's OWN media and stamp "clone" so delete destroys them.
+	// Anything outside the clone folder (referenced ISOs, shared media) stays
+	// unstamped/foreign. Stamp failures narrate — an unstamped copy is merely
+	// preserved at delete, never destroyed wrongly.
+	e.taskProgress(task, 40, "stamping_media")
+	clonePrefix := strings.ToLower(filepath.Clean(cloneInfo.Home)) + string(filepath.Separator)
+	for key, value := range cloneInfo.Raw {
+		if value == "none" || value == "emptydrive" || value == "" {
+			continue
+		}
+		if attachmentPattern.FindStringSubmatch(key) == nil || strings.Contains(key, "ImageUUID") {
+			continue
+		}
+		if !filepath.IsAbs(value) ||
+			!strings.HasPrefix(strings.ToLower(filepath.Clean(value)), clonePrefix) {
+			continue
+		}
+		if perr := stampMedium(ctx, vboxExe, value, "clone", out); perr != nil {
+			out.Write("stderr", "Stamping "+value+" failed (preserved at delete): "+perr.Error()+"\n")
+		} else {
+			out.Write("stdout", "Stamped clone medium "+value+"\n")
+		}
 	}
 
 	// Fresh provisioning transport: the copied natpf1 ssh rule carries the

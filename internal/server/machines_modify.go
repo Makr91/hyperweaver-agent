@@ -6,6 +6,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"strconv"
 
 	"github.com/Makr91/hyperweaver-agent/internal/auth"
 	"github.com/Makr91/hyperweaver-agent/internal/machines"
@@ -101,6 +102,82 @@ func (s *Server) applyModifyTags(w http.ResponseWriter, r *http.Request, machine
 		slog.Error("update machine tags", "machine", machineName, "error", err)
 		taskError(w, http.StatusInternalServerError, "Failed to update machine tags")
 		return false
+	}
+	return true
+}
+
+// applyRemoveOnCompletionFlips extracts remove_on_completion from nics[]
+// entries (the converged flip wire, sync 2026-07-18 — the badged provisional
+// row's toggle) and applies each flip DB-IMMEDIATELY: adapter 1 (the
+// intrinsic NAT transport, which has no document entry) flips
+// configuration.settings.remove_transport_on_completion; adapters 2+ flip
+// the document networks[adapter-2] entry's own remove_on_completion. The key
+// strips from each entry so the infrastructure path never sees it; an entry
+// left with only its adapter drops whole — a flip-only PUT queues nothing.
+// False return = response already written.
+func (s *Server) applyRemoveOnCompletionFlips(w http.ResponseWriter, r *http.Request,
+	machine *machines.Machine, body map[string]any,
+) bool {
+	entries, has := body["nics"].([]any)
+	if !has {
+		return true
+	}
+	networksLen := len(machines.ParseConfiguration(machine).List("networks"))
+	kept := []any{}
+	for _, raw := range entries {
+		entry, eok := raw.(map[string]any)
+		if !eok {
+			kept = append(kept, raw)
+			continue
+		}
+		if value, present := entry["remove_on_completion"]; present {
+			flag, bok := value.(bool)
+			if !bok {
+				taskError(w, http.StatusBadRequest, "nics[].remove_on_completion must be a boolean")
+				return false
+			}
+			adapter := int(machines.DocInt(entry["adapter"], 0))
+			if adapter < 1 {
+				taskError(w, http.StatusBadRequest,
+					"nics[] entries carrying remove_on_completion need adapter (1-8)")
+				return false
+			}
+			delete(entry, "remove_on_completion")
+			if adapter == 1 {
+				if err := s.machines.MergeSettingsKeys(r.Context(), machine.Name, map[string]any{
+					"remove_transport_on_completion": flag,
+				}); err != nil {
+					slog.Error("flip transport remove_on_completion", "machine", machine.Name, "error", err)
+					taskError(w, http.StatusInternalServerError, "Failed to update remove_on_completion")
+					return false
+				}
+			} else {
+				if adapter-2 >= networksLen {
+					taskError(w, http.StatusBadRequest, "adapter "+strconv.Itoa(adapter)+
+						" has no document networks[] entry to carry remove_on_completion")
+					return false
+				}
+				if err := s.machines.SetNetworkRemoveFlag(r.Context(), machine.Name, adapter-2, flag); err != nil {
+					slog.Error("flip networks remove_on_completion", "machine", machine.Name,
+						"adapter", adapter, "error", err)
+					taskError(w, http.StatusInternalServerError, "Failed to update remove_on_completion")
+					return false
+				}
+			}
+			slog.Info("remove_on_completion flipped", "machine", machine.Name,
+				"adapter", adapter, "value", flag, "by", auth.FromContext(r.Context()).Name)
+		}
+		if len(entry) == 1 {
+			if _, only := entry["adapter"]; only {
+				continue // flip-only entry — consumed whole
+			}
+		}
+		kept = append(kept, entry)
+	}
+	if len(kept) > 0 {
+		body["nics"] = kept
+	} else {
+		delete(body, "nics")
 	}
 	return true
 }
@@ -324,6 +401,14 @@ func (s *Server) handleModifyMachine(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	// Typed add_disks pre-flight (the modify cut, sync 2026-07-18): the frozen
+	// refusal strings answer at the PUT on both the queue and accrue paths.
+	if list, ok := body["add_disks"].([]any); ok {
+		if verr := machines.ValidateAddDisks(list); verr != nil {
+			taskError(w, http.StatusBadRequest, verr.Error())
+			return
+		}
+	}
 
 	// notes/tags/boot_priority apply immediately (DB only, no task —
 	// boot_priority is orchestration metadata in the spec, the base's
@@ -352,6 +437,14 @@ func (s *Server) handleModifyMachine(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if credentialsChanged && !s.applyModifyCredentials(w, r, machine.Name, body) {
+		return
+	}
+	// remove_on_completion flips ride nics[] entries but are DOCUMENT/settings
+	// state, never VBox knobs (the converged flip wire, sync 2026-07-18) —
+	// extracted and applied DB-immediately; the keys strip so the
+	// infrastructure path never sees them, and flip-only entries drop whole
+	// (a flip-only PUT queues nothing).
+	if !s.applyRemoveOnCompletionFlips(w, r, machine, body) {
 		return
 	}
 	immediate := map[string]bool{"notes": true, "tags": true, "boot_priority": true, "snapshots": true}

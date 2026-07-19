@@ -125,6 +125,17 @@ type Spec struct {
 	SyncMethod       string   `json:"sync_method"`
 	SafeIDPath       string   `json:"safe_id_path"`
 	StartAfterCreate bool     `json:"start_after_create"`
+	// RemoveTransportOnCompletion is the wizard's per-create transport signal
+	// (the converged cross-agent key, sync 2026-07-18 — UI's Q1(b) answer with
+	// Go's NAT input consumed): true asks the provision pipeline to remove the
+	// provisioning transport NIC (the intrinsic NAT, adapter 1) after the
+	// whole-walk stamp, via the pipeline-owned power cycle (Mark's execution
+	// ruling). POINTER: absent = this agent's ruled default FALSE (keep — the
+	// home/dev model; zoneweaver's default is true, the datacenter model).
+	// Finalize persists the chosen value into configuration.settings as
+	// remove_transport_on_completion — the ONE effective-flag home the
+	// provision chain, knob_current, and the PUT flip all read.
+	RemoveTransportOnCompletion *bool `json:"remove_transport_on_completion,omitempty"`
 }
 
 // HasProvisioner reports whether the spec references a provisioner package.
