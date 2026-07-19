@@ -3316,6 +3316,62 @@
         }
       }
     },
+    "/monitoring/machines/usage": {
+      "get": {
+        "tags": ["Host Monitoring"],
+        "summary": "Per-machine usage metrics",
+        "description": "Minimum role: viewer. Per-machine CPU/RAM/network/disk usage from VirtualBox's OWN telemetry (Mark's ruling, sync 2026-07-19 — never host-OS process tracking): CPU and RAM from the metrics subsystem the Manager GUI's Resource Use tab reads (VBoxManage metrics — the agent runs `metrics setup --period 1 --samples 1` lazily per machine, so the FIRST answer after an agent or machine start can carry null CPU/RAM while collection warms up for a second), network and disk from the VM debugger's cumulative byte counters (VBoxManage debugvm statistics — ReceiveBytes/TransmitBytes/ReadBytes/WrittenBytes summed across devices), diffed into per-second rates between polls exactly like the GUI (rates are null on the first observation and across a VM restart's counter reset; totals are since the VM process started). REALTIME ONLY — one live sample per RUNNING machine, newest state every call; stopped machines have no VM process and are ABSENT from the answer (poll the list — presence = running). RAM'S GUEST-ADDITIONS DEPENDENCY (the GUI's \"requires guest additions\" banner): rss_bytes/ram_total_bytes/ram_free_bytes are null when the guest reports nothing, and guest_additions says whether any Guest/* metric answered — the UI renders the same honest blank the GUI does. The answer mirrors zoneweaver's GET /monitoring/zones/usage envelope ({usage, totalCount, returnedCount} + this agent's sampling block); the sample vocabulary matches where the platforms overlap (host, machine_name for zone_name, cpu_pct = percent of TOTAL host CPU, rss_bytes) and speaks VirtualBox where they differ (guest-vs-VMM CPU split, net/disk rates — zoneweaver's disk I/O is per-ZVOL on its own endpoint).",
+        "parameters": [
+          { "name": "machine_name", "in": "query", "schema": { "type": "string" }, "description": "Filter to one machine (exact name)" },
+          { "name": "limit", "in": "query", "schema": { "type": "integer", "default": 200, "minimum": 1, "maximum": 1000 }, "description": "Maximum rows" }
+        ],
+        "responses": {
+          "200": {
+            "description": "Per-machine usage samples (running machines only)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "usage": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "host": { "type": "string", "example": "desktop-01" },
+                          "machine_name": { "type": "string", "example": "4021--test-machine.startcloud.com" },
+                          "cpu_guest_pct": { "type": "number", "nullable": true, "description": "Guest code's share of host CPU (CPU/Load/User — the GUI's Guest Load); null while metrics warm up", "example": 9.2 },
+                          "cpu_vmm_pct": { "type": "number", "nullable": true, "description": "Hypervisor overhead share (CPU/Load/Kernel — the GUI's VMM Load)", "example": 42.7 },
+                          "cpu_pct": { "type": "number", "nullable": true, "description": "guest + VMM — percent of TOTAL host CPU (zoneweaver's cpu_pct analog)", "example": 51.9 },
+                          "rss_bytes": { "type": "integer", "format": "int64", "nullable": true, "description": "Guest memory used (RAM/Usage/Used, Guest/RAM Total−Free fallback) — null WITHOUT Guest Additions (the GUI's 'requires guest additions' metric)" },
+                          "ram_total_bytes": { "type": "integer", "format": "int64", "nullable": true, "description": "Guest/RAM/Usage/Total — Guest Additions only" },
+                          "ram_free_bytes": { "type": "integer", "format": "int64", "nullable": true, "description": "Guest/RAM/Usage/Free — Guest Additions only" },
+                          "guest_additions": { "type": "boolean", "description": "Whether any Guest/* metric answered — false explains the null RAM fields" },
+                          "net_rx_bps": { "type": "integer", "format": "int64", "nullable": true, "description": "Download rate, bytes/second — diffed between polls; null on the first observation" },
+                          "net_tx_bps": { "type": "integer", "format": "int64", "nullable": true, "description": "Upload rate, bytes/second" },
+                          "net_rx_total_bytes": { "type": "integer", "format": "int64", "nullable": true, "description": "Total downloaded since the VM process started (the GUI's Total Downloaded)" },
+                          "net_tx_total_bytes": { "type": "integer", "format": "int64", "nullable": true, "description": "Total uploaded since the VM process started" },
+                          "disk_read_bps": { "type": "integer", "format": "int64", "nullable": true, "description": "Disk read rate, bytes/second" },
+                          "disk_write_bps": { "type": "integer", "format": "int64", "nullable": true, "description": "Disk write rate, bytes/second" },
+                          "disk_read_total_bytes": { "type": "integer", "format": "int64", "nullable": true, "description": "Total read since the VM process started (the GUI's Total Read)" },
+                          "disk_write_total_bytes": { "type": "integer", "format": "int64", "nullable": true, "description": "Total written since the VM process started" },
+                          "scan_timestamp": { "type": "string", "format": "date-time" }
+                        }
+                      }
+                    },
+                    "totalCount": { "type": "integer" },
+                    "returnedCount": { "type": "integer" },
+                    "sampling": { "$ref": "#/components/schemas/MonitoringSampling" }
+                  }
+                }
+              }
+            }
+          },
+          "500": { "description": "Failed to get machine metrics" },
+          "503": { "description": "VirtualBox is not installed" }
+        }
+      }
+    },
     "/system/processes": {
       "get": {
         "tags": ["Processes"],

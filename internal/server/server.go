@@ -37,23 +37,24 @@ import (
 
 // Server is the agent's HTTP (and optional HTTPS) server.
 type Server struct {
-	cfg          *config.Config
-	keys         *keys.Store
-	trayTokens   *auth.TrayTokens
-	tasks        *tasks.Queue
-	machines     *machines.Store
-	provisioners *provisioner.Registry
-	secrets      *secrets.Store
-	assets       *assets.Store
-	artifactSvc  *assets.Service
-	monitor      *monitoring.Service
-	dbs          []DBHandle
-	wsTickets    *wsTickets
-	sshSessions  *sshSessions
-	termSessions *termSessions
-	httpSrv      *http.Server
-	listener     net.Listener
-	startedAt    time.Time
+	cfg            *config.Config
+	keys           *keys.Store
+	trayTokens     *auth.TrayTokens
+	tasks          *tasks.Queue
+	machines       *machines.Store
+	provisioners   *provisioner.Registry
+	secrets        *secrets.Store
+	assets         *assets.Store
+	artifactSvc    *assets.Service
+	monitor        *monitoring.Service
+	dbs            []DBHandle
+	wsTickets      *wsTickets
+	sshSessions    *sshSessions
+	termSessions   *termSessions
+	machineMetrics *machineMetricsState
+	httpSrv        *http.Server
+	listener       net.Listener
+	startedAt      time.Time
 
 	// httpsSrv/httpsListener exist only when ssl.enabled AND the certificate
 	// loaded — certificate problems leave the agent HTTP-only (Node-agent
@@ -74,23 +75,24 @@ type Server struct {
 // New builds the server and its routes.
 func New(cfg *config.Config, keyStore *keys.Store, trayTokens *auth.TrayTokens, taskQueue *tasks.Queue, machineStore *machines.Store, provisioners *provisioner.Registry, secretsStore *secrets.Store, assetsStore *assets.Store, artifactSvc *assets.Service, monitor *monitoring.Service, dbs []DBHandle, restartArgs []string, openUI func()) (*Server, error) {
 	s := &Server{
-		cfg:          cfg,
-		keys:         keyStore,
-		trayTokens:   trayTokens,
-		tasks:        taskQueue,
-		machines:     machineStore,
-		provisioners: provisioners,
-		secrets:      secretsStore,
-		assets:       assetsStore,
-		artifactSvc:  artifactSvc,
-		monitor:      monitor,
-		dbs:          dbs,
-		wsTickets:    newWsTickets(),
-		sshSessions:  newSSHSessions(),
-		termSessions: newTermSessions(),
-		startedAt:    time.Now(),
-		restartArgs:  restartArgs,
-		openUI:       openUI,
+		cfg:            cfg,
+		keys:           keyStore,
+		trayTokens:     trayTokens,
+		tasks:          taskQueue,
+		machines:       machineStore,
+		provisioners:   provisioners,
+		secrets:        secretsStore,
+		assets:         assetsStore,
+		artifactSvc:    artifactSvc,
+		monitor:        monitor,
+		dbs:            dbs,
+		wsTickets:      newWsTickets(),
+		sshSessions:    newSSHSessions(),
+		termSessions:   newTermSessions(),
+		machineMetrics: newMachineMetricsState(),
+		startedAt:      time.Now(),
+		restartArgs:    restartArgs,
+		openUI:         openUI,
 	}
 
 	mux := http.NewServeMux()
@@ -145,6 +147,9 @@ func New(cfg *config.Config, keyStore *keys.Store, trayTokens *auth.TrayTokens, 
 	mux.Handle("GET /monitoring/network/interfaces", requireKey(http.HandlerFunc(s.handleMonitoringInterfaces)))
 	mux.Handle("GET /monitoring/network/usage", requireKey(http.HandlerFunc(s.handleMonitoringNetworkUsage)))
 	mux.Handle("GET /monitoring/network/ipaddresses", requireKey(http.HandlerFunc(s.handleMonitoringIPAddresses)))
+	// Per-machine usage metrics from VirtualBox's OWN telemetry (Mark's ask,
+	// sync 2026-07-19) — the zones/usage mirror on this hypervisor.
+	mux.Handle("GET /monitoring/machines/usage", requireKey(http.HandlerFunc(s.handleMachineUsageMetrics)))
 
 	// Host processes (Agent API v1 Processes group, the `processes` token —
 	// arch item 15). Literal segments (find, batch-kill, stats) win over the
