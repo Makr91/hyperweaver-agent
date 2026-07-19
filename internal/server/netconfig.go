@@ -325,18 +325,6 @@ func (s *Server) handleListNetworkAddresses(w http.ResponseWriter, r *http.Reque
 	})
 }
 
-// handleNetworkAddressStub answers every /network/addresses mutation with an
-// honest 501 (Mark's scope ruling, sync 2026-07-17: the listing is real,
-// mutations wait for a future session). One handler covers POST, the DELETE
-// {addrobj...} wildcard, and the PUT {rest...} wildcard — Go 1.22 ServeMux
-// forbids segments after a "..." wildcard, so the enable/disable verbs
-// cannot be their own patterns; the suffix would be split here if the stub
-// ever grew real behavior, and today every shape refuses identically.
-func (s *Server) handleNetworkAddressStub(w http.ResponseWriter, _ *http.Request) {
-	netconfigError(w, http.StatusNotImplemented,
-		"IP address management is not implemented on this agent yet — the listing is read-only (a future session expands it)", "")
-}
-
 // The IP-suggestions feed (the converged cross-agent wire, sync 2026-07-18 —
 // Mark's static-IP picker ask, zoneweaver's proposed shape adopted verbatim):
 // the default-route interface anchors the host's own network; the ARP/NDP

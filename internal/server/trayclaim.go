@@ -27,6 +27,13 @@ func trayKeyName() string {
 	return name
 }
 
+const (
+	trayKeyDescriptionPrefix = "Created by the tray Open handoff "
+	// trayKeysKept bounds the tray-minted pile: each Open reaps older
+	// handoff keys beyond the newest N (bcrypt-scan latency grows per key).
+	trayKeysKept = 5
+)
+
 type trayClaimRequest struct {
 	Token string `json:"token"`
 }
@@ -56,7 +63,7 @@ func (s *Server) handleTrayClaim(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	description := "Created by the tray Open handoff " + time.Now().Format(time.RFC3339)
+	description := trayKeyDescriptionPrefix + time.Now().Format(time.RFC3339)
 	entity, err := s.keys.Create(apiKey, trayKeyName(), description, "admin", akCfg.HashRounds)
 	if err != nil {
 		slog.Error("tray key creation failed", "error", err)
@@ -64,6 +71,11 @@ func (s *Server) handleTrayClaim(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	slog.Info("tray login key created", "entity_id", entity.ID)
+	if removed, perr := s.keys.PruneByDescriptionPrefix(trayKeyDescriptionPrefix, trayKeysKept); perr != nil {
+		slog.Warn("tray key prune failed", "error", perr)
+	} else if removed > 0 {
+		slog.Info("stale tray keys pruned", "removed", removed)
+	}
 
 	writeJSON(w, map[string]any{
 		"api_key": apiKey,

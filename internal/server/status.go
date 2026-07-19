@@ -83,17 +83,22 @@ type statusPayload struct {
 // macOS), wire identical; the UI's Network-tab DNS section gates on it.
 // hostname minted 2026-07-17: the /network/hostname surface (GET live view
 // + PUT queuing set_hostname) with the converged wire.
-// ip-addresses minted 2026-07-17: the /network/addresses listing — the read
-// surface the UI's IP-address section needs; mutations are stubbed 501 on
-// this agent (Mark's scope ruling — a future session expands them), the
-// token advertises the read surface.
+// ip-addresses minted 2026-07-17: the /network/addresses surface — the live
+// listing plus (Mark's build order 2026-07-19, replacing the 501 stubs) the
+// zoneweaver-converged mutations: create (static everywhere, dhcp on
+// Windows), delete, and the interface-level enable/disable toggles.
+// network-spaces minted 2026-07-19 (the UI topology ask): the
+// /network/spaces surface — enumerate + manage VirtualBox's host-only
+// interfaces, NAT networks, and internal networks; the topology mapper
+// gates its network-space fetch on this token (D14: tokens, never
+// hypervisors[]).
 var platformFeatures = []string{
 	"tasks", "machines", "machine-suspend", "machine-create",
 	"machine-modify", "machine-snapshots", "machine-screenshot",
 	"swap", "monitoring", "processes", "provisioning",
 	"provisioner-registry", "secrets", "ssh", "templates",
 	"host-launchers", "host-terminal", "hosts-file", "dns",
-	"hostname", "ip-addresses",
+	"hostname", "ip-addresses", "network-spaces",
 }
 
 // features derives the advertised token list: platform tokens plus the

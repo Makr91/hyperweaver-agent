@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -295,6 +296,47 @@ func (s *Store) Delete(id int64) (*Key, error) {
 		return nil, err
 	}
 	return k.clone(), nil
+}
+
+// PruneByDescriptionPrefix deletes all but the newest keep keys whose
+// description carries prefix (the tray-handoff reaper — every desktop Open
+// mints a key and nothing else retires them). Returns how many were removed.
+func (s *Store) PruneByDescriptionPrefix(prefix string, keep int) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	matching := []*Key{}
+	for _, k := range s.data.Keys {
+		if strings.HasPrefix(k.Description, prefix) {
+			matching = append(matching, k)
+		}
+	}
+	if len(matching) <= keep {
+		return 0, nil
+	}
+	victims := map[int64]bool{}
+	for _, k := range matching[:len(matching)-keep] {
+		if s.isLastActiveAdmin(k) {
+			continue
+		}
+		victims[k.ID] = true
+	}
+	if len(victims) == 0 {
+		return 0, nil
+	}
+	kept := s.data.Keys[:0]
+	for _, k := range s.data.Keys {
+		if victims[k.ID] {
+			s.dropVerified(k.ID)
+			continue
+		}
+		kept = append(kept, k)
+	}
+	s.data.Keys = kept
+	if err := s.persist(); err != nil {
+		return 0, err
+	}
+	return len(victims), nil
 }
 
 // Revoke deactivates a key, refusing to deactivate the last active admin.

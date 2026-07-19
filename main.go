@@ -36,6 +36,7 @@ import (
 	"github.com/Makr91/hyperweaver-agent/internal/loginitem"
 	"github.com/Makr91/hyperweaver-agent/internal/machines"
 	"github.com/Makr91/hyperweaver-agent/internal/monitoring"
+	"github.com/Makr91/hyperweaver-agent/internal/netaddr"
 	"github.com/Makr91/hyperweaver-agent/internal/openbrowser"
 	"github.com/Makr91/hyperweaver-agent/internal/protocol"
 	"github.com/Makr91/hyperweaver-agent/internal/provisioner"
@@ -669,6 +670,10 @@ func setupTasks(cfg *config.Config, secretsStore *secrets.Store) (*agentSystems,
 	// set_hostname (the /network/hostname surface's async half — the
 	// converged wire, sync 2026-07-17).
 	hostname.RegisterExecutors(queue)
+
+	// The /network/addresses mutations (zoneweaver's address ops — Mark's
+	// build order 2026-07-19 replaced the 501 stubs).
+	netaddr.RegisterExecutors(queue)
 
 	// Scheduled snapshot rotation (snapshots.enabled — zoneweaver's
 	// Snapshoter.sh replacement, VBox-conservative defaults): visible

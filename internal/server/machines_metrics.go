@@ -23,24 +23,37 @@ import (
 // this agent's machine_name filter and sampling block.
 
 type machineUsageSample struct {
-	Host                string    `json:"host"`
-	MachineName         string    `json:"machine_name"`
-	CPUGuestPct         *float64  `json:"cpu_guest_pct"`
-	CPUVMMPct           *float64  `json:"cpu_vmm_pct"`
-	CPUPct              *float64  `json:"cpu_pct"`
-	RSSBytes            *int64    `json:"rss_bytes"`
-	RAMTotalBytes       *int64    `json:"ram_total_bytes"`
-	RAMFreeBytes        *int64    `json:"ram_free_bytes"`
-	GuestAdditions      bool      `json:"guest_additions"`
-	NetRxBps            *int64    `json:"net_rx_bps"`
-	NetTxBps            *int64    `json:"net_tx_bps"`
-	NetRxTotalBytes     *int64    `json:"net_rx_total_bytes"`
-	NetTxTotalBytes     *int64    `json:"net_tx_total_bytes"`
-	DiskReadBps         *int64    `json:"disk_read_bps"`
-	DiskWriteBps        *int64    `json:"disk_write_bps"`
-	DiskReadTotalBytes  *int64    `json:"disk_read_total_bytes"`
-	DiskWriteTotalBytes *int64    `json:"disk_write_total_bytes"`
-	ScanTimestamp       time.Time `json:"scan_timestamp"`
+	Host                string   `json:"host"`
+	MachineName         string   `json:"machine_name"`
+	CPUGuestPct         *float64 `json:"cpu_guest_pct"`
+	CPUVMMPct           *float64 `json:"cpu_vmm_pct"`
+	CPUPct              *float64 `json:"cpu_pct"`
+	RSSBytes            *int64   `json:"rss_bytes"`
+	RAMTotalBytes       *int64   `json:"ram_total_bytes"`
+	RAMFreeBytes        *int64   `json:"ram_free_bytes"`
+	GuestAdditions      bool     `json:"guest_additions"`
+	NetRxBps            *int64   `json:"net_rx_bps"`
+	NetTxBps            *int64   `json:"net_tx_bps"`
+	NetRxTotalBytes     *int64   `json:"net_rx_total_bytes"`
+	NetTxTotalBytes     *int64   `json:"net_tx_total_bytes"`
+	DiskReadBps         *int64   `json:"disk_read_bps"`
+	DiskWriteBps        *int64   `json:"disk_write_bps"`
+	DiskReadTotalBytes  *int64   `json:"disk_read_total_bytes"`
+	DiskWriteTotalBytes *int64   `json:"disk_write_total_bytes"`
+	// Nics is the PER-ADAPTER traffic split (the topology edge-width feed,
+	// sync 2026-07-19) — one row per network device instance; rates null on
+	// the first observation, adapter joins devices.nics[].adapter.
+	Nics          []machineNicUsage `json:"nics,omitempty"`
+	ScanTimestamp time.Time         `json:"scan_timestamp"`
+}
+
+type machineNicUsage struct {
+	Adapter      int    `json:"adapter"`
+	Device       string `json:"device"`
+	RxBps        *int64 `json:"rx_bps"`
+	TxBps        *int64 `json:"tx_bps"`
+	RxTotalBytes int64  `json:"rx_total_bytes"`
+	TxTotalBytes int64  `json:"tx_total_bytes"`
 }
 
 // machineMetricsState carries the in-memory bookkeeping the realtime answers
@@ -203,6 +216,14 @@ func (s *Server) machineUsage(r *http.Request, exe, hostname string,
 	if counters.HasNet {
 		rx, tx := counters.NetRxBytes, counters.NetTxBytes
 		sample.NetRxTotalBytes, sample.NetTxTotalBytes = &rx, &tx
+		for _, device := range counters.PerNet {
+			sample.Nics = append(sample.Nics, machineNicUsage{
+				Adapter:      device.Adapter,
+				Device:       device.Device,
+				RxTotalBytes: device.RxBytes,
+				TxTotalBytes: device.TxBytes,
+			})
+		}
 	}
 	if counters.HasDisk {
 		read, written := counters.DiskReadBytes, counters.DiskWrittenBytes
@@ -230,6 +251,18 @@ func (s *Server) machineUsage(r *http.Request, exe, hostname string,
 	if counters.HasNet && prev.counters.HasNet {
 		sample.NetRxBps = rate(counters.NetRxBytes, prev.counters.NetRxBytes)
 		sample.NetTxBps = rate(counters.NetTxBytes, prev.counters.NetTxBytes)
+		prevNet := map[string]vbox.NetDeviceCounters{}
+		for _, device := range prev.counters.PerNet {
+			prevNet[device.Device] = device
+		}
+		for i := range sample.Nics {
+			before, seen := prevNet[sample.Nics[i].Device]
+			if !seen {
+				continue
+			}
+			sample.Nics[i].RxBps = rate(sample.Nics[i].RxTotalBytes, before.RxBytes)
+			sample.Nics[i].TxBps = rate(sample.Nics[i].TxTotalBytes, before.TxBytes)
+		}
 	}
 	if counters.HasDisk && prev.counters.HasDisk {
 		sample.DiskReadBps = rate(counters.DiskReadBytes, prev.counters.DiskReadBytes)

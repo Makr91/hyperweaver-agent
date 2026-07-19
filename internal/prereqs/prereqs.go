@@ -60,27 +60,30 @@ func Detect(ctx context.Context) []Tool {
 	probeCtx, cancel := context.WithTimeout(ctx, probeSpan)
 	defer cancel()
 
-	// utmctl has no version flag — a bare invocation proves presence (the scp
-	// pattern); UTM's version answers through System Events. Off darwin the
-	// lookup answers empty, so the row lands uninstalled without probing.
-	utmTool := probePath(probeCtx, "utm", lookupUTMCtl())
-	if utmTool.Installed {
-		if utmVersion, err := utm.Version(probeCtx); err == nil {
-			utmTool.Version = utmVersion
-		}
-	}
-
 	tools := []Tool{
 		probePath(probeCtx, "vagrant", lookPath("vagrant"), "--version"),
 		probePath(probeCtx, "virtualbox", lookupVirtualBox(), "--version"),
-		utmTool,
+	}
+	// utm reports on darwin ONLY (Mark via sync 2026-07-19 — no row off
+	// macOS). utmctl has no version flag — a bare invocation proves presence;
+	// UTM's version answers through System Events.
+	if runtime.GOOS == "darwin" {
+		utmTool := probePath(probeCtx, "utm", lookupUTMCtl())
+		if utmTool.Installed {
+			if utmVersion, err := utm.Version(probeCtx); err == nil {
+				utmTool.Version = utmVersion
+			}
+		}
+		tools = append(tools, utmTool)
+	}
+	tools = append(tools,
 		probePath(probeCtx, "git", lookPath("git"), "--version"),
 		probePath(probeCtx, "rsync", lookSyncTool("rsync"), "--version"),
 		// OpenSSH scp has no version flag; a bare invocation proves presence.
 		probePath(probeCtx, "scp", lookSyncTool("scp")),
 		// The embedded pure-Go transports ship inside the agent binary.
-		{Name: "builtin_sync", Installed: true, Version: "embedded rsync client + sftp"},
-	}
+		Tool{Name: "builtin_sync", Installed: true, Version: "embedded rsync client + sftp"},
+	)
 
 	cached = tools
 	cachedAt = time.Now()

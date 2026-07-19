@@ -215,12 +215,8 @@ func devicesCurrent(raw map[string]string) map[string]any {
 			continue
 		}
 		entry := map[string]any{"adapter": adapter, "mode": mode}
-		bridge := raw["bridgeadapter"+n]
-		if bridge == "" {
-			bridge = raw["hostonlyadapter"+n]
-		}
-		if bridge != "" {
-			entry["bridge"] = bridge
+		if target := nicTargetName(raw, mode, n); target != "" {
+			entry["network"] = target
 		}
 		if mac := raw["macaddress"+n]; mac != "" {
 			entry["mac"] = mac
@@ -228,6 +224,33 @@ func devicesCurrent(raw map[string]string) map[string]any {
 		deviceNics = append(deviceNics, entry)
 	}
 	return map[string]any{"controllers": controllers, "attachments": attachments, "nics": deviceNics}
+}
+
+// nicTargetName resolves an adapter's attachment TARGET from the emitter's
+// per-mode key (the UI's adapter → network-space join, sync 2026-07-19 —
+// bridge?'s replacement, one field for every mode). The nat-network /
+// hostonly-network / generic-driver spellings are emitter-derived but
+// unverified against a live machine in those modes (none exists on Mark's
+// host); natnetwork additionally tries the older natnet<N> spelling.
+func nicTargetName(raw map[string]string, mode, n string) string {
+	switch mode {
+	case "bridged":
+		return raw["bridgeadapter"+n]
+	case "hostonly":
+		return raw["hostonlyadapter"+n]
+	case "intnet":
+		return raw["intnet"+n]
+	case "natnetwork":
+		if name := raw["nat-network"+n]; name != "" {
+			return name
+		}
+		return raw["natnet"+n]
+	case "hostonlynetwork":
+		return raw["hostonly-network"+n]
+	case "generic":
+		return raw["generic-driver"+n]
+	}
+	return ""
 }
 
 // annotateTransportNics stamps the transport/provisional markers onto the

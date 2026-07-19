@@ -2,8 +2,10 @@ package vbox
 
 import (
 	"context"
+	"encoding/xml"
 	"fmt"
 	"os/exec"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -69,10 +71,23 @@ func MetricKilobytes(value string) (int64, bool) {
 	return n, true
 }
 
+// NetDeviceCounters are one network DEVICE INSTANCE's cumulative byte
+// counters — the per-adapter split the topology edge widths ride. Adapter is
+// instance+1: exact on uniform-driver machines (this agent's own creates);
+// mixed-driver machines number instances PER TYPE (e1000-0 beside
+// virtio-net-0), so Device stays alongside for disambiguation.
+type NetDeviceCounters struct {
+	Device  string
+	Adapter int
+	RxBytes int64
+	TxBytes int64
+}
+
 // VMCounters are one machine's cumulative byte counters from the VM
 // debugger's statistics (`debugvm statistics`) — network receive/transmit and
-// disk read/write since the VM process started. HasNet/HasDisk report whether
-// the family answered at all.
+// disk read/write since the VM process started, summed across devices, plus
+// the per-network-device split. HasNet/HasDisk report whether the family
+// answered at all.
 type VMCounters struct {
 	NetRxBytes       int64
 	NetTxBytes       int64
@@ -80,10 +95,45 @@ type VMCounters struct {
 	DiskWrittenBytes int64
 	HasNet           bool
 	HasDisk          bool
+	PerNet           []NetDeviceCounters
+}
+
+// netDeviceKey extracts the device segment between /Devices/ and the counter
+// leaf ("/Devices/e1000-0/ReceiveBytes" → "e1000-0"; instance-as-own-segment
+// shapes fold their slashes into the key) — tolerant of either statistics
+// path shape.
+func netDeviceKey(path, leaf string) (string, bool) {
+	rest, found := strings.CutPrefix(path, "/Devices/")
+	if !found {
+		return "", false
+	}
+	key, found := strings.CutSuffix(rest, "/"+leaf)
+	if !found {
+		return "", false
+	}
+	return key, key != ""
+}
+
+// deviceInstance reads the trailing integer of a device key ("e1000-0" → 0);
+// -1 when none exists.
+func deviceInstance(key string) int {
+	end := len(key)
+	start := end
+	for start > 0 && key[start-1] >= '0' && key[start-1] <= '9' {
+		start--
+	}
+	if start == end {
+		return -1
+	}
+	n, err := strconv.Atoi(key[start:end])
+	if err != nil {
+		return -1
+	}
+	return n
 }
 
 // DebugVMCounters sums the machine's network/disk byte counters across its
-// devices.
+// devices and keeps the per-network-device split.
 func DebugVMCounters(ctx context.Context, vboxManage, target string) (*VMCounters, error) {
 	cmd := exec.CommandContext(ctx, vboxManage, "debugvm", target, "statistics",
 		"--pattern", "*ReceiveBytes|*TransmitBytes|*ReadBytes|*WrittenBytes")
@@ -92,30 +142,60 @@ func DebugVMCounters(ctx context.Context, vboxManage, target string) (*VMCounter
 	if err != nil {
 		return nil, fmt.Errorf("VBoxManage debugvm %s statistics: %w", target, err)
 	}
+	var doc struct {
+		Counters []struct {
+			Value int64  `xml:"c,attr"`
+			Name  string `xml:"name,attr"`
+		} `xml:"Counter"`
+	}
+	if uerr := xml.Unmarshal(out, &doc); uerr != nil {
+		return nil, fmt.Errorf("parse debugvm statistics: %w", uerr)
+	}
 	counters := &VMCounters{}
-	for _, line := range strings.Split(string(out), "\n") {
-		fields := strings.Fields(strings.TrimSpace(line))
-		if len(fields) < 2 || !strings.HasPrefix(fields[0], "/") {
-			continue
+	perNet := map[string]*NetDeviceCounters{}
+	addNet := func(path, leaf string, n int64, rx bool) {
+		key, ok := netDeviceKey(path, leaf)
+		if !ok {
+			return
 		}
-		n, perr := strconv.ParseInt(fields[1], 10, 64)
-		if perr != nil {
-			continue
+		device := perNet[key]
+		if device == nil {
+			device = &NetDeviceCounters{Device: key, Adapter: deviceInstance(key) + 1}
+			perNet[key] = device
 		}
+		if rx {
+			device.RxBytes += n
+		} else {
+			device.TxBytes += n
+		}
+	}
+	for _, counter := range doc.Counters {
+		n := counter.Value
 		switch {
-		case strings.HasSuffix(fields[0], "ReceiveBytes"):
+		case strings.HasSuffix(counter.Name, "ReceiveBytes"):
 			counters.NetRxBytes += n
 			counters.HasNet = true
-		case strings.HasSuffix(fields[0], "TransmitBytes"):
+			addNet(counter.Name, "ReceiveBytes", n, true)
+		case strings.HasSuffix(counter.Name, "TransmitBytes"):
 			counters.NetTxBytes += n
 			counters.HasNet = true
-		case strings.HasSuffix(fields[0], "ReadBytes"):
+			addNet(counter.Name, "TransmitBytes", n, false)
+		case strings.HasSuffix(counter.Name, "ReadBytes"):
 			counters.DiskReadBytes += n
 			counters.HasDisk = true
-		case strings.HasSuffix(fields[0], "WrittenBytes"):
+		case strings.HasSuffix(counter.Name, "WrittenBytes"):
 			counters.DiskWrittenBytes += n
 			counters.HasDisk = true
 		}
 	}
+	for _, device := range perNet {
+		counters.PerNet = append(counters.PerNet, *device)
+	}
+	sort.Slice(counters.PerNet, func(i, j int) bool {
+		if counters.PerNet[i].Adapter != counters.PerNet[j].Adapter {
+			return counters.PerNet[i].Adapter < counters.PerNet[j].Adapter
+		}
+		return counters.PerNet[i].Device < counters.PerNet[j].Device
+	})
 	return counters, nil
 }

@@ -187,23 +187,39 @@ func New(cfg *config.Config, keyStore *keys.Store, trayTokens *auth.TrayTokens, 
 
 	// Host network configuration (converged wire, sync 2026-07-17):
 	// /network/hostname (GET live view, PUT queues set_hostname) and the
-	// /network/addresses family (GET is the real live listing; every
-	// mutation is an honest 501 stub — Mark's scope ruling, a future
-	// session expands it). addrobj values may carry slashes, so DELETE
-	// takes a {addrobj...} wildcard; Go 1.22 ServeMux forbids segments
-	// after "...", so the enable/disable verbs cannot be their own
-	// patterns — PUT registers one {rest...} wildcard and the stub answers
-	// every shape identically.
+	// /network/addresses family (GET is the live listing; mutations queue
+	// zoneweaver's create/delete/enable/disable_ip_address tasks — Mark's
+	// build order 2026-07-19 replaced the 501 stubs). addrobj values carry
+	// slashes, so DELETE takes a {addrobj...} wildcard; Go 1.22 ServeMux
+	// forbids segments after "...", so the enable/disable verbs split from
+	// the one PUT {rest...} wildcard inside the handler.
 	mux.Handle("GET /network/hostname", requireKey(http.HandlerFunc(s.handleGetHostname)))
 	mux.Handle("PUT /network/hostname", requireKey(http.HandlerFunc(s.handleSetHostname)))
 	mux.Handle("GET /network/addresses", requireKey(http.HandlerFunc(s.handleListNetworkAddresses)))
-	mux.Handle("POST /network/addresses", requireKey(http.HandlerFunc(s.handleNetworkAddressStub)))
-	mux.Handle("DELETE /network/addresses/{addrobj...}", requireKey(http.HandlerFunc(s.handleNetworkAddressStub)))
-	mux.Handle("PUT /network/addresses/{rest...}", requireKey(http.HandlerFunc(s.handleNetworkAddressStub)))
+	mux.Handle("POST /network/addresses", requireKey(http.HandlerFunc(s.handleCreateNetworkAddress)))
+	mux.Handle("DELETE /network/addresses/{addrobj...}", requireKey(http.HandlerFunc(s.handleDeleteNetworkAddress)))
+	mux.Handle("PUT /network/addresses/{rest...}", requireKey(http.HandlerFunc(s.handleNetworkAddressAction)))
 	// Static-IP picker feed (the converged cross-agent wire, sync 2026-07-18):
 	// free host addresses on the default-route subnet, ARP/document-informed,
 	// ADVISORY only. GET = viewer via the central policy; no capability token.
 	mux.Handle("GET /network/ip-suggestions", requireKey(http.HandlerFunc(s.handleIPSuggestions)))
+	// Network spaces (the network-spaces token — the UI topology wire, sync
+	// 2026-07-19): enumerate + manage VirtualBox's host-only interfaces (with
+	// DHCP), host-only networks (the 7.x vmnet family), NAT networks (with
+	// port forwards + loopbacks), and the implicit internal networks
+	// (read-only — VirtualBox has no intnet verbs).
+	mux.Handle("GET /network/spaces", requireKey(http.HandlerFunc(s.handleListNetworkSpaces)))
+	mux.Handle("POST /network/spaces/hostonly", requireKey(http.HandlerFunc(s.handleCreateHostOnlySpace)))
+	mux.Handle("PUT /network/spaces/hostonly/{name}", requireKey(http.HandlerFunc(s.handleModifyHostOnlySpace)))
+	mux.Handle("DELETE /network/spaces/hostonly/{name}", requireKey(http.HandlerFunc(s.handleDeleteHostOnlySpace)))
+	mux.Handle("POST /network/spaces/hostonlynet", requireKey(http.HandlerFunc(s.handleCreateHostOnlyNet)))
+	mux.Handle("PUT /network/spaces/hostonlynet/{name}", requireKey(http.HandlerFunc(s.handleModifyHostOnlyNet)))
+	mux.Handle("DELETE /network/spaces/hostonlynet/{name}", requireKey(http.HandlerFunc(s.handleDeleteHostOnlyNet)))
+	mux.Handle("POST /network/spaces/natnetwork", requireKey(http.HandlerFunc(s.handleCreateNATNetwork)))
+	mux.Handle("PUT /network/spaces/natnetwork/{name}", requireKey(http.HandlerFunc(s.handleModifyNATNetwork)))
+	mux.Handle("DELETE /network/spaces/natnetwork/{name}", requireKey(http.HandlerFunc(s.handleDeleteNATNetwork)))
+	mux.Handle("POST /network/spaces/natnetwork/{name}/start", requireKey(http.HandlerFunc(s.handleStartNATNetwork)))
+	mux.Handle("POST /network/spaces/natnetwork/{name}/stop", requireKey(http.HandlerFunc(s.handleStopNATNetwork)))
 
 	// Database management (Agent API v1 Database Management group), across
 	// every open database file. Mutations admin-only via the central policy.

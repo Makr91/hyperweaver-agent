@@ -415,6 +415,11 @@ func ValidateModifyDocument(metadata map[string]any, info *vbox.Info) error {
 	if err := ValidateAddDisks(listOr(metadata["add_disks"])); err != nil {
 		return err
 	}
+	for _, entry := range listOr(metadata["nics"]) {
+		if _, err := nicAttachmentFlags(mapOr(entry), "1"); err != nil {
+			return err
+		}
+	}
 	_, _, err := modifyAttributeFlags(metadata, info)
 	return err
 }
@@ -515,8 +520,10 @@ func (e *executors) modifyNetworks(ctx context.Context, task *tasks.Task, vboxEx
 		*changes = append(*changes, "remove_nics")
 	}
 
-	// nics[] = per-adapter tuning: {adapter, cable_connected?, promisc?,
-	// speed?, boot_prio?, bandwidth_group?, nic_type?, mac?}.
+	// nics[] = per-adapter tuning ({adapter, cable_connected?, promisc?,
+	// speed?, boot_prio?, bandwidth_group?, nic_type?, mac?}) plus
+	// RE-ATTACHMENT ({adapter, mode, network?} — the drag-to-rewire wire,
+	// sync 2026-07-19).
 	if tuning := listOr(metadata["nics"]); len(tuning) > 0 {
 		e.taskProgress(task, 57, "tuning_nics")
 		flags := []string{}
@@ -527,6 +534,11 @@ func (e *executors) modifyNetworks(ctx context.Context, task *tasks.Task, vboxEx
 				return fmt.Errorf("nics entries need adapter 1-%d (got %v)", maxNICSlots, nic["adapter"])
 			}
 			n := strconv.Itoa(adapter)
+			attachFlags, aerr := nicAttachmentFlags(nic, n)
+			if aerr != nil {
+				return aerr
+			}
+			flags = append(flags, attachFlags...)
 			if mac := stringOr(nic["mac"], ""); mac != "" && !strings.EqualFold(mac, "auto") {
 				flags = append(flags, "--mac-address"+n+"="+strings.ReplaceAll(mac, ":", ""))
 			}
@@ -541,6 +553,54 @@ func (e *executors) modifyNetworks(ctx context.Context, task *tasks.Task, vboxEx
 		*changes = append(*changes, "nics")
 	}
 	return nil
+}
+
+// nicAttachmentFlags translates a nics[] entry's re-attachment pair (mode +
+// network — the drag-to-rewire wire, sync 2026-07-19) into modifyvm flags.
+// network is the mode's TARGET (bridged→host interface, hostonly→host-only
+// ifname, hostonlynet/intnet/natnetwork→network name, generic→driver) and is
+// required exactly where the mode addresses one; nat/none take no target.
+// The hostonlynet spelling pair (mode word hostonlynet, flag --host-only-net)
+// is usage-derived and unverified against a live hostonlynet machine.
+func nicAttachmentFlags(nic map[string]any, n string) ([]string, error) {
+	modeRaw, hasMode := nic["mode"]
+	network := stringOr(nic["network"], "")
+	if !hasMode {
+		if network != "" {
+			return nil, errors.New("nics[].network rides mode — send both to re-attach an adapter")
+		}
+		return nil, nil
+	}
+	mode := strings.ToLower(stringOr(modeRaw, ""))
+	needTarget := func(flag string) ([]string, error) {
+		if network == "" {
+			return nil, fmt.Errorf("nics[].mode %s requires network (the attachment target)", mode)
+		}
+		return []string{"--nic" + n + "=" + mode, flag + n + "=" + network}, nil
+	}
+	switch mode {
+	case "nat", "none", "null":
+		if network != "" {
+			return nil, fmt.Errorf("nics[].mode %s takes no network", mode)
+		}
+		return []string{"--nic" + n + "=" + mode}, nil
+	case "bridged":
+		return needTarget("--bridge-adapter")
+	case "hostonly":
+		return needTarget("--host-only-adapter")
+	case "hostonlynet", "hostonlynetwork":
+		if network == "" {
+			return nil, errors.New("nics[].mode hostonlynet requires network (the attachment target)")
+		}
+		return []string{"--nic" + n + "=hostonlynet", "--host-only-net" + n + "=" + network}, nil
+	case "intnet":
+		return needTarget("--intnet")
+	case "natnetwork":
+		return needTarget("--nat-network")
+	case "generic":
+		return needTarget("--nic-generic-drv")
+	}
+	return nil, fmt.Errorf("nics[].mode %s is not a valid attachment mode (nat|bridged|hostonly|hostonlynet|intnet|natnetwork|generic|none)", mode)
 }
 
 // modifyStorage handles the storage device model at modify:

@@ -34,7 +34,7 @@
     { "name": "Host Monitoring", "description": "Host telemetry (the monitoring capability token): always-on realtime sampling via gopsutil; monitoring.storage_enabled adds stored time series in per-datatype database files. Illumos-only families (ZFS pools/datasets/ARC, zpool-iostat disk IO, netstat routes) have no analog on this host and are absent." },
     { "name": "Processes", "description": "Host process listing and control (the processes capability token). The zone concept does not exist here: the zone field is absent and ?zone= filters are ignored. Absent by platform: /{pid}/stack, /{pid}/limits (pstack/plimit are illumos tools) and trace/start (DTrace)." },
     { "name": "System Host Management", "description": "Host power management (the host-power capability token, config-gated by host_power.enabled — every endpoint answers 503 and the token disappears from /api/status when disabled). Absent by platform: runlevels, single-user/multi-user transitions, fast reboot, reboot-required tracking (init semantics with no cross-platform analog)." },
-    { "name": "Host Configuration", "description": "System hosts-file and DNS control on all three platforms (the hosts-file and dns capability tokens — platform tokens, always advertised). Hosts file: Windows System32\\drivers\\etc\\hosts, /etc/hosts elsewhere. DNS (/system/dns, the converged wire, sync 2026-07-17): one wire shape everywhere — nameservers/search_domains/domain/options — with per-OS mechanics: /etc/resolv.conf read/written on Unix; netsh per connected interface on Windows (nameservers only; raw and the resolv.conf-only fields answer 400, backup is \"\"); networksetup per enabled service on macOS (nameservers + search_domains; domain/options/raw answer 400, backup \"\"). Host network configuration (/network/hostname and /network/addresses, the hostname and ip-addresses capability tokens — the converged wire, sync 2026-07-17): zoneweaver's shipped network-controller family, BARE documents (no success/message/timestamp envelope; errors are {error, details?}). Hostname: GET is the live view (persisted name vs live system hostname), PUT queues the async set_hostname task. Addresses: GET is the real live listing over Go's stdlib interface enumeration; every mutation (POST/DELETE/enable/disable) answers an honest 501 on this agent — Mark's scope ruling, a future session expands them." },
+    { "name": "Host Configuration", "description": "System hosts-file and DNS control on all three platforms (the hosts-file and dns capability tokens — platform tokens, always advertised). Hosts file: Windows System32\\drivers\\etc\\hosts, /etc/hosts elsewhere. DNS (/system/dns, the converged wire, sync 2026-07-17): one wire shape everywhere — nameservers/search_domains/domain/options — with per-OS mechanics: /etc/resolv.conf read/written on Unix; netsh per connected interface on Windows (nameservers only; raw and the resolv.conf-only fields answer 400, backup is \"\"); networksetup per enabled service on macOS (nameservers + search_domains; domain/options/raw answer 400, backup \"\"). Host network configuration (/network/hostname and /network/addresses, the hostname and ip-addresses capability tokens — the converged wire, sync 2026-07-17): zoneweaver's shipped network-controller family, BARE documents (no success/message/timestamp envelope; errors are {error, details?}). Hostname: GET is the live view (persisted name vs live system hostname), PUT queues the async set_hostname task. Addresses: GET is the real live listing over Go's stdlib interface enumeration; mutations (shipped 2026-07-19, Mark's build order) queue zoneweaver's create/delete/enable/disable_ip_address tasks with per-OS honesty — static creates everywhere, dhcp on Windows only, addrconf refused (SLAAC is automatic), enable/disable toggle the INTERFACE the addrobj names. Network spaces (/network/spaces*, the network-spaces token, minted 2026-07-19): enumerate and manage VirtualBox's network spaces — host-only interfaces (create/configure/delete + their DHCP servers), host-only NETWORKS (VirtualBox 7's vmnet family: create/modify/delete), NAT networks (create/modify/delete/start/stop + port-forward and loopback rules), and the implicit internal networks (read-only: VirtualBox has no intnet verbs — they exist while a VM references them)." },
     { "name": "Database Management", "description": "SQLite statistics and maintenance across every open database file (tasks.sqlite, agent.sqlite, and the monitoring files when storage is enabled), plus the read-only explorer drill-down (tables with row counts and indexes, then paged rows — zoneweaver's contract, shared wire; no arbitrary SQL, every table and order_by column verified against the database's own catalog)" },
     { "name": "Settings", "description": "Agent configuration over the API (admin only)" },
     { "name": "Secrets", "description": "Global secrets store (the secrets capability token; admin only): SHI's six categories in secrets.yaml beside the config — kept OUT of /settings so that surface stays a pure configuration document. Values are plain text by design (it is the user's local machine; the generated Hosts.yml carries them as SECRETS_* template vars). Independently, Hosts.rb merges the working copy's secrets.yml/.secrets.yml at vagrant runtime — both mechanisms coexist." }
@@ -89,7 +89,7 @@
           "bootstrapAvailable": { "type": "boolean", "example": true },
           "console": { "type": "array", "items": { "type": "string" }, "description": "EMERGENCY consoles only (Mark's placement ruling 2026-07-12 — hypervisor-level surfaces that work with zero guest cooperation): rdp always (base VRDP ships in VirtualBox 7.2 — the IronRDP web client rides the /machines/{name}/rdp-bridge RDCleanPath WebSocket); vnc only when a USABLE VBoxVNC VRDE module is installed (the websockify bridge needs RFB on the VRDE port). The machine SSH terminal is guest-network access and advertises as features 'ssh' instead.", "example": ["rdp"] },
           "shi_mode": { "type": "boolean", "description": "\"I Can't Believe it's not Super.Human.Installer\" presentation toggle (ui.shi_mode): the SPA renders the opinionated SHI-style theme/flow in Direct mode when true. Absent/false on agents without the concept.", "example": false },
-          "features": { "type": "array", "items": { "type": "string" }, "description": "Capability tokens (platform support ∧ config state): host-power is absent when host_power.enabled is false, artifacts when artifact_storage.enabled is false, file-browser when file_browser.enabled is false, guest-agent when guest_agent.enabled is false. provisioner-registry names the SHI-format package registry surface and secrets the global secrets store — finer than the cross-agent provisioning/machine-create tokens, which are true on every provisioning-capable agent regardless of wire shape (Mark's gating ruling, 2026-07-06). machine-modify names PUT's infrastructure-modify surface (the base's zone_modify contract). ssh names the machine SSH-terminal family (POST /machines/{name}/ssh/start + the /ssh/{id} WebSocket) — a FEATURE, not a console, per Mark's placement ruling 2026-07-12: console[] carries emergency consoles only. hosts-file names the /system/hosts editor surface (the converged wire, minted 2026-07-17) — a platform token, always advertised on both agents. dns names the /system/dns surface beside it (minted 2026-07-17, same converged wire — per-OS mechanics, wire identical; the UI's Network-tab DNS section gates on it). hostname names the /network/hostname surface (minted 2026-07-17, the converged wire): GET is the live view, PUT queues the async set_hostname task. ip-addresses names the /network/addresses listing (minted 2026-07-17) — the token advertises the READ surface: the listing is real and always live, while every mutation (POST/DELETE/enable/disable) answers an honest 501 on this agent (Mark's scope ruling — a future session expands them).", "example": ["tasks", "machines", "machine-suspend", "machine-create", "machine-modify", "machine-snapshots", "machine-screenshot", "swap", "monitoring", "processes", "provisioning", "provisioner-registry", "secrets", "ssh", "templates", "host-launchers", "host-terminal", "host-power", "hosts-file", "dns", "hostname", "ip-addresses", "artifacts", "file-browser", "guest-agent"] },
+          "features": { "type": "array", "items": { "type": "string" }, "description": "Capability tokens (platform support ∧ config state): host-power is absent when host_power.enabled is false, artifacts when artifact_storage.enabled is false, file-browser when file_browser.enabled is false, guest-agent when guest_agent.enabled is false. provisioner-registry names the SHI-format package registry surface and secrets the global secrets store — finer than the cross-agent provisioning/machine-create tokens, which are true on every provisioning-capable agent regardless of wire shape (Mark's gating ruling, 2026-07-06). machine-modify names PUT's infrastructure-modify surface (the base's zone_modify contract). ssh names the machine SSH-terminal family (POST /machines/{name}/ssh/start + the /ssh/{id} WebSocket) — a FEATURE, not a console, per Mark's placement ruling 2026-07-12: console[] carries emergency consoles only. hosts-file names the /system/hosts editor surface (the converged wire, minted 2026-07-17) — a platform token, always advertised on both agents. dns names the /system/dns surface beside it (minted 2026-07-17, same converged wire — per-OS mechanics, wire identical; the UI's Network-tab DNS section gates on it). hostname names the /network/hostname surface (minted 2026-07-17, the converged wire): GET is the live view, PUT queues the async set_hostname task. ip-addresses names the /network/addresses surface (minted 2026-07-17; mutations shipped 2026-07-19 per Mark's build order): the live listing plus the zoneweaver-converged task mutations — create (static everywhere, dhcp Windows-only, addrconf refused), delete (?address= disambiguator), and the INTERFACE-level enable/disable toggles. network-spaces names the /network/spaces surface (minted 2026-07-19): enumerate + manage VirtualBox's network spaces (host-only interfaces with DHCP, NAT networks with port forwards, read-only internal networks) — the UI topology mapper gates its network-space fetch on it.", "example": ["tasks", "machines", "machine-suspend", "machine-create", "machine-modify", "machine-snapshots", "machine-screenshot", "swap", "monitoring", "processes", "provisioning", "provisioner-registry", "secrets", "ssh", "templates", "host-launchers", "host-terminal", "host-power", "hosts-file", "dns", "hostname", "ip-addresses", "network-spaces", "artifacts", "file-browser", "guest-agent"] },
           "uptime": { "type": "integer", "description": "Seconds since the agent started", "example": 86400 }
         }
       },
@@ -625,7 +625,7 @@
       "post": {
         "tags": ["Local Login"],
         "summary": "Exchange a tray one-time token for an admin API key",
-        "description": "Public: the token itself is the credential — minted seconds earlier by the local user's physical tray Open click (or an hwa:// protocol invocation), carried in the URL fragment, single-use, 60-second TTL. This is how a desktop user gets a signed-in UI without ever seeing a login screen.",
+        "description": "Public: the token itself is the credential — minted seconds earlier by the local user's physical tray Open click (or an hwa:// protocol invocation), carried in the URL fragment, single-use, 60-second TTL. This is how a desktop user gets a signed-in UI without ever seeing a login screen. Each claim also REAPS older tray-handoff keys beyond the newest 5 (every Open mints a key and nothing else retires them; unbounded piles make the cold-boot bcrypt scan crawl) — a browser tab holding a reaped key re-signs-in via the tray.",
         "security": [],
         "requestBody": {
           "required": true,
@@ -996,7 +996,7 @@
       "get": {
         "tags": ["System"],
         "summary": "Provisioning prerequisite availability",
-        "description": "Minimum role: viewer. A bare tool-name → installed map; this agent's tools are vagrant, virtualbox, git, rsync, scp, and builtin_sync (always true — the embedded pure-Go rsync client + SFTP that make vagrant optional). rsync/scp probe with the pipeline's own lookup: PATH, vagrant's embedded toolchain, and the Windows OpenSSH directory. (The Node agent lists its OmniOS set — same endpoint, platform-appropriate contents.)",
+        "description": "Minimum role: viewer. A bare tool-name → installed map; this agent's tools are vagrant, virtualbox, git, rsync, scp, and builtin_sync (always true — the embedded pure-Go rsync client + SFTP that make vagrant optional), plus utm on macOS agents ONLY (never reported off darwin). rsync/scp probe with the pipeline's own lookup: PATH, vagrant's embedded toolchain, and the Windows OpenSSH directory. (The Node agent lists its OmniOS set — same endpoint, platform-appropriate contents.)",
         "responses": {
           "200": {
             "description": "Tool availability map",
@@ -1373,7 +1373,7 @@
                     "system_status": { "type": "string", "description": "Live VirtualBox state; the stored status for created-but-never-started machines", "example": "running" },
                     "web_address": { "type": "string", "nullable": true, "description": "Post-provision welcome URL read from the working copy's results.yml — null unless something writes one (the native pipeline does not; the document's control IP is authoritative addressing)" },
                     "pending_changes": { "type": "object", "nullable": true, "description": "The accrued changes waiting for the next agent-driven power cycle (the accrue-changes contract — PUT against a non-powered-off machine stores here). Null when none. Badge on key count; DELETE /machines/{name}/pending-changes cancels." },
-                    "knob_current": { "type": "object", "description": "The machine's CURRENT values in PUT /machines/{name}'s EXACT vocabulary — the Edit surface prefills from this and PUTs only changed keys (the UI never reverse-maps the raw showvminfo view itself). Built from the showvminfo machinereadable emitter (VBoxManageInfo.cpp, VirtualBox 7.2 source) read backwards against the forward flag map. Keys: the top-level modify-vocabulary fields (ram MB int, vcpus, bootrom bios|efi — EFI32/EFI64/EFIDUAL collapse to efi, hostbridge, diskif — the FIRST controller's type reverse-mapped e.g. IntelAhci→sata, netif — only when EVERY enabled adapter carries the type netif would set (82540EM→e1000, virtio), os_type — the ID PUT takes, resolved from showvminfo's description through this build's ostypes feed (GuestOSType fallback; omitted when unresolvable), vnc/acpi/xhci on|off, autoboot BOOLEAN (PUT's own type), boot_order — omitted whole when any slot boots a device PUT cannot express (usb/sharedfolder), boot_priority from the spec, guest_agent BOOLEAN — the QGA UART's live presence, always reported: uart2 in server mode onto the machine's QGA pipe/socket (the Proxmox-style checkbox prefill)), vbox.<section>.<key> (each in PUT's value words: graphicscontroller null→none, clipboard_file_transfers on|off→enabled|disabled, hidpointing/hidkeyboard device names→--mouse/--keyboard bus words, audio=\"none\"→{enabled: off}, vrde.port = the configured vrdeports string), vbox.serial[]/parallel[] (enabled ports only — {port, io_base, irq, mode, type|device}; the emitter's \"kind,path\" modes become PUT's \"kind path\" words), nics[] per enabled adapter ({adapter, cable_connected, nic_type, mac, speed}), and credentials ({vagrant_user, vagrant_user_pass, vagrant_user_private_key_path} from the stored settings — the full triple, password included, so the Edit surface prefills and can reveal it). The knobs showvminfo never emits are read from the machine's .vbox settings file (VirtualBox's persisted XML, where ABSENCE = the constructor default — so these arrive as real values, not blanks): cpu hotplug + the mitigation family (spec_ctrl, ibpb_*, l1d_flush_* — sched defaults on, mds_clear_* — sched defaults on), arm_gic_its (ARM machines only), audio controller/codec (with VirtualBox's per-controller codec defaults), usb card_reader, per-NIC promisc/boot_prio/bandwidth_group (bandwidth_group omitted when none), platform tpm_type/tpm_location/system_uuid_le/vm_execution_engine, the firmware logo family + pxe_debug, vrde auth_library/extpack (the word \"default\" when unset — modifyvm's own word for it), recording max_time_seconds/max_size_mb. UNSET AND UNKNOWABLE KEYS ARE OMITTED: disabled serial/parallel ports, a disabled VRDE server's showvminfo sub-keys, platform.icon_file (the .vbox stores the icon as a base64 blob, the source path is unrecoverable), recording.screens, and the whole .vbox-derived set when the file is unreadable (encrypted machines, mid-rewrite race). Machines with no VM behind them carry only the DB-held keys (credentials, boot_priority). TRANSPORT MARKERS (sync 2026-07-18): nics[] rows carry provisional: true + the effective remove_on_completion on the provisioning NAT row (adapter 1, identified by attachment nat + marker MAC 00FF00FF00FF) and on rows whose paired document networks[adapter-2] entry is provisional or explicitly flagged — the UI's badge/lockout/toggle feed; pairing rule: row adapter N ↔ networks[N-2]. DEVICES (the structured device tree, sync 2026-07-18 — the UI's regex killer): knob_current.devices = {controllers: [{name, type}], attachments: [{controller, port, device, path, kind: disk|cdrom}], nics: [{adapter, mode, bridge?, mac?}]} — built from the same showvminfo map (kind cdrom = an empty drive (path \"\") or a .iso path; type in the document's controller vocabulary, raw emitter word when unmapped); the flat configuration map stays as raw debug." }
+                    "knob_current": { "type": "object", "description": "The machine's CURRENT values in PUT /machines/{name}'s EXACT vocabulary — the Edit surface prefills from this and PUTs only changed keys (the UI never reverse-maps the raw showvminfo view itself). Built from the showvminfo machinereadable emitter (VBoxManageInfo.cpp, VirtualBox 7.2 source) read backwards against the forward flag map. Keys: the top-level modify-vocabulary fields (ram MB int, vcpus, bootrom bios|efi — EFI32/EFI64/EFIDUAL collapse to efi, hostbridge, diskif — the FIRST controller's type reverse-mapped e.g. IntelAhci→sata, netif — only when EVERY enabled adapter carries the type netif would set (82540EM→e1000, virtio), os_type — the ID PUT takes, resolved from showvminfo's description through this build's ostypes feed (GuestOSType fallback; omitted when unresolvable), vnc/acpi/xhci on|off, autoboot BOOLEAN (PUT's own type), boot_order — omitted whole when any slot boots a device PUT cannot express (usb/sharedfolder), boot_priority from the spec, guest_agent BOOLEAN — the QGA UART's live presence, always reported: uart2 in server mode onto the machine's QGA pipe/socket (the Proxmox-style checkbox prefill)), vbox.<section>.<key> (each in PUT's value words: graphicscontroller null→none, clipboard_file_transfers on|off→enabled|disabled, hidpointing/hidkeyboard device names→--mouse/--keyboard bus words, audio=\"none\"→{enabled: off}, vrde.port = the configured vrdeports string), vbox.serial[]/parallel[] (enabled ports only — {port, io_base, irq, mode, type|device}; the emitter's \"kind,path\" modes become PUT's \"kind path\" words), nics[] per enabled adapter ({adapter, cable_connected, nic_type, mac, speed}), and credentials ({vagrant_user, vagrant_user_pass, vagrant_user_private_key_path} from the stored settings — the full triple, password included, so the Edit surface prefills and can reveal it). The knobs showvminfo never emits are read from the machine's .vbox settings file (VirtualBox's persisted XML, where ABSENCE = the constructor default — so these arrive as real values, not blanks): cpu hotplug + the mitigation family (spec_ctrl, ibpb_*, l1d_flush_* — sched defaults on, mds_clear_* — sched defaults on), arm_gic_its (ARM machines only), audio controller/codec (with VirtualBox's per-controller codec defaults), usb card_reader, per-NIC promisc/boot_prio/bandwidth_group (bandwidth_group omitted when none), platform tpm_type/tpm_location/system_uuid_le/vm_execution_engine, the firmware logo family + pxe_debug, vrde auth_library/extpack (the word \"default\" when unset — modifyvm's own word for it), recording max_time_seconds/max_size_mb. UNSET AND UNKNOWABLE KEYS ARE OMITTED: disabled serial/parallel ports, a disabled VRDE server's showvminfo sub-keys, platform.icon_file (the .vbox stores the icon as a base64 blob, the source path is unrecoverable), recording.screens, and the whole .vbox-derived set when the file is unreadable (encrypted machines, mid-rewrite race). Machines with no VM behind them carry only the DB-held keys (credentials, boot_priority). TRANSPORT MARKERS (sync 2026-07-18): nics[] rows carry provisional: true + the effective remove_on_completion on the provisioning NAT row (adapter 1, identified by attachment nat + marker MAC 00FF00FF00FF) and on rows whose paired document networks[adapter-2] entry is provisional or explicitly flagged — the UI's badge/lockout/toggle feed; pairing rule: row adapter N ↔ networks[N-2]. DEVICES (the structured device tree, sync 2026-07-18 — the UI's regex killer): knob_current.devices = {controllers: [{name, type}], attachments: [{controller, port, device, path, kind: disk|cdrom}], nics: [{adapter, mode, network?, mac?}]} — built from the same showvminfo map (kind cdrom = an empty drive (path \"\") or a .iso path; type in the document's controller vocabulary, raw emitter word when unmapped; network = the attachment's TARGET name per mode — bridged→host interface, hostonly→host-only ifname, intnet/natnetwork→network name, hostonlynetwork→network name, generic→driver — the adapter → network-space join key against GET /network/spaces, sync 2026-07-19; the former bridge field DIED in the rename); the flat configuration map stays as raw debug." }
                   }
                 }
               }
@@ -1405,7 +1405,7 @@
                   "boot_order": { "type": "array", "items": { "type": "string", "enum": ["floppy", "dvd", "disk", "net", "none"] }, "description": "Ordered boot devices → --boot1..4; remaining slots cleared", "example": ["dvd", "disk"] },
                   "vbox": { "type": "object", "description": "VirtualBox's per-hypervisor section at MODIFY — the same shape as create (see MachineSpec.vbox): the full knob vocabulary vbox.<section>.<key> (cpu, memory, graphics, audio, usb, integration, platform, firmware, recording, vrde, autostart, serial[], parallel[]) plus directives[] (any --flag=value, the final word). Unknown sections/keys fail the task; VirtualBox validates values. The former top-level hardware field is DEAD." },
                   "utm": { "type": "object", "description": "UTM's per-hypervisor section at MODIFY (consumed on utm machines; inert on virtualbox): notes (string → the VM's notes via the config API) and qemu_args[] (raw QEMU arguments appended verbatim).", "properties": { "notes": { "type": "string" }, "qemu_args": { "type": "array", "items": { "type": "string" } } } },
-                  "nics": { "type": "array", "description": "Per-adapter tuning: [{adapter (1-8), cable_connected?, promisc?, speed?, boot_prio?, bandwidth_group?, nic_type? (raw adapter type), mac?, remove_on_completion?}] — the knobs beyond add_nics/remove_nics. remove_on_completion is the FLIP WIRE (the converged cross-agent flag, sync 2026-07-18) and is DB-IMMEDIATE, never a VBox knob: adapter 1 (the intrinsic NAT transport) flips configuration.settings.remove_transport_on_completion, adapters 2+ flip the document networks[adapter-2] entry's own remove_on_completion (an adapter without a document entry answers 400 naming it); the key strips before the infrastructure path, and a flip-only entry queues nothing (status completed).", "items": { "type": "object", "properties": { "adapter": { "type": "integer" }, "cable_connected": { "type": "boolean" }, "promisc": { "type": "string" }, "speed": { "type": "integer" }, "boot_prio": { "type": "integer" }, "bandwidth_group": { "type": "string" }, "nic_type": { "type": "string" }, "mac": { "type": "string" }, "remove_on_completion": { "type": "boolean", "description": "DB-immediate flip of the remove-on-completion flag (adapter 1 → the transport signal; 2+ → the document entry)" } } } },
+                  "nics": { "type": "array", "description": "Per-adapter tuning: [{adapter (1-8), cable_connected?, promisc?, speed?, boot_prio?, bandwidth_group?, nic_type? (raw adapter type), mac?, remove_on_completion?, mode?, network?}] — the knobs beyond add_nics/remove_nics. RE-ATTACHMENT (the drag-to-rewire wire, sync 2026-07-19): mode changes the adapter's attachment type (nat|bridged|hostonly|hostonlynet|intnet|natnetwork|generic|none) and network names its TARGET (bridged→host interface, hostonly→host-only ifname, hostonlynet/intnet/natnetwork→network name — GET /network/spaces vocabulary, generic→driver); network is required exactly where the mode addresses one, refused on nat/none, and rides mode (network alone is a 400). Same accrue/pending_power_cycle flow as every infrastructure field; validated at the PUT on both paths. remove_on_completion is the FLIP WIRE (the converged cross-agent flag, sync 2026-07-18) and is DB-IMMEDIATE, never a VBox knob: adapter 1 (the intrinsic NAT transport) flips configuration.settings.remove_transport_on_completion, adapters 2+ flip the document networks[adapter-2] entry's own remove_on_completion (an adapter without a document entry answers 400 naming it); the key strips before the infrastructure path, and a flip-only entry queues nothing (status completed).", "items": { "type": "object", "properties": { "adapter": { "type": "integer" }, "mode": { "type": "string", "enum": ["nat", "bridged", "hostonly", "hostonlynet", "intnet", "natnetwork", "generic", "none"], "description": "Re-attach the adapter to this mode" }, "network": { "type": "string", "description": "The attachment target for the mode (requires mode)" }, "cable_connected": { "type": "boolean" }, "promisc": { "type": "string" }, "speed": { "type": "integer" }, "boot_prio": { "type": "integer" }, "bandwidth_group": { "type": "string" }, "nic_type": { "type": "string" }, "mac": { "type": "string" }, "remove_on_completion": { "type": "boolean", "description": "DB-immediate flip of the remove-on-completion flag (adapter 1 → the transport signal; 2+ → the document entry)" } } } },
                   "netif": { "type": "string", "description": "Adapter hardware type for every configured NIC", "enum": ["virtio", "e1000"] },
                   "os_type": { "type": "string", "example": "Debian_64" },
                   "vnc": { "type": "string", "description": "VRDE remote display on/off", "example": "on" },
@@ -3366,6 +3366,7 @@
                           "disk_write_bps": { "type": "integer", "format": "int64", "nullable": true, "description": "Disk write rate, bytes/second" },
                           "disk_read_total_bytes": { "type": "integer", "format": "int64", "nullable": true, "description": "Total read since the VM process started (the GUI's Total Read)" },
                           "disk_write_total_bytes": { "type": "integer", "format": "int64", "nullable": true, "description": "Total written since the VM process started" },
+                          "nics": { "type": "array", "description": "PER-ADAPTER traffic split (the topology edge-width feed, sync 2026-07-19) — one row per network device instance from the same debugvm counters, absent when the net family never answered. adapter = instance+1, exact on uniform-driver machines (this agent's creates); mixed-driver machines number instances per type, device disambiguates. Joins the machine detail's devices.nics[].adapter → network. Rates diff between polls like the machine totals (null on the first observation) — the refresh rate IS the caller's poll interval, poll faster for finer rates.", "items": { "type": "object", "properties": { "adapter": { "type": "integer", "example": 1 }, "device": { "type": "string", "example": "e1000-0" }, "rx_bps": { "type": "integer", "format": "int64", "nullable": true }, "tx_bps": { "type": "integer", "format": "int64", "nullable": true }, "rx_total_bytes": { "type": "integer", "format": "int64" }, "tx_total_bytes": { "type": "integer", "format": "int64" } } } },
                           "scan_timestamp": { "type": "string", "format": "date-time" }
                         }
                       }
@@ -4150,61 +4151,62 @@
       },
       "post": {
         "tags": ["Host Configuration"],
-        "summary": "Create an IP address (not implemented)",
-        "description": "Minimum role: operator. NOT IMPLEMENTED on this agent (Mark's scope ruling, sync 2026-07-17: the listing is real, mutations wait for a future session). The wire path exists and matches zoneweaver's, so the expansion is drop-in — but today every /network/addresses mutation answers this same honest 501; no body is read.",
+        "summary": "Create an IP address (task)",
+        "description": "Minimum role: operator. Queues create_ip_address (zoneweaver's op, machine_name \"system\" — Mark's build order 2026-07-19 replaced the 501 stub). PER-OS HONESTY, refused at the POST so no doomed task queues: type static works everywhere (Windows netsh, Linux `ip addr add`, macOS ifconfig alias — the macOS apply is LIVE and does not persist across reboot, narrated in the task output); type dhcp is Windows-only (netsh source=dhcp — Linux/macOS have no cross-distro verb → 400); type addrconf always 400 (IPv6 SLAAC configures itself). address must be CIDR for static. primary/wait/temporary/down are ipadm vocabulary with no analog here — accepted for wire parity, narrated as skipped.",
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "type": "object", "required": ["interface", "type", "addrobj"], "properties": { "interface": { "type": "string", "example": "Ethernet" }, "type": { "type": "string", "enum": ["static", "dhcp", "addrconf"] }, "addrobj": { "type": "string", "description": "The synthetic <interface>/v4|v6 name (the listing's vocabulary)", "example": "Ethernet/v4" }, "address": { "type": "string", "description": "CIDR, required for static", "example": "192.168.1.100/24" }, "primary": { "type": "boolean" }, "wait": { "type": "integer" }, "temporary": { "type": "boolean" }, "down": { "type": "boolean" } } } } }
+        },
         "responses": {
-          "501": {
-            "description": "Not implemented on this agent",
-            "content": { "application/json": { "schema": { "type": "object", "properties": { "error": { "type": "string", "example": "IP address management is not implemented on this agent yet — the listing is read-only (a future session expands it)" } } } } }
-          }
+          "202": { "description": "Creation task queued ({success, message, task_id, addrobj, type, interface})" },
+          "400": { "description": "Missing interface/type/addrobj, missing address for static, non-CIDR address, dhcp off-Windows, or addrconf" }
         }
       }
     },
     "/network/addresses/{addrobj}": {
       "delete": {
         "tags": ["Host Configuration"],
-        "summary": "Delete an IP address (not implemented)",
-        "description": "Minimum role: operator. NOT IMPLEMENTED on this agent — same honest 501 as every /network/addresses mutation (Mark's scope ruling, sync 2026-07-17). The route accepts addrobj values carrying slashes (the listing's synthetic <interface>/<version> names round-trip), so the wire path matches zoneweaver's for the drop-in expansion.",
+        "summary": "Delete an IP address (task)",
+        "description": "Minimum role: operator. Queues delete_ip_address (netsh / `ip addr del` / ifconfig -alias). The synthetic <interface>/<version> addrobj can cover SEVERAL live addresses — ?address= disambiguates (this agent's extension; without it, exactly one live address of that version must exist or the request answers 400 listing the candidates). ?release=true releases the DHCP lease first on Windows (ipconfig /release; narrated skip elsewhere). A missing interface or an addrobj with no live address answers 404.",
         "parameters": [
-          { "name": "addrobj", "in": "path", "required": true, "schema": { "type": "string" }, "description": "The listing's addrobj value — may carry a slash (<interface>/v4); the route accepts it", "example": "Ethernet/v4" }
+          { "name": "addrobj", "in": "path", "required": true, "schema": { "type": "string" }, "description": "The listing's addrobj value — may carry a slash (<interface>/v4)", "example": "Ethernet/v4" },
+          { "name": "address", "in": "query", "schema": { "type": "string" }, "description": "Which of the addrobj's live addresses to delete (IP or CIDR) — required when several exist" },
+          { "name": "release", "in": "query", "schema": { "type": "boolean", "default": false }, "description": "Release the DHCP lease first (Windows; narrated skip elsewhere)" }
         ],
         "responses": {
-          "501": {
-            "description": "Not implemented on this agent",
-            "content": { "application/json": { "schema": { "type": "object", "properties": { "error": { "type": "string", "example": "IP address management is not implemented on this agent yet — the listing is read-only (a future session expands it)" } } } } }
-          }
+          "202": { "description": "Deletion task queued ({success, message, task_id, addrobj, release})" },
+          "400": { "description": "Malformed addrobj, or several live addresses without ?address=" },
+          "404": { "description": "Address object not found ({error, details})" }
         }
       }
     },
     "/network/addresses/{addrobj}/enable": {
       "put": {
         "tags": ["Host Configuration"],
-        "summary": "Enable an IP address (not implemented)",
-        "description": "Minimum role: operator. NOT IMPLEMENTED on this agent — same honest 501 as every /network/addresses mutation (Mark's scope ruling, sync 2026-07-17). The agent registers ONE PUT wildcard under /network/addresses/ (Go 1.22 ServeMux forbids literal segments after a trailing wildcard, so enable/disable cannot be their own patterns), and today every PUT shape answers identically; the documented paths are zoneweaver's, so the expansion is drop-in.",
+        "summary": "Enable an address's interface (task)",
+        "description": "Minimum role: operator. Queues enable_ip_address. HONESTY, loud: no platform here has illumos's per-address enable — the toggle applies to the INTERFACE the addrobj names (netsh set interface / `ip link set up` / ifconfig up), affecting every address on it; the 202 body and the task output both say so. (Route mechanics: one PUT wildcard under /network/addresses/ splits the enable/disable suffix — Go 1.22 ServeMux forbids literal segments after a trailing wildcard.)",
         "parameters": [
           { "name": "addrobj", "in": "path", "required": true, "schema": { "type": "string" }, "example": "Ethernet/v4" }
         ],
         "responses": {
-          "501": {
-            "description": "Not implemented on this agent",
-            "content": { "application/json": { "schema": { "type": "object", "properties": { "error": { "type": "string", "example": "IP address management is not implemented on this agent yet — the listing is read-only (a future session expands it)" } } } } }
-          }
+          "202": { "description": "Enable task queued ({success, message, task_id, addrobj, note})" },
+          "400": { "description": "Malformed addrobj" },
+          "404": { "description": "Unknown action suffix" }
         }
       }
     },
     "/network/addresses/{addrobj}/disable": {
       "put": {
         "tags": ["Host Configuration"],
-        "summary": "Disable an IP address (not implemented)",
-        "description": "Minimum role: operator. NOT IMPLEMENTED on this agent — same honest 501 as every /network/addresses mutation (Mark's scope ruling, sync 2026-07-17; see the enable path for the one-PUT-wildcard route note). The wire path matches zoneweaver's for the drop-in expansion.",
+        "summary": "Disable an address's interface (task)",
+        "description": "Minimum role: operator. Queues disable_ip_address — the INTERFACE-level toggle (see the enable path's honesty note; disabling cuts every address on the interface, including a remote session's own path to the host).",
         "parameters": [
           { "name": "addrobj", "in": "path", "required": true, "schema": { "type": "string" }, "example": "Ethernet/v4" }
         ],
         "responses": {
-          "501": {
-            "description": "Not implemented on this agent",
-            "content": { "application/json": { "schema": { "type": "object", "properties": { "error": { "type": "string", "example": "IP address management is not implemented on this agent yet — the listing is read-only (a future session expands it)" } } } } }
-          }
+          "202": { "description": "Disable task queued ({success, message, task_id, addrobj, note})" },
+          "400": { "description": "Malformed addrobj" },
+          "404": { "description": "Unknown action suffix" }
         }
       }
     },
@@ -4225,6 +4227,183 @@
             "description": "No default route on this host, the routing tool failed, or the default-route interface carries no IPv4 ({error, details?})",
             "content": { "application/json": { "schema": { "type": "object", "properties": { "error": { "type": "string", "example": "Failed to resolve the default route" }, "details": { "type": "string" } } } } }
           }
+        }
+      }
+    },
+    "/network/spaces": {
+      "get": {
+        "tags": ["Host Configuration"],
+        "summary": "List the host's VirtualBox network spaces",
+        "description": "Minimum role: viewer (the network-spaces capability token, minted 2026-07-19 — the UI topology mapper's network-card feed; devices.nics rows join here by their network field). One typed row per space: hostonly = a host-only INTERFACE (VBoxManage list hostonlyifs; VirtualBox assigns names itself) with its DHCP server joined by VBoxNetworkName (best-effort — a failed dhcpservers read degrades to {exists:false} rows, narrated in the log); hostonlynet = a host-only NETWORK (list hostonlynets — VirtualBox 7's vmnet-backed family, the interface successor on macOS hosts; best-effort too, older VBoxManage builds lack the verb and simply contribute no rows); intnet = an implicit internal network (list intnets — exists while a VM references it, no other attributes); natnetwork = a NAT network (list natnetworks) with its port-forward rules (IPv4 + IPv6 folded into one port_forwards[] with an ipv6 flag) and loopback mappings (verbatim rule strings). VirtualBox-only — utm machines join no spaces.",
+        "responses": {
+          "200": {
+            "description": "The network spaces",
+            "content": { "application/json": { "schema": { "type": "object", "properties": { "spaces": { "type": "array", "items": { "type": "object", "properties": { "type": { "type": "string", "enum": ["hostonly", "hostonlynet", "intnet", "natnetwork"] }, "name": { "type": "string", "example": "VirtualBox Host-Only Ethernet Adapter" }, "ip_address": { "type": "string", "description": "hostonly only", "example": "192.168.56.1" }, "network_mask": { "type": "string", "description": "hostonly + hostonlynet", "example": "255.255.255.0" }, "vbox_network_name": { "type": "string", "description": "hostonly + hostonlynet — the DHCP server's / adapter's join key", "example": "HostInterfaceNetworking-VirtualBox Host-Only Ethernet Adapter" }, "dhcp": { "type": "object", "description": "hostonly only: {exists, enabled, server_ip?, lower_ip?, upper_ip?}" }, "lower_ip": { "type": "string", "description": "hostonlynet only — its built-in range" }, "upper_ip": { "type": "string", "description": "hostonlynet only" }, "guid": { "type": "string", "description": "hostonlynet only, when reported" }, "cidr": { "type": "string", "description": "natnetwork only", "example": "10.0.5.0/24" }, "gateway": { "type": "string", "description": "natnetwork only" }, "enabled": { "type": "boolean", "description": "hostonlynet + natnetwork" }, "dhcp_enabled": { "type": "boolean", "description": "natnetwork only" }, "ipv6": { "type": "boolean", "description": "natnetwork only" }, "ipv6_prefix": { "type": "string", "description": "natnetwork only, when IPv6 is on" }, "port_forwards": { "type": "array", "description": "natnetwork only", "items": { "type": "object", "properties": { "name": { "type": "string" }, "protocol": { "type": "string", "enum": ["tcp", "udp"] }, "host_ip": { "type": "string" }, "host_port": { "type": "integer" }, "guest_ip": { "type": "string" }, "guest_port": { "type": "integer" }, "ipv6": { "type": "boolean" } } } }, "loopback_mappings": { "type": "array", "items": { "type": "string" }, "description": "natnetwork only, verbatim rule strings" } } } }, "total": { "type": "integer" } } } } }
+          },
+          "500": { "description": "A VBoxManage listing failed" },
+          "503": { "description": "VirtualBox is not installed" }
+        }
+      }
+    },
+    "/network/spaces/hostonly": {
+      "post": {
+        "tags": ["Host Configuration"],
+        "summary": "Create a host-only interface",
+        "description": "Minimum role: operator. VBoxManage hostonlyif create — VirtualBox assigns the interface name (the answer carries it); the request may configure the static IPv4 (ip + netmask, netmask defaulting to 255.255.255.0) and add the interface's DHCP server (dhcp {server_ip, lower_ip, upper_ip, netmask?}) in the same call. A failed follow-up step answers 500 NAMING the already-created interface — it is not rolled back (delete it explicitly if unwanted). Windows hosts may need driver-install privileges — VirtualBox's own error rides through.",
+        "requestBody": {
+          "required": false,
+          "content": { "application/json": { "schema": { "type": "object", "properties": { "ip": { "type": "string", "example": "192.168.57.1" }, "netmask": { "type": "string", "default": "255.255.255.0" }, "dhcp": { "type": "object", "properties": { "server_ip": { "type": "string", "example": "192.168.57.2" }, "lower_ip": { "type": "string", "example": "192.168.57.10" }, "upper_ip": { "type": "string", "example": "192.168.57.200" }, "netmask": { "type": "string", "description": "Defaults to the interface netmask" } } } } } } }
+        },
+        "responses": {
+          "201": { "description": "Interface created ({success, name, message})" },
+          "400": { "description": "Invalid body, or dhcp missing server_ip/lower_ip/upper_ip" },
+          "500": { "description": "Creation or a follow-up step failed (the message names the created interface when one exists)" },
+          "503": { "description": "VirtualBox is not installed" }
+        }
+      }
+    },
+    "/network/spaces/hostonly/{name}": {
+      "put": {
+        "tags": ["Host Configuration"],
+        "summary": "Reconfigure a host-only interface",
+        "description": "Minimum role: operator. ip (+ netmask, defaulting to the interface's current mask) reassigns the static IPv4 (hostonlyif ipconfig); dhcp {server_ip, lower_ip, upper_ip, netmask?} adds or converges the interface's DHCP server; dhcp: null REMOVES the server (an absent dhcp key leaves it alone). At least one of ip/dhcp is required.",
+        "parameters": [ { "name": "name", "in": "path", "required": true, "schema": { "type": "string" }, "description": "The interface name from GET /network/spaces (URL-encode spaces)" } ],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "type": "object", "properties": { "ip": { "type": "string" }, "netmask": { "type": "string" }, "dhcp": { "type": "object", "nullable": true, "description": "{server_ip, lower_ip, upper_ip, netmask?} to add/converge; null to remove" } } } } }
+        },
+        "responses": {
+          "200": { "description": "Interface updated" },
+          "400": { "description": "Nothing to change, or an invalid dhcp document" },
+          "404": { "description": "No host-only interface by that name" },
+          "503": { "description": "VirtualBox is not installed" }
+        }
+      },
+      "delete": {
+        "tags": ["Host Configuration"],
+        "summary": "Remove a host-only interface",
+        "description": "Minimum role: operator. The teardown order: the interface's DHCP server first (tolerantly — absence is fine), then hostonlyif remove. Machines still attached to the interface lose their uplink — VirtualBox does not refuse; check GET /network/spaces consumers first.",
+        "parameters": [ { "name": "name", "in": "path", "required": true, "schema": { "type": "string" } } ],
+        "responses": {
+          "200": { "description": "Interface removed" },
+          "404": { "description": "No host-only interface by that name" },
+          "503": { "description": "VirtualBox is not installed" }
+        }
+      }
+    },
+    "/network/spaces/hostonlynet": {
+      "post": {
+        "tags": ["Host Configuration"],
+        "summary": "Create a host-only network",
+        "description": "Minimum role: operator. VBoxManage hostonlynet add — VirtualBox 7's vmnet-backed host-only NETWORK family (the caller names it, unlike interfaces): name, netmask, lower_ip, upper_ip required; enabled defaults true. Older VBoxManage builds lack the verb — VirtualBox's own error rides through.",
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "type": "object", "required": ["name", "netmask", "lower_ip", "upper_ip"], "properties": { "name": { "type": "string", "example": "hostnet1" }, "netmask": { "type": "string", "example": "255.255.255.0" }, "lower_ip": { "type": "string", "example": "192.168.58.1" }, "upper_ip": { "type": "string", "example": "192.168.58.199" }, "enabled": { "type": "boolean", "default": true } } } } }
+        },
+        "responses": {
+          "201": { "description": "Host-only network created ({success, name, message})" },
+          "400": { "description": "Missing name/netmask/lower_ip/upper_ip" },
+          "503": { "description": "VirtualBox is not installed" }
+        }
+      }
+    },
+    "/network/spaces/hostonlynet/{name}": {
+      "put": {
+        "tags": ["Host Configuration"],
+        "summary": "Modify a host-only network",
+        "description": "Minimum role: operator. Converges the sent knobs (netmask, lower_ip, upper_ip, enabled — hostonlynet modify). At least one is required.",
+        "parameters": [ { "name": "name", "in": "path", "required": true, "schema": { "type": "string" } } ],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "type": "object", "properties": { "netmask": { "type": "string" }, "lower_ip": { "type": "string" }, "upper_ip": { "type": "string" }, "enabled": { "type": "boolean" } } } } }
+        },
+        "responses": {
+          "200": { "description": "Host-only network updated" },
+          "400": { "description": "Nothing to change" },
+          "404": { "description": "No host-only network by that name" },
+          "503": { "description": "VirtualBox is not installed" }
+        }
+      },
+      "delete": {
+        "tags": ["Host Configuration"],
+        "summary": "Remove a host-only network",
+        "description": "Minimum role: operator. VBoxManage hostonlynet remove. Machines whose adapters name the network lose their uplink — VirtualBox does not refuse.",
+        "parameters": [ { "name": "name", "in": "path", "required": true, "schema": { "type": "string" } } ],
+        "responses": {
+          "200": { "description": "Host-only network removed" },
+          "404": { "description": "No host-only network by that name" },
+          "503": { "description": "VirtualBox is not installed" }
+        }
+      }
+    },
+    "/network/spaces/natnetwork": {
+      "post": {
+        "tags": ["Host Configuration"],
+        "summary": "Create a NAT network",
+        "description": "Minimum role: operator. VBoxManage natnetwork add: name + cidr required; enabled defaults true; dhcp/ipv6 toggle the built-in DHCP server and IPv6 support.",
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "type": "object", "required": ["name", "cidr"], "properties": { "name": { "type": "string", "example": "natnet1" }, "cidr": { "type": "string", "example": "10.0.5.0/24" }, "enabled": { "type": "boolean", "default": true }, "dhcp": { "type": "boolean" }, "ipv6": { "type": "boolean" } } } } }
+        },
+        "responses": {
+          "201": { "description": "NAT network created ({success, name, message})" },
+          "400": { "description": "Missing name or cidr" },
+          "503": { "description": "VirtualBox is not installed" }
+        }
+      }
+    },
+    "/network/spaces/natnetwork/{name}": {
+      "put": {
+        "tags": ["Host Configuration"],
+        "summary": "Modify a NAT network",
+        "description": "Minimum role: operator. Converges the sent knobs (cidr, enabled, dhcp, ipv6 — natnetwork modify) and applies rule changes, removes before adds so one call replaces a rule: port forwards (add_port_forwards[] {name, protocol tcp|udp (default tcp), host_ip?, host_port, guest_ip, guest_port, ipv6? (rule family, default IPv4)} / remove_port_forwards[] {name, ipv6?}) and loopback mappings (add_loopbacks[]/remove_loopbacks[] {rule, ipv6?} — the rule string VERBATIM in VirtualBox's own form, e.g. 127.0.0.1=2; the listing's loopback_mappings shows the same strings back). At least one change is required.",
+        "parameters": [ { "name": "name", "in": "path", "required": true, "schema": { "type": "string" } } ],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "type": "object", "properties": { "cidr": { "type": "string" }, "enabled": { "type": "boolean" }, "dhcp": { "type": "boolean" }, "ipv6": { "type": "boolean" }, "add_port_forwards": { "type": "array", "items": { "type": "object", "required": ["name", "host_port", "guest_port"], "properties": { "name": { "type": "string" }, "protocol": { "type": "string", "enum": ["tcp", "udp"], "default": "tcp" }, "host_ip": { "type": "string" }, "host_port": { "type": "integer" }, "guest_ip": { "type": "string" }, "guest_port": { "type": "integer" }, "ipv6": { "type": "boolean", "default": false } } } }, "remove_port_forwards": { "type": "array", "items": { "type": "object", "required": ["name"], "properties": { "name": { "type": "string" }, "ipv6": { "type": "boolean", "default": false } } } }, "add_loopbacks": { "type": "array", "items": { "type": "object", "required": ["rule"], "properties": { "rule": { "type": "string", "example": "127.0.0.1=2" }, "ipv6": { "type": "boolean", "default": false } } } }, "remove_loopbacks": { "type": "array", "items": { "type": "object", "required": ["rule"], "properties": { "rule": { "type": "string" }, "ipv6": { "type": "boolean", "default": false } } } } } } } }
+        },
+        "responses": {
+          "200": { "description": "NAT network updated" },
+          "400": { "description": "Nothing to change, or an invalid rule entry" },
+          "404": { "description": "No NAT network by that name" },
+          "503": { "description": "VirtualBox is not installed" }
+        }
+      },
+      "delete": {
+        "tags": ["Host Configuration"],
+        "summary": "Remove a NAT network",
+        "description": "Minimum role: operator. VBoxManage natnetwork remove. Machines whose adapters name the network lose their uplink — VirtualBox does not refuse.",
+        "parameters": [ { "name": "name", "in": "path", "required": true, "schema": { "type": "string" } } ],
+        "responses": {
+          "200": { "description": "NAT network removed" },
+          "404": { "description": "No NAT network by that name" },
+          "503": { "description": "VirtualBox is not installed" }
+        }
+      }
+    },
+    "/network/spaces/natnetwork/{name}/start": {
+      "post": {
+        "tags": ["Host Configuration"],
+        "summary": "Start a NAT network's service",
+        "description": "Minimum role: operator. VBoxManage natnetwork start — the network's NAT service process (an enabled network normally starts with its first attached VM; this is the explicit control).",
+        "parameters": [ { "name": "name", "in": "path", "required": true, "schema": { "type": "string" } } ],
+        "responses": {
+          "200": { "description": "Service started" },
+          "404": { "description": "No NAT network by that name" },
+          "503": { "description": "VirtualBox is not installed" }
+        }
+      }
+    },
+    "/network/spaces/natnetwork/{name}/stop": {
+      "post": {
+        "tags": ["Host Configuration"],
+        "summary": "Stop a NAT network's service",
+        "description": "Minimum role: operator. VBoxManage natnetwork stop — attached running machines lose connectivity until it starts again.",
+        "parameters": [ { "name": "name", "in": "path", "required": true, "schema": { "type": "string" } } ],
+        "responses": {
+          "200": { "description": "Service stopped" },
+          "404": { "description": "No NAT network by that name" },
+          "503": { "description": "VirtualBox is not installed" }
         }
       }
     },
