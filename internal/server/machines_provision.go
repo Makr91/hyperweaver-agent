@@ -1493,13 +1493,23 @@ func (s *Server) handlePullTemplate(w http.ResponseWriter, r *http.Request) {
 		}
 		meta.SourceName = source.Name
 	}
-	meta.Provider = machines.TemplateProvider
+	// The provider defaults to this agent's own (virtualbox); "utm" pulls a
+	// box.utm-carrying box for the UTM backend — anything else refuses.
+	switch meta.Provider {
+	case "", machines.TemplateProvider:
+		meta.Provider = machines.TemplateProvider
+	case machines.TemplateProviderUTM:
+	default:
+		taskError(w, http.StatusBadRequest,
+			"provider must be "+machines.TemplateProvider+" or "+machines.TemplateProviderUTM)
+		return
+	}
 	// Already-exists pre-check (the base's rule, mirrored 2026-07-12): answer
 	// an honest 409 with the existing row instead of queueing a download the
 	// executor would no-op. FindTemplate self-heals stale rows (disk image
 	// deleted by hand), so a re-pull after manual cleanup still works.
 	existing, ferr := s.machines.FindTemplate(r.Context(), meta.Organization,
-		meta.BoxName, meta.Version, meta.Architecture)
+		meta.BoxName, meta.Version, meta.Provider, meta.Architecture)
 	switch {
 	case ferr == nil:
 		w.Header().Set("Content-Type", "application/json")

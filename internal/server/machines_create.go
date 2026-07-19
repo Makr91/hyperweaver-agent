@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"regexp"
+	"runtime"
 	"strconv"
 	"strings"
 
@@ -129,6 +130,28 @@ func (s *Server) validateSpec(w http.ResponseWriter, spec *machines.Spec) (ok bo
 	if len(diskProblems) > 0 {
 		taskError(w, http.StatusBadRequest, diskProblems[0])
 		return false, nil
+	}
+	// Per-machine hypervisor selection (phase 3): ""/virtualbox = VirtualBox,
+	// utm = UTM — anything else refuses with the value verbatim. utm gates on
+	// a macOS agent host and, until the other boot types land, on the
+	// template boot type (create = box.utm bundle import).
+	switch spec.Hypervisor {
+	case "", machines.HypervisorVirtualBox, machines.HypervisorUTM:
+	default:
+		taskError(w, http.StatusBadRequest,
+			"hypervisor "+spec.Hypervisor+" is not a valid hypervisor (virtualbox|utm)")
+		return false, nil
+	}
+	if spec.Hypervisor == machines.HypervisorUTM {
+		if runtime.GOOS != "darwin" {
+			taskError(w, http.StatusBadRequest, "hypervisor utm requires a macOS agent host")
+			return false, nil
+		}
+		if effective := machines.EffectiveBootType(spec.Disks, spec.Settings); effective != machines.DiskTypeTemplate {
+			taskError(w, http.StatusBadRequest,
+				"hypervisor utm builds from a box (settings.box) — disks.boot.type "+effective+" is not yet supported on utm")
+			return false, nil
+		}
 	}
 	for i := range spec.Roles {
 		if !provisioner.ValidName(spec.Roles[i].Name) {
@@ -305,7 +328,8 @@ func (s *Server) queueCreateOrchestration(ctx context.Context, name string, spec
 		boxVersion = machines.DocString(settings["box_version"], "latest")
 		boxArch = machines.DocString(settings["box_arch"], "amd64")
 
-		_, terr := s.machines.FindTemplate(ctx, org, boxName, boxVersion, boxArch)
+		_, terr := s.machines.FindTemplate(ctx, org, boxName, boxVersion,
+			machines.TemplateProviderFor(spec.Hypervisor), boxArch)
 		switch {
 		case terr == nil:
 		case errors.Is(terr, machines.ErrTemplateNotFound):
@@ -355,7 +379,7 @@ func (s *Server) queueCreateOrchestration(ctx context.Context, name string, spec
 			Organization: org,
 			BoxName:      boxName,
 			Version:      boxVersion,
-			Provider:     machines.TemplateProvider,
+			Provider:     machines.TemplateProviderFor(spec.Hypervisor),
 			Architecture: boxArch,
 		})
 		if merr != nil {
@@ -707,6 +731,7 @@ func (s *Server) createMultiHostMachines(w http.ResponseWriter, r *http.Request,
 			}
 			_, ferr := s.machines.FindTemplate(r.Context(), org, boxName,
 				machines.DocString(settings["box_version"], "latest"),
+				machines.TemplateProviderFor(body.Hypervisor),
 				machines.DocString(settings["box_arch"], "amd64"))
 			if errors.Is(ferr, machines.ErrTemplateNotFound) {
 				entryError(k, http.StatusBadRequest,
@@ -877,6 +902,11 @@ func (s *Server) handleCloneMachine(w http.ResponseWriter, r *http.Request) {
 	// explicit opt-in rebuild.
 	if body.Source == "" {
 		body.Source = "current"
+	}
+	if source.Hypervisor == machines.HypervisorUTM && (body.Snapshot != "" || body.Linked) {
+		taskError(w, http.StatusBadRequest,
+			"linked/snapshot clones are VirtualBox mechanisms — utm clones copy current state")
+		return
 	}
 	if hostname, _ := body.Settings["hostname"].(string); hostname == "" {
 		taskError(w, http.StatusBadRequest,

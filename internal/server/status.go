@@ -7,8 +7,11 @@ import (
 	"net/http"
 	"os"
 	"runtime"
+	"sync"
 	"time"
 
+	"github.com/Makr91/hyperweaver-agent/internal/machines"
+	"github.com/Makr91/hyperweaver-agent/internal/utm"
 	"github.com/Makr91/hyperweaver-agent/internal/version"
 )
 
@@ -126,6 +129,40 @@ func archName() string {
 	}
 }
 
+// utmCapability caches the utm hypervisor probe (the vncCapability pattern —
+// utm.Version shells osascript, too costly per /status poll). Restart the
+// agent after installing or upgrading UTM.
+var (
+	utmCapabilityOnce sync.Once
+	utmCapable        bool
+)
+
+// utmHypervisorAvailable reports whether this host can drive utm machines:
+// darwin ∧ utmctl present ∧ UTM version at the 4.6.5 floor. Shared by the
+// /status hypervisors list and the remote-catalog provider filter.
+func utmHypervisorAvailable(ctx context.Context) bool {
+	utmCapabilityOnce.Do(func() {
+		if runtime.GOOS != "darwin" || machines.UTMCtlPath(ctx) == "" {
+			return
+		}
+		probeCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+		defer cancel()
+		utmVersion, err := utm.Version(probeCtx)
+		utmCapable = err == nil && utm.VersionSupported(utmVersion)
+	})
+	return utmCapable
+}
+
+// hypervisors derives the advertised hypervisor list: virtualbox always, utm
+// when the capability probe passes.
+func (s *Server) hypervisors(ctx context.Context) []string {
+	list := []string{"virtualbox"}
+	if utmHypervisorAvailable(ctx) {
+		list = append(list, "utm")
+	}
+	return list
+}
+
 // consoles derives the advertised console list — EMERGENCY consoles only
 // (Mark's placement ruling 2026-07-12): rdp always (base VRDP ships in
 // VirtualBox 7.2 and the RDCleanPath bridge is built in — the IronRDP web
@@ -153,7 +190,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 	payload := statusPayload{
 		Role:        "agent",
 		Agent:       "hyperweaver-agent",
-		Hypervisors: []string{"virtualbox"},
+		Hypervisors: s.hypervisors(r.Context()),
 		Platform:    runtime.GOOS,
 		Arch:        archName(),
 		Version:     version.Version,

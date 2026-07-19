@@ -51,6 +51,14 @@ var Migrations = []string{
 // databases drop the table there — the standing tables-drop-freely rule).
 var ProfileTombstone = []string{`DROP TABLE IF EXISTS provisioning_profiles;`}
 
+// HypervisorMigration adds the per-machine hypervisor identity column
+// (virtualbox|utm — lifecycle dispatches on it; backing stays provenance).
+// Appended at the END of main.go's composed list (positional user_version
+// tracking).
+var HypervisorMigration = []string{
+	`ALTER TABLE machines ADD COLUMN hypervisor TEXT NOT NULL DEFAULT 'virtualbox';`,
+}
+
 // timeLayout is the stored timestamp format: fixed-width UTC so lexicographic
 // order is chronological (same convention as the tasks store).
 const timeLayout = "2006-01-02T15:04:05.000000000Z"
@@ -69,7 +77,7 @@ func NewStore(database *sql.DB) *Store {
 	return &Store{db: database}
 }
 
-const machineColumns = `id, name, host, status, backing, home, uuid, server_id,
+const machineColumns = `id, name, host, status, backing, hypervisor, home, uuid, server_id,
 	is_orphaned, auto_discovered, last_seen, notes, tags, configuration, spec,
 	created_at, updated_at`
 
@@ -78,8 +86,8 @@ func scanMachine(row interface{ Scan(...any) error }) (*Machine, error) {
 	var m Machine
 	var createdAt, updatedAt string
 	var lastSeen, tags, configuration, spec sql.NullString
-	err := row.Scan(&m.ID, &m.Name, &m.Host, &m.Status, &m.Backing, &m.Home,
-		&m.UUID, &m.ServerID, &m.IsOrphaned, &m.AutoDiscovered, &lastSeen,
+	err := row.Scan(&m.ID, &m.Name, &m.Host, &m.Status, &m.Backing, &m.Hypervisor,
+		&m.Home, &m.UUID, &m.ServerID, &m.IsOrphaned, &m.AutoDiscovered, &lastSeen,
 		&m.Notes, &tags, &configuration, &spec, &createdAt, &updatedAt)
 	if err != nil {
 		return nil, err
@@ -173,6 +181,7 @@ type Discovered struct {
 	Host          string
 	Status        string
 	Backing       string
+	Hypervisor    string
 	Home          *string
 	UUID          string
 	Configuration json.RawMessage
@@ -187,6 +196,10 @@ type Discovered struct {
 // Returns true when the machine was newly discovered.
 func (s *Store) UpsertDiscovered(ctx context.Context, d *Discovered) (bool, error) {
 	now := formatTime(time.Now())
+	hypervisor := d.Hypervisor
+	if hypervisor == "" {
+		hypervisor = HypervisorVirtualBox
+	}
 
 	matches := []struct {
 		where string
@@ -220,12 +233,12 @@ func (s *Store) UpsertDiscovered(ctx context.Context, d *Discovered) (bool, erro
 			configuration = string(existing.Configuration)
 		}
 		_, err = s.db.ExecContext(ctx, `UPDATE machines
-			SET host = ?, status = ?, backing = ?, home = COALESCE(?, home),
-			    uuid = ?, is_orphaned = 0, last_seen = ?,
+			SET host = ?, status = ?, backing = ?, hypervisor = ?,
+			    home = COALESCE(?, home), uuid = ?, is_orphaned = 0, last_seen = ?,
 			    configuration = ?, updated_at = ?
 			WHERE id = ?`,
-			d.Host, d.Status, d.Backing, d.Home, d.UUID, now, configuration, now,
-			existing.ID)
+			d.Host, d.Status, d.Backing, hypervisor, d.Home, d.UUID, now,
+			configuration, now, existing.ID)
 		if err != nil {
 			return false, err
 		}
@@ -237,10 +250,11 @@ func (s *Store) UpsertDiscovered(ctx context.Context, d *Discovered) (bool, erro
 		configuration = string(d.Configuration)
 	}
 	_, err := s.db.ExecContext(ctx, `INSERT INTO machines
-		(name, host, status, backing, home, uuid, is_orphaned, auto_discovered,
-		 last_seen, configuration, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, 0, 1, ?, ?, ?, ?)`,
-		d.Name, d.Host, d.Status, d.Backing, d.Home, d.UUID, now, configuration, now, now)
+		(name, host, status, backing, hypervisor, home, uuid, is_orphaned,
+		 auto_discovered, last_seen, configuration, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, 0, 1, ?, ?, ?, ?)`,
+		d.Name, d.Host, d.Status, d.Backing, hypervisor, d.Home, d.UUID, now,
+		configuration, now, now)
 	if err != nil {
 		return false, err
 	}
@@ -262,23 +276,28 @@ func (s *Store) SetConfiguration(ctx context.Context, name string, configuration
 // entry with the user's spec and working directory — no VM until first
 // start (SHI's clone model).
 type NewMachine struct {
-	Name     string
-	Host     string
-	Home     string
-	ServerID string
-	Spec     json.RawMessage
+	Name       string
+	Host       string
+	Home       string
+	ServerID   string
+	Hypervisor string
+	Spec       json.RawMessage
 }
 
 // Create inserts a provisioned-machine row in status configured, backing
 // vagrant.
 func (s *Store) Create(ctx context.Context, nm *NewMachine) (*Machine, error) {
 	now := formatTime(time.Now())
+	hypervisor := nm.Hypervisor
+	if hypervisor == "" {
+		hypervisor = HypervisorVirtualBox
+	}
 	_, err := s.db.ExecContext(ctx, `INSERT INTO machines
-		(name, host, status, backing, home, server_id, is_orphaned,
+		(name, host, status, backing, hypervisor, home, server_id, is_orphaned,
 		 auto_discovered, spec, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, 0, 0, ?, ?, ?)`,
-		nm.Name, nm.Host, StatusConfigured, BackingVagrant, nm.Home, nm.ServerID,
-		string(nm.Spec), now, now)
+		VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?, ?)`,
+		nm.Name, nm.Host, StatusConfigured, BackingVagrant, hypervisor, nm.Home,
+		nm.ServerID, string(nm.Spec), now, now)
 	if err != nil {
 		return nil, err
 	}

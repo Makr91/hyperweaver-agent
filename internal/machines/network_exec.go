@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/Makr91/hyperweaver-agent/internal/tasks"
+	"github.com/Makr91/hyperweaver-agent/internal/utm"
 	"github.com/Makr91/hyperweaver-agent/internal/vbox"
 )
 
@@ -77,8 +78,25 @@ func FindProvisioningDHCP(ctx context.Context, vboxExe, networkName string) (*vb
 // adapter 1 IS the provisioning NIC; on VirtualBox the host reaches it
 // through the forward, vagrant's model, so guest network reconfiguration can
 // never kill the pipeline's session). 0 when the machine carries no rule —
-// callers fall back to the document's control IP.
+// callers fall back to the document's control IP. utm machines answer from
+// their emulated-interface forwards (create's ssh forward lives there —
+// the only UTM interface mode whose forwards take effect).
 func FindSSHForward(ctx context.Context, machine *Machine) int {
+	if machine.Hypervisor == HypervisorUTM {
+		if machine.UUID == nil || *machine.UUID == "" {
+			return 0
+		}
+		forwards, err := utm.ReadForwardedPorts(ctx, *machine.UUID)
+		if err != nil {
+			return 0
+		}
+		for _, forward := range forwards {
+			if forward.GuestPort == 22 && forward.HostPort > 0 {
+				return forward.HostPort
+			}
+		}
+		return 0
+	}
 	vboxExe := VBoxManagePath(ctx)
 	if vboxExe == "" {
 		return 0
@@ -112,6 +130,10 @@ func FindSSHForward(ctx context.Context, machine *Machine) int {
 // 0 when neither exists — callers fall back to the control IP with the
 // ruled guest port.
 func FindWinRMForward(ctx context.Context, machine *Machine, guestPort int) int {
+	if machine.Hypervisor == HypervisorUTM {
+		// winrm rides the VBox natpf shape only — utm machines answer 0.
+		return 0
+	}
 	vboxExe := VBoxManagePath(ctx)
 	if vboxExe == "" {
 		return 0

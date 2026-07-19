@@ -83,10 +83,13 @@ type ProvisionerRef struct {
 // hostname/domain are required — box, disks, provisioner, everything else is
 // optional, and a three-field spec makes a stub machine (Mark's ruling).
 type Spec struct {
-	Provisioner ProvisionerRef          `json:"provisioner"`
-	Settings    map[string]any          `json:"settings"`
-	Networks    []any                   `json:"networks"`
-	Roles       []provisioner.RoleInput `json:"roles"`
+	Provisioner ProvisionerRef `json:"provisioner"`
+	// Hypervisor is the per-machine hypervisor selection: ""/virtualbox =
+	// VirtualBox (the default), utm = UTM. Finalize persists it onto the row.
+	Hypervisor string                  `json:"hypervisor"`
+	Settings   map[string]any          `json:"settings"`
+	Networks   []any                   `json:"networks"`
+	Roles      []provisioner.RoleInput `json:"roles"`
 	// Properties is THE answers map — one flat map keyed by exact field name
 	// (the Field DSL's contract; advanced_properties died in the one cut).
 	Properties map[string]any `json:"properties"`

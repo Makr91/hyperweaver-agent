@@ -23,6 +23,7 @@ import (
 	"github.com/Makr91/hyperweaver-agent/internal/procattr"
 	"github.com/Makr91/hyperweaver-agent/internal/safepath"
 	"github.com/Makr91/hyperweaver-agent/internal/sshrun"
+	"github.com/Makr91/hyperweaver-agent/internal/utm"
 )
 
 // Tool is one detected prerequisite.
@@ -59,9 +60,20 @@ func Detect(ctx context.Context) []Tool {
 	probeCtx, cancel := context.WithTimeout(ctx, probeSpan)
 	defer cancel()
 
+	// utmctl has no version flag — a bare invocation proves presence (the scp
+	// pattern); UTM's version answers through System Events. Off darwin the
+	// lookup answers empty, so the row lands uninstalled without probing.
+	utmTool := probePath(probeCtx, "utm", lookupUTMCtl())
+	if utmTool.Installed {
+		if utmVersion, err := utm.Version(probeCtx); err == nil {
+			utmTool.Version = utmVersion
+		}
+	}
+
 	tools := []Tool{
 		probePath(probeCtx, "vagrant", lookPath("vagrant"), "--version"),
 		probePath(probeCtx, "virtualbox", lookupVirtualBox(), "--version"),
+		utmTool,
 		probePath(probeCtx, "git", lookPath("git"), "--version"),
 		probePath(probeCtx, "rsync", lookSyncTool("rsync"), "--version"),
 		// OpenSSH scp has no version flag; a bare invocation proves presence.
@@ -128,6 +140,22 @@ func lookupVirtualBox() string {
 		if exe, err := safepath.ValidateExecutable(candidate); err == nil {
 			return exe
 		}
+	}
+	return ""
+}
+
+// lookupUTMCtl finds utmctl: PATH first, then UTM.app's bundled binary (UTM
+// does not add itself to PATH). Empty anywhere but macOS — UTM is
+// darwin-only.
+func lookupUTMCtl() string {
+	if runtime.GOOS != "darwin" {
+		return ""
+	}
+	if p := lookPath("utmctl"); p != "" {
+		return p
+	}
+	if exe, err := safepath.ValidateExecutable("/Applications/UTM.app/Contents/MacOS/utmctl"); err == nil {
+		return exe
 	}
 	return ""
 }

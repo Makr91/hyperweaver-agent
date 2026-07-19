@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -18,6 +19,7 @@ import (
 	"github.com/Makr91/hyperweaver-agent/internal/provisioner"
 	"github.com/Makr91/hyperweaver-agent/internal/qga"
 	"github.com/Makr91/hyperweaver-agent/internal/tasks"
+	"github.com/Makr91/hyperweaver-agent/internal/utm"
 	"github.com/Makr91/hyperweaver-agent/internal/vbox"
 )
 
@@ -179,6 +181,12 @@ func VBoxManagePath(ctx context.Context) string {
 	return toolPath(ctx, "virtualbox")
 }
 
+// UTMCtlPath returns the validated utmctl path from the prerequisite
+// detector, or "" when UTM is not installed.
+func UTMCtlPath(ctx context.Context) string {
+	return toolPath(ctx, "utm")
+}
+
 func toolPath(ctx context.Context, name string) string {
 	for _, tool := range prereqs.Detect(ctx) {
 		if tool.Name == name && tool.Installed {
@@ -201,80 +209,102 @@ func (r *Reconciler) RunOnce(ctx context.Context, out *tasks.OutputWriter) {
 	defer cancel()
 
 	exe := VBoxManagePath(sweepCtx)
-	if exe == "" {
-		// No VirtualBox, no observations — leaving the registry as-is beats
-		// mass-orphaning machines over a broken installation.
-		narrate("stderr", "VirtualBox not installed — sweep skipped, registry left untouched")
-		mlog().Debug("machine reconciliation skipped: VirtualBox not installed")
-		return
-	}
-
-	registered, err := vbox.ListRegistered(sweepCtx, exe, "vms")
-	if err != nil {
-		narrate("stderr", "VBoxManage list vms failed: "+err.Error())
-		mlog().Warn("machine reconciliation: list vms failed", "error", err)
-		return
-	}
-	narrate("stdout", "VirtualBox reports "+strconv.Itoa(len(registered))+" registered machine(s)")
 
 	discovered := 0
 	updated := 0
-	seen := make([]string, 0, len(registered))
-	for _, reg := range registered {
-		info, ierr := vbox.ShowVMInfo(sweepCtx, exe, reg.UUID)
-		if ierr != nil {
-			// Deleted between list and inspect — the next sweep settles it.
-			narrate("stderr", reg.Name+": showvminfo failed ("+ierr.Error()+")")
-			mlog().Debug("machine reconciliation: showvminfo failed",
-				"machine", reg.Name, "error", ierr)
-			continue
+	var seen []string
+	if exe == "" {
+		// No VirtualBox is not no sweep — a Mac running only UTM still
+		// discovers and refreshes its utm machines. Only the VBox sweep is
+		// skipped, and its rows get the same guard as an unobserved UTM:
+		// every virtualbox row (and every "" row from before the hypervisor
+		// column) joins seen, because a hypervisor never observed must never
+		// orphan its rows.
+		narrate("stderr", "VirtualBox not installed — VirtualBox sweep skipped, its registry rows left untouched")
+		mlog().Debug("machine reconciliation: VirtualBox sweep skipped, not installed")
+		seen = append(seen, r.hypervisorRowNames(sweepCtx, narrate, HypervisorVirtualBox, "")...)
+	} else {
+		registered, err := vbox.ListRegistered(sweepCtx, exe, "vms")
+		if err != nil {
+			// VirtualBox is PRESENT but its probe broke — the conservative
+			// path: no observations, no marking, the next sweep retries.
+			narrate("stderr", "VBoxManage list vms failed: "+err.Error())
+			mlog().Warn("machine reconciliation: list vms failed", "error", err)
+			return
 		}
-		seen = append(seen, reg.Name)
+		narrate("stdout", "VirtualBox reports "+strconv.Itoa(len(registered))+" registered machine(s)")
 
-		configuration, merr := json.Marshal(info.Raw)
-		if merr != nil {
-			mlog().Warn("machine reconciliation: serialize configuration",
-				"machine", reg.Name, "error", merr)
-			configuration = nil
-		}
+		seen = make([]string, 0, len(registered))
+		for _, reg := range registered {
+			info, ierr := vbox.ShowVMInfo(sweepCtx, exe, reg.UUID)
+			if ierr != nil {
+				// Deleted between list and inspect — the next sweep settles it.
+				narrate("stderr", reg.Name+": showvminfo failed ("+ierr.Error()+")")
+				mlog().Debug("machine reconciliation: showvminfo failed",
+					"machine", reg.Name, "error", ierr)
+				continue
+			}
+			seen = append(seen, reg.Name)
 
-		observation := Discovered{
-			Name:          reg.Name,
-			Host:          r.hostname,
-			Status:        MapVBoxState(info.State),
-			Backing:       BackingVBox,
-			UUID:          reg.UUID,
-			Configuration: configuration,
-		}
-		existing, gerr := r.store.Get(sweepCtx, reg.Name)
-		if gerr == nil && existing.Backing == BackingVagrant && existing.Home != nil {
-			// A row that carries vagrant provenance (recorded before the
-			// vagrant cut, or by an agent-created machine's home) keeps its
-			// backing and home — read from the store, never from vagrant.
-			observation.Backing = BackingVagrant
-			observation.Home = existing.Home
-		}
+			configuration, merr := json.Marshal(info.Raw)
+			if merr != nil {
+				mlog().Warn("machine reconciliation: serialize configuration",
+					"machine", reg.Name, "error", merr)
+				configuration = nil
+			}
 
-		narrate("stdout", reg.Name+": "+info.State+" → "+observation.Status+
-			" (backing "+observation.Backing+")")
-		created, uerr := r.store.UpsertDiscovered(sweepCtx, &observation)
-		if uerr != nil {
-			narrate("stderr", reg.Name+": registry update failed ("+uerr.Error()+")")
-			mlog().Error("machine reconciliation: upsert failed",
-				"machine", reg.Name, "error", uerr)
-			continue
-		}
-		if created {
-			discovered++
-			narrate("stdout", reg.Name+": NEW — imported into the registry")
-		} else {
-			updated++
-		}
+			observation := Discovered{
+				Name:          reg.Name,
+				Host:          r.hostname,
+				Status:        MapVBoxState(info.State),
+				Backing:       BackingVBox,
+				Hypervisor:    HypervisorVirtualBox,
+				UUID:          reg.UUID,
+				Configuration: configuration,
+			}
+			existing, gerr := r.store.Get(sweepCtx, reg.Name)
+			if gerr == nil && existing.Backing == BackingVagrant && existing.Home != nil {
+				// A row that carries vagrant provenance (recorded before the
+				// vagrant cut, or by an agent-created machine's home) keeps its
+				// backing and home — read from the store, never from vagrant.
+				observation.Backing = BackingVagrant
+				observation.Home = existing.Home
+			}
 
-		// The guest-info probe: running machines get their live IPs observed
-		// (QGA channel first, Guest Additions properties second) and stored on
-		// the row; anything else loses the section.
-		r.refreshGuestInfo(sweepCtx, exe, reg.UUID, reg.Name, existing, observation.Status, narrate)
+			narrate("stdout", reg.Name+": "+info.State+" → "+observation.Status+
+				" (backing "+observation.Backing+")")
+			created, uerr := r.store.UpsertDiscovered(sweepCtx, &observation)
+			if uerr != nil {
+				narrate("stderr", reg.Name+": registry update failed ("+uerr.Error()+")")
+				mlog().Error("machine reconciliation: upsert failed",
+					"machine", reg.Name, "error", uerr)
+				continue
+			}
+			if created {
+				discovered++
+				narrate("stdout", reg.Name+": NEW — imported into the registry")
+			} else {
+				updated++
+			}
+
+			// The guest-info probe: running machines get their live IPs observed
+			// (QGA channel first, Guest Additions properties second) and stored on
+			// the row; anything else loses the section.
+			r.refreshGuestInfo(sweepCtx, exe, reg.UUID, reg.Name, existing, observation.Status, narrate)
+		}
+	}
+
+	utmNames, utmDiscovered, utmUpdated, utmSwept := r.sweepUTM(sweepCtx, narrate)
+	if utmSwept {
+		seen = append(seen, utmNames...)
+		discovered += utmDiscovered
+		updated += utmUpdated
+	} else {
+		// A hypervisor that was never observed must never orphan its rows —
+		// every existing utm machine joins seen so MarkMissing/
+		// DeleteOrphanedMissing leave them alone (the VBox
+		// no-observations-beats-mass-orphaning principle, per hypervisor).
+		seen = append(seen, r.hypervisorRowNames(sweepCtx, narrate, HypervisorUTM)...)
 	}
 
 	// Hard-delete rows orphaned on a PREVIOUS sweep and still missing (the
@@ -306,6 +336,90 @@ func (r *Reconciler) RunOnce(ctx context.Context, out *tasks.OutputWriter) {
 	narrate("stdout", "Discovery completed: "+strconv.Itoa(discovered)+" new machines discovered, "+
 		strconv.Itoa(updated)+" updated, "+strconv.FormatInt(orphaned, 10)+" machines orphaned, "+
 		strconv.Itoa(len(deleted))+" removed")
+}
+
+// sweepUTM is the discovery sweep's second hypervisor: on darwin with utmctl
+// present, UTM's machine list lands in the registry exactly like
+// VirtualBox's — no Configuration document (UTM has no machinereadable map
+// yet; nil is legal); running rows get the utm guest-info probe (utmctl
+// ip-address). ok=false means the sweep never observed UTM (absent or
+// failed) so RunOnce guards existing utm rows from orphaning.
+func (r *Reconciler) sweepUTM(ctx context.Context, narrate func(stream, line string)) (names []string, discovered, updated int, ok bool) {
+	utmctlPath := UTMCtlPath(ctx)
+	if runtime.GOOS != "darwin" || utmctlPath == "" {
+		return nil, 0, 0, false
+	}
+	registered, err := utm.List(ctx)
+	if err != nil {
+		narrate("stderr", "UTM list failed: "+err.Error())
+		mlog().Warn("machine reconciliation: UTM list failed", "error", err)
+		return nil, 0, 0, false
+	}
+	narrate("stdout", "UTM reports "+strconv.Itoa(len(registered))+" registered machine(s)")
+
+	for _, reg := range registered {
+		names = append(names, reg.Name)
+		observation := Discovered{
+			Name:   reg.Name,
+			Host:   r.hostname,
+			Status: utm.MapUTMState(reg.Status),
+			// BackingVBox records "exists only in the hypervisor" provenance
+			// (the const's meaning, not its name); agent-created rows keep
+			// their vagrant backing below, exactly like VirtualBox ones.
+			Backing:    BackingVBox,
+			Hypervisor: HypervisorUTM,
+			UUID:       reg.UUID,
+		}
+		existing, gerr := r.store.Get(ctx, reg.Name)
+		if gerr == nil && existing.Backing == BackingVagrant && existing.Home != nil {
+			observation.Backing = BackingVagrant
+			observation.Home = existing.Home
+		}
+		narrate("stdout", reg.Name+": "+reg.Status+" → "+observation.Status+
+			" (backing "+observation.Backing+")")
+		created, uerr := r.store.UpsertDiscovered(ctx, &observation)
+		if uerr != nil {
+			narrate("stderr", reg.Name+": registry update failed ("+uerr.Error()+")")
+			mlog().Error("machine reconciliation: upsert failed",
+				"machine", reg.Name, "error", uerr)
+			continue
+		}
+		if created {
+			discovered++
+			narrate("stdout", reg.Name+": NEW — imported into the registry")
+		} else {
+			updated++
+		}
+
+		r.refreshGuestInfoUTM(ctx, utmctlPath, reg.UUID, reg.Name, observation.Status, narrate)
+	}
+	return names, discovered, updated, true
+}
+
+// hypervisorRowNames lists the registry's machine names whose Hypervisor is
+// one of the given values — the orphan guard's input when a sweep never
+// observed that hypervisor. VirtualBox's guard passes "" alongside
+// HypervisorVirtualBox: rows written before the hypervisor column carry the
+// empty default and are VirtualBox's.
+func (r *Reconciler) hypervisorRowNames(ctx context.Context, narrate func(stream, line string),
+	hypervisors ...string,
+) []string {
+	rows, err := r.store.List(ctx, &ListFilter{})
+	if err != nil {
+		narrate("stderr", "loading rows for the orphan guard failed: "+err.Error())
+		mlog().Error("machine reconciliation: list rows for the orphan guard failed", "error", err)
+		return nil
+	}
+	names := []string{}
+	for _, m := range rows {
+		for _, h := range hypervisors {
+			if m.Hypervisor == h {
+				names = append(names, m.Name)
+				break
+			}
+		}
+	}
+	return names
 }
 
 // refreshGuestInfo records one machine's live-IP observation on its row —
@@ -370,6 +484,53 @@ func (r *Reconciler) refreshGuestInfo(ctx context.Context, vboxExe, target, name
 		narrate("stdout", name+": guest agent responding, no host-reachable IP yet")
 	default:
 		narrate("stdout", name+": no live guest IP source (guest agent silent, no Additions)")
+	}
+	if serr := r.store.SetGuestInfo(ctx, name, map[string]any{
+		"ips":              ips,
+		"source":           source,
+		"agent_responding": responding,
+		"checked_at":       time.Now().UTC().Format(time.RFC3339),
+	}); serr != nil {
+		narrate("stderr", name+": storing guest info failed ("+serr.Error()+")")
+		mlog().Warn("store guest info failed", "machine", name, "error", serr)
+	}
+}
+
+// refreshGuestInfoUTM is refreshGuestInfo's utm twin: the one live source is
+// utmctl ip-address (qemu-guest-agent — no UART, no Additions fallback);
+// non-running machines lose the section exactly like VBox rows.
+func (r *Reconciler) refreshGuestInfoUTM(ctx context.Context, utmctlPath, target, name, status string,
+	narrate func(stream, line string),
+) {
+	if status != StatusRunning {
+		if err := r.store.SetGuestInfo(ctx, name, nil); err != nil && !errors.Is(err, ErrNotFound) {
+			mlog().Warn("clear guest info failed", "machine", name, "error", err)
+		}
+		return
+	}
+
+	probeCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	agentIPs, err := utm.GuestIPs(probeCtx, utmctlPath, target)
+	cancel()
+	responding := err == nil
+	ips := []string{}
+	for _, ip := range agentIPs {
+		if UsableGuestIP(ip) {
+			ips = append(ips, ip)
+		}
+	}
+	source := ""
+	if len(ips) > 0 {
+		source = "guest-agent"
+	}
+
+	switch {
+	case len(ips) > 0:
+		narrate("stdout", name+": guest IPs ("+source+"): "+strings.Join(ips, ", "))
+	case responding:
+		narrate("stdout", name+": guest agent responding, no host-reachable IP yet")
+	default:
+		narrate("stdout", name+": no live guest IP source (qemu-guest-agent silent)")
 	}
 	if serr := r.store.SetGuestInfo(ctx, name, map[string]any{
 		"ips":              ips,

@@ -451,7 +451,7 @@ func setupTasks(cfg *config.Config, secretsStore *secrets.Store) (*agentSystems,
 	}
 	// agent.sqlite carries every core-state family in ONE ordered list —
 	// user_version tracking is positional, so new scripts APPEND at the end
-	// (the artifact merge rebuild rides last for exactly that reason).
+	// (whichever family arrived latest rides last for exactly that reason).
 	// ProfileTombstone appears TWICE by design: once holding the removed
 	// feature's original slot (position must survive removal), once appended
 	// so existing databases actually drop the table.
@@ -460,6 +460,7 @@ func setupTasks(cfg *config.Config, secretsStore *secrets.Store) (*agentSystems,
 	agentMigrations = append(agentMigrations, machines.ProfileTombstone...)
 	agentMigrations = append(agentMigrations, assets.MergeMigrations...)
 	agentMigrations = append(agentMigrations, machines.ProfileTombstone...)
+	agentMigrations = append(agentMigrations, machines.HypervisorMigration...)
 	agentDB, err := openDB(agentPath, agentMigrations)
 	if err != nil {
 		_ = tasksDB.Close()

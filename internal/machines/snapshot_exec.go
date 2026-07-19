@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/Makr91/hyperweaver-agent/internal/qga"
 	"github.com/Makr91/hyperweaver-agent/internal/tasks"
+	"github.com/Makr91/hyperweaver-agent/internal/utm"
 	"github.com/Makr91/hyperweaver-agent/internal/vbox"
 )
 
@@ -70,9 +72,21 @@ func readSnapshotMetadata(task *tasks.Task, allowPrefix bool) (*snapshotMetadata
 // no queryable creation time the machinereadable list exposes).
 const snapshotTimestampLayout = "20060102-1504"
 
+// resolveName answers the take's snapshot name — the shared rotation naming
+// (prefix takes get <prefix>-<timestamp>).
+func (m *snapshotMetadata) resolveName() string {
+	if m.SnapshotName != "" {
+		return m.SnapshotName
+	}
+	return m.Prefix + "-" + time.Now().Format(snapshotTimestampLayout)
+}
+
 // snapshotTake executes snapshot_take (`VBoxManage snapshot take`): quiesce →
 // take → retention/age prune (prefix-scoped, exactly zoneweaver's semantics).
 func (e *executors) snapshotTake(ctx context.Context, task *tasks.Task, out *tasks.OutputWriter) error {
+	if e.dispatchUTM(ctx, task) {
+		return e.snapshotTakeUTM(ctx, task, out)
+	}
 	machine, vboxExe, err := e.resolve(ctx, task)
 	if err != nil {
 		return err
@@ -81,10 +95,7 @@ func (e *executors) snapshotTake(ctx context.Context, task *tasks.Task, out *tas
 	if err != nil {
 		return err
 	}
-	name := meta.SnapshotName
-	if name == "" {
-		name = meta.Prefix + "-" + time.Now().Format(snapshotTimestampLayout)
-	}
+	name := meta.resolveName()
 
 	e.taskProgress(task, 20, "taking_snapshot")
 	thaw := func() {}
@@ -106,8 +117,80 @@ func (e *executors) snapshotTake(ctx context.Context, task *tasks.Task, out *tas
 	// and never fail the take: the snapshot itself exists.
 	if meta.Prefix != "" && (meta.Retention > 0 || meta.MaxAgeDays > 0) {
 		e.taskProgress(task, 90, "pruning_snapshots")
-		e.pruneSnapshots(ctx, vboxExe, machine.VBoxTarget(), meta.Prefix,
-			meta.Retention, meta.MaxAgeDays, out)
+		e.pruneSnapshots(meta.Prefix, meta.Retention, meta.MaxAgeDays,
+			func() ([]string, error) {
+				list, lerr := vbox.ListSnapshots(ctx, vboxExe, machine.VBoxTarget())
+				if lerr != nil {
+					return nil, lerr
+				}
+				names := make([]string, 0, len(list))
+				for i := range list {
+					names = append(names, list[i].Name)
+				}
+				return names, nil
+			},
+			func(snapshot string) error {
+				return vbox.DeleteSnapshot(ctx, vboxExe, machine.VBoxTarget(), snapshot)
+			}, out)
+	}
+	e.taskProgress(task, 100, "completed")
+	return nil
+}
+
+// requireStoppedUTM gates the utm snapshot verbs: qemu-img needs the qcow2
+// write lock, so the machine must be stopped.
+func (e *executors) requireStoppedUTM(ctx context.Context, utmctlPath, target string) error {
+	status, err := utm.Status(ctx, utmctlPath, target)
+	if err != nil {
+		return err
+	}
+	if utm.MapUTMState(status) != StatusStopped {
+		return errors.New("utm snapshots are offline (qemu-img) — stop the machine first")
+	}
+	return nil
+}
+
+// snapshotTakeUTM is snapshot_take's utm branch: offline qemu-img against the
+// bundle qcow2; quiesce/live/description have no utm channel and narrate as
+// skipped.
+func (e *executors) snapshotTakeUTM(ctx context.Context, task *tasks.Task, out *tasks.OutputWriter) error {
+	machine, utmctlPath, err := e.resolveUTM(ctx, task)
+	if err != nil {
+		return err
+	}
+	meta, err := readSnapshotMetadata(task, true)
+	if err != nil {
+		return err
+	}
+	target := machine.VBoxTarget()
+	if gerr := e.requireStoppedUTM(ctx, utmctlPath, target); gerr != nil {
+		return gerr
+	}
+	name := meta.resolveName()
+
+	e.taskProgress(task, 20, "taking_snapshot")
+	if meta.Quiesce {
+		out.Write("stdout", "quiesce has no channel on utm — skipped\n")
+	}
+	if meta.Live {
+		out.Write("stdout", "live snapshots do not exist on utm (qemu-img is offline) — skipped\n")
+	}
+	if meta.Description != "" {
+		out.Write("stdout", "utm snapshots carry no description — skipped\n")
+	}
+	out.Write("stdout", "Taking snapshot "+name+" of "+machine.Name+" (qemu-img snapshot -c)\n")
+	if serr := utm.CreateSnapshot(ctx, target, name); serr != nil {
+		out.Write("stderr", "Snapshot failed: "+serr.Error()+"\n")
+		return serr
+	}
+	out.Write("stdout", "Snapshot "+name+" taken\n")
+
+	if meta.Prefix != "" && (meta.Retention > 0 || meta.MaxAgeDays > 0) {
+		e.taskProgress(task, 90, "pruning_snapshots")
+		e.pruneSnapshots(meta.Prefix, meta.Retention, meta.MaxAgeDays,
+			func() ([]string, error) { return utm.ListSnapshots(ctx, target) },
+			func(snapshot string) error { return utm.DeleteSnapshot(ctx, target, snapshot) },
+			out)
 	}
 	e.taskProgress(task, 100, "completed")
 	return nil
@@ -157,26 +240,28 @@ func (e *executors) freezeGuest(ctx context.Context, machine *Machine, vboxExe s
 // (the timestamp suffix); snapshots whose suffix does not parse are left
 // alone. Every deletion narrates; failures never fail the caller — on
 // VirtualBox a snapshot delete is a physical disk merge, which is exactly
-// why the defaults keep so few.
-func (e *executors) pruneSnapshots(ctx context.Context, vboxExe, target, prefix string,
-	retention, maxAgeDays int, out *tasks.OutputWriter,
+// why the defaults keep so few. The list/delete primitives are the callers'
+// (per-hypervisor); the rotation logic is shared.
+func (e *executors) pruneSnapshots(prefix string, retention, maxAgeDays int,
+	listNames func() ([]string, error), deleteSnapshot func(string) error,
+	out *tasks.OutputWriter,
 ) {
-	list, err := vbox.ListSnapshots(ctx, vboxExe, target)
+	names, err := listNames()
 	if err != nil {
 		out.Write("stderr", "Snapshot prune skipped — list failed: "+err.Error()+"\n")
 		return
 	}
 	matching := []string{}
-	for i := range list {
-		if strings.HasPrefix(list[i].Name, prefix+"-") {
-			matching = append(matching, list[i].Name)
+	for _, name := range names {
+		if strings.HasPrefix(name, prefix+"-") {
+			matching = append(matching, name)
 		}
 	}
 	sort.Strings(matching)
 
 	remove := func(name, reason string) {
 		out.Write("stdout", "Pruning "+name+" ("+reason+")\n")
-		if derr := vbox.DeleteSnapshot(ctx, vboxExe, target, name); derr != nil {
+		if derr := deleteSnapshot(name); derr != nil {
 			out.Write("stderr", name+": "+derr.Error()+"\n")
 		}
 	}
@@ -205,6 +290,9 @@ func (e *executors) pruneSnapshots(ctx context.Context, vboxExe, target, prefix 
 // running machine — refused here with a clear message instead of the raw
 // VBoxManage error (the modify executor's rule).
 func (e *executors) snapshotRestore(ctx context.Context, task *tasks.Task, out *tasks.OutputWriter) error {
+	if e.dispatchUTM(ctx, task) {
+		return e.snapshotRestoreUTM(ctx, task, out)
+	}
 	machine, vboxExe, err := e.resolve(ctx, task)
 	if err != nil {
 		return err
@@ -231,8 +319,35 @@ func (e *executors) snapshotRestore(ctx context.Context, task *tasks.Task, out *
 	return nil
 }
 
+// snapshotRestoreUTM applies a snapshot to a stopped utm machine
+// (qemu-img snapshot -a).
+func (e *executors) snapshotRestoreUTM(ctx context.Context, task *tasks.Task, out *tasks.OutputWriter) error {
+	machine, utmctlPath, err := e.resolveUTM(ctx, task)
+	if err != nil {
+		return err
+	}
+	meta, err := readSnapshotMetadata(task, false)
+	if err != nil {
+		return err
+	}
+	target := machine.VBoxTarget()
+	if gerr := e.requireStoppedUTM(ctx, utmctlPath, target); gerr != nil {
+		return gerr
+	}
+	out.Write("stdout", "Restoring "+machine.Name+" to snapshot "+meta.SnapshotName+" (qemu-img snapshot -a)\n")
+	if serr := utm.RestoreSnapshot(ctx, target, meta.SnapshotName); serr != nil {
+		out.Write("stderr", "Restore failed: "+serr.Error()+"\n")
+		return serr
+	}
+	out.Write("stdout", "Machine restored to "+meta.SnapshotName+"\n")
+	return nil
+}
+
 // snapshotDelete executes snapshot_delete (state merges into children).
 func (e *executors) snapshotDelete(ctx context.Context, task *tasks.Task, out *tasks.OutputWriter) error {
+	if e.dispatchUTM(ctx, task) {
+		return e.snapshotDeleteUTM(ctx, task, out)
+	}
 	machine, vboxExe, err := e.resolve(ctx, task)
 	if err != nil {
 		return err
@@ -243,6 +358,30 @@ func (e *executors) snapshotDelete(ctx context.Context, task *tasks.Task, out *t
 	}
 	out.Write("stdout", "Deleting snapshot "+meta.SnapshotName+" of "+machine.Name+"\n")
 	if serr := vbox.DeleteSnapshot(ctx, vboxExe, machine.VBoxTarget(), meta.SnapshotName); serr != nil {
+		out.Write("stderr", "Snapshot delete failed: "+serr.Error()+"\n")
+		return serr
+	}
+	out.Write("stdout", "Snapshot "+meta.SnapshotName+" deleted\n")
+	return nil
+}
+
+// snapshotDeleteUTM removes a snapshot from a stopped utm machine
+// (qemu-img snapshot -d).
+func (e *executors) snapshotDeleteUTM(ctx context.Context, task *tasks.Task, out *tasks.OutputWriter) error {
+	machine, utmctlPath, err := e.resolveUTM(ctx, task)
+	if err != nil {
+		return err
+	}
+	meta, err := readSnapshotMetadata(task, false)
+	if err != nil {
+		return err
+	}
+	target := machine.VBoxTarget()
+	if gerr := e.requireStoppedUTM(ctx, utmctlPath, target); gerr != nil {
+		return gerr
+	}
+	out.Write("stdout", "Deleting snapshot "+meta.SnapshotName+" of "+machine.Name+" (qemu-img snapshot -d)\n")
+	if serr := utm.DeleteSnapshot(ctx, target, meta.SnapshotName); serr != nil {
 		out.Write("stderr", "Snapshot delete failed: "+serr.Error()+"\n")
 		return serr
 	}
@@ -263,6 +402,9 @@ type snapshotModifyMetadata struct {
 // rename and/or description rewrite. Rename collisions and unknown snapshots
 // surface as VBoxManage's own error, honestly.
 func (e *executors) snapshotModify(ctx context.Context, task *tasks.Task, out *tasks.OutputWriter) error {
+	if e.dispatchUTM(ctx, task) {
+		return errors.New("snapshot modify is not supported on utm machines (qemu-img cannot rename)")
+	}
 	machine, vboxExe, err := e.resolve(ctx, task)
 	if err != nil {
 		return err
@@ -332,6 +474,12 @@ func (e *executors) cloneCurrent(ctx context.Context, task *tasks.Task, out *tas
 	}
 	if meta.Source == "" || meta.Spec == nil {
 		return errors.New("clone task metadata needs source and spec")
+	}
+	// The utm branch keys on the SOURCE row's hypervisor — the clone's own row
+	// does not exist yet, so dispatchUTM cannot answer here. Load errors fall
+	// through: the VBox path re-loads and reports them.
+	if source, serr := e.store.Get(ctx, meta.Source); serr == nil && source.Hypervisor == HypervisorUTM {
+		return e.cloneCurrentUTM(ctx, task, &meta, source, out)
 	}
 	vboxExe := VBoxManagePath(ctx)
 	if vboxExe == "" {
@@ -443,6 +591,146 @@ func (e *executors) cloneCurrent(ctx context.Context, task *tasks.Task, out *tas
 	}
 	e.syncLiveConfiguration(ctx, task.MachineName, vboxExe, task.MachineName, out)
 	e.refreshStatus(task.MachineName, vboxExe)
+
+	e.taskProgress(task, 100, "completed")
+	out.Write("stdout", "Machine "+task.MachineName+" cloned from "+meta.Source+" (current state)\n")
+	return nil
+}
+
+// cloneCurrentUTM is machine_clone_current's utm branch — UTM has no clonevm,
+// so the copy is Export (source stopped) → Import → Customize (name + spec
+// resources) → fresh MAC on NIC 0 → inherited forwards cleared and a fresh
+// ssh forward on the first emulated interface → the registry row, exactly the
+// VBox clone's landing (Hypervisor utm, UUID = the imported id).
+func (e *executors) cloneCurrentUTM(ctx context.Context, task *tasks.Task,
+	meta *cloneCurrentMetadata, source *Machine, out *tasks.OutputWriter,
+) error {
+	if meta.Snapshot != "" || meta.Linked {
+		return errors.New("linked/snapshot clones are VirtualBox mechanisms — utm clones copy current state")
+	}
+	utmctlPath := UTMCtlPath(ctx)
+	if utmctlPath == "" {
+		return errors.New("UTM is not installed")
+	}
+	sourceTarget := source.VBoxTarget()
+	status, err := utm.Status(ctx, utmctlPath, sourceTarget)
+	if err != nil {
+		return fmt.Errorf("source machine %s has no VM to clone: %w", meta.Source, err)
+	}
+	if utm.MapUTMState(status) != StatusStopped {
+		return errors.New("source machine is " + status + " — utm export needs it stopped; stop it first")
+	}
+
+	workdir := e.machineWorkdir(task.MachineName)
+	if merr := os.MkdirAll(workdir, 0o750); merr != nil {
+		return merr
+	}
+	exportPath := filepath.Join(workdir, "clone-export.utm")
+
+	e.taskProgress(task, 10, "exporting_source")
+	out.Write("stdout", "Cloning "+meta.Source+" → "+task.MachineName+" (utm export → import — current state)\n")
+	if xerr := utm.Export(ctx, sourceTarget, exportPath); xerr != nil {
+		return fmt.Errorf("source export failed: %w", xerr)
+	}
+	defer func() {
+		if rerr := os.RemoveAll(exportPath); rerr != nil {
+			out.Write("stderr", "Temp export cleanup failed: "+rerr.Error()+"\n")
+		}
+	}()
+
+	e.taskProgress(task, 30, "importing_clone")
+	id, err := utm.Import(ctx, exportPath)
+	if err != nil {
+		return fmt.Errorf("clone import failed: %w", err)
+	}
+	cleanup := func(step string, ferr error) error {
+		out.Write("stderr", step+" failed — deleting the half-made clone\n")
+		if derr := utm.Delete(ctx, utmctlPath, id); derr != nil {
+			out.Write("stderr", "Delete failed: "+derr.Error()+"\n")
+		}
+		return ferr
+	}
+
+	e.taskProgress(task, 50, "fixing_identity")
+	settings := map[string]any{}
+	if meta.Spec.Settings != nil {
+		settings = meta.Spec.Settings
+	}
+	// Only spec-carried resources apply — an absent key keeps the source's
+	// exported value (Customize skips zero fields).
+	opts := utm.CustomizeOptions{Name: task.MachineName}
+	if v, ok := settings["vcpus"]; ok {
+		opts.CPUs = int(VCPUCount(v, 2))
+	}
+	if v, ok := settings["memory"]; ok {
+		opts.MemoryMB = int(memoryToMB(v))
+	}
+	if cerr := utm.Customize(ctx, id, opts); cerr != nil {
+		return cleanup("clone identity fix-up", cerr)
+	}
+	if merr := utm.SetMACAddress(ctx, id, 0, utm.RandomMAC()); merr != nil {
+		return cleanup("mac address", merr)
+	}
+
+	nics, nerr := utm.ReadNetworkInterfaces(ctx, id)
+	if nerr != nil {
+		return cleanup("read network interfaces", nerr)
+	}
+	emulatedIndex := -1
+	for index, mode := range nics {
+		if mode == "emulated" && (emulatedIndex < 0 || index < emulatedIndex) {
+			emulatedIndex = index
+		}
+	}
+	if emulatedIndex < 0 {
+		return cleanup("network interfaces",
+			errors.New("clone has no emulated network interface — port forwards need one"))
+	}
+	// The copied forwards carry the SOURCE's host ports — clear them before
+	// the fresh allocation (the VBox path's natpf1-delete rule).
+	forwards, ferr := utm.ReadForwardedPorts(ctx, id)
+	if ferr != nil {
+		return cleanup("read forwarded ports", ferr)
+	}
+	stale := []int{}
+	for _, fw := range forwards {
+		if fw.NIC == emulatedIndex {
+			stale = append(stale, fw.HostPort)
+		}
+	}
+	if cerr := utm.ClearPortForwards(ctx, id, emulatedIndex, stale); cerr != nil {
+		return cleanup("clear inherited forwards", cerr)
+	}
+	sshPort, perr := allocateLocalPort(ctx)
+	if perr != nil {
+		return cleanup("ssh port-forward allocation", perr)
+	}
+	if aerr := utm.AddPortForwards(ctx, id, emulatedIndex, []utm.ForwardedPort{{
+		Protocol: "tcp", GuestPort: 22, HostIP: "127.0.0.1", HostPort: sshPort,
+	}}); aerr != nil {
+		return cleanup("ssh port-forward", aerr)
+	}
+	out.Write("stdout", fmt.Sprintf("Provisioning SSH port-forward: 127.0.0.1:%d → guest 22\n", sshPort))
+
+	e.taskProgress(task, 80, "creating_database_record")
+	rawSpec, err := json.Marshal(meta.Spec)
+	if err != nil {
+		return cleanup("spec serialization", err)
+	}
+	if _, cerr := e.store.Create(ctx, &NewMachine{
+		Name:       task.MachineName,
+		Host:       source.Host,
+		Home:       workdir,
+		ServerID:   stringOr(settings["server_id"], ""),
+		Hypervisor: HypervisorUTM,
+		Spec:       rawSpec,
+	}); cerr != nil {
+		return cleanup("create machine row", cerr)
+	}
+	if uerr := e.store.SetUUID(ctx, task.MachineName, id); uerr != nil {
+		return uerr
+	}
+	e.refreshStatusUTM(task.MachineName, utmctlPath)
 
 	e.taskProgress(task, 100, "completed")
 	out.Write("stdout", "Machine "+task.MachineName+" cloned from "+meta.Source+" (current state)\n")

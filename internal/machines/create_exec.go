@@ -23,6 +23,7 @@ import (
 	"github.com/Makr91/hyperweaver-agent/internal/qga"
 	"github.com/Makr91/hyperweaver-agent/internal/sslcert"
 	"github.com/Makr91/hyperweaver-agent/internal/tasks"
+	"github.com/Makr91/hyperweaver-agent/internal/utm"
 	"github.com/Makr91/hyperweaver-agent/internal/vbox"
 )
 
@@ -462,6 +463,10 @@ func (e *executors) createStorage(ctx context.Context, task *tasks.Task, out *ta
 	settings := document.Section("settings")
 	disks := document.Section("disks")
 
+	if meta.Spec.Hypervisor == HypervisorUTM {
+		return e.createStorageUTM(ctx, task, meta.Spec, output, settings, out)
+	}
+
 	vboxExe := VBoxManagePath(ctx)
 	if vboxExe == "" {
 		return errors.New("VirtualBox is not installed")
@@ -543,7 +548,8 @@ func (e *executors) createStorage(ctx context.Context, task *tasks.Task, out *ta
 			return errors.New(`settings.box must be "organization/box-name"`)
 		}
 		template, terr := e.store.FindTemplate(ctx, org, box,
-			stringOr(settings["box_version"], "latest"), stringOr(settings["box_arch"], "amd64"))
+			stringOr(settings["box_version"], "latest"), TemplateProvider,
+			stringOr(settings["box_arch"], "amd64"))
 		if terr != nil {
 			return fmt.Errorf("template %s/%s: %w (download it first — POST /templates/pull or let create chain it)", org, box, terr)
 		}
@@ -732,6 +738,46 @@ func (e *executors) createStorage(ctx context.Context, task *tasks.Task, out *ta
 	return nil
 }
 
+// createStorageUTM is machine_create_storage's UTM branch: this hypervisor
+// materializes no media — the template's box.utm bundle imports WHOLE at the
+// config step (utm.Import copies it into UTM's own storage), so this step
+// only resolves the template and verifies the bundle exists. BootdiskPath is
+// REUSED to carry the bundle directory forward (no boot medium exists to
+// name); no media list, no stamps, no rollback.
+func (e *executors) createStorageUTM(ctx context.Context, task *tasks.Task, spec *Spec,
+	output *createExecutionOutput, settings map[string]any, out *tasks.OutputWriter,
+) error {
+	e.taskProgress(task, 10, "preparing_storage")
+	// prepare's materialize normally creates the working directory; a
+	// provisioner-less create has no prepare, so ensure it (idempotent) —
+	// finalize records Home pointing at it either way.
+	if merr := os.MkdirAll(e.machineWorkdir(task.MachineName), 0o750); merr != nil {
+		return merr
+	}
+	boxRef := stringOr(settings["box"], "")
+	org, box, ok := strings.Cut(boxRef, "/")
+	if !ok || org == "" || box == "" {
+		return errors.New(`settings.box must be "organization/box-name"`)
+	}
+	template, terr := e.store.FindTemplate(ctx, org, box,
+		stringOr(settings["box_version"], "latest"), TemplateProviderUTM,
+		stringOr(settings["box_arch"], "amd64"))
+	if terr != nil {
+		return fmt.Errorf("template %s/%s: %w (download it first — POST /templates/pull or let create chain it)", org, box, terr)
+	}
+	info, serr := os.Stat(template.DiskPath)
+	if serr != nil || !info.IsDir() {
+		return errors.New("template " + boxRef + " carries no box.utm bundle directory at " + template.DiskPath)
+	}
+	out.Write("stdout", "UTM template bundle "+template.DiskPath+" (imported whole at the config step)\n")
+	output.BootdiskPath = template.DiskPath
+	if rerr := e.recordOutput(ctx, task, spec, output); rerr != nil {
+		return rerr
+	}
+	e.taskProgress(task, 100, "completed")
+	return nil
+}
+
 // createConfig executes machine_create_config: createvm + the full Hosts.rb
 // VirtualBox directive set + storage attach + NICs + cloud-init properties.
 // Failure unregisters the half-made machine (the base's zonecfg delete -F).
@@ -743,6 +789,9 @@ func (e *executors) createConfig(ctx context.Context, task *tasks.Task, out *tas
 	output, err := e.dependencyOutput(ctx, task)
 	if err != nil {
 		return err
+	}
+	if meta.Spec.Hypervisor == HypervisorUTM {
+		return e.createConfigUTM(ctx, task, meta.Spec, output, out)
 	}
 	document := parseConfigBytes(output.Document)
 	settings := document.Section("settings")
@@ -945,6 +994,125 @@ func (e *executors) createConfig(ctx context.Context, task *tasks.Task, out *tas
 	}
 	e.taskProgress(task, 100, "completed")
 	out.Write("stdout", "Machine "+task.MachineName+" configured ("+uuid+")\n")
+	return nil
+}
+
+// createConfigUTM is machine_create_config's UTM branch — the createvm/
+// modifyvm flow spoken as bundle import + scripted configuration: utm.Import
+// brings the storage child's box.utm bundle in whole, then Customize
+// (name/cpus/memory/notes), a fresh MAC on NIC 0 (UTM cannot generate one),
+// the provisioning ssh port-forward on the box's EMULATED interface (the
+// only mode whose forwards take effect), document networks as vmnet QEMU
+// args from net2, and the document's utm.qemu_args[] passthrough. The
+// VBox-only mechanisms (DHCP fixed leases, VRDE TLS, guest-agent UART,
+// cloud-init guestproperties, consoleport) have no analog here and are never
+// called.
+func (e *executors) createConfigUTM(ctx context.Context, task *tasks.Task, spec *Spec,
+	output *createExecutionOutput, out *tasks.OutputWriter,
+) error {
+	document := parseConfigBytes(output.Document)
+	settings := document.Section("settings")
+	utmSection := document.Section("utm")
+	bundlePath := output.BootdiskPath
+	if bundlePath == "" {
+		return errors.New("storage step recorded no box.utm bundle path")
+	}
+
+	e.taskProgress(task, 20, "importing_machine")
+	out.Write("stdout", "Importing "+bundlePath+" into UTM\n")
+	id, err := utm.Import(ctx, bundlePath)
+	if err != nil {
+		return err
+	}
+	// Failure past this point cannot clean up after itself: utmctl delete
+	// needs the utmctl path, whose plumbing arrives with the lifecycle phase
+	// — the leftover is narrated honestly instead.
+	failed := func(step string, ferr error) error {
+		out.Write("stderr", step+" failed — imported machine "+id+
+			" left in UTM — delete it in the UTM UI\n")
+		return ferr
+	}
+
+	e.taskProgress(task, 40, "configuring_vm")
+	if cerr := utm.Customize(ctx, id, utm.CustomizeOptions{
+		Name:     task.MachineName,
+		CPUs:     int(VCPUCount(settings["vcpus"], 2)),
+		MemoryMB: int(memoryToMB(settings["memory"])),
+		Notes:    stringOr(utmSection["notes"], ""),
+	}); cerr != nil {
+		return failed("customize", cerr)
+	}
+	if merr := utm.SetMACAddress(ctx, id, 0, utm.RandomMAC()); merr != nil {
+		return failed("mac address", merr)
+	}
+
+	// The provisioning ssh transport rides the FIRST emulated interface —
+	// port forwards function on no other mode; a box without one cannot carry
+	// the transport, so the create refuses instead of inventing adapters.
+	nics, nerr := utm.ReadNetworkInterfaces(ctx, id)
+	if nerr != nil {
+		return failed("read network interfaces", nerr)
+	}
+	emulatedIndex := -1
+	for index, mode := range nics {
+		if mode == "emulated" && (emulatedIndex < 0 || index < emulatedIndex) {
+			emulatedIndex = index
+		}
+	}
+	if emulatedIndex < 0 {
+		return failed("network interfaces", errors.New("box "+
+			stringOr(settings["box"], bundlePath)+
+			" has no emulated network interface — port forwards need one"))
+	}
+	sshPort, perr := allocateLocalPort(ctx)
+	if perr != nil {
+		return failed("ssh port-forward allocation", perr)
+	}
+	out.Write("stdout", fmt.Sprintf("Provisioning SSH port-forward: 127.0.0.1:%d → guest 22\n", sshPort))
+	if ferr := utm.AddPortForwards(ctx, id, emulatedIndex, []utm.ForwardedPort{{
+		Protocol: "tcp", GuestPort: 22, HostIP: "127.0.0.1", HostPort: sshPort,
+	}}); ferr != nil {
+		return failed("ssh port-forward", ferr)
+	}
+
+	// Document networks ride as vmnet QEMU args from net2 (net0/net1 are the
+	// box's shared+emulated base pair): host → vmnet-host, anything else →
+	// vmnet-bridged with ifname from the entry's bridge. The document's
+	// utm.qemu_args[] passthrough appends after them — the user's final word.
+	qemuArgs := []string{}
+	for i, entry := range document.List("networks") {
+		network := mapOr(entry)
+		netID := "net" + strconv.Itoa(i+2)
+		netdev := "-netdev vmnet-bridged,id=" + netID
+		if stringOr(network["type"], "external") == "host" {
+			netdev = "-netdev vmnet-host,id=" + netID
+		} else if bridge := stringOr(network["bridge"], ""); bridge != "" {
+			netdev += ",ifname=" + bridge
+		}
+		mac := stringOr(network["mac"], "")
+		if mac == "" || strings.EqualFold(mac, "auto") {
+			mac = utm.RandomMAC()
+		}
+		qemuArgs = append(qemuArgs, netdev, "-device virtio-net-pci,mac="+mac+",netdev="+netID)
+	}
+	for _, entry := range listOr(utmSection["qemu_args"]) {
+		if arg := stringOr(entry, ""); arg != "" {
+			qemuArgs = append(qemuArgs, arg)
+		}
+	}
+	if len(qemuArgs) > 0 {
+		e.taskProgress(task, 70, "configuring_networks")
+		if qerr := utm.AddQemuArgs(ctx, id, qemuArgs); qerr != nil {
+			return failed("qemu args", qerr)
+		}
+	}
+
+	output.UUID = id
+	if rerr := e.recordOutput(ctx, task, spec, output); rerr != nil {
+		return failed("record output", rerr)
+	}
+	e.taskProgress(task, 100, "completed")
+	out.Write("stdout", "Machine "+task.MachineName+" configured ("+id+")\n")
 	return nil
 }
 
@@ -1596,6 +1764,12 @@ func cancelDiskCandidates(disks map[string]any, workdir string) []string {
 // half-configured machine is unregistered (the error path's rule applied to
 // cancellation).
 func (e *executors) cancelCreateConfig(task *tasks.Task, out *tasks.OutputWriter) {
+	// UTM machines have no unregister to run: utmctl delete's path plumbing
+	// arrives with the lifecycle phase — narrate the possible leftover.
+	if meta, merr := readCreateMetadata(task); merr == nil && meta.Spec.Hypervisor == HypervisorUTM {
+		out.Write("stderr", "Config step cancelled — a half-imported machine may remain in UTM; delete it in the UTM UI\n")
+		return
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 	vboxExe := VBoxManagePath(ctx)
@@ -1637,11 +1811,12 @@ func (e *executors) createFinalize(ctx context.Context, task *tasks.Task, out *t
 	}
 	serverID := stringOr(document.Section("settings")["server_id"], "")
 	if _, cerr := e.store.Create(ctx, &NewMachine{
-		Name:     task.MachineName,
-		Host:     hostname,
-		Home:     e.machineWorkdir(task.MachineName),
-		ServerID: serverID,
-		Spec:     rawSpec,
+		Name:       task.MachineName,
+		Host:       hostname,
+		Home:       e.machineWorkdir(task.MachineName),
+		ServerID:   serverID,
+		Hypervisor: meta.Spec.Hypervisor,
+		Spec:       rawSpec,
 	}); cerr != nil {
 		return fmt.Errorf("create machine row: %w", cerr)
 	}

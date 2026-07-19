@@ -45,6 +45,19 @@ const OpTemplateMove = "template_move"
 // TemplateProvider is this agent's provider value in the registry tuple.
 const TemplateProvider = "virtualbox"
 
+// TemplateProviderUTM is the registry provider value for UTM boxes (the .box
+// carries a box.utm bundle instead of a VMDK/VDI disk image).
+const TemplateProviderUTM = "utm"
+
+// TemplateProviderFor maps a spec's hypervisor onto the registry provider
+// value (""/virtualbox → virtualbox, utm → utm).
+func TemplateProviderFor(hypervisor string) string {
+	if hypervisor == HypervisorUTM {
+		return TemplateProviderUTM
+	}
+	return TemplateProvider
+}
+
 // ErrTemplateNotFound reports no usable local template for the tuple.
 var ErrTemplateNotFound = errors.New("template not available locally")
 
@@ -151,14 +164,15 @@ func (s *Store) ListTemplates(ctx context.Context) ([]*Template, error) {
 // FindTemplate resolves a box tuple to a local template — the base's
 // resolveBoxToTemplate: version "latest" (or empty) takes the newest row,
 // and the disk image is re-verified to exist on disk: a stale row (image
-// deleted by hand) self-deletes and the lookup reports not-found.
-func (s *Store) FindTemplate(ctx context.Context, org, box, version, arch string) (*Template, error) {
+// deleted by hand) self-deletes and the lookup reports not-found. provider
+// picks the hypervisor's registry rows (TemplateProvider | TemplateProviderUTM).
+func (s *Store) FindTemplate(ctx context.Context, org, box, version, provider, arch string) (*Template, error) {
 	if arch == "" {
 		arch = "amd64"
 	}
 	query := `SELECT ` + templateColumns + ` FROM templates
 		WHERE organization = ? AND box_name = ? AND architecture = ? AND provider = ?`
-	args := []any{org, box, arch, TemplateProvider}
+	args := []any{org, box, arch, provider}
 	if version != "" && version != "latest" {
 		query += ` AND version = ?`
 		args = append(args, version)
@@ -443,13 +457,16 @@ func (e *executors) templateDownload(ctx context.Context, task *tasks.Task, out 
 	if meta.Architecture == "" {
 		meta.Architecture = "amd64"
 	}
+	if meta.Provider == "" {
+		meta.Provider = TemplateProvider
+	}
 
 	source, err := findTemplateSource(e.env.TemplateSources, meta.SourceName)
 	if err != nil {
 		return err
 	}
 	if existing, ferr := e.store.FindTemplate(ctx, meta.Organization, meta.BoxName,
-		meta.Version, meta.Architecture); ferr == nil && existing != nil {
+		meta.Version, meta.Provider, meta.Architecture); ferr == nil && existing != nil {
 		out.Write("stdout", "Template already exists locally — nothing to download\n")
 		return nil
 	}
@@ -458,7 +475,7 @@ func (e *executors) templateDownload(ctx context.Context, task *tasks.Task, out 
 	downloadURL := source.URL + "/api/organization/" + url.PathEscape(meta.Organization) +
 		"/box/" + url.PathEscape(meta.BoxName) +
 		"/version/" + url.PathEscape(meta.Version) +
-		"/provider/" + url.PathEscape(TemplateProvider) +
+		"/provider/" + url.PathEscape(meta.Provider) +
 		"/architecture/" + url.PathEscape(meta.Architecture) + "/file/download"
 
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, downloadURL, http.NoBody)
@@ -525,7 +542,7 @@ func (e *executors) templateDownload(ctx context.Context, task *tasks.Task, out 
 		Organization: meta.Organization,
 		BoxName:      meta.BoxName,
 		Version:      meta.Version,
-		Provider:     TemplateProvider,
+		Provider:     meta.Provider,
 		Architecture: meta.Architecture,
 		DiskPath:     diskPath,
 		Size:         size,
@@ -580,7 +597,10 @@ func FindTemplateSourceForURL(sources []TemplateSource, boxURL string) (*Templat
 // extractBoxDisk pulls the disk image (and metadata.json) out of a .box
 // archive (a gzipped tar: disk image + box.ovf + metadata.json +
 // Vagrantfile). The image lands beside the archive; the OVF wrapper is not
-// needed — create's storage child clones the raw image.
+// needed — create's storage child clones the raw image. UTM boxes carry a
+// box.utm BUNDLE (a directory tree) instead of a disk image: its entries
+// extract under targetDir with their relative tree preserved and the bundle
+// directory becomes diskPath (create's utm config child imports it whole).
 func extractBoxDisk(boxPath, targetDir string) (diskPath string, metadata json.RawMessage, err error) {
 	file, err := os.Open(filepath.Clean(boxPath))
 	if err != nil {
@@ -595,6 +615,7 @@ func extractBoxDisk(boxPath, targetDir string) (diskPath string, metadata json.R
 	}
 	reader := tar.NewReader(unzipped)
 
+	utmBundle := ""
 	for {
 		header, herr := reader.Next()
 		if errors.Is(herr, io.EOF) {
@@ -602,6 +623,32 @@ func extractBoxDisk(boxPath, targetDir string) (diskPath string, metadata json.R
 		}
 		if herr != nil {
 			return "", nil, fmt.Errorf("read .box archive: %w", herr)
+		}
+		slashName := filepath.ToSlash(header.Name)
+		if idx := strings.Index(slashName, "box.utm/"); idx >= 0 {
+			// Pure directory headers skip — directories materialize as the
+			// files beneath them land.
+			if header.Typeflag == tar.TypeDir {
+				continue
+			}
+			target, terr := safepath.Under(targetDir, filepath.FromSlash(slashName[idx:]))
+			if terr != nil {
+				return "", nil, terr
+			}
+			if merr := os.MkdirAll(filepath.Dir(target), 0o750); merr != nil {
+				return "", nil, merr
+			}
+			if _, werr := safepath.WriteFileFrom(target, reader, 0o600); werr != nil {
+				return "", nil, werr
+			}
+			if utmBundle == "" {
+				bundle, berr := safepath.Under(targetDir, "box.utm")
+				if berr != nil {
+					return "", nil, berr
+				}
+				utmBundle = bundle
+			}
+			continue
 		}
 		name := filepath.Base(header.Name)
 		lower := strings.ToLower(name)
@@ -621,6 +668,9 @@ func extractBoxDisk(boxPath, targetDir string) (diskPath string, metadata json.R
 				metadata = raw
 			}
 		}
+	}
+	if utmBundle != "" {
+		diskPath = utmBundle
 	}
 	if diskPath == "" {
 		return "", nil, errors.New(".box archive carries no VMDK/VDI disk image")

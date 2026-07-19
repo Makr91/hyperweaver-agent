@@ -15,6 +15,7 @@ import (
 	"github.com/Makr91/hyperweaver-agent/internal/auth"
 	"github.com/Makr91/hyperweaver-agent/internal/machines"
 	"github.com/Makr91/hyperweaver-agent/internal/tasks"
+	"github.com/Makr91/hyperweaver-agent/internal/utm"
 	"github.com/Makr91/hyperweaver-agent/internal/vbox"
 )
 
@@ -32,17 +33,29 @@ func validMachineName(name string) bool {
 	return machineNamePattern.MatchString(name)
 }
 
-// liveMachineStatus asks VirtualBox for a machine's current state — the
-// pre-operation idempotency check ("not_found" when no VM exists, matching
-// the Node agent's getSystemZoneStatus contract). The UUID addresses the VM
-// once known — a provisioned machine's VirtualBox name is Hosts.rb's own.
+// liveMachineStatus asks the machine's hypervisor for its current state —
+// the pre-operation idempotency check ("not_found" when no VM exists,
+// matching the Node agent's getSystemZoneStatus contract). The UUID
+// addresses the VM once known — a provisioned machine's VirtualBox name is
+// Hosts.rb's own; utmctl takes the same UUID-else-name target.
 func liveMachineStatus(ctx context.Context, machine *machines.Machine) string {
+	probeCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	if machine.Hypervisor == machines.HypervisorUTM {
+		exe := machines.UTMCtlPath(ctx)
+		if exe == "" {
+			return "not_found"
+		}
+		status, err := utm.Status(probeCtx, exe, machine.VBoxTarget())
+		if err != nil {
+			return "not_found"
+		}
+		return utm.MapUTMState(status)
+	}
 	exe := machines.VBoxManagePath(ctx)
 	if exe == "" {
 		return "not_found"
 	}
-	probeCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
-	defer cancel()
 	info, err := vbox.ShowVMInfo(probeCtx, exe, machine.VBoxTarget())
 	if err != nil {
 		return "not_found"
@@ -122,11 +135,15 @@ func (s *Server) handleMachineDetails(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// One showvminfo serves the status probe AND knob_current's reverse map
-	// (liveMachineStatus would discard the view).
+	// (liveMachineStatus would discard the view). The showvminfo enrichment
+	// is VBox plumbing — utm machines take the plain status probe and live
+	// stays nil (knob_current and the settings file answer honestly absent).
 	var live *vbox.Info
 	exe := machines.VBoxManagePath(r.Context())
 	systemStatus := "not_found"
-	if exe != "" {
+	if machine.Hypervisor == machines.HypervisorUTM {
+		systemStatus = liveMachineStatus(r.Context(), machine)
+	} else if exe != "" {
 		probeCtx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
 		if info, err := vbox.ShowVMInfo(probeCtx, exe, machine.VBoxTarget()); err == nil {
 			live = info
@@ -735,10 +752,47 @@ func (s *Server) handleMachineScreenshot(w http.ResponseWriter, r *http.Request)
 }
 
 // handleListSnapshots serves the machine's snapshot tree (read-only,
-// synchronous — VBoxManage snapshot list).
+// synchronous — VBoxManage snapshot list; qemu-img snapshot -l on utm, where
+// even the list needs the stopped machine's qcow2 write lock).
 func (s *Server) handleListSnapshots(w http.ResponseWriter, r *http.Request) {
 	machine := s.findMachine(w, r)
 	if machine == nil {
+		return
+	}
+	if machine.Hypervisor == machines.HypervisorUTM {
+		if machines.UTMCtlPath(r.Context()) == "" {
+			taskError(w, http.StatusServiceUnavailable, "UTM is not installed")
+			return
+		}
+		switch liveMachineStatus(r.Context(), machine) {
+		case "not_found":
+			taskError(w, http.StatusNotFound, "No VM exists behind this machine yet")
+			return
+		case machines.StatusStopped:
+		default:
+			taskError(w, http.StatusBadRequest, "utm snapshots are offline (qemu-img) — stop the machine first")
+			return
+		}
+		names, err := utm.ListSnapshots(r.Context(), machine.VBoxTarget())
+		if errors.Is(err, utm.ErrNotFound) {
+			taskError(w, http.StatusNotFound, "No VM exists behind this machine yet")
+			return
+		}
+		if err != nil {
+			slog.Error("list snapshots", "machine", machine.Name, "error", err)
+			taskError(w, http.StatusInternalServerError, "Failed to list snapshots")
+			return
+		}
+		// qemu-img knows only names — uuid/description/node/current stay absent.
+		rows := make([]map[string]any, 0, len(names))
+		for _, name := range names {
+			rows = append(rows, map[string]any{"name": name})
+		}
+		writeJSON(w, map[string]any{
+			"machine_name": machine.Name,
+			"snapshots":    rows,
+			"total":        len(rows),
+		})
 		return
 	}
 	exe := machines.VBoxManagePath(r.Context())

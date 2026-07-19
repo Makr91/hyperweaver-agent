@@ -39,6 +39,14 @@ const (
 	BackingVBox = "vbox"
 )
 
+// Machine hypervisors — the per-machine identity lifecycle dispatch keys on
+// (backing stays provenance: who created the VM, never which engine drives
+// it).
+const (
+	HypervisorVirtualBox = "virtualbox"
+	HypervisorUTM        = "utm"
+)
+
 // Machine is one registry row (the Agent API v1 Machine schema); backing and
 // home are this agent's dual-path fields. Configuration is the LIVE view
 // (VirtualBox's machinereadable map, refreshed by reconciliation); Spec is
@@ -51,6 +59,7 @@ type Machine struct {
 	Host           string          `json:"host"`
 	Status         string          `json:"status"`
 	Backing        string          `json:"backing"`
+	Hypervisor     string          `json:"hypervisor"`
 	Home           *string         `json:"home"`
 	UUID           *string         `json:"uuid"`
 	ServerID       *string         `json:"server_id"`

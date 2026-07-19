@@ -21,7 +21,8 @@ import (
 // registries, GET /templates/remote/{sourceName} serves the registry's
 // /api/discover catalog, and GET /templates/remote/{sourceName}/{org}/{boxName}
 // the Vagrant-compatible /{org}/{box} metadata document — BOTH filtered to
-// THIS hypervisor's provider (virtualbox) AND the host's architecture
+// THIS host's provider set (virtualbox; utm when the capability probe
+// passes) AND the host's architecture
 // (Mark's directive 2026-07-09: a zones-only or foreign-arch box in the
 // picker is a guaranteed 404 at download time). An
 // x-registry-token request header overrides the source's configured token
@@ -106,15 +107,26 @@ func registryJSON(ctx context.Context, source *machines.TemplateSource,
 	return decoded, http.StatusOK, nil
 }
 
+// agentProviders is the registry-provider set THIS host can consume:
+// virtualbox always, utm when the capability probe passes (the same probe
+// /status advertises on).
+func agentProviders(ctx context.Context) map[string]bool {
+	providers := map[string]bool{machines.TemplateProvider: true}
+	if utmHypervisorAvailable(ctx) {
+		providers[machines.TemplateProviderUTM] = true
+	}
+	return providers
+}
+
 // compatibleVersions keeps only the versions this agent can actually
-// download — provider virtualbox AND the host's own architecture
+// download — a provider in the host's set AND the host's own architecture
 // (runtime.GOARCH matches BoxVault's names: amd64, arm64; a VirtualBox-arm
 // future needs zero changes here) — pruning foreign providers and
 // architectures from the survivors. Mark's directive 2026-07-09: the
 // catalog must never offer a template this hypervisor cannot consume — a
 // zones-only box in the picker was a guaranteed 404 at download time.
 // Discover's shape: versions[].providers[].architectures[].name.
-func compatibleVersions(versions []any) []any {
+func compatibleVersions(versions []any, providerSet map[string]bool) []any {
 	kept := make([]any, 0, len(versions))
 	for _, raw := range versions {
 		ver, ok := raw.(map[string]any)
@@ -128,7 +140,7 @@ func compatibleVersions(versions []any) []any {
 			if !pok {
 				continue
 			}
-			if name, _ := provider["name"].(string); !strings.EqualFold(name, machines.TemplateProvider) {
+			if name, _ := provider["name"].(string); !providerSet[strings.ToLower(name)] {
 				continue
 			}
 			architectures, _ := provider["architectures"].([]any)
@@ -158,7 +170,7 @@ func compatibleVersions(versions []any) []any {
 // compatibleMetadataVersions is compatibleVersions for the Vagrant metadata
 // document's FLATTENED shape (findone.js formatVagrantResponse): one
 // providers[] entry per provider×architecture pair — {name, architecture}.
-func compatibleMetadataVersions(versions []any) []any {
+func compatibleMetadataVersions(versions []any, providerSet map[string]bool) []any {
 	kept := make([]any, 0, len(versions))
 	for _, raw := range versions {
 		ver, ok := raw.(map[string]any)
@@ -174,7 +186,7 @@ func compatibleMetadataVersions(versions []any) []any {
 			}
 			name, _ := provider["name"].(string)
 			architecture, _ := provider["architecture"].(string)
-			if strings.EqualFold(name, machines.TemplateProvider) &&
+			if providerSet[strings.ToLower(name)] &&
 				strings.EqualFold(architecture, runtime.GOARCH) {
 				matching = append(matching, provider)
 			}
@@ -213,6 +225,7 @@ func (s *Server) handleRemoteTemplates(w http.ResponseWriter, r *http.Request) {
 			fmt.Sprintf("Remote source answered HTTP %d", status))
 		return
 	}
+	providerSet := agentProviders(r.Context())
 	list, _ := decoded.([]any)
 	catalog := make([]any, 0, len(list))
 	for _, raw := range list {
@@ -221,7 +234,7 @@ func (s *Server) handleRemoteTemplates(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		versions, _ := entry["versions"].([]any)
-		usable := compatibleVersions(versions)
+		usable := compatibleVersions(versions, providerSet)
 		if len(usable) == 0 {
 			continue
 		}
@@ -268,7 +281,7 @@ func (s *Server) handleRemoteTemplateDetails(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	versions, _ := document["versions"].([]any)
-	usable := compatibleMetadataVersions(versions)
+	usable := compatibleMetadataVersions(versions, agentProviders(r.Context()))
 	if len(usable) == 0 {
 		taskError(w, http.StatusNotFound, "Template not found on remote source")
 		return

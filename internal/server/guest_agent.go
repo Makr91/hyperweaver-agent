@@ -16,6 +16,7 @@ import (
 	"github.com/Makr91/hyperweaver-agent/internal/provisioner"
 	"github.com/Makr91/hyperweaver-agent/internal/qga"
 	"github.com/Makr91/hyperweaver-agent/internal/tasks"
+	"github.com/Makr91/hyperweaver-agent/internal/utm"
 	"github.com/Makr91/hyperweaver-agent/internal/vbox"
 )
 
@@ -58,8 +59,27 @@ func (s *Server) machineQGAPipe(machine *machines.Machine) (string, error) {
 }
 
 // guestAgentIP answers the machine's live IPv4 through the guest agent ("" on
-// any failure) — the live-truth rung of the RDP/SSH target ladders.
+// any failure) — the live-truth rung of the RDP/SSH target ladders. utm
+// machines answer through utmctl ip-address instead of the QGA UART.
 func (s *Server) guestAgentIP(ctx context.Context, machine *machines.Machine) string {
+	if machine.Hypervisor == machines.HypervisorUTM {
+		exe := machines.UTMCtlPath(ctx)
+		if exe == "" {
+			return ""
+		}
+		probeCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+		defer cancel()
+		ips, err := utm.GuestIPs(probeCtx, exe, machine.VBoxTarget())
+		if err != nil {
+			return ""
+		}
+		for _, ip := range ips {
+			if machines.UsableGuestIP(ip) {
+				return ip
+			}
+		}
+		return ""
+	}
 	if !s.cfg.GuestAgent.Enabled {
 		return ""
 	}
@@ -76,15 +96,11 @@ func (s *Server) guestAgentIP(ctx context.Context, machine *machines.Machine) st
 	return ips[0]
 }
 
-// guestCommand resolves the machine, requires it running, and runs one
-// guest-agent command (nil return = response already written).
+// guestCommand requires the machine running and runs one guest-agent command
+// (nil return = response already written).
 func (s *Server) guestCommand(w http.ResponseWriter, r *http.Request,
-	execute string, arguments any, timeout time.Duration,
+	machine *machines.Machine, execute string, arguments any, timeout time.Duration,
 ) (json.RawMessage, *machines.Machine) {
-	machine := s.findMachine(w, r)
-	if machine == nil {
-		return nil, nil
-	}
 	if liveMachineStatus(r.Context(), machine) != machines.StatusRunning {
 		taskError(w, http.StatusBadRequest, "Machine is not running")
 		return nil, nil
@@ -110,9 +126,50 @@ func (s *Server) guestCommand(w http.ResponseWriter, r *http.Request,
 	return result, machine
 }
 
+// utmGuestExec runs one command in a utm guest (utmctl exec —
+// qemu-guest-agent, synchronous). ok=false means the response is written.
+func (s *Server) utmGuestExec(w http.ResponseWriter, r *http.Request,
+	machine *machines.Machine, timeout time.Duration, command ...string,
+) (string, bool) {
+	if liveMachineStatus(r.Context(), machine) != machines.StatusRunning {
+		taskError(w, http.StatusBadRequest, "Machine is not running")
+		return "", false
+	}
+	exe := machines.UTMCtlPath(r.Context())
+	if exe == "" {
+		taskError(w, http.StatusServiceUnavailable, "UTM is not installed")
+		return "", false
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), timeout)
+	defer cancel()
+	output, err := utm.Exec(ctx, exe, machine.VBoxTarget(), command...)
+	if err != nil {
+		slog.Warn("utm guest exec failed", "machine", machine.Name, "error", err)
+		taskError(w, http.StatusBadGateway,
+			"Guest agent did not answer ("+err.Error()+") — the guest needs qemu-guest-agent running")
+		return "", false
+	}
+	return output, true
+}
+
 // handleGuestPing serves GET /machines/{name}/guest/ping.
 func (s *Server) handleGuestPing(w http.ResponseWriter, r *http.Request) {
-	_, machine := s.guestCommand(w, r, "guest-ping", nil, 5*time.Second)
+	machine := s.findMachine(w, r)
+	if machine == nil {
+		return
+	}
+	if machine.Hypervisor == machines.HypervisorUTM {
+		if _, ok := s.utmGuestExec(w, r, machine, 5*time.Second, "whoami"); !ok {
+			return
+		}
+		writeJSON(w, map[string]any{
+			"success":      true,
+			"machine_name": machine.Name,
+			"message":      "Guest agent is responding",
+		})
+		return
+	}
+	_, machine = s.guestCommand(w, r, machine, "guest-ping", nil, 5*time.Second)
 	if machine == nil {
 		return
 	}
@@ -126,7 +183,15 @@ func (s *Server) handleGuestPing(w http.ResponseWriter, r *http.Request) {
 // handleGuestOSInfo serves GET /machines/{name}/guest/osinfo — the guest's
 // own identity (guest-get-osinfo).
 func (s *Server) handleGuestOSInfo(w http.ResponseWriter, r *http.Request) {
-	result, machine := s.guestCommand(w, r, "guest-get-osinfo", nil, 5*time.Second)
+	machine := s.findMachine(w, r)
+	if machine == nil {
+		return
+	}
+	if machine.Hypervisor == machines.HypervisorUTM {
+		taskError(w, http.StatusBadRequest, "osinfo is not supported on utm machines (no utmctl verb)")
+		return
+	}
+	result, machine := s.guestCommand(w, r, machine, "guest-get-osinfo", nil, 5*time.Second)
 	if machine == nil {
 		return
 	}
@@ -138,9 +203,39 @@ func (s *Server) handleGuestOSInfo(w http.ResponseWriter, r *http.Request) {
 
 // handleGuestNetwork serves GET /machines/{name}/guest/network — the guest's
 // live interfaces (guest-network-get-interfaces): real addresses with no
-// Guest Additions.
+// Guest Additions. utm answers a flat ips[] — utmctl ip-address reports bare
+// addresses, never the QGA interface shape.
 func (s *Server) handleGuestNetwork(w http.ResponseWriter, r *http.Request) {
-	result, machine := s.guestCommand(w, r, "guest-network-get-interfaces", nil, 5*time.Second)
+	machine := s.findMachine(w, r)
+	if machine == nil {
+		return
+	}
+	if machine.Hypervisor == machines.HypervisorUTM {
+		if liveMachineStatus(r.Context(), machine) != machines.StatusRunning {
+			taskError(w, http.StatusBadRequest, "Machine is not running")
+			return
+		}
+		exe := machines.UTMCtlPath(r.Context())
+		if exe == "" {
+			taskError(w, http.StatusServiceUnavailable, "UTM is not installed")
+			return
+		}
+		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+		defer cancel()
+		ips, err := utm.GuestIPs(ctx, exe, machine.VBoxTarget())
+		if err != nil {
+			slog.Warn("utm guest ip-address failed", "machine", machine.Name, "error", err)
+			taskError(w, http.StatusBadGateway,
+				"Guest agent did not answer ("+err.Error()+") — the guest needs qemu-guest-agent running")
+			return
+		}
+		writeJSON(w, map[string]any{
+			"machine_name": machine.Name,
+			"ips":          ips,
+		})
+		return
+	}
+	result, machine := s.guestCommand(w, r, machine, "guest-network-get-interfaces", nil, 5*time.Second)
 	if machine == nil {
 		return
 	}
@@ -201,7 +296,39 @@ func (s *Server) handleGuestExec(w http.ResponseWriter, r *http.Request) {
 		taskError(w, http.StatusBadRequest, "Body needs path (the guest executable) and optional args[]")
 		return
 	}
-	result, machine := s.guestCommand(w, r, "guest-exec", map[string]any{
+	machine := s.findMachine(w, r)
+	if machine == nil {
+		return
+	}
+	if machine.Hypervisor == machines.HypervisorUTM {
+		if body.Wait != nil && !*body.Wait {
+			taskError(w, http.StatusBadRequest,
+				"utmctl exec is synchronous — wait:false is not supported on utm machines")
+			return
+		}
+		timeout := body.TimeoutSeconds
+		if timeout <= 0 {
+			timeout = 30
+		}
+		if timeout > 600 {
+			timeout = 600
+		}
+		output, ok := s.utmGuestExec(w, r, machine, time.Duration(timeout)*time.Second,
+			append([]string{body.Path}, body.Args...)...)
+		if !ok {
+			return
+		}
+		slog.Info("guest exec", "machine", machine.Name, "path", body.Path,
+			"by", auth.FromContext(r.Context()).Name)
+		writeJSON(w, map[string]any{
+			"success":      true,
+			"machine_name": machine.Name,
+			"exited":       true,
+			"stdout":       output,
+		})
+		return
+	}
+	result, machine := s.guestCommand(w, r, machine, "guest-exec", map[string]any{
 		"path":           body.Path,
 		"arg":            body.Args,
 		"capture-output": true,
@@ -287,7 +414,15 @@ func (s *Server) handleGuestExecStatus(w http.ResponseWriter, r *http.Request) {
 		taskError(w, http.StatusBadRequest, "Invalid pid")
 		return
 	}
-	result, machine := s.guestCommand(w, r, "guest-exec-status", map[string]any{"pid": pid}, 5*time.Second)
+	machine := s.findMachine(w, r)
+	if machine == nil {
+		return
+	}
+	if machine.Hypervisor == machines.HypervisorUTM {
+		taskError(w, http.StatusBadRequest, "not supported on utm machines (utmctl exec is synchronous)")
+		return
+	}
+	result, machine := s.guestCommand(w, r, machine, "guest-exec-status", map[string]any{"pid": pid}, 5*time.Second)
 	if machine == nil {
 		return
 	}
@@ -323,7 +458,43 @@ func (s *Server) handleGuestShutdown(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	_, machine := s.guestCommand(w, r, "guest-shutdown", map[string]any{"mode": mode}, 5*time.Second)
+	machine := s.findMachine(w, r)
+	if machine == nil {
+		return
+	}
+	if machine.Hypervisor == machines.HypervisorUTM {
+		if mode != "powerdown" {
+			taskError(w, http.StatusBadRequest,
+				"guest "+mode+" is not supported on utm machines — only powerdown (rides utmctl stop)")
+			return
+		}
+		if liveMachineStatus(r.Context(), machine) != machines.StatusRunning {
+			taskError(w, http.StatusBadRequest, "Machine is not running")
+			return
+		}
+		exe := machines.UTMCtlPath(r.Context())
+		if exe == "" {
+			taskError(w, http.StatusServiceUnavailable, "UTM is not installed")
+			return
+		}
+		ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+		defer cancel()
+		if serr := utm.Stop(ctx, exe, machine.VBoxTarget(), false); serr != nil {
+			slog.Warn("utm guest shutdown failed", "machine", machine.Name, "error", serr)
+			taskError(w, http.StatusBadGateway, "Guest shutdown did not take ("+serr.Error()+")")
+			return
+		}
+		slog.Info("guest shutdown requested", "machine", machine.Name, "mode", mode,
+			"by", auth.FromContext(r.Context()).Name)
+		writeJSON(w, map[string]any{
+			"success":      true,
+			"machine_name": machine.Name,
+			"mode":         mode,
+			"message":      "Guest powerdown requested — rides utmctl stop (graceful)",
+		})
+		return
+	}
+	_, machine = s.guestCommand(w, r, machine, "guest-shutdown", map[string]any{"mode": mode}, 5*time.Second)
 	if machine == nil {
 		return
 	}
@@ -345,6 +516,11 @@ func (s *Server) handleGuestShutdown(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleGuestAgentSetup(w http.ResponseWriter, r *http.Request) {
 	machine := s.findMachine(w, r)
 	if machine == nil {
+		return
+	}
+	if machine.Hypervisor == machines.HypervisorUTM {
+		taskError(w, http.StatusBadRequest,
+			"the guest-agent UART is VirtualBox plumbing — utm guests use qemu-guest-agent via utmctl already")
 		return
 	}
 	exe := machines.VBoxManagePath(r.Context())

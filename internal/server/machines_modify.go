@@ -26,7 +26,7 @@ import (
 // must be present or the request is a 400.
 var modifyChangeFields = []string{
 	"ram", "vcpus", "bootrom", "hostbridge", "diskif", "netif", "os_type",
-	"vnc", "acpi", "xhci", "autoboot", "guest_agent", "boot_order", "vbox",
+	"vnc", "acpi", "xhci", "autoboot", "guest_agent", "boot_order", "vbox", "utm",
 	"add_nics", "remove_nics", "nics", "add_disks", "remove_disks",
 	"add_cdroms", "remove_cdroms", "add_controllers", "remove_controllers",
 	"cloud_init", "provisioner", "notes", "tags",
