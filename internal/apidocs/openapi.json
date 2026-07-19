@@ -452,6 +452,7 @@
           "load_avg_15min": { "type": "number" },
           "processes_running": { "type": "integer", "description": "Run-queue count where the platform reports one (Linux); zero elsewhere" },
           "processes_blocked": { "type": "integer" },
+          "io_delay_pct": { "type": "number", "description": "The converged cross-agent IO-delay series (sync 2026-07-19, Proxmox's IO delay): this agent derives it from the window's CPU-iowait share — PRESENT on Linux hosts only, ABSENT (omitted, never zero) on Windows/macOS whose kernels account no iowait. zoneweaver serves the same field from its own illumos-truthful derivation (max per-device %w).", "example": 3.2 },
           "per_core_parsed": {
             "type": "array",
             "description": "Present only when include_cores=true",

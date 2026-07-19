@@ -14,6 +14,7 @@ import (
 	"log/slog"
 	"math"
 	"os"
+	"runtime"
 	"sync"
 	"time"
 
@@ -44,19 +45,23 @@ type CoreUsage struct {
 // CPUSample is one CPU telemetry observation (the CPUStats schema's
 // platform-feasible subset; illumos-only counters stay zero).
 type CPUSample struct {
-	Host              string      `json:"host"`
-	CPUCount          int         `json:"cpu_count"`
-	CPUUtilizationPct float64     `json:"cpu_utilization_pct"`
-	UserPct           float64     `json:"user_pct"`
-	SystemPct         float64     `json:"system_pct"`
-	IdlePct           float64     `json:"idle_pct"`
-	LoadAvg1Min       float64     `json:"load_avg_1min"`
-	LoadAvg5Min       float64     `json:"load_avg_5min"`
-	LoadAvg15Min      float64     `json:"load_avg_15min"`
-	ProcessesRunning  int         `json:"processes_running"`
-	ProcessesBlocked  int         `json:"processes_blocked"`
-	PerCoreParsed     []CoreUsage `json:"per_core_parsed,omitempty"`
-	ScanTimestamp     time.Time   `json:"scan_timestamp"`
+	Host              string  `json:"host"`
+	CPUCount          int     `json:"cpu_count"`
+	CPUUtilizationPct float64 `json:"cpu_utilization_pct"`
+	UserPct           float64 `json:"user_pct"`
+	SystemPct         float64 `json:"system_pct"`
+	IdlePct           float64 `json:"idle_pct"`
+	LoadAvg1Min       float64 `json:"load_avg_1min"`
+	LoadAvg5Min       float64 `json:"load_avg_5min"`
+	LoadAvg15Min      float64 `json:"load_avg_15min"`
+	ProcessesRunning  int     `json:"processes_running"`
+	ProcessesBlocked  int     `json:"processes_blocked"`
+	// IODelayPct is the converged cross-agent IO-delay series (sync
+	// 2026-07-19): the window's CPU-iowait share on Linux; absent (nil) where
+	// the kernel accounts no iowait — never a faked zero.
+	IODelayPct    *float64    `json:"io_delay_pct,omitempty"`
+	PerCoreParsed []CoreUsage `json:"per_core_parsed,omitempty"`
+	ScanTimestamp time.Time   `json:"scan_timestamp"`
 }
 
 // MemorySample is one memory telemetry observation (the MemoryStats schema's
@@ -232,6 +237,16 @@ func (s *Sampler) SampleCPU(ctx context.Context) (*CPUSample, error) {
 	}
 	sample.PerCoreParsed = cores
 	sample.CPUUtilizationPct, sample.UserPct, sample.SystemPct, sample.IdlePct = cpuBusyPcts(&prevAgg, &currAgg)
+	if runtime.GOOS == "linux" {
+		dIowait := currAgg.Iowait - prevAgg.Iowait
+		dBusy := (currAgg.User - prevAgg.User) + (currAgg.System - prevAgg.System) +
+			(currAgg.Nice - prevAgg.Nice) + (currAgg.Irq - prevAgg.Irq) +
+			(currAgg.Softirq - prevAgg.Softirq) + (currAgg.Steal - prevAgg.Steal) + dIowait
+		if span := dBusy + (currAgg.Idle - prevAgg.Idle); span > 0 {
+			ioDelay := round2(dIowait / span * 100)
+			sample.IODelayPct = &ioDelay
+		}
+	}
 
 	// Load averages: zeros on Windows (the platform has no concept — same
 	// answer Node's os.loadavg() gives there).

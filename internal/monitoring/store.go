@@ -33,6 +33,7 @@ var CPUMigrations = []string{
 		scan_timestamp      TEXT NOT NULL
 	);
 	CREATE INDEX idx_cpu_samples_scan ON cpu_samples (scan_timestamp DESC);`,
+	`ALTER TABLE cpu_samples ADD COLUMN io_delay_pct REAL;`,
 }
 
 // MemoryMigrations is the monitoring-memory.sqlite schema.
@@ -106,12 +107,13 @@ func (s *Store) InsertCPU(ctx context.Context, sample *CPUSample) error {
 	_, err := s.cpuDB.ExecContext(ctx, `INSERT INTO cpu_samples
 		(host, cpu_count, cpu_utilization_pct, user_pct, system_pct, idle_pct,
 		 load_avg_1min, load_avg_5min, load_avg_15min,
-		 processes_running, processes_blocked, per_core_data, scan_timestamp)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		 processes_running, processes_blocked, per_core_data, io_delay_pct,
+		 scan_timestamp)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		sample.Host, sample.CPUCount, sample.CPUUtilizationPct, sample.UserPct,
 		sample.SystemPct, sample.IdlePct, sample.LoadAvg1Min, sample.LoadAvg5Min,
 		sample.LoadAvg15Min, sample.ProcessesRunning, sample.ProcessesBlocked,
-		perCore, formatTime(sample.ScanTimestamp))
+		perCore, sample.IODelayPct, formatTime(sample.ScanTimestamp))
 	return err
 }
 
@@ -167,8 +169,8 @@ func (s *Store) CPUHistory(ctx context.Context, f *HistoryFilter) ([]CPUSample, 
 	var query strings.Builder
 	query.WriteString(`SELECT host, cpu_count, cpu_utilization_pct, user_pct,
 		system_pct, idle_pct, load_avg_1min, load_avg_5min, load_avg_15min,
-		processes_running, processes_blocked, per_core_data, scan_timestamp
-		FROM cpu_samples`)
+		processes_running, processes_blocked, per_core_data, io_delay_pct,
+		scan_timestamp FROM cpu_samples`)
 	args := []any{}
 	if f.Since != nil {
 		query.WriteString(" WHERE scan_timestamp >= ?")
@@ -189,11 +191,13 @@ func (s *Store) CPUHistory(ctx context.Context, f *HistoryFilter) ([]CPUSample, 
 	for rows.Next() {
 		var sample CPUSample
 		var perCore sql.NullString
+		var ioDelay sql.NullFloat64
 		var scanned string
 		if serr := rows.Scan(&sample.Host, &sample.CPUCount, &sample.CPUUtilizationPct,
 			&sample.UserPct, &sample.SystemPct, &sample.IdlePct,
 			&sample.LoadAvg1Min, &sample.LoadAvg5Min, &sample.LoadAvg15Min,
-			&sample.ProcessesRunning, &sample.ProcessesBlocked, &perCore, &scanned); serr != nil {
+			&sample.ProcessesRunning, &sample.ProcessesBlocked, &perCore, &ioDelay,
+			&scanned); serr != nil {
 			return nil, serr
 		}
 		if parsed, perr := time.Parse(timeLayout, scanned); perr == nil {
@@ -203,6 +207,10 @@ func (s *Store) CPUHistory(ctx context.Context, f *HistoryFilter) ([]CPUSample, 
 			if uerr := json.Unmarshal([]byte(perCore.String), &sample.PerCoreParsed); uerr != nil {
 				sample.PerCoreParsed = nil
 			}
+		}
+		if ioDelay.Valid {
+			value := ioDelay.Float64
+			sample.IODelayPct = &value
 		}
 		samples = append(samples, sample)
 	}
