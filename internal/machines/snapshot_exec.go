@@ -54,11 +54,11 @@ type snapshotMetadata struct {
 // readSnapshotMetadata parses a snapshot task's metadata. allowPrefix lets
 // the take task name by prefix instead of a literal snapshot_name.
 func readSnapshotMetadata(task *tasks.Task, allowPrefix bool) (*snapshotMetadata, error) {
-	if task.Metadata == nil {
+	if len(task.Metadata) == 0 {
 		return nil, errors.New("snapshot task has no metadata")
 	}
 	var meta snapshotMetadata
-	if err := json.Unmarshal([]byte(*task.Metadata), &meta); err != nil {
+	if err := json.Unmarshal(task.Metadata, &meta); err != nil {
 		return nil, fmt.Errorf("parse snapshot metadata: %w", err)
 	}
 	if meta.SnapshotName == "" && (!allowPrefix || meta.Prefix == "") {
@@ -409,11 +409,11 @@ func (e *executors) snapshotModify(ctx context.Context, task *tasks.Task, out *t
 	if err != nil {
 		return err
 	}
-	if task.Metadata == nil {
+	if len(task.Metadata) == 0 {
 		return errors.New("snapshot task has no metadata")
 	}
 	var meta snapshotModifyMetadata
-	if uerr := json.Unmarshal([]byte(*task.Metadata), &meta); uerr != nil {
+	if uerr := json.Unmarshal(task.Metadata, &meta); uerr != nil {
 		return fmt.Errorf("parse snapshot metadata: %w", uerr)
 	}
 	if meta.SnapshotName == "" {
@@ -465,11 +465,11 @@ type cloneCurrentMetadata struct {
 // VRDE off (consoleport was stripped), and the registry row lands with the
 // stripped spec. The task's MachineName is the CLONE.
 func (e *executors) cloneCurrent(ctx context.Context, task *tasks.Task, out *tasks.OutputWriter) error {
-	if task.Metadata == nil {
+	if len(task.Metadata) == 0 {
 		return errors.New("clone task has no metadata")
 	}
 	var meta cloneCurrentMetadata
-	if err := json.Unmarshal([]byte(*task.Metadata), &meta); err != nil {
+	if err := json.Unmarshal(task.Metadata, &meta); err != nil {
 		return fmt.Errorf("parse clone metadata: %w", err)
 	}
 	if meta.Source == "" || meta.Spec == nil {

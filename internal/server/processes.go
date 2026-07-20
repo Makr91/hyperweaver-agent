@@ -24,19 +24,21 @@ import (
 
 // processInfo is one process listing entry (GET /system/processes item and
 // GET /system/processes/{pid}). Every optional field is a pointer so a failed
-// gopsutil probe OMITS its key rather than emitting a zero value — the map
-// response this replaced added keys only when the probe succeeded, and the
-// wire stays byte-identical. detailed=false leaves the statistics block nil;
-// open_files_sample is set only on the single-process detail read.
+// gopsutil probe OMITS its key rather than emitting a zero value (the map
+// response this replaced added keys only when the probe succeeded).
+// detailed=false leaves the statistics block nil; open_files_sample is set
+// only on the single-process detail read.
 type processInfo struct {
 	Command string `json:"command"`
 	// detailed=true only
-	CPUPercent      *float64 `json:"cpu_percent,omitempty"`
-	CPUTime         *string  `json:"cpu_time,omitempty"`
-	MemoryPercent   *float64 `json:"memory_percent,omitempty"`
-	OpenFilesSample *string  `json:"open_files_sample,omitempty"`
-	Pid             int32    `json:"pid"`
-	Ppid            *int32   `json:"ppid,omitempty"`
+	CPUPercent *float64 `json:"cpu_percent,omitempty"`
+	// Consumed CPU time in seconds (detailed=true only)
+	CPUTime       *int64   `json:"cpu_time,omitempty"`
+	MemoryPercent *float64 `json:"memory_percent,omitempty"`
+	// Detail read only: up to 10 open file paths ([] on platforms where per-process file enumeration is unsupported)
+	OpenFilesSample *[]string `json:"open_files_sample,omitempty"`
+	Pid             int32     `json:"pid"`
+	Ppid            *int32    `json:"ppid,omitempty"`
 	// Resident size in KB
 	RSS       *uint64 `json:"rss,omitempty"`
 	StartTime *string `json:"start_time,omitempty"`
@@ -90,7 +92,7 @@ func processRow(p *process.Process, detailed bool) processInfo {
 		row.StartTime = &t
 	}
 	if times, err := p.Times(); err == nil && times != nil {
-		ct := formatCPUTime(times.User + times.System)
+		ct := int64(times.User + times.System)
 		row.CPUTime = &ct
 	}
 	return row
@@ -98,12 +100,6 @@ func processRow(p *process.Process, detailed bool) processInfo {
 
 func round2(v float64) float64 {
 	return float64(int(v*100+0.5)) / 100
-}
-
-// formatCPUTime renders consumed CPU seconds as H:MM:SS (the ps TIME column).
-func formatCPUTime(seconds float64) string {
-	total := int64(seconds)
-	return fmt.Sprintf("%d:%02d:%02d", total/3600, (total%3600)/60, total%60)
 }
 
 // matchProcesses lists processes passing the user/command filters.
@@ -220,16 +216,14 @@ func (s *Server) handleProcessDetails(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	row := processRow(p, true)
-	sample := ""
+	sample := []string{}
 	if files, err := p.OpenFilesWithContext(r.Context()); err == nil {
-		paths := make([]string, 0, len(files))
 		for i, f := range files {
 			if i >= 10 {
 				break
 			}
-			paths = append(paths, f.Path)
+			sample = append(sample, f.Path)
 		}
-		sample = strings.Join(paths, "\n")
 	}
 	row.OpenFilesSample = &sample
 	writeJSON(w, row)
@@ -538,9 +532,11 @@ type processStatRow struct {
 	Command    string  `json:"command"`
 	CPUPercent float64 `json:"cpu_percent"`
 	Pid        int32   `json:"pid"`
-	RSS        string  `json:"rss"`
-	Size       string  `json:"size"`
-	Username   string  `json:"username"`
+	// Resident set size in bytes
+	RSS uint64 `json:"rss"`
+	// Virtual size in bytes
+	Size     uint64 `json:"size"`
+	Username string `json:"username"`
 }
 
 // handleProcessStats mirrors GET /system/processes/stats (the prstat view):
@@ -564,8 +560,8 @@ func (s *Server) handleProcessStats(w http.ResponseWriter, r *http.Request) {
 		pid      int32
 		username string
 		cpuPct   float64
-		vszKB    uint64
-		rssKB    uint64
+		vszBytes uint64
+		rssBytes uint64
 		command  string
 	}
 	rows := make([]statRow, 0, len(matched))
@@ -578,8 +574,8 @@ func (s *Server) handleProcessStats(w http.ResponseWriter, r *http.Request) {
 			row.username = username
 		}
 		if info, merr := p.MemoryInfo(); merr == nil && info != nil {
-			row.vszKB = info.VMS / 1024
-			row.rssKB = info.RSS / 1024
+			row.vszBytes = info.VMS
+			row.rssBytes = info.RSS
 		}
 		if name, nerr := p.Name(); nerr == nil {
 			row.command = name
@@ -597,22 +593,10 @@ func (s *Server) handleProcessStats(w http.ResponseWriter, r *http.Request) {
 			Command:    row.command,
 			CPUPercent: round2(row.cpuPct),
 			Pid:        row.pid,
-			RSS:        formatKB(row.rssKB),
-			Size:       formatKB(row.vszKB),
+			RSS:        row.rssBytes,
+			Size:       row.vszBytes,
 			Username:   row.username,
 		})
 	}
 	writeJSON(w, out)
-}
-
-// formatKB renders a kilobyte count the prstat way (K/M/G suffix).
-func formatKB(kb uint64) string {
-	switch {
-	case kb >= 1024*1024:
-		return fmt.Sprintf("%.1fG", float64(kb)/(1024*1024))
-	case kb >= 1024:
-		return fmt.Sprintf("%.1fM", float64(kb)/1024)
-	default:
-		return fmt.Sprintf("%dK", kb)
-	}
 }

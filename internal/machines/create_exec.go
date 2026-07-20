@@ -77,11 +77,11 @@ type createTaskMetadata struct {
 
 // readCreateMetadata parses a create child's own metadata.
 func readCreateMetadata(task *tasks.Task) (*createTaskMetadata, error) {
-	if task.Metadata == nil {
+	if len(task.Metadata) == 0 {
 		return nil, errors.New("create task has no metadata")
 	}
 	var meta createTaskMetadata
-	if err := json.Unmarshal([]byte(*task.Metadata), &meta); err != nil {
+	if err := json.Unmarshal(task.Metadata, &meta); err != nil {
 		return nil, fmt.Errorf("parse create metadata: %w", err)
 	}
 	if meta.Spec == nil {
@@ -100,11 +100,11 @@ func (e *executors) dependencyOutput(ctx context.Context, task *tasks.Task) (*cr
 	if err != nil {
 		return nil, fmt.Errorf("dependency task: %w", err)
 	}
-	if previous.Metadata == nil {
+	if len(previous.Metadata) == 0 {
 		return nil, errors.New("dependency task carries no metadata")
 	}
 	var meta createTaskMetadata
-	if err := json.Unmarshal([]byte(*previous.Metadata), &meta); err != nil {
+	if err := json.Unmarshal(previous.Metadata, &meta); err != nil {
 		return nil, fmt.Errorf("parse dependency metadata: %w", err)
 	}
 	if meta.ExecutionOutput == nil {

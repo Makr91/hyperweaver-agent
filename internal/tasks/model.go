@@ -63,13 +63,13 @@ type Task struct {
 	CompletedAt  *time.Time `json:"completed_at"`
 	// Last modification — the since query parameter compares against this
 	UpdatedAt time.Time `json:"updatedAt"`
-	// JSON-encoded execution parameters
-	Metadata        *string `json:"metadata"`
-	ProgressPercent float64 `json:"progress_percent"`
+	// JSON execution parameters — a real object on the wire (null when absent); stored as TEXT
+	Metadata        json.RawMessage `json:"metadata"`
+	ProgressPercent float64         `json:"progress_percent"`
 	// Freeform progress detail; parent tasks carry {completed_tasks, failed_tasks, total_tasks, status}. machine_provision tasks carry {status} at the coarse phases and — while the playbook runs — the STARTcloud progress callback's live reports as {status: "running_playbook", ansible_percent, message} (the guest's own 0-100% and role label, parsed from the packages' PROGRESS::{json} stdout marker; progress_percent maps it into this task's 40→90 window). Playbooks without the callback simply keep the coarse phases. REGISTRY TRANSFERS (the converged task wire, sync 2026-07-17 — no new endpoints, both agents identical): while template_download streams the .box, template_upload chunk-uploads to the registry, or provisioner_catalog_install downloads the catalog archive, progress_info carries exactly {status: "downloading"|"uploading", received_bytes: <int>, total_bytes: <int|null>} — received_bytes is bytes transferred so far (the ONE field name for BOTH directions), total_bytes is the Content-Length or known file size, JSON null when unknown — and progress_percent maps the bytes into that step's existing window (download 10→60, publish upload 85→95, catalog install 0→90). Updates emit at most every 1s OR every 1% of the total, whichever comes first, with a final update always emitted at completion; an unknown total parks the percent at the window floor (no fake percent) while received_bytes still streams.
 	ProgressInfo json.RawMessage `json:"progress_info"`
-	// JSON-encoded array of output entries as last flushed — ALWAYS null on GET /tasks (the list never carries output blobs); GET /tasks/{taskId} (detail), GET /tasks/{taskId}/output, and the /tasks/{taskId}/stream WebSocket serve it in full
-	Output *string `json:"output"`
+	// ALWAYS null on the wire (list AND detail — the converged task wire); GET /tasks/{taskId}/output and the /tasks/{taskId}/stream WebSocket are the output channels; storage stays TEXT
+	Output json.RawMessage `json:"output"`
 }
 
 // NewTask describes a task to enqueue. Inserting the row IS enqueueing

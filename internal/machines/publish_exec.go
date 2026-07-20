@@ -50,10 +50,10 @@ type templatePublishMetadata struct {
 // templatePublish executes one template_upload task.
 func (e *executors) templatePublish(ctx context.Context, task *tasks.Task, out *tasks.OutputWriter) error {
 	var meta templatePublishMetadata
-	if task.Metadata == nil {
+	if len(task.Metadata) == 0 {
 		return errors.New("template_upload task has no metadata")
 	}
-	if err := json.Unmarshal([]byte(*task.Metadata), &meta); err != nil {
+	if err := json.Unmarshal(task.Metadata, &meta); err != nil {
 		return fmt.Errorf("parse template_upload metadata: %w", err)
 	}
 	if meta.Architecture == "" {

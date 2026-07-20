@@ -340,8 +340,8 @@ func (e *executors) stop(ctx context.Context, task *tasks.Task, out *tasks.Outpu
 	defer e.refreshStatus(machine.Name, vboxExe)
 
 	var meta stopMetadata
-	if task.Metadata != nil {
-		if uerr := json.Unmarshal([]byte(*task.Metadata), &meta); uerr != nil {
+	if len(task.Metadata) > 0 {
+		if uerr := json.Unmarshal(task.Metadata, &meta); uerr != nil {
 			return fmt.Errorf("parse stop metadata: %w", uerr)
 		}
 	}
@@ -396,8 +396,8 @@ func (e *executors) stopUTM(ctx context.Context, task *tasks.Task, out *tasks.Ou
 	defer e.refreshStatusUTM(machine.Name, utmctlPath)
 
 	var meta stopMetadata
-	if task.Metadata != nil {
-		if uerr := json.Unmarshal([]byte(*task.Metadata), &meta); uerr != nil {
+	if len(task.Metadata) > 0 {
+		if uerr := json.Unmarshal(task.Metadata, &meta); uerr != nil {
 			return fmt.Errorf("parse stop metadata: %w", uerr)
 		}
 	}
@@ -666,8 +666,8 @@ func (e *executors) deleteMachine(ctx context.Context, task *tasks.Task, out *ta
 	}
 
 	meta := deleteMetadata{CleanupDisks: true}
-	if task.Metadata != nil {
-		if uerr := json.Unmarshal([]byte(*task.Metadata), &meta); uerr != nil {
+	if len(task.Metadata) > 0 {
+		if uerr := json.Unmarshal(task.Metadata, &meta); uerr != nil {
 			return fmt.Errorf("parse delete metadata: %w", uerr)
 		}
 	}
@@ -716,8 +716,8 @@ func (e *executors) deleteMachineUTM(ctx context.Context, task *tasks.Task, out 
 	}
 
 	meta := deleteMetadata{CleanupDisks: true}
-	if task.Metadata != nil {
-		if uerr := json.Unmarshal([]byte(*task.Metadata), &meta); uerr != nil {
+	if len(task.Metadata) > 0 {
+		if uerr := json.Unmarshal(task.Metadata, &meta); uerr != nil {
 			return fmt.Errorf("parse delete metadata: %w", uerr)
 		}
 	}

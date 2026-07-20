@@ -79,10 +79,10 @@ func RegisterExecutors(queue *tasks.Queue) {
 // apply it through the platform's own tooling.
 func setHostname(ctx context.Context, task *tasks.Task, out *tasks.OutputWriter) error {
 	var meta Metadata
-	if task.Metadata == nil {
+	if len(task.Metadata) == 0 {
 		return errors.New("set_hostname task has no metadata")
 	}
-	if err := json.Unmarshal([]byte(*task.Metadata), &meta); err != nil {
+	if err := json.Unmarshal(task.Metadata, &meta); err != nil {
 		return fmt.Errorf("parse set_hostname metadata: %w", err)
 	}
 	if !Valid(meta.Hostname) {

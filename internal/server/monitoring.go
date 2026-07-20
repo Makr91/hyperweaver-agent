@@ -1,7 +1,6 @@
 package server
 
 import (
-	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -60,8 +59,10 @@ func samplingMeta(strategy string, returned int) monitoringSamplingMeta {
 	}
 }
 
-func queryTimeSince(start time.Time) string {
-	return fmt.Sprintf("%dms", time.Since(start).Milliseconds())
+// queryTimeSince answers the milliseconds spent serving the request — the
+// listings' queryTime field (a plain number).
+func queryTimeSince(start time.Time) int64 {
+	return time.Since(start).Milliseconds()
 }
 
 // stripCores removes per-core data unless include_cores=true (the Node
@@ -99,7 +100,8 @@ type cpuStatsResponse struct {
 	TotalCount    int                    `json:"totalCount"`
 	ReturnedCount int                    `json:"returnedCount"`
 	Sampling      monitoringSamplingMeta `json:"sampling"`
-	QueryTime     string                 `json:"queryTime"`
+	// Milliseconds spent serving the request
+	QueryTime int64 `json:"queryTime"`
 	// The newest sample; null when none
 	Latest *monitoring.CPUSample `json:"latest"`
 }
@@ -145,7 +147,8 @@ type memoryStatsResponse struct {
 	TotalCount    int                       `json:"totalCount"`
 	ReturnedCount int                       `json:"returnedCount"`
 	Sampling      monitoringSamplingMeta    `json:"sampling"`
-	QueryTime     string                    `json:"queryTime"`
+	// Milliseconds spent serving the request
+	QueryTime int64 `json:"queryTime"`
 	// The newest sample; null when none
 	Latest *monitoring.MemorySample `json:"latest"`
 }
@@ -349,7 +352,8 @@ type monitoringSummaryResponse struct {
 	LatestData map[string]string `json:"latestData"`
 	// The last collection time; null when none
 	LastCollected *string `json:"lastCollected"`
-	QueryTime     string  `json:"queryTime"`
+	// Milliseconds spent serving the request
+	QueryTime int64 `json:"queryTime"`
 }
 
 // @Summary		Monitoring summary
@@ -612,7 +616,8 @@ type networkUsageResponse struct {
 	ReturnedCount int                        `json:"returnedCount"`
 	Sampling      monitoringSamplingMeta     `json:"sampling"`
 	Metadata      networkUsageMetadata       `json:"metadata"`
-	QueryTime     string                     `json:"queryTime"`
+	// Milliseconds spent serving the request
+	QueryTime int64 `json:"queryTime"`
 }
 
 // @Summary		Network usage
@@ -780,9 +785,11 @@ func (s *Server) handleMonitoringIPAddresses(w http.ResponseWriter, r *http.Requ
 
 // lowSwapHost is one host row in the low-swap listing.
 type lowSwapHost struct {
-	Host               string    `json:"host"`
-	SwapTotalGB        string    `json:"swap_total_gb"`
-	SwapUsedGB         string    `json:"swap_used_gb"`
+	Host string `json:"host"`
+	// Total swap in bytes
+	SwapTotalBytes uint64 `json:"swap_total_bytes"`
+	// Swap bytes in use
+	SwapUsedBytes      uint64    `json:"swap_used_bytes"`
 	SwapUtilizationPct float64   `json:"swap_utilization_pct"`
 	LastChecked        time.Time `json:"last_checked"`
 }
@@ -823,8 +830,8 @@ func (s *Server) handleLowSwapHosts(w http.ResponseWriter, r *http.Request) {
 	if sample.SwapUtilizationPct > threshold {
 		hosts = append(hosts, lowSwapHost{
 			Host:               sample.Host,
-			SwapTotalGB:        gbString(sample.SwapTotalBytes),
-			SwapUsedGB:         gbString(sample.SwapUsedBytes),
+			SwapTotalBytes:     sample.SwapTotalBytes,
+			SwapUsedBytes:      sample.SwapUsedBytes,
 			SwapUtilizationPct: sample.SwapUtilizationPct,
 			LastChecked:        sample.ScanTimestamp,
 		})

@@ -966,7 +966,7 @@ func (s *Server) handleUploadArtifactToTask(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	var meta assets.UploadMetadata
-	if task.Metadata == nil || json.Unmarshal([]byte(*task.Metadata), &meta) != nil {
+	if len(task.Metadata) == 0 || json.Unmarshal(task.Metadata, &meta) != nil {
 		taskError(w, http.StatusInternalServerError, "Upload task metadata is unreadable")
 		return
 	}

@@ -94,11 +94,11 @@ func RegisterExecutors(queue *tasks.Queue) {
 }
 
 func parseMeta(task *tasks.Task) (*Metadata, error) {
-	if task.Metadata == nil {
+	if len(task.Metadata) == 0 {
 		return nil, errors.New("address task has no metadata")
 	}
 	meta := &Metadata{}
-	if err := json.Unmarshal([]byte(*task.Metadata), meta); err != nil {
+	if err := json.Unmarshal(task.Metadata, meta); err != nil {
 		return nil, fmt.Errorf("parse address metadata: %w", err)
 	}
 	return meta, nil

@@ -182,10 +182,10 @@ func (s *Server) archiveCreateTask(ctx context.Context, task *tasks.Task, out *t
 		return errors.New("archive operations are disabled")
 	}
 	var meta archiveCreateMetadata
-	if task.Metadata == nil {
+	if len(task.Metadata) == 0 {
 		return errors.New("archive task has no metadata")
 	}
-	if err := json.Unmarshal([]byte(*task.Metadata), &meta); err != nil {
+	if err := json.Unmarshal(task.Metadata, &meta); err != nil {
 		return err
 	}
 	destination, err := s.validateBrowsePath(meta.ArchivePath)
@@ -373,10 +373,10 @@ func (s *Server) archiveExtractTask(ctx context.Context, task *tasks.Task, out *
 		return errors.New("archive operations are disabled")
 	}
 	var meta archiveExtractMetadata
-	if task.Metadata == nil {
+	if len(task.Metadata) == 0 {
 		return errors.New("archive task has no metadata")
 	}
-	if err := json.Unmarshal([]byte(*task.Metadata), &meta); err != nil {
+	if err := json.Unmarshal(task.Metadata, &meta); err != nil {
 		return err
 	}
 	archivePath, err := s.validateBrowsePath(meta.ArchivePath)

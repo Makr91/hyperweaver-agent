@@ -71,10 +71,10 @@ func (m *HCLDownloadMetadata) Validate() error {
 // hclDownload executes one hcl_download task end to end.
 func (e *executors) hclDownload(ctx context.Context, task *tasks.Task, out *tasks.OutputWriter) error {
 	var meta HCLDownloadMetadata
-	if task.Metadata == nil {
+	if len(task.Metadata) == 0 {
 		return errors.New("hcl_download task has no metadata")
 	}
-	if err := json.Unmarshal([]byte(*task.Metadata), &meta); err != nil {
+	if err := json.Unmarshal(task.Metadata, &meta); err != nil {
 		return fmt.Errorf("parse hcl_download metadata: %w", err)
 	}
 	if err := meta.Validate(); err != nil {

@@ -45,10 +45,10 @@ func (e *executors) keyRotate(ctx context.Context, task *tasks.Task, out *tasks.
 		return err
 	}
 	var extra keyRotateMetadata
-	if task.Metadata != nil {
+	if len(task.Metadata) > 0 {
 		// Tolerant second decode: readProvisionMetadata already validated the
 		// document; this only lifts the key_path field out of it.
-		_ = json.Unmarshal([]byte(*task.Metadata), &extra)
+		_ = json.Unmarshal(task.Metadata, &extra)
 	}
 	keyPath := extra.KeyPath
 	if keyPath == "" {

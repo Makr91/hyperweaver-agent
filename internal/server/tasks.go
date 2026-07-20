@@ -151,7 +151,7 @@ func (s *Server) handleTaskStats(w http.ResponseWriter, r *http.Request) {
 // handleTaskDetails mirrors GET /tasks/{taskId}.
 //
 //	@Summary		Task details
-//	@Description	Minimum role: viewer.
+//	@Description	Minimum role: viewer. The task document's output field is ALWAYS null (the converged task wire) — GET /tasks/{taskId}/output and the /tasks/{taskId}/stream WebSocket serve the output.
 //	@Tags			Task Management
 //	@Produce		json
 //	@Param			taskId	path	string	true	"Task id"

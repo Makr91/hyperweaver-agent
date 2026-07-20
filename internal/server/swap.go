@@ -51,10 +51,6 @@ func swapDevices(total, used uint64) []swapDevice {
 	return []swapDevice{{path: "swap", sizeBytes: total, usedBytes: used}}
 }
 
-func gbString(bytes uint64) string {
-	return fmt.Sprintf("%.2f", float64(bytes)/(1024*1024*1024))
-}
-
 func utilizationPct(used, total uint64) float64 {
 	if total == 0 {
 		return 0
@@ -66,10 +62,12 @@ func utilizationPct(used, total uint64) float64 {
 
 // swapSummaryArea is one live swap area in the summary's per-area breakdown.
 type swapSummaryArea struct {
-	Path        string  `json:"path"`
-	Pool        *string `json:"pool"`
-	SizeGB      string  `json:"sizeGB"`
-	UsedGB      string  `json:"usedGB"`
+	Path string  `json:"path"`
+	Pool *string `json:"pool"`
+	// Area size in bytes
+	SizeBytes uint64 `json:"sizeBytes"`
+	// Bytes in use
+	UsedBytes   uint64  `json:"usedBytes"`
 	Utilization float64 `json:"utilization"`
 }
 
@@ -86,12 +84,14 @@ type swapRecommendation struct {
 // host — pools are a ZFS concept with no VirtualBox-host analog.
 type swapPoolDistribution struct{}
 
-// swapSummaryResponse is GET /system/swap/summary's answer.
+// swapSummaryResponse is GET /system/swap/summary's answer. The swap size
+// fields are plain numbers in BYTES (the converged wire — no formatted GB
+// strings, no unit division).
 type swapSummaryResponse struct {
 	Host                 string               `json:"host"`
-	TotalSwapGB          string               `json:"totalSwapGB"`
-	UsedSwapGB           string               `json:"usedSwapGB"`
-	FreeSwapGB           string               `json:"freeSwapGB"`
+	TotalSwapBytes       uint64               `json:"totalSwapBytes"`
+	UsedSwapBytes        uint64               `json:"usedSwapBytes"`
+	FreeSwapBytes        uint64               `json:"freeSwapBytes"`
 	OverallUtilization   float64              `json:"overallUtilization"`
 	SwapAreaCount        int                  `json:"swapAreaCount"`
 	SwapAreas            []swapSummaryArea    `json:"swapAreas"`
@@ -107,7 +107,7 @@ type swapSummaryResponse struct {
 // pools are a ZFS concept with no VirtualBox-host analog.
 //
 //	@Summary		Swap configuration summary
-//	@Description	Minimum role: viewer. Aggregate swap figures, per-area breakdown, and utilization recommendations (Node-agent shape). Pool fields are present but empty — ZFS pools have no analog on this host. Read live from the OS; lastScanned is the request time.
+//	@Description	Minimum role: viewer. Aggregate swap figures (the swap size fields are plain numbers in BYTES — totalSwapBytes/usedSwapBytes/freeSwapBytes, per-area sizeBytes/usedBytes), per-area breakdown, and utilization recommendations (Node-agent shape). Pool fields are present but empty — ZFS pools have no analog on this host. Read live from the OS; lastScanned is the request time.
 //	@Tags			Swap Management
 //	@Produce		json
 //	@Success		200	{object}	swapSummaryResponse	"Swap summary"
@@ -132,8 +132,8 @@ func (s *Server) handleSwapSummary(w http.ResponseWriter, _ *http.Request) {
 		areas = append(areas, swapSummaryArea{
 			Path:        d.path,
 			Pool:        nil,
-			SizeGB:      gbString(d.sizeBytes),
-			UsedGB:      gbString(d.usedBytes),
+			SizeBytes:   d.sizeBytes,
+			UsedBytes:   d.usedBytes,
 			Utilization: utilizationPct(d.usedBytes, d.sizeBytes),
 		})
 	}
@@ -151,9 +151,9 @@ func (s *Server) handleSwapSummary(w http.ResponseWriter, _ *http.Request) {
 
 	writeJSON(w, swapSummaryResponse{
 		Host:                 hostname,
-		TotalSwapGB:          gbString(swap.Total),
-		UsedSwapGB:           gbString(swap.Used),
-		FreeSwapGB:           gbString(swap.Free),
+		TotalSwapBytes:       swap.Total,
+		UsedSwapBytes:        swap.Used,
+		FreeSwapBytes:        swap.Free,
 		OverallUtilization:   overall,
 		SwapAreaCount:        len(areas),
 		SwapAreas:            areas,

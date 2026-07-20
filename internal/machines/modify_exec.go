@@ -44,11 +44,11 @@ func (e *executors) modifyMachine(ctx context.Context, task *tasks.Task, out *ta
 	if err != nil {
 		return err
 	}
-	if task.Metadata == nil {
+	if len(task.Metadata) == 0 {
 		return errors.New("modify task has no metadata")
 	}
 	metadata := map[string]any{}
-	if uerr := json.Unmarshal([]byte(*task.Metadata), &metadata); uerr != nil {
+	if uerr := json.Unmarshal(task.Metadata, &metadata); uerr != nil {
 		return fmt.Errorf("parse modify metadata: %w", uerr)
 	}
 
@@ -190,11 +190,11 @@ func (e *executors) modifyMachineUTM(ctx context.Context, task *tasks.Task, out 
 	if err != nil {
 		return err
 	}
-	if task.Metadata == nil {
+	if len(task.Metadata) == 0 {
 		return errors.New("modify task has no metadata")
 	}
 	metadata := map[string]any{}
-	if uerr := json.Unmarshal([]byte(*task.Metadata), &metadata); uerr != nil {
+	if uerr := json.Unmarshal(task.Metadata, &metadata); uerr != nil {
 		return fmt.Errorf("parse modify metadata: %w", uerr)
 	}
 

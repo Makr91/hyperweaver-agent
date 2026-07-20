@@ -165,10 +165,10 @@ func (e *executors) progress(taskID string, percent float64, info map[string]any
 }
 
 func parseMetadata(task *tasks.Task, target any) error {
-	if task.Metadata == nil {
+	if len(task.Metadata) == 0 {
 		return errors.New(task.Operation + " task has no metadata")
 	}
-	if err := json.Unmarshal([]byte(*task.Metadata), target); err != nil {
+	if err := json.Unmarshal(task.Metadata, target); err != nil {
 		return fmt.Errorf("parse %s metadata: %w", task.Operation, err)
 	}
 	return nil
@@ -177,8 +177,8 @@ func parseMetadata(task *tasks.Task, target any) error {
 // scan runs a user-triggered scan (one location, one type, or everything).
 func (e *executors) scan(ctx context.Context, task *tasks.Task, out *tasks.OutputWriter) error {
 	var meta ScanTaskMetadata
-	if task.Metadata != nil {
-		if err := json.Unmarshal([]byte(*task.Metadata), &meta); err != nil {
+	if len(task.Metadata) > 0 {
+		if err := json.Unmarshal(task.Metadata, &meta); err != nil {
 			return fmt.Errorf("parse scan metadata: %w", err)
 		}
 	}

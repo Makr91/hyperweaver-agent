@@ -225,10 +225,10 @@ type templateDeleteMetadata struct {
 // replaced by the disk-image removal this hypervisor stores.
 func (e *executors) templateDelete(ctx context.Context, task *tasks.Task, out *tasks.OutputWriter) error {
 	var meta templateDeleteMetadata
-	if task.Metadata == nil {
+	if len(task.Metadata) == 0 {
 		return errors.New("template_delete task has no metadata")
 	}
-	if err := json.Unmarshal([]byte(*task.Metadata), &meta); err != nil {
+	if err := json.Unmarshal(task.Metadata, &meta); err != nil {
 		return fmt.Errorf("parse template_delete metadata: %w", err)
 	}
 
@@ -337,10 +337,10 @@ type templateMoveMetadata struct {
 // rename vs send-recv split).
 func (e *executors) templateMove(ctx context.Context, task *tasks.Task, out *tasks.OutputWriter) error {
 	var meta templateMoveMetadata
-	if task.Metadata == nil {
+	if len(task.Metadata) == 0 {
 		return errors.New("template_move task has no metadata")
 	}
-	if err := json.Unmarshal([]byte(*task.Metadata), &meta); err != nil {
+	if err := json.Unmarshal(task.Metadata, &meta); err != nil {
 		return fmt.Errorf("parse template_move metadata: %w", err)
 	}
 
@@ -445,10 +445,10 @@ type TemplateDownloadMetadata struct {
 // the disk-image placement this hypervisor clones from.
 func (e *executors) templateDownload(ctx context.Context, task *tasks.Task, out *tasks.OutputWriter) error {
 	var meta TemplateDownloadMetadata
-	if task.Metadata == nil {
+	if len(task.Metadata) == 0 {
 		return errors.New("template_download task has no metadata")
 	}
-	if err := json.Unmarshal([]byte(*task.Metadata), &meta); err != nil {
+	if err := json.Unmarshal(task.Metadata, &meta); err != nil {
 		return fmt.Errorf("parse template_download metadata: %w", err)
 	}
 	if meta.Version == "" || meta.Version == "latest" {

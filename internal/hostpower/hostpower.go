@@ -68,8 +68,8 @@ type executors struct {
 func (e *executors) run(operation string) func(ctx context.Context, task *tasks.Task, out *tasks.OutputWriter) error {
 	return func(ctx context.Context, task *tasks.Task, out *tasks.OutputWriter) error {
 		var meta Metadata
-		if task.Metadata != nil {
-			if err := json.Unmarshal([]byte(*task.Metadata), &meta); err != nil {
+		if len(task.Metadata) > 0 {
+			if err := json.Unmarshal(task.Metadata, &meta); err != nil {
 				return fmt.Errorf("parse power task metadata: %w", err)
 			}
 		}

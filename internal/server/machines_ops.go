@@ -163,10 +163,12 @@ func (s *Server) handleMoveMachine(w http.ResponseWriter, r *http.Request) {
 }
 
 // unattendedDetectResponse is GET /machines/unattended/detect's answer: the
-// probed ISO path and VBoxManage's snake-cased detection fields.
+// probed ISO path and VBoxManage's snake-cased detection fields — os_languages
+// is a string array (split from VBoxManage's comma-joined value), every other
+// value a string.
 type unattendedDetectResponse struct {
-	Iso      string            `json:"iso"`
-	Detected map[string]string `json:"detected"`
+	Iso      string         `json:"iso"`
+	Detected map[string]any `json:"detected"`
 }
 
 // handleUnattendedDetect serves GET /machines/unattended/detect?iso= —
@@ -174,7 +176,7 @@ type unattendedDetectResponse struct {
 // and whether unattended installation supports it (the wizard's probe).
 //
 //	@Summary		Probe an installer ISO
-//	@Description	Minimum role: viewer. Synchronous VBoxManage unattended detect — what the ISO contains and whether VirtualBox can install it unattended. iso is an agent-host path (cached ISOs carry theirs in GET /artifacts/iso's path field). detected keys are VBoxManage's own fields snake_cased (os_typeid, os_version, os_flavor, os_languages, os_hints, unattended_installation_supported).
+//	@Description	Minimum role: viewer. Synchronous VBoxManage unattended detect — what the ISO contains and whether VirtualBox can install it unattended. iso is an agent-host path (cached ISOs carry theirs in GET /artifacts/iso's path field). detected keys are VBoxManage's own fields snake_cased (os_typeid, os_version, os_flavor, os_languages, os_hints, unattended_installation_supported); os_languages is a string array (split from VBoxManage's comma-joined list), every other value a string.
 //	@Tags			Machine Management
 //	@Produce		json
 //	@Param			iso	query	string	true	"Agent-host ISO path"
@@ -204,7 +206,22 @@ func (s *Server) handleUnattendedDetect(w http.ResponseWriter, r *http.Request) 
 		taskError(w, http.StatusInternalServerError, "Detection failed: "+err.Error())
 		return
 	}
-	writeJSON(w, unattendedDetectResponse{Iso: iso, Detected: detected})
+	fields := make(map[string]any, len(detected))
+	for key, value := range detected {
+		fields[key] = value
+	}
+	// os_languages is VBoxManage's comma-joined language list — served as a
+	// real string array (entries trimmed, empties dropped).
+	if raw, ok := detected["os_languages"]; ok {
+		languages := []string{}
+		for _, entry := range strings.Split(raw, ",") {
+			if trimmed := strings.TrimSpace(entry); trimmed != "" {
+				languages = append(languages, trimmed)
+			}
+		}
+		fields["os_languages"] = languages
+	}
+	writeJSON(w, unattendedDetectResponse{Iso: iso, Detected: fields})
 }
 
 // unattendedInstallRequest is POST /machines/{machineName}/unattended's body:

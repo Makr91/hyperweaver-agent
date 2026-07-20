@@ -142,10 +142,10 @@ func capitalize(s string) string {
 // transferPaths re-validates a transfer task's endpoints at run time.
 func (s *Server) transferPaths(task *tasks.Task) (source, destination string, err error) {
 	var meta fileTransferMetadata
-	if task.Metadata == nil {
+	if len(task.Metadata) == 0 {
 		return "", "", errors.New(task.Operation + " task has no metadata")
 	}
-	if uerr := json.Unmarshal([]byte(*task.Metadata), &meta); uerr != nil {
+	if uerr := json.Unmarshal(task.Metadata, &meta); uerr != nil {
 		return "", "", uerr
 	}
 	source, err = s.validateBrowsePath(meta.Source)

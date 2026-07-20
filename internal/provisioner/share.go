@@ -43,11 +43,11 @@ type ExportMetadata struct {
 // exportVersion executes provisioner_export: build the archive + sidecar and
 // report both paths and the archive hash in the task output.
 func (e *executors) exportVersion(ctx context.Context, task *tasks.Task, out *tasks.OutputWriter) error {
-	if task.Metadata == nil {
+	if len(task.Metadata) == 0 {
 		return errors.New("export task has no metadata")
 	}
 	var meta ExportMetadata
-	if err := json.Unmarshal([]byte(*task.Metadata), &meta); err != nil {
+	if err := json.Unmarshal(task.Metadata, &meta); err != nil {
 		return fmt.Errorf("parse export metadata: %w", err)
 	}
 	version, err := e.registry.GetVersion(meta.Name, meta.Version)

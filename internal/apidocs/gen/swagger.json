@@ -2339,7 +2339,8 @@
                         "$ref": "#/components/schemas/monitoring.CPUSample"
                     },
                     "queryTime": {
-                        "type": "string"
+                        "description": "Milliseconds spent serving the request",
+                        "type": "integer"
                     },
                     "returnedCount": {
                         "type": "integer"
@@ -2499,13 +2500,15 @@
                     "deleted_tasks": {
                         "type": "integer"
                     },
-                    "monitoring_retained": {
-                        "type": "string"
+                    "monitoring_retention_days": {
+                        "description": "Days of stored telemetry retained (monitoring.retention_days)",
+                        "type": "integer"
                     },
                     "monitoring_storage": {
                         "type": "boolean"
                     },
                     "retention_days": {
+                        "description": "Days finished tasks are retained (tasks.retention_days)",
                         "type": "integer"
                     }
                 },
@@ -3970,11 +3973,13 @@
                     "last_checked": {
                         "type": "string"
                     },
-                    "swap_total_gb": {
-                        "type": "string"
+                    "swap_total_bytes": {
+                        "description": "Total swap in bytes",
+                        "type": "integer"
                     },
-                    "swap_used_gb": {
-                        "type": "string"
+                    "swap_used_bytes": {
+                        "description": "Swap bytes in use",
+                        "type": "integer"
                     },
                     "swap_utilization_pct": {
                         "type": "number"
@@ -4289,7 +4294,8 @@
                         "uniqueItems": false
                     },
                     "queryTime": {
-                        "type": "string"
+                        "description": "Milliseconds spent serving the request",
+                        "type": "integer"
                     },
                     "returnedCount": {
                         "type": "integer"
@@ -4554,7 +4560,8 @@
                         "type": "object"
                     },
                     "queryTime": {
-                        "type": "string"
+                        "description": "Milliseconds spent serving the request",
+                        "type": "integer"
                     },
                     "recordCounts": {
                         "additionalProperties": {
@@ -4783,7 +4790,8 @@
                         "$ref": "#/components/schemas/server.networkUsageMetadata"
                     },
                     "queryTime": {
-                        "type": "string"
+                        "description": "Milliseconds spent serving the request",
+                        "type": "integer"
                     },
                     "returnedCount": {
                         "type": "integer"
@@ -5110,13 +5118,19 @@
                         "type": "number"
                     },
                     "cpu_time": {
-                        "type": "string"
+                        "description": "Consumed CPU time in seconds (detailed=true only)",
+                        "type": "integer"
                     },
                     "memory_percent": {
                         "type": "number"
                     },
                     "open_files_sample": {
-                        "type": "string"
+                        "description": "Detail read only: up to 10 open file paths ([] on platforms where per-process file enumeration is unsupported)",
+                        "items": {
+                            "type": "string"
+                        },
+                        "type": "array",
+                        "uniqueItems": false
                     },
                     "pid": {
                         "type": "integer"
@@ -5225,10 +5239,12 @@
                         "type": "integer"
                     },
                     "rss": {
-                        "type": "string"
+                        "description": "Resident set size in bytes",
+                        "type": "integer"
                     },
                     "size": {
-                        "type": "string"
+                        "description": "Virtual size in bytes",
+                        "type": "integer"
                     },
                     "username": {
                         "type": "string"
@@ -5862,11 +5878,13 @@
                     "pool": {
                         "type": "string"
                     },
-                    "sizeGB": {
-                        "type": "string"
+                    "sizeBytes": {
+                        "description": "Area size in bytes",
+                        "type": "integer"
                     },
-                    "usedGB": {
-                        "type": "string"
+                    "usedBytes": {
+                        "description": "Bytes in use",
+                        "type": "integer"
                     },
                     "utilization": {
                         "type": "number"
@@ -5876,8 +5894,8 @@
             },
             "server.swapSummaryResponse": {
                 "properties": {
-                    "freeSwapGB": {
-                        "type": "string"
+                    "freeSwapBytes": {
+                        "type": "integer"
                     },
                     "host": {
                         "type": "string"
@@ -5909,11 +5927,11 @@
                         "type": "array",
                         "uniqueItems": false
                     },
-                    "totalSwapGB": {
-                        "type": "string"
+                    "totalSwapBytes": {
+                        "type": "integer"
                     },
-                    "usedSwapGB": {
-                        "type": "string"
+                    "usedSwapBytes": {
+                        "type": "integer"
                     }
                 },
                 "type": "object"
@@ -6134,9 +6152,7 @@
             "server.unattendedDetectResponse": {
                 "properties": {
                     "detected": {
-                        "additionalProperties": {
-                            "type": "string"
-                        },
+                        "additionalProperties": {},
                         "type": "object"
                     },
                     "iso": {
@@ -6643,16 +6659,24 @@
                         "type": "string"
                     },
                     "metadata": {
-                        "description": "JSON-encoded execution parameters",
-                        "type": "string"
+                        "description": "JSON execution parameters — a real object on the wire (null when absent); stored as TEXT",
+                        "items": {
+                            "type": "integer"
+                        },
+                        "type": "array",
+                        "uniqueItems": false
                     },
                     "operation": {
                         "description": "Operation kind. Vocabulary: start, stop, suspend, delete, discover, machine_modify (PUT's infrastructure changes), machine_import (OVA/OVF appliance import), machine_move (movevm relocation), machine_unattended_install (VBoxManage answer-file install), restart (never dispatched — a restart is a stop→start chain); create orchestration: machine_create_orchestration (parent), machine_prepare, machine_create_storage, machine_create_config, machine_create_finalize, template_download; provisioning pipeline: machine_provision_orchestration (parent — the document-walk children chain directly under it), machine_wait_ssh, machine_sync_parent, machine_sync (one per folder), machine_hook (one per provisioning.pre[]/post[] sequence-hook entry — pre entries before the first method, post entries after the last), machine_shell (one per provisioning.shell.scripts[] entry, in the document walk), machine_provision (one per ansible local[] playbook entry), machine_provision_remote (one per ansible remote[] entry — ansible-playbook ON the agent host over the guest transport; needs host ansible), machine_docker_compose (one per provisioning.docker.docker_compose[] file — no engine setup; an absent guest engine fails the task honestly), machine_provision_parent (ONLY as the /run-provisioners anchor), machine_syncback_parent, machine_syncback (one per syncback-flagged folder — the post-provision guest→host pull), machine_key_rotate (queued only when settings.vagrant_ssh_insert_key is set and the communicator is not winrm — adopts the box's rotated private key into the working copy after the syncback bracket; never the whole-walk stamp owner); network: provisioning_network_setup, provisioning_network_teardown; consoles/snapshots: reset, pause, resume, snapshot_take (user takes AND the rotation service's scheduled rows — created_by snapshot_rotation), snapshot_restore, snapshot_delete, snapshot_modify (rename and/or description edit via PUT), machine_clone_current (clonevm current-state clone); templates: template_download, template_delete, template_export, template_upload (publish), template_move; filesystem (machine_name \"filesystem\"): file_move, file_copy, file_archive_create, file_archive_extract; registry/artifacts/system: provisioner_import, provisioner_export (one version → registry-shaped tar.gz + archive sha256 sidecar), provisioner_catalog_install (fetch catalog.json → download the versioned asset → verify sha256 → import), artifact_scan, artifact_download, artifact_upload, artifact_move, artifact_copy, artifact_delete_file, artifact_delete_folder, hcl_download, agent_update, set_hostname (PUT /network/hostname's queued rename — zoneweaver's exact op name, machine_name \"system\"; the converged wire, sync 2026-07-17).",
                         "type": "string"
                     },
                     "output": {
-                        "description": "JSON-encoded array of output entries as last flushed — ALWAYS null on GET /tasks (the list never carries output blobs); GET /tasks/{taskId} (detail), GET /tasks/{taskId}/output, and the /tasks/{taskId}/stream WebSocket serve it in full",
-                        "type": "string"
+                        "description": "ALWAYS null on the wire (list AND detail — the converged task wire); GET /tasks/{taskId}/output and the /tasks/{taskId}/stream WebSocket are the output channels; storage stays TEXT",
+                        "items": {
+                            "type": "integer"
+                        },
+                        "type": "array",
+                        "uniqueItems": false
                     },
                     "parent_task_id": {
                         "description": "Progress-aggregation anchor this task reports into",
@@ -9707,7 +9731,7 @@
         },
         "/machines/unattended/detect": {
             "get": {
-                "description": "Minimum role: viewer. Synchronous VBoxManage unattended detect — what the ISO contains and whether VirtualBox can install it unattended. iso is an agent-host path (cached ISOs carry theirs in GET /artifacts/iso's path field). detected keys are VBoxManage's own fields snake_cased (os_typeid, os_version, os_flavor, os_languages, os_hints, unattended_installation_supported).",
+                "description": "Minimum role: viewer. Synchronous VBoxManage unattended detect — what the ISO contains and whether VirtualBox can install it unattended. iso is an agent-host path (cached ISOs carry theirs in GET /artifacts/iso's path field). detected keys are VBoxManage's own fields snake_cased (os_typeid, os_version, os_flavor, os_languages, os_hints, unattended_installation_supported); os_languages is a string array (split from VBoxManage's comma-joined list), every other value a string.",
                 "parameters": [
                     {
                         "description": "Agent-host ISO path",
@@ -10016,7 +10040,7 @@
         },
         "/machines/{machineName}/config": {
             "get": {
-                "description": "Minimum role: viewer. The live configuration document (VBoxManage showvminfo --machinereadable view on this agent), falling back to the last reconciled copy.",
+                "description": "Minimum role: viewer. The live configuration document (VBoxManage showvminfo --machinereadable view on this agent), falling back to the last reconciled copy. nat_forwards serves the configuration's Forwarding(N) NAT port-forward rules as structured rows {name, protocol, host_ip, host_port, guest_ip, guest_port} — empty host/guest IPs are legal, adapter appears only when the machinereadable key names one, and unparseable entries are skipped.",
                 "parameters": [
                     {
                         "description": "Machine name",
@@ -16557,7 +16581,7 @@
         },
         "/system/swap/summary": {
             "get": {
-                "description": "Minimum role: viewer. Aggregate swap figures, per-area breakdown, and utilization recommendations (Node-agent shape). Pool fields are present but empty — ZFS pools have no analog on this host. Read live from the OS; lastScanned is the request time.",
+                "description": "Minimum role: viewer. Aggregate swap figures (the swap size fields are plain numbers in BYTES — totalSwapBytes/usedSwapBytes/freeSwapBytes, per-area sizeBytes/usedBytes), per-area breakdown, and utilization recommendations (Node-agent shape). Pool fields are present but empty — ZFS pools have no analog on this host. Read live from the OS; lastScanned is the request time.",
                 "responses": {
                     "200": {
                         "content": {
@@ -16812,7 +16836,7 @@
                 ]
             },
             "get": {
-                "description": "Minimum role: viewer.",
+                "description": "Minimum role: viewer. The task document's output field is ALWAYS null (the converged task wire) — GET /tasks/{taskId}/output and the /tasks/{taskId}/stream WebSocket serve the output.",
                 "parameters": [
                     {
                         "description": "Task id",

@@ -72,11 +72,11 @@ type provisionTaskMetadata struct {
 }
 
 func readProvisionMetadata(task *tasks.Task) (*provisionTaskMetadata, error) {
-	if task.Metadata == nil {
+	if len(task.Metadata) == 0 {
 		return nil, errors.New("provision task has no metadata")
 	}
 	var meta provisionTaskMetadata
-	if err := json.Unmarshal([]byte(*task.Metadata), &meta); err != nil {
+	if err := json.Unmarshal(task.Metadata, &meta); err != nil {
 		return nil, fmt.Errorf("parse provision metadata: %w", err)
 	}
 	if meta.IP == "" {

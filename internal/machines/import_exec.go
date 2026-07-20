@@ -39,10 +39,10 @@ type MoveMetadata struct {
 // machines root, then one reconciliation sweep so the row appears.
 func (e *executors) importAppliance(ctx context.Context, task *tasks.Task, out *tasks.OutputWriter) error {
 	var meta ImportMetadata
-	if task.Metadata == nil {
+	if len(task.Metadata) == 0 {
 		return errors.New("import task has no metadata")
 	}
-	if err := json.Unmarshal([]byte(*task.Metadata), &meta); err != nil {
+	if err := json.Unmarshal(task.Metadata, &meta); err != nil {
 		return fmt.Errorf("parse import metadata: %w", err)
 	}
 	if meta.Path == "" {
@@ -80,10 +80,10 @@ func (e *executors) moveMachine(ctx context.Context, task *tasks.Task, out *task
 		return err
 	}
 	var meta MoveMetadata
-	if task.Metadata == nil {
+	if len(task.Metadata) == 0 {
 		return errors.New("move task has no metadata")
 	}
-	if uerr := json.Unmarshal([]byte(*task.Metadata), &meta); uerr != nil {
+	if uerr := json.Unmarshal(task.Metadata, &meta); uerr != nil {
 		return fmt.Errorf("parse move metadata: %w", uerr)
 	}
 	if meta.TargetPath == "" {

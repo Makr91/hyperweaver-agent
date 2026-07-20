@@ -122,10 +122,10 @@ type executors struct {
 // hand it to the shared import path.
 func (e *executors) importPackage(ctx context.Context, task *tasks.Task, out *tasks.OutputWriter) error {
 	var meta ImportMetadata
-	if task.Metadata == nil {
+	if len(task.Metadata) == 0 {
 		return errors.New("import task has no metadata")
 	}
-	if err := json.Unmarshal([]byte(*task.Metadata), &meta); err != nil {
+	if err := json.Unmarshal(task.Metadata, &meta); err != nil {
 		return fmt.Errorf("parse import metadata: %w", err)
 	}
 	return e.runImport(ctx, &meta, out)

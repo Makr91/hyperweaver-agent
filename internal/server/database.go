@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"strconv"
 	"time"
 
 	"github.com/Makr91/hyperweaver-agent/internal/auth"
@@ -249,10 +248,12 @@ func (s *Server) handleDatabaseAnalyze(w http.ResponseWriter, r *http.Request) {
 }
 
 type databaseCleanupStatus struct {
-	DeletedTasks       int64  `json:"deleted_tasks"`
-	RetentionDays      int    `json:"retention_days"`
-	MonitoringStorage  bool   `json:"monitoring_storage"`
-	MonitoringRetained string `json:"monitoring_retained"`
+	DeletedTasks int64 `json:"deleted_tasks"`
+	// Days finished tasks are retained (tasks.retention_days)
+	RetentionDays     int  `json:"retention_days"`
+	MonitoringStorage bool `json:"monitoring_storage"`
+	// Days of stored telemetry retained (monitoring.retention_days)
+	MonitoringRetentionDays int `json:"monitoring_retention_days"`
 }
 
 type databaseCleanupResponse struct {
@@ -288,10 +289,10 @@ func (s *Server) handleDatabaseCleanup(w http.ResponseWriter, r *http.Request) {
 		Message:   "Cleanup triggered successfully",
 		Timestamp: time.Now().UTC().Format(time.RFC3339),
 		CleanupStatus: databaseCleanupStatus{
-			DeletedTasks:       deleted,
-			RetentionDays:      s.cfg.Tasks.RetentionDays,
-			MonitoringStorage:  s.monitor.StorageEnabled(),
-			MonitoringRetained: strconv.Itoa(s.cfg.Monitoring.RetentionDays) + " days",
+			DeletedTasks:            deleted,
+			RetentionDays:           s.cfg.Tasks.RetentionDays,
+			MonitoringStorage:       s.monitor.StorageEnabled(),
+			MonitoringRetentionDays: s.cfg.Monitoring.RetentionDays,
 		},
 	})
 }

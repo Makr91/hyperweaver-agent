@@ -42,8 +42,8 @@ func (e *executors) templateExport(ctx context.Context, task *tasks.Task, out *t
 		return err
 	}
 	var meta templateExportMetadata
-	if task.Metadata != nil {
-		if uerr := json.Unmarshal([]byte(*task.Metadata), &meta); uerr != nil {
+	if len(task.Metadata) > 0 {
+		if uerr := json.Unmarshal(task.Metadata, &meta); uerr != nil {
 			return fmt.Errorf("parse export metadata: %w", uerr)
 		}
 	}

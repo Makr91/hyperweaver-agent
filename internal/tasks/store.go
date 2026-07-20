@@ -63,29 +63,25 @@ func NewStore(database *sql.DB) *Store {
 	return &Store{db: database}
 }
 
+// taskColumns deliberately EXCLUDES the output column: task rows never carry
+// output on the wire — Task.Output is ALWAYS null on the list AND the detail
+// (Mark's 2026-07-07 list ruling extended whole by the converged task wire; a
+// provision run's output is hundreds of KB per row). GET /tasks/{taskId}/output,
+// the /tasks/{taskId}/stream WebSocket, and the OutputManager are the output
+// channels; Store.GetOutput reads the column directly.
 const taskColumns = `id, machine_name, operation, status, priority, created_by,
 	depends_on, parent_task_id, error_message, created_at, started_at,
-	completed_at, updated_at, metadata, progress_percent, progress_info, output`
-
-// listColumns is taskColumns with the output blob nulled: GET /tasks is the
-// UI's polling list, and a provision run's output is hundreds of KB per row —
-// megabytes per poll for data the list never renders (Mark's ruling
-// 2026-07-07, the joint W1 fix). The detail endpoint, /tasks/{id}/output, and
-// the WebSocket stream keep serving output in full.
-const listColumns = `id, machine_name, operation, status, priority, created_by,
-	depends_on, parent_task_id, error_message, created_at, started_at,
-	completed_at, updated_at, metadata, progress_percent, progress_info,
-	NULL AS output`
+	completed_at, updated_at, metadata, progress_percent, progress_info`
 
 // scanTask reads one task row from any row scanner.
 func scanTask(row interface{ Scan(...any) error }) (*Task, error) {
 	var t Task
 	var createdAt, updatedAt string
-	var startedAt, completedAt, progressInfo sql.NullString
+	var startedAt, completedAt, metadata, progressInfo sql.NullString
 	err := row.Scan(&t.ID, &t.MachineName, &t.Operation, &t.Status, &t.Priority,
 		&t.CreatedBy, &t.DependsOn, &t.ParentTaskID, &t.ErrorMessage,
 		&createdAt, &startedAt, &completedAt, &updatedAt,
-		&t.Metadata, &t.ProgressPercent, &progressInfo, &t.Output)
+		&metadata, &t.ProgressPercent, &progressInfo)
 	if err != nil {
 		return nil, err
 	}
@@ -109,6 +105,9 @@ func scanTask(row interface{ Scan(...any) error }) (*Task, error) {
 			return nil, fmt.Errorf("task %s: parse completed_at: %w", t.ID, perr)
 		}
 		t.CompletedAt = &parsed
+	}
+	if metadata.Valid && json.Valid([]byte(metadata.String)) {
+		t.Metadata = json.RawMessage(metadata.String)
 	}
 	if progressInfo.Valid {
 		t.ProgressInfo = json.RawMessage(progressInfo.String)
@@ -243,7 +242,7 @@ func (s *Store) List(ctx context.Context, f *ListFilter) ([]*Task, error) {
 
 	var query strings.Builder
 	query.WriteString("SELECT ")
-	query.WriteString(listColumns)
+	query.WriteString(taskColumns)
 	query.WriteString(" FROM tasks")
 	args := f.where(&query)
 	query.WriteString(" ORDER BY ")

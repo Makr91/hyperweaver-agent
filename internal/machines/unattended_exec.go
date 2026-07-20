@@ -57,10 +57,10 @@ func (e *executors) unattendedInstall(ctx context.Context, task *tasks.Task, out
 		return err
 	}
 	var meta UnattendedMetadata
-	if task.Metadata == nil {
+	if len(task.Metadata) == 0 {
 		return errors.New("unattended task has no metadata")
 	}
-	if uerr := json.Unmarshal([]byte(*task.Metadata), &meta); uerr != nil {
+	if uerr := json.Unmarshal(task.Metadata, &meta); uerr != nil {
 		return fmt.Errorf("parse unattended metadata: %w", uerr)
 	}
 	if meta.Account.User == "" || meta.Account.Password == "" {

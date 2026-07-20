@@ -178,11 +178,11 @@ type CatalogInstallMetadata struct {
 // download the VERSIONED asset → verify sha256 → the ordinary import path
 // (lint gate, non-clobber, role-specs + schema derivation included).
 func (e *executors) catalogInstall(ctx context.Context, task *tasks.Task, out *tasks.OutputWriter) error {
-	if task.Metadata == nil {
+	if len(task.Metadata) == 0 {
 		return errors.New("catalog install task has no metadata")
 	}
 	var meta CatalogInstallMetadata
-	if err := json.Unmarshal([]byte(*task.Metadata), &meta); err != nil {
+	if err := json.Unmarshal(task.Metadata, &meta); err != nil {
 		return fmt.Errorf("parse catalog install metadata: %w", err)
 	}
 	source, err := FindCatalogSource(e.catalogSources, meta.SourceName)
