@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
+	"runtime"
 	"strconv"
 	"strings"
 
@@ -11,6 +13,92 @@ import (
 	"github.com/Makr91/hyperweaver-agent/internal/utm"
 	"github.com/Makr91/hyperweaver-agent/internal/vbox"
 )
+
+// UseHostOnlyNets reports Oracle's platform split (vagrant's
+// use_host_only_nets? with the version check dropped — this agent's floor is
+// VirtualBox 7): macOS removed host-only ADAPTERS and manages hostonlynet
+// NETWORKS; every other host OS manages host-only interfaces and lacks the
+// hostonlynet verbs entirely.
+func UseHostOnlyNets() bool {
+	return runtime.GOOS == "darwin"
+}
+
+// ProvisioningNetName is the darwin provisioning network's fixed name — the
+// interface world lets VirtualBox assign names and finds by host IP; the
+// hostonlynet world names networks, so ONE deterministic name is the
+// identity.
+const ProvisioningNetName = "hyperweaver-provision"
+
+// FindProvisioningNet locates the darwin provisioning host-only NETWORK by
+// its fixed name (FindProvisioningIf's hostonlynet twin). nil when absent.
+func FindProvisioningNet(ctx context.Context, vboxExe string) (*vbox.HostOnlyNet, error) {
+	nets, err := vbox.ListHostOnlyNets(ctx, vboxExe)
+	if err != nil {
+		return nil, err
+	}
+	for i := range nets {
+		if nets[i].Name == ProvisioningNetName {
+			return &nets[i], nil
+		}
+	}
+	return nil, nil
+}
+
+// BridgeCandidates lists the host's bridgeable interfaces for the picker. On
+// darwin (Oracle's split) hostonlynet families surface their vmnet BACKING
+// bridges in bridgedifs too (bridge100-style entries carrying the network's
+// own subnet — vagrant #13025's picker hole); those are EXCLUDED by subnet
+// match. A failed hostonlynets read degrades to the unfiltered list.
+func BridgeCandidates(ctx context.Context, vboxExe string) ([]vbox.BridgedIf, error) {
+	interfaces, err := vbox.ListBridgedIfs(ctx, vboxExe)
+	if err != nil {
+		return nil, err
+	}
+	if !UseHostOnlyNets() {
+		return interfaces, nil
+	}
+	nets, nerr := vbox.ListHostOnlyNets(ctx, vboxExe)
+	if nerr != nil {
+		nets = nil
+	}
+	if len(nets) == 0 {
+		return interfaces, nil
+	}
+	filtered := make([]vbox.BridgedIf, 0, len(interfaces))
+	for i := range interfaces {
+		if hostOnlyNetBacking(&interfaces[i], nets) {
+			continue
+		}
+		filtered = append(filtered, interfaces[i])
+	}
+	return filtered, nil
+}
+
+// hostOnlyNetBacking reports whether a bridgeable interface's address sits
+// inside any hostonlynet's subnet — the vmnet backing-bridge signature.
+func hostOnlyNetBacking(iface *vbox.BridgedIf, nets []vbox.HostOnlyNet) bool {
+	ip := net.ParseIP(iface.IPAddress)
+	if ip == nil {
+		return false
+	}
+	for i := range nets {
+		maskIP := net.ParseIP(nets[i].NetworkMask)
+		lower := net.ParseIP(nets[i].LowerIP)
+		if maskIP == nil || lower == nil {
+			continue
+		}
+		mask4 := maskIP.To4()
+		if mask4 == nil {
+			continue
+		}
+		mask := net.IPMask(mask4)
+		masked := ip.Mask(mask)
+		if masked != nil && masked.Equal(lower.Mask(mask)) {
+			return true
+		}
+	}
+	return false
+}
 
 // The provisioning-network executors — zoneweaver's
 // ProvisioningNetworkController setup/teardown chains (etherstub → host VNIC
@@ -177,7 +265,7 @@ func FindWinRMForward(ctx context.Context, machine *Machine, guestPort int) int 
 // absent components never fail the delete.
 func (e *executors) removeDHCPLeases(ctx context.Context, vboxExe string, machine *Machine, out *tasks.OutputWriter) {
 	network := e.env.Network
-	if !network.Enabled {
+	if !network.Enabled || UseHostOnlyNets() {
 		return
 	}
 	iface, err := FindProvisioningIf(ctx, vboxExe, network.HostIP)
@@ -205,6 +293,9 @@ func (e *executors) networkSetup(ctx context.Context, task *tasks.Task, out *tas
 	vboxExe := VBoxManagePath(ctx)
 	if vboxExe == "" {
 		return errors.New("VirtualBox is not installed")
+	}
+	if UseHostOnlyNets() {
+		return e.networkSetupDarwin(ctx, task, vboxExe, out)
 	}
 
 	e.taskProgress(task, 10, "resolving_interface")
@@ -265,6 +356,47 @@ func (e *executors) networkSetup(ctx context.Context, task *tasks.Task, out *tas
 	return nil
 }
 
+// networkSetupDarwin is setup's hostonlynet half (Oracle's macOS split —
+// vagrant's create_host_only_network model): ONE named network whose embedded
+// LowerIP-UpperIP range IS the DHCP (no dhcpserver verbs exist in this
+// family), converged idempotently onto the configured range. The host side's
+// own address is vmnet's to assign — provisioning.network.host_ip has no
+// write path here, and the pipeline's transport rides the NAT forward
+// regardless.
+func (e *executors) networkSetupDarwin(ctx context.Context, task *tasks.Task, vboxExe string, out *tasks.OutputWriter) error {
+	network := e.env.Network
+	e.taskProgress(task, 20, "resolving_network")
+	existing, err := FindProvisioningNet(ctx, vboxExe)
+	if err != nil {
+		return err
+	}
+	enabled := true
+	opts := vbox.HostOnlyNetOptions{
+		Netmask: network.Netmask,
+		LowerIP: network.DHCPRangeStart,
+		UpperIP: network.DHCPRangeEnd,
+		Enabled: &enabled,
+	}
+	if existing == nil {
+		e.taskProgress(task, 50, "creating_network")
+		out.Write("stdout", "Creating host-only network "+ProvisioningNetName+
+			" ("+network.DHCPRangeStart+" - "+network.DHCPRangeEnd+")\n")
+		if aerr := vbox.AddHostOnlyNet(ctx, vboxExe, ProvisioningNetName, opts); aerr != nil {
+			return aerr
+		}
+	} else {
+		e.taskProgress(task, 50, "converging_network")
+		out.Write("stdout", "Converging host-only network "+ProvisioningNetName+" onto the configuration\n")
+		if merr := vbox.ModifyHostOnlyNet(ctx, vboxExe, ProvisioningNetName, opts); merr != nil {
+			return merr
+		}
+	}
+	e.taskProgress(task, 100, "completed")
+	out.Write("stdout", "Provisioning network ready: "+ProvisioningNetName+" ("+network.Subnet+
+		") — the embedded range serves DHCP; per-VM fixed leases have no hostonlynet analog\n")
+	return nil
+}
+
 // networkTeardown executes provisioning_network_teardown — the base's reverse
 // order: DHCP first, then the interface. Absent components are simply noted.
 func (e *executors) networkTeardown(ctx context.Context, task *tasks.Task, out *tasks.OutputWriter) error {
@@ -272,6 +404,25 @@ func (e *executors) networkTeardown(ctx context.Context, task *tasks.Task, out *
 	vboxExe := VBoxManagePath(ctx)
 	if vboxExe == "" {
 		return errors.New("VirtualBox is not installed")
+	}
+	if UseHostOnlyNets() {
+		e.taskProgress(task, 20, "resolving_network")
+		existing, err := FindProvisioningNet(ctx, vboxExe)
+		if err != nil {
+			return err
+		}
+		if existing == nil {
+			e.taskProgress(task, 100, "completed")
+			out.Write("stdout", "No host-only network named "+ProvisioningNetName+" — nothing to tear down\n")
+			return nil
+		}
+		e.taskProgress(task, 70, "removing_network")
+		if rerr := vbox.RemoveHostOnlyNet(ctx, vboxExe, ProvisioningNetName); rerr != nil {
+			return rerr
+		}
+		e.taskProgress(task, 100, "completed")
+		out.Write("stdout", "Provisioning network removed ("+ProvisioningNetName+")\n")
+		return nil
 	}
 
 	e.taskProgress(task, 10, "resolving_interface")

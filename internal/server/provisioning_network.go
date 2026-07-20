@@ -37,6 +37,32 @@ func (s *Server) handleProvisioningNetworkStatus(w http.ResponseWriter, r *http.
 		return
 	}
 
+	if machines.UseHostOnlyNets() {
+		net, nerr := machines.FindProvisioningNet(r.Context(), exe)
+		if nerr != nil {
+			slog.Error("list host-only networks", "error", nerr)
+			taskError(w, http.StatusInternalServerError, "Failed to check provisioning network status")
+			return
+		}
+		writeJSON(w, map[string]any{
+			"enabled": true,
+			"ready":   net != nil && net.Enabled,
+			"components": map[string]any{
+				"network": map[string]any{
+					"name":   machines.ProvisioningNetName,
+					"exists": net != nil,
+				},
+				"dhcp": map[string]any{
+					"exists":   net != nil,
+					"enabled":  net != nil && net.Enabled,
+					"embedded": true,
+				},
+			},
+			"config": network,
+		})
+		return
+	}
+
 	iface, err := machines.FindProvisioningIf(r.Context(), exe, network.HostIP)
 	if err != nil {
 		slog.Error("list host-only interfaces", "error", err)

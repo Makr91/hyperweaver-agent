@@ -851,13 +851,23 @@ func (e *executors) createConfig(ctx context.Context, task *tasks.Task, out *tas
 
 	// Host-type NICs ride the provisioning network's host-only interface —
 	// resolved by host IP (VirtualBox names interfaces itself); absent setup
-	// is a loud note, never an invented adapter.
+	// is a loud note, never an invented adapter. On macOS (Oracle's split)
+	// the target is the hostonlynet NETWORK, resolved by its fixed name.
 	hostAdapter := ""
 	if e.env.Network.Enabled && hasHostNetworks(document) {
-		if iface, ferr := FindProvisioningIf(ctx, vboxExe, e.env.Network.HostIP); ferr == nil && iface != nil {
-			hostAdapter = iface.Name
-		} else {
-			out.Write("stderr", "Provisioning network is not set up — host-type NICs attach without an adapter (run POST /provisioning/network/setup first)\n")
+		switch {
+		case UseHostOnlyNets():
+			if provNet, ferr := FindProvisioningNet(ctx, vboxExe); ferr == nil && provNet != nil {
+				hostAdapter = provNet.Name
+			} else {
+				out.Write("stderr", "Provisioning network is not set up — host-type NICs attach without a network (run POST /provisioning/network/setup first)\n")
+			}
+		default:
+			if iface, ferr := FindProvisioningIf(ctx, vboxExe, e.env.Network.HostIP); ferr == nil && iface != nil {
+				hostAdapter = iface.Name
+			} else {
+				out.Write("stderr", "Provisioning network is not set up — host-type NICs attach without an adapter (run POST /provisioning/network/setup first)\n")
+			}
 		}
 	}
 
@@ -938,8 +948,23 @@ func (e *executors) createConfig(ctx context.Context, task *tasks.Task, out *tas
 	// Pin each host-network address as a DHCP fixed lease (the base's
 	// dhcp_add_host block): the guest's ordinary DHCP request then receives
 	// the document's own control IP — the deterministic addressing wait_ssh
-	// dials.
-	if hostAdapter != "" {
+	// dials. hostonlynet (macOS) embeds ONE range and has no per-VM lease
+	// verbs — pinned addresses narrate honestly there (the networking role
+	// pins them in-guest, and the pipeline's transport is the NAT forward).
+	if hostAdapter != "" && UseHostOnlyNets() {
+		for i, entry := range document.List("networks") {
+			network := mapOr(entry)
+			if stringOr(network["type"], "") != "host" {
+				continue
+			}
+			if address := stringOr(network["address"], ""); address != "" {
+				out.Write("stdout", fmt.Sprintf(
+					"NIC %d address %s: hostonlynet embeds one DHCP range — per-VM fixed leases have no macOS analog; the networking role pins the address in-guest\n",
+					i+2, address))
+			}
+		}
+	}
+	if hostAdapter != "" && !UseHostOnlyNets() {
 		leases := 0
 		for i, entry := range document.List("networks") {
 			network := mapOr(entry)
@@ -1149,8 +1174,8 @@ func hasHostNetworks(document MachineConfig) bool {
 // stacks were built for vagrant's NAT-first guests on BOTH hypervisors
 // (vagrant-zones emulated it on bhyve; runtime-proven: the networking role
 // refuses guests with fewer than two interfaces). Document networks occupy
-// adapters 2+ (host-type entries ride hostOnlyAdapter, the provisioning
-// network's interface).
+// adapters 2+ (host-type entries ride hostOnlyAdapter — the provisioning
+// network's interface, or its hostonlynet NAME on macOS, Oracle's split).
 func modifyFlags(document MachineConfig, hostOnlyAdapter string, sshForwardPort, winrmForwardPort int) ([]string, error) {
 	settings := document.Section("settings")
 	flags := []string{
@@ -1221,9 +1246,16 @@ func modifyFlags(document MachineConfig, hostOnlyAdapter string, sshForwardPort,
 		n := strconv.Itoa(i + 2)
 		switch stringOr(network["type"], "external") {
 		case "host":
-			flags = append(flags, "--nic"+n+"=hostonly")
-			if hostOnlyAdapter != "" {
-				flags = append(flags, "--host-only-adapter"+n+"="+hostOnlyAdapter)
+			if UseHostOnlyNets() {
+				flags = append(flags, "--nic"+n+"=hostonlynet")
+				if hostOnlyAdapter != "" {
+					flags = append(flags, "--host-only-net"+n+"="+hostOnlyAdapter)
+				}
+			} else {
+				flags = append(flags, "--nic"+n+"=hostonly")
+				if hostOnlyAdapter != "" {
+					flags = append(flags, "--host-only-adapter"+n+"="+hostOnlyAdapter)
+				}
 			}
 		default:
 			flags = append(flags, "--nic"+n+"=bridged")

@@ -76,8 +76,21 @@ func (t *wsTickets) Verify(ticket string) bool {
 	return true
 }
 
+// wsTicketResponse is GET /ws-ticket's answer.
+type wsTicketResponse struct {
+	// 64 hex chars, valid 60 seconds
+	Ticket string `json:"ticket"`
+}
+
 // handleWsTicket mints a WebSocket upgrade ticket (the base's GET /ws-ticket
 // — operator role via the central policy's explicit /ws-ticket rule).
+//
+//	@Summary		Mint a WebSocket upgrade ticket
+//	@Description	Minimum role: operator. A short-lived (60s) UNBOUND ticket appended as ?ticket= to every WebSocket upgrade URL (task stream, SSH terminal, VNC websockify). Reusable within its lifetime; fetch a fresh one before each connect or reconnect.
+//	@Tags			Console
+//	@Produce		json
+//	@Success		200	{object}	wsTicketResponse	"Ticket minted"
+//	@Router			/ws-ticket [get]
 func (s *Server) handleWsTicket(w http.ResponseWriter, _ *http.Request) {
 	ticket, err := s.wsTickets.Mint()
 	if err != nil {
@@ -85,7 +98,7 @@ func (s *Server) handleWsTicket(w http.ResponseWriter, _ *http.Request) {
 		taskError(w, http.StatusInternalServerError, "Failed to mint ticket")
 		return
 	}
-	writeJSON(w, map[string]any{"ticket": ticket})
+	writeJSON(w, wsTicketResponse{Ticket: ticket})
 }
 
 // requireTicket gates a WebSocket upgrade on ?ticket= (the base's rule: the

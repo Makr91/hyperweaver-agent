@@ -253,6 +253,19 @@ func InjectNMI(ctx context.Context, vboxManage, name string) error {
 	return runSimple(ctx, vboxManage, "debugvm", name, "injectnmi")
 }
 
+// ControlVMNatPF hot-adds one adapter-1 NAT port-forward rule on a RUNNING
+// machine (`controlvm <vm> natpf1 "name,proto,hostip,hostport,guestip,
+// guestport"`) — takes effect immediately, persists into the stored config.
+func ControlVMNatPF(ctx context.Context, vboxManage, name, rule string) error {
+	return runSimple(ctx, vboxManage, "controlvm", name, "natpf1", rule)
+}
+
+// ControlVMNatPFDelete removes one adapter-1 forward rule by name from a
+// RUNNING machine.
+func ControlVMNatPFDelete(ctx context.Context, vboxManage, name, ruleName string) error {
+	return runSimple(ctx, vboxManage, "controlvm", name, "natpf1", "delete", ruleName)
+}
+
 // SharedFolderAdd registers a shared folder on a machine (`sharedfolder add`
 // — works on running machines too; VirtualBox hot-adds through the session).
 // automount + an auto-mount-point let Guest Additions mount it without any

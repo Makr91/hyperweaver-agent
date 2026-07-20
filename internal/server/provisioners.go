@@ -16,7 +16,6 @@ import (
 	"github.com/Makr91/hyperweaver-agent/internal/provisioner"
 	"github.com/Makr91/hyperweaver-agent/internal/safepath"
 	"github.com/Makr91/hyperweaver-agent/internal/tasks"
-	"github.com/Makr91/hyperweaver-agent/internal/vbox"
 )
 
 // Provisioner registry endpoints (Agent API v1 provisioning surface —
@@ -280,22 +279,34 @@ func (s *Server) handleDeleteProvisionerVersion(w http.ResponseWriter, r *http.R
 // zoneweaver, sync 2026-07-17): every row is {name, class} — on this
 // hypervisor every bridgeable interface is a physical adapter, so class is
 // always "phys" (zoneweaver's vocabulary adds aggr/etherstub/simnet/overlay
-// for its link families). The `default` extra rides as before.
+// for its link families) — plus the ADDITIVE picker fields status ("up"|
+// "down") and wireless (the sync proposal 2026-07-19: macOS lists pseudo and
+// down interfaces the picker should filter). On darwin the hostonlynet
+// families' vmnet backing bridges are excluded (BridgeCandidates). The
+// `default` extra rides as before.
 func (s *Server) handleBridgedInterfaces(w http.ResponseWriter, r *http.Request) {
 	exe := machines.VBoxManagePath(r.Context())
 	if exe == "" {
 		taskError(w, http.StatusServiceUnavailable, "VirtualBox is not installed")
 		return
 	}
-	names, err := vbox.ListBridgedIfs(r.Context(), exe)
+	interfaces, err := machines.BridgeCandidates(r.Context(), exe)
 	if err != nil {
 		slog.Error("list bridged interfaces", "error", err)
 		taskError(w, http.StatusInternalServerError, "Failed to list bridged interfaces")
 		return
 	}
-	rows := make([]map[string]any, 0, len(names))
-	for _, name := range names {
-		rows = append(rows, map[string]any{"name": name, "class": "phys"})
+	rows := make([]map[string]any, 0, len(interfaces))
+	for i := range interfaces {
+		row := map[string]any{
+			"name":     interfaces[i].Name,
+			"class":    "phys",
+			"wireless": interfaces[i].Wireless,
+		}
+		if interfaces[i].Status != "" {
+			row["status"] = strings.ToLower(interfaces[i].Status)
+		}
+		rows = append(rows, row)
 	}
 	writeJSON(w, map[string]any{
 		"interfaces": rows,

@@ -1,0 +1,559 @@
+{
+    "components": {
+        "schemas": {
+            "hostinfo.Info": {
+                "properties": {
+                    "arch": {
+                        "type": "string"
+                    },
+                    "cpus": {
+                        "type": "integer"
+                    },
+                    "memory_bytes": {
+                        "type": "integer"
+                    },
+                    "os": {
+                        "type": "string"
+                    }
+                },
+                "type": "object"
+            },
+            "prereqs.Tool": {
+                "properties": {
+                    "installed": {
+                        "type": "boolean"
+                    },
+                    "name": {
+                        "type": "string"
+                    },
+                    "path": {
+                        "type": "string"
+                    },
+                    "version": {
+                        "type": "string"
+                    }
+                },
+                "type": "object"
+            },
+            "server.cpuEntry": {
+                "properties": {
+                    "model": {
+                        "type": "string"
+                    },
+                    "speed": {
+                        "description": "MHz",
+                        "type": "integer"
+                    },
+                    "times": {
+                        "$ref": "#/components/schemas/server.cpuTimes"
+                    }
+                },
+                "type": "object"
+            },
+            "server.cpuTimes": {
+                "properties": {
+                    "idle": {
+                        "type": "integer"
+                    },
+                    "irq": {
+                        "type": "integer"
+                    },
+                    "nice": {
+                        "type": "integer"
+                    },
+                    "sys": {
+                        "type": "integer"
+                    },
+                    "user": {
+                        "type": "integer"
+                    }
+                },
+                "type": "object"
+            },
+            "server.statsPayload": {
+                "properties": {
+                    "allmachines": {
+                        "description": "All registered machine names (VBoxManage list vms)",
+                        "items": {
+                            "type": "string"
+                        },
+                        "type": "array",
+                        "uniqueItems": false
+                    },
+                    "arch": {
+                        "description": "Node os.arch() vocabulary",
+                        "type": "string"
+                    },
+                    "cpus": {
+                        "description": "One entry per logical CPU, Node os.cpus() shape; times are cumulative milliseconds — consumers diff between polls for usage",
+                        "items": {
+                            "$ref": "#/components/schemas/server.cpuEntry"
+                        },
+                        "type": "array",
+                        "uniqueItems": false
+                    },
+                    "endianness": {
+                        "type": "string"
+                    },
+                    "eol": {
+                        "type": "string"
+                    },
+                    "freemem": {
+                        "description": "Available physical memory in bytes",
+                        "type": "integer"
+                    },
+                    "hostname": {
+                        "type": "string"
+                    },
+                    "loadavg": {
+                        "description": "1/5/15-minute load averages (zeros on Windows)",
+                        "items": {
+                            "type": "number"
+                        },
+                        "type": "array",
+                        "uniqueItems": false
+                    },
+                    "platform": {
+                        "description": "Node os.platform() vocabulary",
+                        "type": "string"
+                    },
+                    "release": {
+                        "description": "Kernel version",
+                        "type": "string"
+                    },
+                    "runningmachines": {
+                        "description": "Running machine names (VBoxManage list runningvms)",
+                        "items": {
+                            "type": "string"
+                        },
+                        "type": "array",
+                        "uniqueItems": false
+                    },
+                    "totalmem": {
+                        "description": "Total physical memory in bytes",
+                        "type": "integer"
+                    },
+                    "type": {
+                        "description": "Node os.type() vocabulary",
+                        "type": "string"
+                    },
+                    "uptime": {
+                        "description": "Host uptime in seconds (not process uptime)",
+                        "type": "integer"
+                    },
+                    "version": {
+                        "description": "OS marketing name",
+                        "type": "string"
+                    }
+                },
+                "type": "object"
+            },
+            "server.ticketBaseURLValue": {
+                "properties": {
+                    "value": {
+                        "example": "https://xd.prominic.net/app/apprequest.nsf/router?openagent",
+                        "type": "string"
+                    }
+                },
+                "type": "object"
+            },
+            "server.ticketConfigResponse": {
+                "properties": {
+                    "ticket_system": {
+                        "$ref": "#/components/schemas/server.ticketSystemConfig"
+                    }
+                },
+                "type": "object"
+            },
+            "server.ticketContextValue": {
+                "properties": {
+                    "value": {
+                        "example": "https://github.com/Makr91/hyperweaver-agent",
+                        "type": "string"
+                    }
+                },
+                "type": "object"
+            },
+            "server.ticketEnabledValue": {
+                "properties": {
+                    "value": {
+                        "type": "boolean"
+                    }
+                },
+                "type": "object"
+            },
+            "server.ticketReqTypeValue": {
+                "properties": {
+                    "value": {
+                        "example": "sso",
+                        "type": "string"
+                    }
+                },
+                "type": "object"
+            },
+            "server.ticketSystemConfig": {
+                "properties": {
+                    "base_url": {
+                        "$ref": "#/components/schemas/server.ticketBaseURLValue"
+                    },
+                    "context": {
+                        "$ref": "#/components/schemas/server.ticketContextValue"
+                    },
+                    "enabled": {
+                        "$ref": "#/components/schemas/server.ticketEnabledValue"
+                    },
+                    "req_type": {
+                        "$ref": "#/components/schemas/server.ticketReqTypeValue"
+                    }
+                },
+                "type": "object"
+            },
+            "server.updateApplyResponse": {
+                "properties": {
+                    "message": {
+                        "type": "string"
+                    },
+                    "status": {
+                        "type": "string"
+                    },
+                    "success": {
+                        "type": "boolean"
+                    },
+                    "target_version": {
+                        "type": "string"
+                    },
+                    "task_id": {
+                        "type": "string"
+                    }
+                },
+                "type": "object"
+            },
+            "server.updateCheckResponse": {
+                "properties": {
+                    "changelog": {},
+                    "current_version": {
+                        "type": "string"
+                    },
+                    "latest_version": {
+                        "type": "string"
+                    },
+                    "message": {
+                        "type": "string"
+                    },
+                    "release_date": {},
+                    "release_url": {},
+                    "success": {
+                        "type": "boolean"
+                    },
+                    "timestamp": {
+                        "type": "string"
+                    },
+                    "update_available": {
+                        "type": "boolean"
+                    }
+                },
+                "type": "object"
+            },
+            "server.versionResponse": {
+                "properties": {
+                    "arch": {
+                        "type": "string"
+                    },
+                    "go_version": {
+                        "type": "string"
+                    },
+                    "host": {
+                        "$ref": "#/components/schemas/hostinfo.Info"
+                    },
+                    "message": {
+                        "type": "string"
+                    },
+                    "name": {
+                        "type": "string"
+                    },
+                    "platform": {
+                        "type": "string"
+                    },
+                    "success": {
+                        "type": "boolean"
+                    },
+                    "timestamp": {
+                        "type": "string"
+                    },
+                    "tools": {
+                        "description": "One detected prerequisite (SHI parity: presence + version)",
+                        "items": {
+                            "$ref": "#/components/schemas/prereqs.Tool"
+                        },
+                        "type": "array",
+                        "uniqueItems": false
+                    },
+                    "uptime_seconds": {
+                        "type": "integer"
+                    },
+                    "version": {
+                        "type": "string"
+                    }
+                },
+                "type": "object"
+            },
+            "server.wrappedError": {
+                "properties": {
+                    "details": {
+                        "description": "Optional detail; omitted when empty",
+                        "type": "string"
+                    },
+                    "error": {
+                        "description": "Error message",
+                        "type": "string"
+                    },
+                    "success": {
+                        "type": "boolean"
+                    },
+                    "timestamp": {
+                        "description": "RFC3339 UTC",
+                        "type": "string"
+                    }
+                },
+                "type": "object"
+            },
+            "server.wsTicketResponse": {
+                "properties": {
+                    "ticket": {
+                        "description": "64 hex chars, valid 60 seconds",
+                        "type": "string"
+                    }
+                },
+                "type": "object"
+            }
+        }
+    },
+    "info": {
+        "description": "The swag-generated half of the Agent API v1 document. Serve-time authority lives in internal/apidocs: the hand-maintained fragment (openapi.json) owns info/tags/components/security and every not-yet-migrated path, and this generated document's paths merge into it.",
+        "title": "Agent API",
+        "version": "1.0.0"
+    },
+    "externalDocs": {
+        "description": "",
+        "url": ""
+    },
+    "paths": {
+        "/api/config/ticket": {
+            "get": {
+                "description": "The Help \u0026 Support link's config feed (the Server's /api/config/ticket served on this agent too, so Direct mode renders the same profile-dropdown link). No authentication. Fields ride BoxVault's {value}-wrapped shape; the UI renders the link only when enabled AND base_url are set, building base_url\u0026req=\u003creq_type\u003e\u0026customerId=\u0026user=\u0026email=\u0026context=\u003ccontext\u003e.",
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/server.ticketConfigResponse"
+                                }
+                            }
+                        },
+                        "description": "Ticket-system configuration"
+                    }
+                },
+                "summary": "Ticket-system configuration (public)",
+                "tags": [
+                    "Status"
+                ]
+            }
+        },
+        "/app/updates/apply": {
+            "post": {
+                "description": "Minimum role: admin. Queues an agent_update task (SHI's download-then-relaunch, Mark's ruling 2026-07-06): downloads this platform's installer from the release named by updates.versioninfo_url, verifies it against the release's SHA256SUMS.txt (MANDATORY — an unverifiable installer never launches), starts it (the .exe directly on Windows, open for the macOS .pkg, xdg-open for the Linux .deb — headless Linux keeps the download and reports the dpkg command), and exits the agent so the installer can replace it.",
+                "responses": {
+                    "202": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/server.updateApplyResponse"
+                                }
+                            }
+                        },
+                        "description": "Update task queued"
+                    },
+                    "400": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/server.wrappedError"
+                                }
+                            }
+                        },
+                        "description": "Update checking not configured, or already up to date"
+                    },
+                    "500": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/server.wrappedError"
+                                }
+                            }
+                        },
+                        "description": "Versioninfo fetch failure"
+                    }
+                },
+                "summary": "Download and apply an agent update",
+                "tags": [
+                    "System"
+                ]
+            }
+        },
+        "/app/updates/check": {
+            "get": {
+                "description": "Minimum role: viewer. Fetches the configured versioninfo document (updates.versioninfo_url) and compares against the running build.",
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/server.updateCheckResponse"
+                                }
+                            }
+                        },
+                        "description": "Update check result"
+                    },
+                    "400": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/server.wrappedError"
+                                }
+                            }
+                        },
+                        "description": "Update checking not configured"
+                    },
+                    "500": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/server.wrappedError"
+                                }
+                            }
+                        },
+                        "description": "Versioninfo fetch or parse failure"
+                    }
+                },
+                "summary": "Check for application updates",
+                "tags": [
+                    "System"
+                ]
+            }
+        },
+        "/provisioning/status": {
+            "get": {
+                "description": "Minimum role: viewer. A bare tool-name → installed map; this agent's tools are vagrant, virtualbox, git, ansible, rsync, scp, and builtin_sync (always true — the embedded pure-Go rsync client + SFTP that make vagrant optional), plus utm on macOS agents ONLY (never reported off darwin). rsync/scp probe with the pipeline's own lookup: PATH, vagrant's embedded toolchain, and the Windows OpenSSH directory. ansible probes the host control node — the native binary, or on Windows the default WSL distribution's ansible-playbook (the transports matrix's WSL rows). (The Node agent lists its OmniOS set — same endpoint, platform-appropriate contents.)",
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "additionalProperties": {
+                                        "type": "boolean"
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        },
+                        "description": "Tool availability map"
+                    }
+                },
+                "summary": "Provisioning prerequisite availability",
+                "tags": [
+                    "System"
+                ]
+            }
+        },
+        "/stats": {
+            "get": {
+                "description": "Minimum role: viewer — unless the agent is configured with `stats.public_access: true`, which serves this endpoint without an API key (the Node agent's conditional /stats registration). OS-level host statistics plus the registered and running VirtualBox machine name lists. Machine-list failures degrade to empty arrays — a broken VBoxManage never fails the host stats.",
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/server.statsPayload"
+                                }
+                            }
+                        },
+                        "description": "Host statistics"
+                    },
+                    "401": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "additionalProperties": {
+                                        "type": "string"
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        },
+                        "description": "Missing API key"
+                    },
+                    "403": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "additionalProperties": {
+                                        "type": "string"
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        },
+                        "description": "Invalid API key"
+                    }
+                },
+                "summary": "Host statistics and machine lists",
+                "tags": [
+                    "System"
+                ]
+            }
+        },
+        "/version": {
+            "get": {
+                "description": "Minimum role: viewer. Includes the detected provisioning prerequisites (Vagrant, VirtualBox, Git, ansible, rsync, scp, plus builtin_sync — the embedded pure-Go transports) and host information — SHI's footer data. The ansible row reports the host's control node: the native binary where the OS carries one, and on Windows the default WSL distribution's ansible (the WSL control-node resolution the remote-playbook and winrm mechanisms use — path names the wsl.exe carrying it).",
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/server.versionResponse"
+                                }
+                            }
+                        },
+                        "description": "Version information"
+                    }
+                },
+                "summary": "Application version and host environment",
+                "tags": [
+                    "System"
+                ]
+            }
+        },
+        "/ws-ticket": {
+            "get": {
+                "description": "Minimum role: operator. A short-lived (60s) UNBOUND ticket appended as ?ticket= to every WebSocket upgrade URL (task stream, SSH terminal, VNC websockify). Reusable within its lifetime; fetch a fresh one before each connect or reconnect.",
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/server.wsTicketResponse"
+                                }
+                            }
+                        },
+                        "description": "Ticket minted"
+                    }
+                },
+                "summary": "Mint a WebSocket upgrade ticket",
+                "tags": [
+                    "Console"
+                ]
+            }
+        }
+    },
+    "openapi": "3.1.0"
+}

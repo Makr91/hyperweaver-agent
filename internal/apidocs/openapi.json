@@ -34,7 +34,7 @@
     { "name": "Host Monitoring", "description": "Host telemetry (the monitoring capability token): always-on realtime sampling via gopsutil; monitoring.storage_enabled adds stored time series in per-datatype database files. Illumos-only families (ZFS pools/datasets/ARC, zpool-iostat disk IO, netstat routes) have no analog on this host and are absent." },
     { "name": "Processes", "description": "Host process listing and control (the processes capability token). The zone concept does not exist here: the zone field is absent and ?zone= filters are ignored. Absent by platform: /{pid}/stack, /{pid}/limits (pstack/plimit are illumos tools) and trace/start (DTrace)." },
     { "name": "System Host Management", "description": "Host power management (the host-power capability token, config-gated by host_power.enabled — every endpoint answers 503 and the token disappears from /api/status when disabled). Absent by platform: runlevels, single-user/multi-user transitions, fast reboot, reboot-required tracking (init semantics with no cross-platform analog)." },
-    { "name": "Host Configuration", "description": "System hosts-file and DNS control on all three platforms (the hosts-file and dns capability tokens — platform tokens, always advertised). Hosts file: Windows System32\\drivers\\etc\\hosts, /etc/hosts elsewhere. DNS (/system/dns, the converged wire, sync 2026-07-17): one wire shape everywhere — nameservers/search_domains/domain/options — with per-OS mechanics: /etc/resolv.conf read/written on Unix; netsh per connected interface on Windows (nameservers only; raw and the resolv.conf-only fields answer 400, backup is \"\"); networksetup per enabled service on macOS (nameservers + search_domains; domain/options/raw answer 400, backup \"\"). Host network configuration (/network/hostname and /network/addresses, the hostname and ip-addresses capability tokens — the converged wire, sync 2026-07-17): zoneweaver's shipped network-controller family, BARE documents (no success/message/timestamp envelope; errors are {error, details?}). Hostname: GET is the live view (persisted name vs live system hostname), PUT queues the async set_hostname task. Addresses: GET is the real live listing over Go's stdlib interface enumeration; mutations (shipped 2026-07-19, Mark's build order) queue zoneweaver's create/delete/enable/disable_ip_address tasks with per-OS honesty — static creates everywhere, dhcp on Windows only, addrconf refused (SLAAC is automatic), enable/disable toggle the INTERFACE the addrobj names. Network spaces (/network/spaces*, the network-spaces token, minted 2026-07-19): enumerate and manage VirtualBox's network spaces — host-only interfaces (create/configure/delete + their DHCP servers), host-only NETWORKS (VirtualBox 7's vmnet family: create/modify/delete), NAT networks (create/modify/delete/start/stop + port-forward and loopback rules), and the implicit internal networks (read-only: VirtualBox has no intnet verbs — they exist while a VM references them)." },
+    { "name": "Host Configuration", "description": "System hosts-file and DNS control on all three platforms (the hosts-file and dns capability tokens — platform tokens, always advertised). Hosts file: Windows System32\\drivers\\etc\\hosts, /etc/hosts elsewhere. DNS (/system/dns, the converged wire, sync 2026-07-17): one wire shape everywhere — nameservers/search_domains/domain/options — with per-OS mechanics: /etc/resolv.conf read/written on Unix; netsh per connected interface on Windows (nameservers only; raw and the resolv.conf-only fields answer 400, backup is \"\"); networksetup per enabled service on macOS (nameservers + search_domains; domain/options/raw answer 400, backup \"\"). Host network configuration (/network/hostname and /network/addresses, the hostname and ip-addresses capability tokens — the converged wire, sync 2026-07-17): zoneweaver's shipped network-controller family, BARE documents (no success/message/timestamp envelope; errors are {error, details?}). Hostname: GET is the live view (persisted name vs live system hostname), PUT queues the async set_hostname task. Addresses: GET is the real live listing over Go's stdlib interface enumeration; mutations (shipped 2026-07-19, Mark's build order) queue zoneweaver's create/delete/enable/disable_ip_address tasks with per-OS honesty — static creates everywhere, dhcp on Windows only, addrconf refused (SLAAC is automatic), enable/disable toggle the INTERFACE the addrobj names. Network spaces (/network/spaces*, the network-spaces token, minted 2026-07-19): enumerate and manage VirtualBox's network spaces — host-only interfaces (create/configure/delete + their DHCP servers — every host OS EXCEPT macOS, where VirtualBox 7 removed the family), host-only NETWORKS (VirtualBox's macOS-only vmnet family: create/modify/delete — Oracle's platform split, each side refusing the other's family with an honest 400), NAT networks (create/modify/delete/start/stop + port-forward and loopback rules), and the implicit internal networks (read-only: VirtualBox has no intnet verbs — they exist while a VM references them)." },
     { "name": "Database Management", "description": "SQLite statistics and maintenance across every open database file (tasks.sqlite, agent.sqlite, and the monitoring files when storage is enabled), plus the read-only explorer drill-down (tables with row counts and indexes, then paged rows — zoneweaver's contract, shared wire; no arbitrary SQL, every table and order_by column verified against the database's own catalog)" },
     { "name": "Settings", "description": "Agent configuration over the API (admin only)" },
     { "name": "Secrets", "description": "Global secrets store (the secrets capability token; admin only): SHI's six categories in secrets.yaml beside the config — kept OUT of /settings so that surface stays a pure configuration document. Values are plain text by design (it is the user's local machine; the generated Hosts.yml carries them as SECRETS_* template vars). Independently, Hosts.rb merges the working copy's secrets.yml/.secrets.yml at vagrant runtime — both mechanisms coexist." }
@@ -510,6 +510,7 @@
     }
   },
   "security": [{ "ApiKeyAuth": [] }, { "XApiKeyAuth": [] }],
+  "x-public-paths": ["/status", "/api/status", "/api/config/ticket", "/api-keys/bootstrap", "/auth/tray-claim", "/protocol/open", "/tasks/{taskId}/stream", "/term/{sessionId}", "/ssh/{sessionId}", "/machines/{machineName}/vnc/websockify", "/machines/{machineName}/rdp-bridge"],
   "paths": {
     "/status": {
       "get": {
@@ -535,41 +536,6 @@
           "200": {
             "description": "Agent identity and capabilities",
             "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Status" } } }
-          }
-        }
-      }
-    },
-    "/api/config/ticket": {
-      "get": {
-        "tags": ["Status"],
-        "summary": "Ticket-system configuration (public)",
-        "description": "The Help & Support link's config feed (the Server's /api/config/ticket served on this agent too, so Direct mode renders the same profile-dropdown link). No authentication. Fields ride BoxVault's {value}-wrapped shape; the UI renders the link only when enabled AND base_url are set, building base_url&req=<req_type>&customerId=&user=&email=&context=<context>.",
-        "security": [],
-        "responses": {
-          "200": {
-            "description": "Ticket-system configuration",
-            "content": { "application/json": { "schema": { "type": "object", "properties": { "ticket_system": { "type": "object", "properties": { "enabled": { "type": "object", "properties": { "value": { "type": "boolean" } } }, "base_url": { "type": "object", "properties": { "value": { "type": "string", "example": "https://xd.prominic.net/app/apprequest.nsf/router?openagent" } } }, "req_type": { "type": "object", "properties": { "value": { "type": "string", "example": "sso" } } }, "context": { "type": "object", "properties": { "value": { "type": "string", "example": "https://github.com/Makr91/hyperweaver-agent" } } } } } } } } }
-          }
-        }
-      }
-    },
-    "/stats": {
-      "get": {
-        "tags": ["System"],
-        "summary": "Host statistics and machine lists",
-        "description": "Minimum role: viewer — unless the agent is configured with `stats.public_access: true`, which serves this endpoint without an API key (the Node agent's conditional /stats registration). OS-level host statistics plus the registered and running VirtualBox machine name lists. Machine-list failures degrade to empty arrays — a broken VBoxManage never fails the host stats.",
-        "responses": {
-          "200": {
-            "description": "Host statistics",
-            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ServerStats" } } }
-          },
-          "401": {
-            "description": "Missing API key",
-            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
-          },
-          "403": {
-            "description": "Invalid API key",
-            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
           }
         }
       }
@@ -904,112 +870,6 @@
           "409": {
             "description": "Would deactivate the last active admin key",
             "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
-          }
-        }
-      }
-    },
-    "/version": {
-      "get": {
-        "tags": ["System"],
-        "summary": "Application version and host environment",
-        "description": "Minimum role: viewer. Includes the detected provisioning prerequisites (Vagrant, VirtualBox, Git, rsync, scp, plus builtin_sync — the embedded pure-Go transports) and host information — SHI's footer data.",
-        "responses": {
-          "200": {
-            "description": "Version information",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "success": { "type": "boolean", "example": true },
-                    "message": { "type": "string", "example": "Version information retrieved" },
-                    "timestamp": { "type": "string", "format": "date-time" },
-                    "version": { "type": "string", "example": "0.1.1" },
-                    "name": { "type": "string", "example": "hyperweaver-agent" },
-                    "go_version": { "type": "string", "example": "go1.25.0" },
-                    "platform": { "type": "string", "example": "windows" },
-                    "arch": { "type": "string", "example": "amd64" },
-                    "uptime_seconds": { "type": "integer", "example": 86400 },
-                    "tools": { "type": "array", "items": { "$ref": "#/components/schemas/Tool" } },
-                    "host": { "$ref": "#/components/schemas/HostInfo" }
-                  }
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/app/updates/check": {
-      "get": {
-        "tags": ["System"],
-        "summary": "Check for application updates",
-        "description": "Minimum role: viewer. Fetches the configured versioninfo document (updates.versioninfo_url) and compares against the running build.",
-        "responses": {
-          "200": {
-            "description": "Update check result",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "success": { "type": "boolean", "example": true },
-                    "message": { "type": "string", "example": "Update check completed" },
-                    "timestamp": { "type": "string", "format": "date-time" },
-                    "current_version": { "type": "string", "example": "0.1.1" },
-                    "latest_version": { "type": "string", "example": "0.2.0" },
-                    "update_available": { "type": "boolean", "example": true },
-                    "release_url": { "type": "string", "nullable": true },
-                    "release_date": { "type": "string", "nullable": true },
-                    "changelog": { "type": "string", "nullable": true }
-                  }
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Update checking not configured",
-            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/WrappedError" } } }
-          },
-          "500": {
-            "description": "Versioninfo fetch or parse failure",
-            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/WrappedError" } } }
-          }
-        }
-      }
-    },
-    "/app/updates/apply": {
-      "post": {
-        "tags": ["System"],
-        "summary": "Download and apply an agent update",
-        "description": "Minimum role: admin. Queues an agent_update task (SHI's download-then-relaunch, Mark's ruling 2026-07-06): downloads this platform's installer from the release named by updates.versioninfo_url, verifies it against the release's SHA256SUMS.txt (MANDATORY — an unverifiable installer never launches), starts it (the .exe directly on Windows, open for the macOS .pkg, xdg-open for the Linux .deb — headless Linux keeps the download and reports the dpkg command), and exits the agent so the installer can replace it.",
-        "responses": {
-          "202": {
-            "description": "Update task queued",
-            "content": { "application/json": { "schema": { "type": "object", "properties": { "success": { "type": "boolean" }, "task_id": { "type": "string", "format": "uuid" }, "target_version": { "type": "string" }, "status": { "type": "string" }, "message": { "type": "string" } } } } }
-          },
-          "400": { "description": "Update checking not configured, or already up to date" },
-          "500": { "description": "Versioninfo fetch failure" }
-        }
-      }
-    },
-    "/provisioning/status": {
-      "get": {
-        "tags": ["System"],
-        "summary": "Provisioning prerequisite availability",
-        "description": "Minimum role: viewer. A bare tool-name → installed map; this agent's tools are vagrant, virtualbox, git, rsync, scp, and builtin_sync (always true — the embedded pure-Go rsync client + SFTP that make vagrant optional), plus utm on macOS agents ONLY (never reported off darwin). rsync/scp probe with the pipeline's own lookup: PATH, vagrant's embedded toolchain, and the Windows OpenSSH directory. (The Node agent lists its OmniOS set — same endpoint, platform-appropriate contents.)",
-        "responses": {
-          "200": {
-            "description": "Tool availability map",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "additionalProperties": { "type": "boolean" },
-                  "example": { "vagrant": true, "virtualbox": true, "git": true, "rsync": false, "scp": true, "builtin_sync": true }
-                }
-              }
-            }
           }
         }
       }
@@ -1646,7 +1506,7 @@
       "post": {
         "tags": ["Machine Management"],
         "summary": "Start the provisioning pipeline",
-        "description": "Minimum role: operator. Orchestrates the full provisioning run against the STORED provisioner document (the zoneweaver mechanism). THERE ARE NO PHASES: the run executes the stored document's provisioning: section AS WRITTEN — method keys in the order they appear in the stored document, entries within each method in list order — bracketed by the folder sync (outermost) and the pre[]/post[] hooks; the method children chain DIRECTLY under the orchestration parent. The chain: machine_prepare (re-render + refresh the working copy — regenerated before every provision) → boot (the plain start operation as a child, skipped when running or skip_boot) → machine_wait_ssh (credentials = settings.vagrant_user/vagrant_user_pass/vagrant_user_private_key_path — SSH keys resolve over the THREE-TIER ladder (Mark's three-tier ruling, sync 2026-07-17): tier 1 = the working copy's vagrant_user_private_key_path when the file EXISTS (rotated, or user-supplied); tier 2 = the packaged bootstrap key inside the working copy (driver/ssh_keys/id_rsa, then the legacy core/ssh_keys/id_rsa) when the named key is missing or none is named — never a guest fetch; the agent provisioning key is the last existence-checked candidate, and password auth engages ONLY when no key file exists anywhere — a key file on disk always beats a document password (zoneweaver's exact ladder). TIER 3 is RECOVERY ONLY: when the wait exhausts on key auth and the guest-agent channel is enabled, the agent recovers the rotated key over QGA (guest-exec cat of /home/<vagrant_user>/.ssh/id_ssh_rsa), lands it at the working-copy key path (0600), and retries the wait ONCE — without a QGA channel the failure honestly names 'both known keys were rejected and no SSH-free transport exists'; transport = the provisioning NIC's NAT ssh port-forward at 127.0.0.1 when the machine carries one — vagrant's model, immune to guest network reconfiguration — else the control IP from networks[] is_control → provisional → first; neither existing is a 400) → machine_sync_parent + one machine_sync per folders[] entry (transport per folder.type: rsync | scp, each with a pure-Go fallback when the binary is absent — embedded rsync client / SFTP, loudly narrated in the task output; vagrant is optional; disabled entries skipped; type virtualbox registers a REAL VirtualBox shared folder instead of copying — hot-added with automount, guest-mounted via vboxsf when Guest Additions run, a failed guest mount narrates and never fails the pipeline) → one machine_hook per provisioning.pre[] SEQUENCE HOOK entry, before the first method ({script, target: host|guest default guest, on_failure: abort|continue default abort, run: always|once default always} — design §5's ruled shape: guest hooks upload+sudo-run like shell scripts, host hooks run the working-copy script ON THE AGENT HOST gated by provisioning.host_hooks (default ON here), on_failure continue narrates and proceeds, run once skips after the first successful provision) → THE METHOD WALK — provisioning:'s keys in stored-document order, entries in list order: shell → one machine_shell per scripts[] string (the package-relative path resolves against the working copy, uploads over the built-in SFTP to a /tmp path, chmod +x, runs with sudo — shebang honored — then removes itself; a nonzero exit fails the task; bare string entries carry no run directive and execute every time the walk reaches them); ansible → groups in list order, each group's local[] then its remote[] per its own lists — ONE chain, each entry local (machine_provision) or remote (machine_provision_remote — design §5: ansible-playbook ON THE AGENT HOST dialing the guest over the pipeline transport, inventory pinned to the resolved ip/port, credentials from the stored settings with the agent provisioning key as fallback, ANSIBLE_CONFIG/ANSIBLE_COLLECTIONS_PATH resolved against the working copy, remote_collections galaxy-installs host-side; NO host ansible-playbook fails honestly — Windows hosts stay in the design matrix's WSL-LATER row) per its OWN list, never all-locals-then-all-remotes; run directives filter PER ENTRY (always = every run; not_first = only after a prior success; once/unset = only when never provisioned — judged by configuration.provisioner_state.last_provisioned_at); docker → one machine_docker_compose per docker_compose[] (or docker-compose[]) file (guest path, `up -d`, compose v2 plugin first then docker-compose) — NO engine installation: an absent guest engine fails the task honestly, and compose entries carry no run pin; UNKNOWN method keys SURVIVE in the stored document and are narrate-skipped by the walk — named loudly in the response and the parent's metadata, never a failure → one machine_hook per provisioning.post[] entry, after the last method → when any folder carries syncback: true, machine_syncback_parent + one machine_syncback per flagged folder pulls those folders guest→host — the post-provision results landing (folder.to → folder.map reversed; delete never honored on a pull, no chown) → KEY ROTATION (settings.vagrant_ssh_insert_key, the on/true/1/yes vocabulary — the key_rotate proposal, sync 2026-07-17): ONE machine_key_rotate child AFTER the syncback bracket adopts the box's ROTATED private key — SFTP-reads /home/<vagrant_user>/.ssh/id_ssh_rsa from the guest (a missing remote file is a narrated skip and the task SUCCEEDS — box built without rotation), lands it at settings.vagrant_user_private_key_path in the working copy (0600), then strips the bootstrap pubkey line from the guest file (sed '/vagrantup/d' — Hosts.rb:706's hack; a strip failure fails the task HONESTLY — the landed key stays, and the whole-walk stamp never sits on this child). It NEVER owns the whole-walk stamp; the response task_chain[] carries {step: 'key_rotate', task_id}, and winrm guests get the response-only {step: 'key_rotate_skipped_winrm'} entry instead. THE STAMP: provisioner_state.last_provisioned_at records ONLY when the ENTIRE walk succeeds, whatever type its last entry is — it rides the chain's final task, and the linear chain makes that equivalent to whole-run success; a partial run never marks the machine provisioned. THE PIPELINE-OWNED POWER CYCLE (Mark's execution ruling, sync 2026-07-18): when the machine is flagged for transport removal (settings.remove_transport_on_completion true, or any networks[] entry's remove_on_completion — absent = this agent's default FALSE) the chain appends stop → machine_transport_remove → start AFTER the stamp (task_chain steps post_provision_stop / transport_remove / post_provision_boot): the flagged adapters are removed (the intrinsic NAT's forwards deleted with it), the document updates to match (entries removed, is_control flipped to the first survivor, the settings flag cleared), and the post-removal boot gates on NOTHING — the run is COMPLETE at the boot, the machine comes up on its real NICs. vbox.post_provision_boot (the cycle-after-provisioning knob — per-hypervisor key, sync 2026-07-19) triggers the SAME stop→start cycle without the removal step. The extra_vars networks[] carry each adapter's LIVE MAC when the document leaves mac auto/empty (adapter = network index + 2; resolved into the run's variable document only — the stored document is never modified). Prerequisites: provisioner config stored (create auto-fills it; PUT overrides) and a control IP in networks[]. WINRM MACHINES (settings.communicator: winrm — the converged transport, sync 2026-07-17): the wait step verifies the guest via HOST-ANSIBLE win_ping instead of an SSH dial (ansible + pywinrm on the AGENT HOST are required — their absence is an honest task failure, never a pre-flight); shell scripts and guest hooks run via host-ansible win_copy/win_shell/win_file; remote playbooks connect over winrm. Folder sync/syncback, ansible LOCAL playbooks, and docker compose CANNOT run over winrm — they are skipped as RESPONSE-ONLY task_chain entries ({step: 'sync_skipped_winrm', folder_count}, {step: 'syncback_skipped_winrm', folder_count}, {step: 'ansible_local_skipped_winrm', playbook_count}, {step: 'docker_skipped_winrm'}), and unknown methods additionally emit {step: 'method_not_executable', method}.",
+        "description": "Minimum role: operator. Orchestrates the full provisioning run against the STORED provisioner document (the zoneweaver mechanism). THERE ARE NO PHASES: the run executes the stored document's provisioning: section AS WRITTEN — method keys in the order they appear in the stored document, entries within each method in list order — bracketed by the folder sync (outermost) and the pre[]/post[] hooks; the method children chain DIRECTLY under the orchestration parent. The chain: machine_prepare (re-render + refresh the working copy — regenerated before every provision) → boot (the plain start operation as a child, skipped when running or skip_boot) → machine_wait_ssh (credentials = settings.vagrant_user/vagrant_user_pass/vagrant_user_private_key_path — SSH keys resolve over the THREE-TIER ladder (Mark's three-tier ruling, sync 2026-07-17): tier 1 = the working copy's vagrant_user_private_key_path when the file EXISTS (rotated, or user-supplied); tier 2 = the packaged bootstrap key inside the working copy (driver/ssh_keys/id_rsa, then the legacy core/ssh_keys/id_rsa) when the named key is missing or none is named — never a guest fetch; the agent provisioning key is the last existence-checked candidate, and password auth engages ONLY when no key file exists anywhere — a key file on disk always beats a document password (zoneweaver's exact ladder). TIER 3 is RECOVERY ONLY: when the wait exhausts on key auth and the guest-agent channel is enabled, the agent recovers the rotated key over QGA (guest-exec cat of /home/<vagrant_user>/.ssh/id_ssh_rsa), lands it at the working-copy key path (0600), and retries the wait ONCE — without a QGA channel the failure honestly names 'both known keys were rejected and no SSH-free transport exists'; transport = the provisioning NIC's NAT ssh port-forward at 127.0.0.1 when the machine carries one — vagrant's model, immune to guest network reconfiguration — else the control IP from networks[] is_control → provisional → first; neither existing is a 400) → machine_sync_parent + one machine_sync per folders[] entry (transport per folder.type: rsync | scp, each with a pure-Go fallback when the binary is absent — embedded rsync client / SFTP, loudly narrated in the task output; vagrant is optional; disabled entries skipped; type virtualbox registers a REAL VirtualBox shared folder instead of copying — hot-added with automount, guest-mounted via vboxsf when Guest Additions run, a failed guest mount narrates and never fails the pipeline) → one machine_hook per provisioning.pre[] SEQUENCE HOOK entry, before the first method ({script, target: host|guest default guest, on_failure: abort|continue default abort, run: always|once default always} — design §5's ruled shape: guest hooks upload+sudo-run like shell scripts, host hooks run the working-copy script ON THE AGENT HOST gated by provisioning.host_hooks (default ON here), on_failure continue narrates and proceeds, run once skips after the first successful provision) → THE METHOD WALK — provisioning:'s keys in stored-document order, entries in list order: shell → one machine_shell per scripts[] string (the package-relative path resolves against the working copy, uploads over the built-in SFTP to a /tmp path, chmod +x, runs with sudo — shebang honored — then removes itself; a nonzero exit fails the task; bare string entries carry no run directive and execute every time the walk reaches them); ansible → groups in list order, each group's local[] then its remote[] per its own lists — ONE chain, each entry local (machine_provision) or remote (machine_provision_remote — design §5: ansible-playbook ON THE AGENT HOST dialing the guest over the pipeline transport, inventory pinned to the resolved ip/port, credentials from the stored settings with the agent provisioning key as fallback, ANSIBLE_CONFIG/ANSIBLE_COLLECTIONS_PATH resolved against the working copy, remote_collections galaxy-installs host-side; the control node resolves natively where the OS carries ansible and through WSL on Windows hosts — the default WSL distribution's ansible, host paths translated to their /mnt form, extra-vars via an @file in the working copy, the private key riding a chmod-600 mktemp copy (keys on /mnt mounts are world-readable and OpenSSH refuses them), and 127.0.0.1 forward targets (ssh and winrm alike) reached through a RUN-SCOPED twin forward bound to the WSL gateway address (NAT-mode WSL2 shares no loopback with the Windows host and the create-time forwards bind 127.0.0.1 — the twin is added before the run, removed after, host-internal, and the loopback rule is untouched) — and NO control node anywhere fails honestly) per its OWN list, never all-locals-then-all-remotes; run directives filter PER ENTRY (always = every run; not_first = only after a prior success; once/unset = only when never provisioned — judged by configuration.provisioner_state.last_provisioned_at); docker → one machine_docker_compose per docker_compose[] (or docker-compose[]) file (guest path, `up -d`, compose v2 plugin first then docker-compose) — NO engine installation: an absent guest engine fails the task honestly, and compose entries carry no run pin; UNKNOWN method keys SURVIVE in the stored document and are narrate-skipped by the walk — named loudly in the response and the parent's metadata, never a failure → one machine_hook per provisioning.post[] entry, after the last method → when any folder carries syncback: true, machine_syncback_parent + one machine_syncback per flagged folder pulls those folders guest→host — the post-provision results landing (folder.to → folder.map reversed; delete never honored on a pull, no chown) → KEY ROTATION (settings.vagrant_ssh_insert_key, the on/true/1/yes vocabulary — the key_rotate proposal, sync 2026-07-17): ONE machine_key_rotate child AFTER the syncback bracket adopts the box's ROTATED private key — SFTP-reads /home/<vagrant_user>/.ssh/id_ssh_rsa from the guest (a missing remote file is a narrated skip and the task SUCCEEDS — box built without rotation), lands it at settings.vagrant_user_private_key_path in the working copy (0600), then strips the bootstrap pubkey line from the guest file (sed '/vagrantup/d' — Hosts.rb:706's hack; a strip failure fails the task HONESTLY — the landed key stays, and the whole-walk stamp never sits on this child). It NEVER owns the whole-walk stamp; the response task_chain[] carries {step: 'key_rotate', task_id}, and winrm guests get the response-only {step: 'key_rotate_skipped_winrm'} entry instead. THE STAMP: provisioner_state.last_provisioned_at records ONLY when the ENTIRE walk succeeds, whatever type its last entry is — it rides the chain's final task, and the linear chain makes that equivalent to whole-run success; a partial run never marks the machine provisioned. THE PIPELINE-OWNED POWER CYCLE (Mark's execution ruling, sync 2026-07-18): when the machine is flagged for transport removal (settings.remove_transport_on_completion true, or any networks[] entry's remove_on_completion — absent = this agent's default FALSE) the chain appends stop → machine_transport_remove → start AFTER the stamp (task_chain steps post_provision_stop / transport_remove / post_provision_boot): the flagged adapters are removed (the intrinsic NAT's forwards deleted with it), the document updates to match (entries removed, is_control flipped to the first survivor, the settings flag cleared), and the post-removal boot gates on NOTHING — the run is COMPLETE at the boot, the machine comes up on its real NICs. vbox.post_provision_boot (the cycle-after-provisioning knob — per-hypervisor key, sync 2026-07-19) triggers the SAME stop→start cycle without the removal step. The extra_vars networks[] carry each adapter's LIVE MAC when the document leaves mac auto/empty (adapter = network index + 2; resolved into the run's variable document only — the stored document is never modified). Prerequisites: provisioner config stored (create auto-fills it; PUT overrides) and a control IP in networks[]. WINRM MACHINES (settings.communicator: winrm — the converged transport, sync 2026-07-17): the wait step verifies the guest via HOST-ANSIBLE win_ping instead of an SSH dial (ansible + pywinrm on the AGENT HOST are required — on Windows hosts that means ansible + pywinrm inside WSL's default distribution; their absence is an honest task failure, never a pre-flight); shell scripts and guest hooks run via host-ansible win_copy/win_shell/win_file; remote playbooks connect over winrm. Folder sync/syncback, ansible LOCAL playbooks, and docker compose CANNOT run over winrm — they are skipped as RESPONSE-ONLY task_chain entries ({step: 'sync_skipped_winrm', folder_count}, {step: 'syncback_skipped_winrm', folder_count}, {step: 'ansible_local_skipped_winrm', playbook_count}, {step: 'docker_skipped_winrm'}), and unknown methods additionally emit {step: 'method_not_executable', method}.",
         "parameters": [
           { "name": "machineName", "in": "path", "required": true, "schema": { "type": "string" } }
         ],
@@ -2466,11 +2326,11 @@
       "get": {
         "tags": ["Provisioning"],
         "summary": "Host bridgeable interfaces",
-        "description": "Minimum role: viewer. VBoxManage list bridgedifs — the UI's uplink dropdown and the bridge/default-NIC picker's choices. FLAT ROWS (the converged wire, sync 2026-07-17 — one shape on both agents): every entry is {name, class}, class from each agent's own link vocabulary. On this hypervisor every bridgeable interface is a physical adapter, so class is always \"phys\"; zoneweaver's rows additionally speak aggr/etherstub/simnet/overlay for its link families. default echoes provisioning.default_network_interface.",
+        "description": "Minimum role: viewer. VBoxManage list bridgedifs — the UI's uplink dropdown and the bridge/default-NIC picker's choices. FLAT ROWS (the converged wire, sync 2026-07-17 — one shape on both agents): every entry is {name, class}, class from each agent's own link vocabulary. On this hypervisor every bridgeable interface is a physical adapter, so class is always \"phys\"; zoneweaver's rows additionally speak aggr/etherstub/simnet/overlay for its link families. ADDITIVE picker fields (the sync proposal 2026-07-19): status (\"up\"|\"down\") and wireless — macOS lists pseudo and down interfaces the picker should filter. macOS additionally EXCLUDES the hostonlynet families' vmnet backing bridges (bridge100-style entries carrying a hostonlynet's own subnet — never real bridge candidates; vagrant #13025's picker hole). default echoes provisioning.default_network_interface.",
         "responses": {
           "200": {
             "description": "Interface rows",
-            "content": { "application/json": { "schema": { "type": "object", "properties": { "interfaces": { "type": "array", "items": { "type": "object", "properties": { "name": { "type": "string", "example": "Intel(R) Ethernet Connection I217-LM" }, "class": { "type": "string", "description": "Always \"phys\" on this agent (VBoxManage list bridgedifs enumerates physical adapters only)", "example": "phys" } } } }, "default": { "type": "string" }, "total": { "type": "integer" } } } } }
+            "content": { "application/json": { "schema": { "type": "object", "properties": { "interfaces": { "type": "array", "items": { "type": "object", "properties": { "name": { "type": "string", "example": "Intel(R) Ethernet Connection I217-LM" }, "class": { "type": "string", "description": "Always \"phys\" on this agent (VBoxManage list bridgedifs enumerates physical adapters only)", "example": "phys" }, "status": { "type": "string", "enum": ["up", "down"], "description": "The interface's live state (absent when VirtualBox reports none) — hide down entries by default" }, "wireless": { "type": "boolean", "description": "Wireless adapter (bridging over Wi-Fi is best-effort)" } } } }, "default": { "type": "string" }, "total": { "type": "integer" } } } } }
           },
           "503": { "description": "VirtualBox is not installed" }
         }
@@ -2480,7 +2340,7 @@
       "get": {
         "tags": ["Provisioning"],
         "summary": "Provisioning network status",
-        "description": "Minimum role: viewer. The dedicated provisioning network (the zoneweaver mechanism's etherstub+dhcpd, as ONE VirtualBox host-only interface — identified by provisioning.network.host_ip, since VirtualBox assigns interface names itself — plus its DHCP server). Disabled answers just {enabled:false, message}; enabled answers ready + per-component existence + the effective configuration. The base's NAT/forwarding components translate to the create-time NAT adapter + ssh port-forward transport (the provisioning NIC); this host-only machinery stays dormant-but-available for host-type networks[] entries and build-it-yourself setups.",
+        "description": "Minimum role: viewer. The dedicated provisioning network (the zoneweaver mechanism's etherstub+dhcpd, as ONE VirtualBox host-only interface — identified by provisioning.network.host_ip, since VirtualBox assigns interface names itself — plus its DHCP server). Disabled answers just {enabled:false, message}; enabled answers ready + per-component existence + the effective configuration. macOS hosts (Oracle's split) answer components.network ({name: \"hyperweaver-provision\", exists}) instead of interface/ip_address, with dhcp {exists, enabled, embedded: true} — the hostonlynet's own embedded range serves DHCP. The base's NAT/forwarding components translate to the create-time NAT adapter + ssh port-forward transport (the provisioning NIC); this host-only machinery stays dormant-but-available for host-type networks[] entries and build-it-yourself setups.",
         "responses": {
           "200": {
             "description": "Provisioning network status",
@@ -2494,7 +2354,7 @@
       "post": {
         "tags": ["Provisioning"],
         "summary": "Set up the provisioning network",
-        "description": "Minimum role: operator. Queues a provisioning_network_setup task (category-locked — one network mutation at a time), idempotent at every component: the host-only interface is created only when none carries the configured host_ip, its address always converges onto the configuration, and the DHCP server (subnet range, its own dhcp_server_ip) is added or modified to match. Machines with host-type networks[] entries then attach to this interface at create, and each entry's address pins as a per-VM-NIC DHCP fixed lease — the guest's ordinary DHCP request receives the document's own control IP, so wait_ssh dials a deterministic address.",
+        "description": "Minimum role: operator. Queues a provisioning_network_setup task (category-locked — one network mutation at a time), idempotent at every component: the host-only interface is created only when none carries the configured host_ip, its address always converges onto the configuration, and the DHCP server (subnet range, its own dhcp_server_ip) is added or modified to match. Machines with host-type networks[] entries then attach to this interface at create, and each entry's address pins as a per-VM-NIC DHCP fixed lease — the guest's ordinary DHCP request receives the document's own control IP, so wait_ssh dials a deterministic address. macOS hosts (Oracle's split — host-only adapters died with VirtualBox 7 there) create/converge ONE named host-only NETWORK instead: hyperweaver-provision, a hostonlynet whose embedded lower/upper range IS the DHCP (no dhcpserver verbs exist in that family; host_ip is vmnet's to assign, and per-VM fixed leases have no analog — pinned addresses narrate honestly and the networking role applies them in-guest; the pipeline's transport rides the NAT forward regardless). Host-type machines there attach via --nic hostonlynet + --host-only-net.",
         "responses": {
           "202": { "description": "Setup task queued" },
           "400": { "description": "Provisioning network is disabled in configuration" }
@@ -2505,7 +2365,7 @@
       "delete": {
         "tags": ["Provisioning"],
         "summary": "Tear down the provisioning network",
-        "description": "Minimum role: operator. Queues a provisioning_network_teardown task: the DHCP server first, then the host-only interface (the base's reverse order); absent components are noted, never errors.",
+        "description": "Minimum role: operator. Queues a provisioning_network_teardown task: the DHCP server first, then the host-only interface (the base's reverse order); absent components are noted, never errors. macOS hosts remove the hyperweaver-provision host-only network instead.",
         "responses": {
           "202": { "description": "Teardown task queued" },
           "400": { "description": "Provisioning network is disabled in configuration" }
@@ -4235,7 +4095,7 @@
       "get": {
         "tags": ["Host Configuration"],
         "summary": "List the host's VirtualBox network spaces",
-        "description": "Minimum role: viewer (the network-spaces capability token, minted 2026-07-19 — the UI topology mapper's network-card feed; devices.nics rows join here by their network field). One typed row per space: hostonly = a host-only INTERFACE (VBoxManage list hostonlyifs; VirtualBox assigns names itself) with its DHCP server joined by VBoxNetworkName (best-effort — a failed dhcpservers read degrades to {exists:false} rows, narrated in the log); hostonlynet = a host-only NETWORK (list hostonlynets — VirtualBox 7's vmnet-backed family, the interface successor on macOS hosts; best-effort too, older VBoxManage builds lack the verb and simply contribute no rows); intnet = an implicit internal network (list intnets — exists while a VM references it, no other attributes); natnetwork = a NAT network (list natnetworks) with its port-forward rules (IPv4 + IPv6 folded into one port_forwards[] with an ipv6 flag) and loopback mappings (verbatim rule strings). VirtualBox-only — utm machines join no spaces.",
+        "description": "Minimum role: viewer (the network-spaces capability token, minted 2026-07-19 — the UI topology mapper's network-card feed; devices.nics rows join here by their network field). One typed row per space: hostonly = a host-only INTERFACE (VBoxManage list hostonlyifs; VirtualBox assigns names itself) with its DHCP server joined by VBoxNetworkName (best-effort — a failed dhcpservers read degrades to {exists:false} rows, narrated in the log); hostonlynet = a host-only NETWORK (list hostonlynets — VirtualBox's macOS-ONLY vmnet family; Oracle's platform split: VirtualBox 7 on macOS REMOVED host-only adapters while every other host OS lacks the hostonlynet verb entirely, so darwin agents carry hostonlynet rows, every other host carries hostonly rows, and off darwin the verb is never even probed); intnet = an implicit internal network (list intnets — exists while a VM references it, no other attributes); natnetwork = a NAT network (list natnetworks) with its port-forward rules (IPv4 + IPv6 folded into one port_forwards[] with an ipv6 flag) and loopback mappings (verbatim rule strings). VirtualBox-only — utm machines join no spaces.",
         "responses": {
           "200": {
             "description": "The network spaces",
@@ -4250,14 +4110,14 @@
       "post": {
         "tags": ["Host Configuration"],
         "summary": "Create a host-only interface",
-        "description": "Minimum role: operator. VBoxManage hostonlyif create — VirtualBox assigns the interface name (the answer carries it); the request may configure the static IPv4 (ip + netmask, netmask defaulting to 255.255.255.0) and add the interface's DHCP server (dhcp {server_ip, lower_ip, upper_ip, netmask?}) in the same call. A failed follow-up step answers 500 NAMING the already-created interface — it is not rolled back (delete it explicitly if unwanted). Windows hosts may need driver-install privileges — VirtualBox's own error rides through.",
+        "description": "Minimum role: operator. VBoxManage hostonlyif create — VirtualBox assigns the interface name (the answer carries it); the request may configure the static IPv4 (ip + netmask, netmask defaulting to 255.255.255.0) and add the interface's DHCP server (dhcp {server_ip, lower_ip, upper_ip, netmask?}) in the same call. A failed follow-up step answers 500 NAMING the already-created interface — it is not rolled back (delete it explicitly if unwanted). Windows hosts may need driver-install privileges — VirtualBox's own error rides through. macOS hosts REFUSE the whole hostonly-interface family with a 400 (VirtualBox 7 removed host-only adapters there — manage /network/spaces/hostonlynet instead).",
         "requestBody": {
           "required": false,
           "content": { "application/json": { "schema": { "type": "object", "properties": { "ip": { "type": "string", "example": "192.168.57.1" }, "netmask": { "type": "string", "default": "255.255.255.0" }, "dhcp": { "type": "object", "properties": { "server_ip": { "type": "string", "example": "192.168.57.2" }, "lower_ip": { "type": "string", "example": "192.168.57.10" }, "upper_ip": { "type": "string", "example": "192.168.57.200" }, "netmask": { "type": "string", "description": "Defaults to the interface netmask" } } } } } } }
         },
         "responses": {
           "201": { "description": "Interface created ({success, name, message})" },
-          "400": { "description": "Invalid body, or dhcp missing server_ip/lower_ip/upper_ip" },
+          "400": { "description": "Invalid body, dhcp missing server_ip/lower_ip/upper_ip, or a macOS host (host-only interfaces died with VirtualBox 7 there — use hostonlynet)" },
           "500": { "description": "Creation or a follow-up step failed (the message names the created interface when one exists)" },
           "503": { "description": "VirtualBox is not installed" }
         }
@@ -4275,7 +4135,7 @@
         },
         "responses": {
           "200": { "description": "Interface updated" },
-          "400": { "description": "Nothing to change, or an invalid dhcp document" },
+          "400": { "description": "Nothing to change, an invalid dhcp document, or a macOS host (use hostonlynet)" },
           "404": { "description": "No host-only interface by that name" },
           "503": { "description": "VirtualBox is not installed" }
         }
@@ -4287,6 +4147,7 @@
         "parameters": [ { "name": "name", "in": "path", "required": true, "schema": { "type": "string" } } ],
         "responses": {
           "200": { "description": "Interface removed" },
+          "400": { "description": "A macOS host (use hostonlynet)" },
           "404": { "description": "No host-only interface by that name" },
           "503": { "description": "VirtualBox is not installed" }
         }
@@ -4296,7 +4157,7 @@
       "post": {
         "tags": ["Host Configuration"],
         "summary": "Create a host-only network",
-        "description": "Minimum role: operator. VBoxManage hostonlynet add — VirtualBox 7's vmnet-backed host-only NETWORK family (the caller names it, unlike interfaces): name, netmask, lower_ip, upper_ip required; enabled defaults true. Older VBoxManage builds lack the verb — VirtualBox's own error rides through.",
+        "description": "Minimum role: operator. VBoxManage hostonlynet add — VirtualBox's macOS-ONLY vmnet-backed host-only NETWORK family (the caller names it, unlike interfaces): name, netmask, lower_ip, upper_ip required; enabled defaults true. Non-macOS hosts answer 400 (Oracle's platform split — every other host OS lacks the verb; manage /network/spaces/hostonly there).",
         "requestBody": {
           "required": true,
           "content": { "application/json": { "schema": { "type": "object", "required": ["name", "netmask", "lower_ip", "upper_ip"], "properties": { "name": { "type": "string", "example": "hostnet1" }, "netmask": { "type": "string", "example": "255.255.255.0" }, "lower_ip": { "type": "string", "example": "192.168.58.1" }, "upper_ip": { "type": "string", "example": "192.168.58.199" }, "enabled": { "type": "boolean", "default": true } } } } }
@@ -4320,7 +4181,7 @@
         },
         "responses": {
           "200": { "description": "Host-only network updated" },
-          "400": { "description": "Nothing to change" },
+          "400": { "description": "Nothing to change, or a non-macOS host (hostonlynet is VirtualBox's macOS-only family)" },
           "404": { "description": "No host-only network by that name" },
           "503": { "description": "VirtualBox is not installed" }
         }
@@ -4332,6 +4193,7 @@
         "parameters": [ { "name": "name", "in": "path", "required": true, "schema": { "type": "string" } } ],
         "responses": {
           "200": { "description": "Host-only network removed" },
+          "400": { "description": "A non-macOS host (hostonlynet is VirtualBox's macOS-only family)" },
           "404": { "description": "No host-only network by that name" },
           "503": { "description": "VirtualBox is not installed" }
         }
@@ -5589,19 +5451,6 @@
           },
           "404": { "description": "Machine not found, or no VM exists behind it yet" },
           "503": { "description": "VirtualBox is not installed" }
-        }
-      }
-    },
-    "/ws-ticket": {
-      "get": {
-        "tags": ["Console"],
-        "summary": "Mint a WebSocket upgrade ticket",
-        "description": "Minimum role: operator. A short-lived (60s) UNBOUND ticket appended as ?ticket= to every WebSocket upgrade URL (task stream, SSH terminal, VNC websockify). Reusable within its lifetime; fetch a fresh one before each connect or reconnect.",
-        "responses": {
-          "200": {
-            "description": "Ticket minted",
-            "content": { "application/json": { "schema": { "type": "object", "properties": { "ticket": { "type": "string", "description": "64 hex chars, valid 60 seconds" } } } } }
-          }
         }
       }
     },

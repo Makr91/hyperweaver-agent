@@ -122,7 +122,8 @@ func (e *executors) transportRemove(ctx context.Context, task *tasks.Task, out *
 
 	// Fixed leases of flagged host-type entries — removed like delete does
 	// (misses are silent; absent components never fail the removal).
-	if e.env.Network.Enabled && len(hostFlagged) > 0 {
+	// hostonlynet (macOS) has no per-VM lease configs — nothing to remove.
+	if e.env.Network.Enabled && len(hostFlagged) > 0 && !UseHostOnlyNets() {
 		if iface, ferr := FindProvisioningIf(ctx, vboxExe, e.env.Network.HostIP); ferr == nil && iface != nil {
 			for _, index := range hostFlagged {
 				if rerr := vbox.RemoveDHCPVMConfig(ctx, vboxExe, iface.Name, target, index+2); rerr == nil {

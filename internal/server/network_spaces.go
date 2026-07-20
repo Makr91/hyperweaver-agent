@@ -4,11 +4,17 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"runtime"
+	"sync"
 
 	"github.com/Makr91/hyperweaver-agent/internal/auth"
 	"github.com/Makr91/hyperweaver-agent/internal/machines"
 	"github.com/Makr91/hyperweaver-agent/internal/vbox"
 )
+
+// hostOnlyNetsNarrated keeps the hostonlynet best-effort failure to ONE log
+// line per process — the listing is polled by the UI topology page.
+var hostOnlyNetsNarrated sync.Once
 
 // The network-space surface (/network/spaces*, the network-spaces capability
 // token — the UI topology ask, sync 2026-07-19): enumerate and manage
@@ -52,12 +58,19 @@ func (s *Server) handleListNetworkSpaces(w http.ResponseWriter, r *http.Request)
 		slog.Warn("list dhcp servers", "error", err)
 		dhcpServers = nil
 	}
-	// Best-effort too: `list hostonlynets` predates nothing on 7.x but older
-	// VBoxManage builds lack the verb — their hosts simply have no such rows.
-	hostonlyNets, err := vbox.ListHostOnlyNets(r.Context(), exe)
-	if err != nil {
-		slog.Warn("list hostonly networks", "error", err)
-		hostonlyNets = nil
+	// hostonlynet is VirtualBox's macOS-ONLY family (Oracle's ruling: every
+	// other host OS uses host-only interfaces) — off darwin the verb does not
+	// exist, so no probe and no rows. A darwin failure narrates once.
+	var hostonlyNets []vbox.HostOnlyNet
+	if runtime.GOOS == "darwin" {
+		hostonlyNets, err = vbox.ListHostOnlyNets(r.Context(), exe)
+		if err != nil {
+			hostOnlyNetsNarrated.Do(func() {
+				slog.Warn("list hostonly networks failed — no hostonlynet rows render (narrated once; the UI polls this endpoint)",
+					"error", err)
+			})
+			hostonlyNets = nil
+		}
 	}
 
 	spaces := []map[string]any{}
@@ -184,6 +197,20 @@ func findHostOnlyByName(list []vbox.HostOnlyIf, name string) *vbox.HostOnlyIf {
 	return nil
 }
 
+// requireHostOnlyIfPlatform writes the platform refusal ON darwin —
+// VirtualBox 7 on macOS REMOVED host-only adapters (startvm errors
+// "Host-only adapters are no longer supported!"; hostonlynet replaced the
+// family there — Oracle's platform split, the mirror of
+// requireHostOnlyNetPlatform). False = response already written.
+func requireHostOnlyIfPlatform(w http.ResponseWriter) bool {
+	if runtime.GOOS != "darwin" {
+		return true
+	}
+	taskError(w, http.StatusBadRequest,
+		"host-only interfaces died with VirtualBox 7 on macOS — this host manages host-only networks instead (/network/spaces/hostonlynet)")
+	return false
+}
+
 // handleCreateHostOnlySpace serves POST /network/spaces/hostonly — create a
 // host-only interface (VirtualBox assigns its name), optionally configure
 // its static IP and add its DHCP server in one call. A failed follow-up step
@@ -191,6 +218,9 @@ func findHostOnlyByName(list []vbox.HostOnlyIf, name string) *vbox.HostOnlyIf {
 func (s *Server) handleCreateHostOnlySpace(w http.ResponseWriter, r *http.Request) {
 	exe := s.requireVBox(w, r)
 	if exe == "" {
+		return
+	}
+	if !requireHostOnlyIfPlatform(w) {
 		return
 	}
 	var body struct {
@@ -249,6 +279,9 @@ func (s *Server) handleCreateHostOnlySpace(w http.ResponseWriter, r *http.Reques
 func (s *Server) handleModifyHostOnlySpace(w http.ResponseWriter, r *http.Request) {
 	exe := s.requireVBox(w, r)
 	if exe == "" {
+		return
+	}
+	if !requireHostOnlyIfPlatform(w) {
 		return
 	}
 	name := r.PathValue("name")
@@ -339,6 +372,9 @@ func (s *Server) handleDeleteHostOnlySpace(w http.ResponseWriter, r *http.Reques
 	if exe == "" {
 		return
 	}
+	if !requireHostOnlyIfPlatform(w) {
+		return
+	}
 	name := r.PathValue("name")
 	list, err := vbox.ListHostOnlyIfs(r.Context(), exe)
 	if err != nil {
@@ -367,12 +403,27 @@ func (s *Server) handleDeleteHostOnlySpace(w http.ResponseWriter, r *http.Reques
 	})
 }
 
+// requireHostOnlyNetPlatform writes the platform refusal off darwin —
+// hostonlynet is VirtualBox's macOS-only family (Oracle's ruling: every other
+// host OS uses host-only interfaces). False = response already written.
+func requireHostOnlyNetPlatform(w http.ResponseWriter) bool {
+	if runtime.GOOS == "darwin" {
+		return true
+	}
+	taskError(w, http.StatusBadRequest,
+		"hostonlynet is VirtualBox's macOS-only family — this host manages host-only interfaces instead (/network/spaces/hostonly)")
+	return false
+}
+
 // handleCreateHostOnlyNet serves POST /network/spaces/hostonlynet — create a
 // host-only NETWORK (VirtualBox 7's vmnet-backed family; the caller names
 // it, unlike interfaces).
 func (s *Server) handleCreateHostOnlyNet(w http.ResponseWriter, r *http.Request) {
 	exe := s.requireVBox(w, r)
 	if exe == "" {
+		return
+	}
+	if !requireHostOnlyNetPlatform(w) {
 		return
 	}
 	var body struct {
@@ -437,6 +488,9 @@ func (s *Server) handleModifyHostOnlyNet(w http.ResponseWriter, r *http.Request)
 	if exe == "" {
 		return
 	}
+	if !requireHostOnlyNetPlatform(w) {
+		return
+	}
 	name, found := s.findHostOnlyNet(w, r, exe)
 	if !found {
 		return
@@ -477,6 +531,9 @@ func (s *Server) handleModifyHostOnlyNet(w http.ResponseWriter, r *http.Request)
 func (s *Server) handleDeleteHostOnlyNet(w http.ResponseWriter, r *http.Request) {
 	exe := s.requireVBox(w, r)
 	if exe == "" {
+		return
+	}
+	if !requireHostOnlyNetPlatform(w) {
 		return
 	}
 	name, found := s.findHostOnlyNet(w, r, exe)

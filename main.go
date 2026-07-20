@@ -2,6 +2,10 @@
 // control plane. Runs a local web server serving the Hyperweaver UI plus the
 // Agent API, with a native system-tray icon (LedFx model: manage it from your
 // own browser).
+//
+//	@title		Agent API
+//	@version	1.0.0
+//	@description	The swag-generated half of the Agent API v1 document. Serve-time authority lives in internal/apidocs: the hand-maintained fragment (openapi.json) owns info/tags/components/security and every not-yet-migrated path, and this generated document's paths merge into it.
 package main
 
 //go:generate goversioninfo -platform-specific=true

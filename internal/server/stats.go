@@ -18,28 +18,41 @@ import (
 // statsPayload is the GET /stats document (the shared v1 stats shape):
 // host-OS numbers in Node's os-module vocabulary plus machine name lists.
 type statsPayload struct {
-	Hostname        string     `json:"hostname"`
-	EOL             string     `json:"eol"`
-	Arch            string     `json:"arch"`
-	Cpus            []cpuEntry `json:"cpus"`
-	Endianness      string     `json:"endianness"`
-	Freemem         uint64     `json:"freemem"`
-	Loadavg         [3]float64 `json:"loadavg"`
-	Platform        string     `json:"platform"`
-	Release         string     `json:"release"`
-	Totalmem        uint64     `json:"totalmem"`
-	Type            string     `json:"type"`
-	Uptime          uint64     `json:"uptime"`
-	Version         string     `json:"version"`
-	AllMachines     []string   `json:"allmachines"`
-	RunningMachines []string   `json:"runningmachines"`
+	Hostname string `json:"hostname"`
+	EOL      string `json:"eol"`
+	// Node os.arch() vocabulary
+	Arch string `json:"arch"`
+	// One entry per logical CPU, Node os.cpus() shape; times are cumulative milliseconds — consumers diff between polls for usage
+	Cpus       []cpuEntry `json:"cpus"`
+	Endianness string     `json:"endianness"`
+	// Available physical memory in bytes
+	Freemem uint64 `json:"freemem"`
+	// 1/5/15-minute load averages (zeros on Windows)
+	Loadavg [3]float64 `json:"loadavg"`
+	// Node os.platform() vocabulary
+	Platform string `json:"platform"`
+	// Kernel version
+	Release string `json:"release"`
+	// Total physical memory in bytes
+	Totalmem uint64 `json:"totalmem"`
+	// Node os.type() vocabulary
+	Type string `json:"type"`
+	// Host uptime in seconds (not process uptime)
+	Uptime uint64 `json:"uptime"`
+	// OS marketing name
+	Version string `json:"version"`
+	// All registered machine names (VBoxManage list vms)
+	AllMachines []string `json:"allmachines"`
+	// Running machine names (VBoxManage list runningvms)
+	RunningMachines []string `json:"runningmachines"`
 }
 
 // cpuEntry is one logical CPU in Node's os.cpus() shape: model string, speed
 // in MHz, cumulative times in MILLISECONDS — the UI's Resource Utilization
 // diffs the times between polls to compute usage.
 type cpuEntry struct {
-	Model string   `json:"model"`
+	Model string `json:"model"`
+	// MHz
 	Speed int      `json:"speed"`
 	Times cpuTimes `json:"times"`
 }
@@ -138,6 +151,15 @@ func vboxManagePath(ctx context.Context) string {
 // host stats. The `version` field carries the OS marketing name (what Node's
 // os.version() reports on Windows) rather than a raw kernel build string —
 // it feeds the UI's System Information panel.
+//
+//	@Summary		Host statistics and machine lists
+//	@Description	Minimum role: viewer — unless the agent is configured with `stats.public_access: true`, which serves this endpoint without an API key (the Node agent's conditional /stats registration). OS-level host statistics plus the registered and running VirtualBox machine name lists. Machine-list failures degrade to empty arrays — a broken VBoxManage never fails the host stats.
+//	@Tags			System
+//	@Produce		json
+//	@Success		200	{object}	statsPayload		"Host statistics"
+//	@Failure		401	{object}	map[string]string	"Missing API key"
+//	@Failure		403	{object}	map[string]string	"Invalid API key"
+//	@Router			/stats [get]
 func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 	hostname, err := os.Hostname()
 	if err != nil {

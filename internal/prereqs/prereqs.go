@@ -1,6 +1,6 @@
 // Package prereqs detects the external tools the provisioning engine drives
-// (Vagrant, VirtualBox, Git, rsync, scp) — SHI parity: presence + version
-// display. rsync's version also feeds the sync-method platform rule (macOS
+// (Vagrant, VirtualBox, Git, ansible, rsync, scp) — SHI parity: presence +
+// version display. rsync's version also feeds the sync-method platform rule (macOS
 // auto-falls back to SCP when the system rsync is the ancient Apple 2.x
 // build). The sync transports probe with the SAME lookup the pipeline uses
 // (sshrun.FindTool: PATH → vagrant's embedded toolchain → Windows OpenSSH),
@@ -20,6 +20,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Makr91/hyperweaver-agent/internal/ansiblehost"
 	"github.com/Makr91/hyperweaver-agent/internal/procattr"
 	"github.com/Makr91/hyperweaver-agent/internal/safepath"
 	"github.com/Makr91/hyperweaver-agent/internal/sshrun"
@@ -78,6 +79,7 @@ func Detect(ctx context.Context) []Tool {
 	}
 	tools = append(tools,
 		probePath(probeCtx, "git", lookPath("git"), "--version"),
+		ansibleTool(probeCtx),
 		probePath(probeCtx, "rsync", lookSyncTool("rsync"), "--version"),
 		// OpenSSH scp has no version flag; a bare invocation proves presence.
 		probePath(probeCtx, "scp", lookSyncTool("scp")),
@@ -91,6 +93,21 @@ func Detect(ctx context.Context) []Tool {
 	out := make([]Tool, len(tools))
 	copy(out, tools)
 	return out
+}
+
+// ansibleTool reports the host's ansible control node: the native binary
+// where the OS carries one, and on Windows the default WSL distribution's
+// ansible (the same resolution the remote-playbook and winrm mechanisms use
+// — internal/ansiblehost), Path naming the wsl.exe that carries it.
+func ansibleTool(ctx context.Context) Tool {
+	if runtime.GOOS != "windows" {
+		return probePath(ctx, "ansible", lookPath("ansible"), "--version")
+	}
+	installed, version, wslPath := ansiblehost.DetectWSL(ctx)
+	if !installed {
+		return Tool{Name: "ansible", Installed: false}
+	}
+	return Tool{Name: "ansible", Installed: true, Version: version, Path: wslPath}
 }
 
 // lookSyncTool locates a sync transport with the pipeline's own lookup

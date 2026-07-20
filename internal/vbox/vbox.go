@@ -154,25 +154,59 @@ func ShowVMInfo(ctx context.Context, vboxManage, nameOrUUID string) (*Info, erro
 	return info, nil
 }
 
-// ListBridgedIfs returns the host's bridgeable interface names
-// (`VBoxManage list bridgedifs` Name: lines) — SHI's default-NIC detection,
-// feeding the UI's bridge-interface picker.
-func ListBridgedIfs(ctx context.Context, vboxManage string) ([]string, error) {
+// BridgedIf is one `list bridgedifs` block: the name plus the fields the
+// picker filters on (Status/Wireless — macOS lists pseudo and down
+// interfaces) and the darwin hostonlynet-backing exclusion matches by
+// (IPAddress/NetworkMask).
+type BridgedIf struct {
+	Name        string
+	IPAddress   string
+	NetworkMask string
+	Status      string
+	Wireless    bool
+}
+
+// ListBridgedIfs parses `VBoxManage list bridgedifs` — Key: value blocks per
+// interface (SHI's default-NIC detection, feeding the UI's bridge-interface
+// picker).
+func ListBridgedIfs(ctx context.Context, vboxManage string) ([]BridgedIf, error) {
 	cmd := exec.CommandContext(ctx, vboxManage, "list", "bridgedifs")
 	cmd.SysProcAttr = procattr.NoConsole()
 	out, err := cmd.Output()
 	if err != nil {
 		return nil, fmt.Errorf("VBoxManage list bridgedifs: %w", err)
 	}
-	names := []string{}
+	interfaces := []BridgedIf{}
+	var current *BridgedIf
 	for _, line := range strings.Split(string(out), "\n") {
-		if value, found := strings.CutPrefix(strings.TrimSpace(line), "Name:"); found {
-			if name := strings.TrimSpace(value); name != "" {
-				names = append(names, name)
+		key, value, found := strings.Cut(strings.TrimSpace(line), ":")
+		if !found {
+			continue
+		}
+		value = strings.TrimSpace(value)
+		switch strings.TrimSpace(key) {
+		case "Name":
+			interfaces = append(interfaces, BridgedIf{Name: value})
+			current = &interfaces[len(interfaces)-1]
+		case "IPAddress":
+			if current != nil {
+				current.IPAddress = value
+			}
+		case "NetworkMask":
+			if current != nil {
+				current.NetworkMask = value
+			}
+		case "Status":
+			if current != nil {
+				current.Status = value
+			}
+		case "Wireless":
+			if current != nil {
+				current.Wireless = strings.EqualFold(value, "Yes")
 			}
 		}
 	}
-	return names, nil
+	return interfaces, nil
 }
 
 // StartVM boots a machine (`startvm --type headless|gui`) — the direct path
