@@ -52,7 +52,21 @@ func (s *Server) registerFilesystemExecutors() {
 	s.tasks.Register(opFileArchiveExtract, tasks.Executor{Run: s.archiveExtractTask})
 }
 
-// queueFilesystemTask creates one filesystem task row.
+// queueFilesystemTask creates one filesystem task row; this swag block
+// documents the copy action (the move action rides handleTransferItem, which
+// shares this helper).
+//
+//	@Summary		Copy an item (task)
+//	@Description	Minimum role: operator. {source, destination} → 202 file_copy task. Directories copy recursively; symlinks and specials are skipped, never followed.
+//	@Tags			File System
+//	@Accept			json
+//	@Produce		json
+//	@Param			request	body	fileTransferMetadata	true	"Source and destination paths"
+//	@Success		202	{object}	transferTaskResponse	"Copy task created ({success, message, task_id, source, destination})"
+//	@Failure		400	"Missing fields"
+//	@Failure		403	"Path forbidden"
+//	@Failure		503	"File browser is disabled"
+//	@Router			/filesystem/copy [post]
 func (s *Server) queueFilesystemTask(r *http.Request, operation string, priority int, metadata any) (*tasks.Task, error) {
 	raw, err := json.Marshal(metadata)
 	if err != nil {
@@ -70,6 +84,18 @@ func (s *Server) queueFilesystemTask(r *http.Request, operation string, priority
 
 // handleTransferItem serves PUT /filesystem/move and POST /filesystem/copy —
 // {source, destination} → 202 with the task id.
+//
+//	@Summary		Move an item (task)
+//	@Description	Minimum role: operator. {source, destination} → 202 file_move task (async — trees can be huge). Rename first; a cross-volume move copies then deletes the source.
+//	@Tags			File System
+//	@Accept			json
+//	@Produce		json
+//	@Param			request	body	fileTransferMetadata	true	"Source and destination paths"
+//	@Success		202	{object}	transferTaskResponse	"Move task created ({success, message, task_id, source, destination})"
+//	@Failure		400	"Missing fields"
+//	@Failure		403	"Path forbidden"
+//	@Failure		503	"File browser is disabled"
+//	@Router			/filesystem/move [put]
 func (s *Server) handleTransferItem(operation, verb string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var body fileTransferMetadata

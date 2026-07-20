@@ -166,6 +166,18 @@ func additionsRunLevel(info *vbox.Info) int {
 // handleVncWebsockify bridges the browser's WebSocket onto the machine's
 // VRDE port (the base's websockify proxy): binary frames ↔ raw TCP, closed
 // when either side ends.
+//
+//	@Summary		VNC console bridge (WebSocket)
+//	@Description	WEBSOCKET upgrade — authenticate with ?ticket= (GET /ws-ticket). Bridges binary WebSocket frames onto the running machine's VRDE port (subprotocol "binary" — noVNC's wire). Requires an active VRDE console (settings.consoleport at create, or vnc: on via modify) AND a VNC-speaking VRDE module (the console list advertises vnc only then).
+//	@Tags			Console
+//	@Param			machineName	path	string	true	"Machine name"
+//	@Param			ticket	query	string	true	"WebSocket upgrade ticket (GET /ws-ticket)"
+//	@Success		101	"Switching Protocols — RFB flows"
+//	@Failure		400	"Machine not running, or no active VRDE console"
+//	@Failure		401	"Missing or invalid ticket"
+//	@Failure		404	"Machine not found"
+//	@Failure		502	"Console server connection failed"
+//	@Router			/machines/{machineName}/vnc/websockify [get]
 func (s *Server) handleVncWebsockify(w http.ResponseWriter, r *http.Request) {
 	if !s.requireTicket(w, r) {
 		return

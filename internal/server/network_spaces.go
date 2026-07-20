@@ -27,6 +27,15 @@ var hostOnlyNetsNarrated sync.Once
 
 // handleListNetworkSpaces serves GET /network/spaces — every network space
 // as one typed row (the topology mapper's network-card feed).
+//
+//	@Summary		List the host's VirtualBox network spaces
+//	@Description	Minimum role: viewer (the network-spaces capability token, minted 2026-07-19 — the UI topology mapper's network-card feed; devices.nics rows join here by their network field). One typed row per space: hostonly = a host-only INTERFACE (VBoxManage list hostonlyifs; VirtualBox assigns names itself) with its DHCP server joined by VBoxNetworkName (best-effort — a failed dhcpservers read degrades to {exists:false} rows, narrated in the log); hostonlynet = a host-only NETWORK (list hostonlynets — VirtualBox's macOS-ONLY vmnet family; Oracle's platform split: VirtualBox 7 on macOS REMOVED host-only adapters while every other host OS lacks the hostonlynet verb entirely, so darwin agents carry hostonlynet rows, every other host carries hostonly rows, and off darwin the verb is never even probed); intnet = an implicit internal network (list intnets — exists while a VM references it, no other attributes); natnetwork = a NAT network (list natnetworks) with its port-forward rules (IPv4 + IPv6 folded into one port_forwards[] with an ipv6 flag) and loopback mappings (verbatim rule strings). VirtualBox-only — utm machines join no spaces.
+//	@Tags			Host Configuration
+//	@Produce		json
+//	@Success		200	{object}	map[string]interface{}	"The network spaces"
+//	@Failure		500	"A VBoxManage listing failed"
+//	@Failure		503	"VirtualBox is not installed"
+//	@Router			/network/spaces [get]
 func (s *Server) handleListNetworkSpaces(w http.ResponseWriter, r *http.Request) {
 	exe := machines.VBoxManagePath(r.Context())
 	if exe == "" {

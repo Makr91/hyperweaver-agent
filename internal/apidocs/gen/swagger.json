@@ -3097,6 +3097,17 @@
                 },
                 "type": "object"
             },
+            "server.fileTransferMetadata": {
+                "properties": {
+                    "destination": {
+                        "type": "string"
+                    },
+                    "source": {
+                        "type": "string"
+                    }
+                },
+                "type": "object"
+            },
             "server.findProcessesResponse": {
                 "properties": {
                     "count": {
@@ -6044,6 +6055,26 @@
                 },
                 "type": "object"
             },
+            "server.transferTaskResponse": {
+                "properties": {
+                    "destination": {
+                        "type": "string"
+                    },
+                    "message": {
+                        "type": "string"
+                    },
+                    "source": {
+                        "type": "string"
+                    },
+                    "success": {
+                        "type": "boolean"
+                    },
+                    "task_id": {
+                        "type": "string"
+                    }
+                },
+                "type": "object"
+            },
             "server.trayClaimRequest": {
                 "properties": {
                     "token": {
@@ -8736,6 +8767,56 @@
                 ]
             }
         },
+        "/filesystem/copy": {
+            "post": {
+                "description": "Minimum role: operator. {source, destination} → 202 file_copy task. Directories copy recursively; symlinks and specials are skipped, never followed.",
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "oneOf": [
+                                    {
+                                        "type": "object"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/server.fileTransferMetadata",
+                                        "summary": "request",
+                                        "description": "Source and destination paths"
+                                    }
+                                ]
+                            }
+                        }
+                    },
+                    "description": "Source and destination paths",
+                    "required": true
+                },
+                "responses": {
+                    "202": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/server.transferTaskResponse"
+                                }
+                            }
+                        },
+                        "description": "Copy task created ({success, message, task_id, source, destination})"
+                    },
+                    "400": {
+                        "description": "Missing fields"
+                    },
+                    "403": {
+                        "description": "Path forbidden"
+                    },
+                    "503": {
+                        "description": "File browser is disabled"
+                    }
+                },
+                "summary": "Copy an item (task)",
+                "tags": [
+                    "File System"
+                ]
+            }
+        },
         "/filesystem/download": {
             "get": {
                 "description": "Minimum role: operator. Streams the file as an attachment (range requests honored); directories are refused — archive them instead.",
@@ -8825,6 +8906,56 @@
                     }
                 },
                 "summary": "Create a directory",
+                "tags": [
+                    "File System"
+                ]
+            }
+        },
+        "/filesystem/move": {
+            "put": {
+                "description": "Minimum role: operator. {source, destination} → 202 file_move task (async — trees can be huge). Rename first; a cross-volume move copies then deletes the source.",
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "oneOf": [
+                                    {
+                                        "type": "object"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/server.fileTransferMetadata",
+                                        "summary": "request",
+                                        "description": "Source and destination paths"
+                                    }
+                                ]
+                            }
+                        }
+                    },
+                    "description": "Source and destination paths",
+                    "required": true
+                },
+                "responses": {
+                    "202": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/server.transferTaskResponse"
+                                }
+                            }
+                        },
+                        "description": "Move task created ({success, message, task_id, source, destination})"
+                    },
+                    "400": {
+                        "description": "Missing fields"
+                    },
+                    "403": {
+                        "description": "Path forbidden"
+                    },
+                    "503": {
+                        "description": "File browser is disabled"
+                    }
+                },
+                "summary": "Move an item (task)",
                 "tags": [
                     "File System"
                 ]
@@ -11424,6 +11555,65 @@
                 ]
             }
         },
+        "/machines/{machineName}/rdp-bridge": {
+            "get": {
+                "description": "WEBSOCKET upgrade — authenticate with ?ticket= (GET /ws-ticket). The IronRDP web client's transport (iron-remote-desktop-rdp, proxyAddress = this URL): the client cannot open TCP or TLS from a browser, so its wire is the RDCleanPath contract — the bridge reads the client's DER-encoded RDCleanPath request (first binary frames), relays the embedded X.224 connection request to the chosen RDP server, performs the TLS handshake toward that server ITSELF, answers the RDCleanPath response (X.224 confirm + the server certificate chain the client pins), and then pipes raw bytes both ways. TWO targets via ?target= (GET /machines/{name}/rdp's same vocabulary): console (default) = the machine's VRDE port at 127.0.0.1, TLS VERIFIED against the AGENT CA; guest = a Windows guest's OWN RDP service at its host-reachable IP:3389 (resolved like the rdp launcher: guest agent → Guest Additions → control IP) — the guest presents its OWN certificate (self-signed or domain-issued), so the bridge forwards the chain UNVERIFIED and the client's pin of it is the trust anchor (Devolutions Gateway's model; Mark's ruling 2026-07-11). The PDU's destination field is advisory: both targets resolve server-side, never from the client. SELF-HEALING (console target, Mark's zero-click ruling 2026-07-11): a VRDE server answering without TLS gets the whole VRDE TLS setup applied LIVE — certificate minted from the agent CA, Security properties set via controlvm vrdeproperty (the VRDP server reads them per connection; no power cycle) — and the relay retries once, so the first browser connect to an unconfigured machine (vagrant-up, GUI-created, anything) just works. Persistent negotiation failures ride through as RDCleanPath errors (guest target on Standard security = the guest's own RDP settings disable TLS — unhealable from the host).",
+                "parameters": [
+                    {
+                        "description": "Machine name",
+                        "in": "path",
+                        "name": "machineName",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    {
+                        "description": "WebSocket upgrade ticket (GET /ws-ticket)",
+                        "in": "query",
+                        "name": "ticket",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    {
+                        "description": "console = the VRDE hypervisor console (agent-CA-verified TLS); guest = the guest's own RDP service at its host-reachable IP (chain forwarded unverified — the client pin is the trust)",
+                        "in": "query",
+                        "name": "target",
+                        "schema": {
+                            "default": "console",
+                            "enum": [
+                                "console",
+                                "guest"
+                            ],
+                            "type": "string"
+                        }
+                    }
+                ],
+                "responses": {
+                    "101": {
+                        "description": "Switching Protocols — RDCleanPath handshake, then raw RDP flows"
+                    },
+                    "400": {
+                        "description": "Machine not running, unknown target, no active VRDE console (console target), or no host-reachable guest IP (guest target)"
+                    },
+                    "401": {
+                        "description": "Missing or invalid ticket"
+                    },
+                    "404": {
+                        "description": "Machine not found, or no VM exists behind it yet"
+                    },
+                    "503": {
+                        "description": "VirtualBox is not installed, or the agent CA is unavailable (console target)"
+                    }
+                },
+                "summary": "Browser-RDP bridge (WebSocket)",
+                "tags": [
+                    "Console"
+                ]
+            }
+        },
         "/machines/{machineName}/reset": {
             "post": {
                 "description": "Minimum role: operator. VBoxManage controlvm reset — the hard reboot beyond the stop→start chain (no guest shutdown; like pressing the reset button).",
@@ -12604,6 +12794,52 @@
                 ]
             }
         },
+        "/machines/{machineName}/vnc/websockify": {
+            "get": {
+                "description": "WEBSOCKET upgrade — authenticate with ?ticket= (GET /ws-ticket). Bridges binary WebSocket frames onto the running machine's VRDE port (subprotocol \"binary\" — noVNC's wire). Requires an active VRDE console (settings.consoleport at create, or vnc: on via modify) AND a VNC-speaking VRDE module (the console list advertises vnc only then).",
+                "parameters": [
+                    {
+                        "description": "Machine name",
+                        "in": "path",
+                        "name": "machineName",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    {
+                        "description": "WebSocket upgrade ticket (GET /ws-ticket)",
+                        "in": "query",
+                        "name": "ticket",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "responses": {
+                    "101": {
+                        "description": "Switching Protocols — RFB flows"
+                    },
+                    "400": {
+                        "description": "Machine not running, or no active VRDE console"
+                    },
+                    "401": {
+                        "description": "Missing or invalid ticket"
+                    },
+                    "404": {
+                        "description": "Machine not found"
+                    },
+                    "502": {
+                        "description": "Console server connection failed"
+                    }
+                },
+                "summary": "VNC console bridge (WebSocket)",
+                "tags": [
+                    "Console"
+                ]
+            }
+        },
         "/machines/{machineName}/vrde-tls": {
             "post": {
                 "description": "Minimum role: operator. Explicit VRDE TLS prep — NEAR-OBSOLETE since machine creation mints the TLS material from birth and the rdp-bridge SELF-HEALS unconfigured machines live at first connect (Mark's zero-click ruling 2026-07-11); kept as the manual prep path. Mints the machine's VRDE certificate signed by the AGENT CA (loopback SANs; files under \u003cconfig dir\u003e/ssl/vrde/\u003cmachine\u003e/ — reused, never regenerated) and applies Security/Method=Negotiate + the certificate/key/CA paths. RUNNING machines: applied LIVE via controlvm vrdeproperty (status applied_live, requires_restart false — the VRDP server reads Security/* per connection; the VRDE listener restarts, dropping active RDP sessions, VM untouched), with the modifyvm-bound console extras (multi-con, reuse-con, usbtablet, usb keyboard, xHCI, clipboard) accrued for the next power cycle (pending_changes in the answer). POWERED-OFF machines: everything as one queued machine_modify. Negotiate keeps native clients (mstsc) connecting however they like; the bridge always asks for TLS and gets it.",
@@ -13582,6 +13818,34 @@
                     }
                 },
                 "summary": "Free-IP suggestions for static addressing",
+                "tags": [
+                    "Host Configuration"
+                ]
+            }
+        },
+        "/network/spaces": {
+            "get": {
+                "description": "Minimum role: viewer (the network-spaces capability token, minted 2026-07-19 — the UI topology mapper's network-card feed; devices.nics rows join here by their network field). One typed row per space: hostonly = a host-only INTERFACE (VBoxManage list hostonlyifs; VirtualBox assigns names itself) with its DHCP server joined by VBoxNetworkName (best-effort — a failed dhcpservers read degrades to {exists:false} rows, narrated in the log); hostonlynet = a host-only NETWORK (list hostonlynets — VirtualBox's macOS-ONLY vmnet family; Oracle's platform split: VirtualBox 7 on macOS REMOVED host-only adapters while every other host OS lacks the hostonlynet verb entirely, so darwin agents carry hostonlynet rows, every other host carries hostonly rows, and off darwin the verb is never even probed); intnet = an implicit internal network (list intnets — exists while a VM references it, no other attributes); natnetwork = a NAT network (list natnetworks) with its port-forward rules (IPv4 + IPv6 folded into one port_forwards[] with an ipv6 flag) and loopback mappings (verbatim rule strings). VirtualBox-only — utm machines join no spaces.",
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "additionalProperties": {},
+                                    "type": "object"
+                                }
+                            }
+                        },
+                        "description": "The network spaces"
+                    },
+                    "500": {
+                        "description": "A VBoxManage listing failed"
+                    },
+                    "503": {
+                        "description": "VirtualBox is not installed"
+                    }
+                },
+                "summary": "List the host's VirtualBox network spaces",
                 "tags": [
                     "Host Configuration"
                 ]
@@ -15204,6 +15468,46 @@
                 ]
             }
         },
+        "/ssh/{sessionId}": {
+            "get": {
+                "description": "WEBSOCKET upgrade — authenticate with ?ticket= (GET /ws-ticket). Opens the interactive shell (xterm-256color PTY) for a session minted at POST /machines/{name}/ssh/start. Wire: remote output arrives as raw text frames; send raw text as terminal input; send {\"type\": \"resize\", \"cols\": N, \"rows\": N} JSON frames to resize the PTY. \"Connecting to SSH...\" opens the stream; \"SSH connection closed.\" marks remote exit.",
+                "parameters": [
+                    {
+                        "description": "SSH session id",
+                        "in": "path",
+                        "name": "sessionId",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    {
+                        "description": "WebSocket upgrade ticket (GET /ws-ticket)",
+                        "in": "query",
+                        "name": "ticket",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "responses": {
+                    "101": {
+                        "description": "Switching Protocols — the terminal begins"
+                    },
+                    "401": {
+                        "description": "Missing or invalid ticket"
+                    },
+                    "404": {
+                        "description": "SSH session or machine not found"
+                    }
+                },
+                "summary": "SSH terminal (WebSocket)",
+                "tags": [
+                    "Console"
+                ]
+            }
+        },
         "/stats": {
             "get": {
                 "description": "Minimum role: viewer — unless the agent is configured with `stats.public_access: true`, which serves this endpoint without an API key (the Node agent's conditional /stats registration). OS-level host statistics plus the registered and running VirtualBox machine name lists. Machine-list failures degrade to empty arrays — a broken VBoxManage never fails the host stats.",
@@ -16524,6 +16828,47 @@
                 ]
             }
         },
+        "/tasks/{taskId}/stream": {
+            "get": {
+                "description": "WEBSOCKET upgrade — authenticate with ?ticket= (GET /ws-ticket), not API-key headers. Replays the task's buffered (or persisted) output as {type: \"output\", task_id, stream, data, timestamp} frames, streams live entries while the task runs, then sends {type: \"status\", task_id, status} and closes. Already-finished tasks get the full replay plus the status frame immediately.",
+                "parameters": [
+                    {
+                        "description": "Task id",
+                        "in": "path",
+                        "name": "taskId",
+                        "required": true,
+                        "schema": {
+                            "format": "uuid",
+                            "type": "string"
+                        }
+                    },
+                    {
+                        "description": "WebSocket upgrade ticket (GET /ws-ticket)",
+                        "in": "query",
+                        "name": "ticket",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "responses": {
+                    "101": {
+                        "description": "Switching Protocols — the stream begins"
+                    },
+                    "401": {
+                        "description": "Missing or invalid ticket"
+                    },
+                    "404": {
+                        "description": "Task not found"
+                    }
+                },
+                "summary": "Live task output stream (WebSocket)",
+                "tags": [
+                    "Console"
+                ]
+            }
+        },
         "/templates": {
             "get": {
                 "description": "Minimum role: viewer. The local box-template registry: downloaded box disk images machines clone from (organization/box_name/version/architecture tuples; stale rows whose disk image vanished self-delete on resolution).",
@@ -17049,6 +17394,46 @@
                     }
                 },
                 "summary": "Start a host terminal session",
+                "tags": [
+                    "Console"
+                ]
+            }
+        },
+        "/term/{sessionId}": {
+            "get": {
+                "description": "WEBSOCKET upgrade — authenticate with ?ticket= (GET /ws-ticket); the session id itself is mintable only by an admin at POST /term/start. Opens the host shell for the session. Wire = the SSH terminal's exactly: raw text frames both ways, {\"type\": \"resize\", \"cols\": N, \"rows\": N} JSON frames resize the PTY, \"Terminal session closed.\" marks shell exit — one xterm.js component serves both terminals.",
+                "parameters": [
+                    {
+                        "description": "Terminal session ID",
+                        "in": "path",
+                        "name": "sessionId",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    {
+                        "description": "WebSocket upgrade ticket (GET /ws-ticket)",
+                        "in": "query",
+                        "name": "ticket",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "responses": {
+                    "101": {
+                        "description": "Switching Protocols — the terminal begins"
+                    },
+                    "401": {
+                        "description": "Missing or invalid ticket"
+                    },
+                    "404": {
+                        "description": "Terminal session not found"
+                    }
+                },
+                "summary": "Host terminal (WebSocket)",
                 "tags": [
                     "Console"
                 ]

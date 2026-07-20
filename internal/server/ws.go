@@ -147,6 +147,16 @@ func writeFrame(ctx context.Context, conn *websocket.Conn, frame *outputFrame) e
 // handleTaskStream serves GET /tasks/{taskId}/stream: replay the buffered (or
 // persisted) output, then live entries, then a final status frame and close —
 // the base's handleTaskStreamConnection.
+//
+//	@Summary		Live task output stream (WebSocket)
+//	@Description	WEBSOCKET upgrade — authenticate with ?ticket= (GET /ws-ticket), not API-key headers. Replays the task's buffered (or persisted) output as {type: "output", task_id, stream, data, timestamp} frames, streams live entries while the task runs, then sends {type: "status", task_id, status} and closes. Already-finished tasks get the full replay plus the status frame immediately.
+//	@Tags			Console
+//	@Param			taskId	path	string	true	"Task id"	format(uuid)
+//	@Param			ticket	query	string	true	"WebSocket upgrade ticket (GET /ws-ticket)"
+//	@Success		101	"Switching Protocols — the stream begins"
+//	@Failure		401	"Missing or invalid ticket"
+//	@Failure		404	"Task not found"
+//	@Router			/tasks/{taskId}/stream [get]
 func (s *Server) handleTaskStream(w http.ResponseWriter, r *http.Request) {
 	if !s.requireTicket(w, r) {
 		return

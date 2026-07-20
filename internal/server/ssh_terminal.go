@@ -247,6 +247,16 @@ type terminalControl struct {
 // handleSSHSocket serves the WebSocket at /ssh/{sessionId}: dial, shell,
 // bidirectional piping, resize control frames — the base's
 // handleSSHConnection + setupSSHPiping.
+//
+//	@Summary		SSH terminal (WebSocket)
+//	@Description	WEBSOCKET upgrade — authenticate with ?ticket= (GET /ws-ticket). Opens the interactive shell (xterm-256color PTY) for a session minted at POST /machines/{name}/ssh/start. Wire: remote output arrives as raw text frames; send raw text as terminal input; send {"type": "resize", "cols": N, "rows": N} JSON frames to resize the PTY. "Connecting to SSH..." opens the stream; "SSH connection closed." marks remote exit.
+//	@Tags			Console
+//	@Param			sessionId	path	string	true	"SSH session id"
+//	@Param			ticket	query	string	true	"WebSocket upgrade ticket (GET /ws-ticket)"
+//	@Success		101	"Switching Protocols — the terminal begins"
+//	@Failure		401	"Missing or invalid ticket"
+//	@Failure		404	"SSH session or machine not found"
+//	@Router			/ssh/{sessionId} [get]
 func (s *Server) handleSSHSocket(w http.ResponseWriter, r *http.Request) {
 	if !s.requireTicket(w, r) {
 		return

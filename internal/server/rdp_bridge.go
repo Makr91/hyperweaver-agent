@@ -279,6 +279,19 @@ func (s *Server) healVRDETLS(ctx context.Context, vboxExe string, machine *machi
 // authorized THIS machine's bridge and both targets resolve server-side
 // (VRDE port from the live view; guest IP via guestRDPAddress), so the
 // bridge never dials a client-chosen address.
+//
+//	@Summary		Browser-RDP bridge (WebSocket)
+//	@Description	WEBSOCKET upgrade — authenticate with ?ticket= (GET /ws-ticket). The IronRDP web client's transport (iron-remote-desktop-rdp, proxyAddress = this URL): the client cannot open TCP or TLS from a browser, so its wire is the RDCleanPath contract — the bridge reads the client's DER-encoded RDCleanPath request (first binary frames), relays the embedded X.224 connection request to the chosen RDP server, performs the TLS handshake toward that server ITSELF, answers the RDCleanPath response (X.224 confirm + the server certificate chain the client pins), and then pipes raw bytes both ways. TWO targets via ?target= (GET /machines/{name}/rdp's same vocabulary): console (default) = the machine's VRDE port at 127.0.0.1, TLS VERIFIED against the AGENT CA; guest = a Windows guest's OWN RDP service at its host-reachable IP:3389 (resolved like the rdp launcher: guest agent → Guest Additions → control IP) — the guest presents its OWN certificate (self-signed or domain-issued), so the bridge forwards the chain UNVERIFIED and the client's pin of it is the trust anchor (Devolutions Gateway's model; Mark's ruling 2026-07-11). The PDU's destination field is advisory: both targets resolve server-side, never from the client. SELF-HEALING (console target, Mark's zero-click ruling 2026-07-11): a VRDE server answering without TLS gets the whole VRDE TLS setup applied LIVE — certificate minted from the agent CA, Security properties set via controlvm vrdeproperty (the VRDP server reads them per connection; no power cycle) — and the relay retries once, so the first browser connect to an unconfigured machine (vagrant-up, GUI-created, anything) just works. Persistent negotiation failures ride through as RDCleanPath errors (guest target on Standard security = the guest's own RDP settings disable TLS — unhealable from the host).
+//	@Tags			Console
+//	@Param			machineName	path	string	true	"Machine name"
+//	@Param			ticket	query	string	true	"WebSocket upgrade ticket (GET /ws-ticket)"
+//	@Param			target	query	string	false	"console = the VRDE hypervisor console (agent-CA-verified TLS); guest = the guest's own RDP service at its host-reachable IP (chain forwarded unverified — the client pin is the trust)"	Enums(console, guest)	default(console)
+//	@Success		101	"Switching Protocols — RDCleanPath handshake, then raw RDP flows"
+//	@Failure		400	"Machine not running, unknown target, no active VRDE console (console target), or no host-reachable guest IP (guest target)"
+//	@Failure		401	"Missing or invalid ticket"
+//	@Failure		404	"Machine not found, or no VM exists behind it yet"
+//	@Failure		503	"VirtualBox is not installed, or the agent CA is unavailable (console target)"
+//	@Router			/machines/{machineName}/rdp-bridge [get]
 func (s *Server) handleRDPBridge(w http.ResponseWriter, r *http.Request) {
 	if !s.requireTicket(w, r) {
 		return

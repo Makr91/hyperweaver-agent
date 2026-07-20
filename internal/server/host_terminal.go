@@ -192,6 +192,16 @@ func parseResizeFrame(data []byte) (cols, rows int, ok bool) {
 
 // handleTermSocket serves the WebSocket at /term/{sessionId}: opens the host
 // shell and pipes it — the SSH socket's exact wire.
+//
+//	@Summary		Host terminal (WebSocket)
+//	@Description	WEBSOCKET upgrade — authenticate with ?ticket= (GET /ws-ticket); the session id itself is mintable only by an admin at POST /term/start. Opens the host shell for the session. Wire = the SSH terminal's exactly: raw text frames both ways, {"type": "resize", "cols": N, "rows": N} JSON frames resize the PTY, "Terminal session closed." marks shell exit — one xterm.js component serves both terminals.
+//	@Tags			Console
+//	@Param			sessionId	path	string	true	"Terminal session ID"
+//	@Param			ticket	query	string	true	"WebSocket upgrade ticket (GET /ws-ticket)"
+//	@Success		101	"Switching Protocols — the terminal begins"
+//	@Failure		401	"Missing or invalid ticket"
+//	@Failure		404	"Terminal session not found"
+//	@Router			/term/{sessionId} [get]
 func (s *Server) handleTermSocket(w http.ResponseWriter, r *http.Request) {
 	if !s.requireTicket(w, r) {
 		return
