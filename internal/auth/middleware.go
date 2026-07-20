@@ -98,12 +98,19 @@ func ExtractKey(r *http.Request) string {
 	return ""
 }
 
+// ErrorMsg is the agent's auth-layer error envelope (the spec's Error
+// component).
+type ErrorMsg struct {
+	// Error message
+	Msg string `json:"msg"`
+}
+
 // WriteMsg writes the agent's error shape: {"msg": "..."} — the field the
 // Hyperweaver UI surfaces.
 func WriteMsg(w http.ResponseWriter, status int, msg string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	if err := json.NewEncoder(w).Encode(map[string]string{"msg": msg}); err != nil {
+	if err := json.NewEncoder(w).Encode(ErrorMsg{Msg: msg}); err != nil {
 		slog.Error("write error response", "error", err)
 	}
 }

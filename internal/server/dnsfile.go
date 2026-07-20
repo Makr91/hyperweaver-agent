@@ -43,15 +43,13 @@ type dnsView struct {
 	Options       []string
 }
 
-// payload spreads the view into the response envelope (domain is null when
-// absent — zoneweaver's shape).
-func (v *dnsView) payload() map[string]any {
-	return map[string]any{
-		"nameservers":    v.Nameservers,
-		"search_domains": v.SearchDomains,
-		"domain":         nullable(v.Domain),
-		"options":        v.Options,
+// domainPtr renders the domain directive for the wire — nil when absent
+// (zoneweaver's null shape).
+func domainPtr(domain string) *string {
+	if domain == "" {
+		return nil
 	}
+	return &domain
 }
 
 // parseResolvConf implements the resolv.conf grammar (zoneweaver's parser,
@@ -245,9 +243,32 @@ func darwinDNSView(r *http.Request) (dnsView, string, error) {
 	return view, raw.String(), nil
 }
 
+// dnsGetResponse is the GET /system/dns answer: the converged success
+// envelope spread with the parsed DNS view plus raw.
+type dnsGetResponse struct {
+	Success       bool     `json:"success"`
+	Message       string   `json:"message"`
+	Timestamp     string   `json:"timestamp"`
+	Nameservers   []string `json:"nameservers"`
+	SearchDomains []string `json:"search_domains"`
+	// The resolv.conf domain directive; null when absent (always null on Windows/macOS)
+	Domain  *string  `json:"domain"`
+	Options []string `json:"options"`
+	// The whole source text: /etc/resolv.conf on Unix, the platform tool's output on Windows/macOS
+	Raw string `json:"raw"`
+}
+
 // handleGetDNS mirrors GET /system/dns — zoneweaver's shipped wire (the
 // converged wire, sync 2026-07-17): the standard success envelope with
 // nameservers/search_domains/domain/options/raw spread top-level.
+//
+//	@Summary		Read the DNS configuration
+//	@Description	Minimum role: viewer (the dns capability token). The converged wire (sync 2026-07-17 — both agents answer the same shape): the standard success envelope with nameservers/search_domains/domain/options plus raw. Per-OS mechanics behind the one shape: Unix parses /etc/resolv.conf (grammar: blanks and #/; comment lines skipped; nameserver appends, search extends, domain sets, options extends; raw = the whole file). Windows has no resolv.conf — nameservers are the unique server IPs (static or DHCP-configured) across CONNECTED interfaces via netsh, search_domains/domain/options stay empty (the honest platform subset; DNS suffixes live elsewhere), raw = the netsh output. macOS resolv.conf is generated and ignored by the resolver — nameservers/search_domains union networksetup's per-enabled-service answers, domain/options stay empty, raw = the concatenated tool output.
+//	@Tags			Host Configuration
+//	@Produce		json
+//	@Success		200	{object}	dnsGetResponse	"DNS configuration"
+//	@Failure		500	{object}	wrappedError	"Failed to read DNS configuration"
+//	@Router			/system/dns [get]
 func (s *Server) handleGetDNS(w http.ResponseWriter, r *http.Request) {
 	var view dnsView
 	var raw string
@@ -275,20 +296,32 @@ func (s *Server) handleGetDNS(w http.ResponseWriter, r *http.Request) {
 		view, raw = parseResolvConf(string(content)), string(content)
 	}
 
-	payload := view.payload()
-	payload["raw"] = raw
-	successResponse(w, "DNS configuration retrieved successfully", payload)
+	writeJSON(w, dnsGetResponse{
+		Success:       true,
+		Message:       "DNS configuration retrieved successfully",
+		Timestamp:     time.Now().UTC().Format(time.RFC3339),
+		Nameservers:   view.Nameservers,
+		SearchDomains: view.SearchDomains,
+		Domain:        domainPtr(view.Domain),
+		Options:       view.Options,
+		Raw:           raw,
+	})
 }
 
 // dnsUpdateRequest is the PUT body (zoneweaver's shape): raw wins when
 // present; pointers keep JS presence semantics — an absent key and an empty
 // value are different answers on this wire.
 type dnsUpdateRequest struct {
-	Nameservers   *[]string `json:"nameservers"`
+	// DNS server IP addresses (required unless raw is present; [] clears — DHCP revert on Windows, Empty on macOS)
+	Nameservers *[]string `json:"nameservers"`
+	// Search domains (Unix and macOS; 400 on Windows)
 	SearchDomains *[]string `json:"search_domains"`
-	Domain        *string   `json:"domain"`
-	Options       *[]string `json:"options"`
-	Raw           *string   `json:"raw"`
+	// The resolv.conf domain directive (Unix only; 400 on Windows/macOS)
+	Domain *string `json:"domain"`
+	// resolv.conf options (Unix only; 400 on Windows/macOS)
+	Options *[]string `json:"options"`
+	// Raw resolv.conf content, written verbatim (takes precedence; Unix only — 400 on Windows/macOS)
+	Raw *string `json:"raw"`
 }
 
 // validateNameservers requires every entry to be a literal IP — resolv.conf
@@ -351,12 +384,15 @@ func (s *Server) updateDNSWindows(w http.ResponseWriter, r *http.Request, namese
 	slog.Info("dns configuration updated", "platform", "windows",
 		"interfaces", len(interfaces), "by", auth.FromContext(r.Context()).Name)
 	// backup "" — no file exists to back up on this platform (honest absence).
-	applied := dnsView{
-		Nameservers: nameservers, SearchDomains: []string{}, Options: []string{},
-	}
-	payload := applied.payload()
-	payload["backup"] = ""
-	successResponse(w, "DNS configuration updated successfully", payload)
+	writeJSON(w, dnsUpdateResponse{
+		Success:       true,
+		Message:       "DNS configuration updated successfully",
+		Timestamp:     time.Now().UTC().Format(time.RFC3339),
+		Backup:        "",
+		Nameservers:   nameservers,
+		SearchDomains: []string{},
+		Options:       []string{},
+	})
 }
 
 // updateDNSDarwin applies nameservers (and search domains when sent) to every
@@ -390,17 +426,21 @@ func (s *Server) updateDNSDarwin(w http.ResponseWriter, r *http.Request, nameser
 		}
 	}
 
-	applied := dnsView{
-		Nameservers: nameservers, SearchDomains: []string{}, Options: []string{},
-	}
+	applied := []string{}
 	if searchDomains != nil {
-		applied.SearchDomains = *searchDomains
+		applied = *searchDomains
 	}
 	slog.Info("dns configuration updated", "platform", "darwin",
 		"services", len(services), "by", auth.FromContext(r.Context()).Name)
-	payload := applied.payload()
-	payload["backup"] = ""
-	successResponse(w, "DNS configuration updated successfully", payload)
+	writeJSON(w, dnsUpdateResponse{
+		Success:       true,
+		Message:       "DNS configuration updated successfully",
+		Timestamp:     time.Now().UTC().Format(time.RFC3339),
+		Backup:        "",
+		Nameservers:   nameservers,
+		SearchDomains: applied,
+		Options:       []string{},
+	})
 }
 
 // updateDNSResolvConf is the Unix path: serialize (or take raw verbatim),
@@ -469,15 +509,47 @@ func (s *Server) updateDNSResolvConf(w http.ResponseWriter, r *http.Request, bod
 	// written (zoneweaver spreads parseResolvConf(content) — four fields, no
 	// raw).
 	written := parseResolvConf(content)
-	payload := written.payload()
-	payload["backup"] = filepath.Base(backup)
-	successResponse(w, "DNS configuration updated successfully", payload)
+	writeJSON(w, dnsUpdateResponse{
+		Success:       true,
+		Message:       "DNS configuration updated successfully",
+		Timestamp:     time.Now().UTC().Format(time.RFC3339),
+		Backup:        filepath.Base(backup),
+		Nameservers:   written.Nameservers,
+		SearchDomains: written.SearchDomains,
+		Domain:        domainPtr(written.Domain),
+		Options:       written.Options,
+	})
+}
+
+// dnsUpdateResponse is the PUT /system/dns answer: the converged success
+// envelope with backup plus the parsed-back view (no raw).
+type dnsUpdateResponse struct {
+	Success   bool   `json:"success"`
+	Message   string `json:"message"`
+	Timestamp string `json:"timestamp"`
+	// The backup FILENAME (<file>.bak.<ISO-timestamp>, colons→dashes) on Unix; "" on Windows/macOS — there is no file to back up
+	Backup        string   `json:"backup"`
+	Nameservers   []string `json:"nameservers"`
+	SearchDomains []string `json:"search_domains"`
+	Domain        *string  `json:"domain"`
+	Options       []string `json:"options"`
 }
 
 // handleUpdateDNS mirrors PUT /system/dns (the converged wire, sync
 // 2026-07-17): raw wins when present; Unix writes resolv.conf, Windows/macOS
 // take the structured fields their tooling can honor and answer 400 naming
 // anything they cannot — never a silent no-op.
+//
+//	@Summary		Replace the DNS configuration
+//	@Description	Minimum role: operator. The converged wire (sync 2026-07-17): raw WINS when present; a body carrying neither raw nor nameservers answers 400 "Either nameservers array or raw string is required". Unix serializes the structured fields into /etc/resolv.conf (manager header, then domain, search, one nameserver per entry, options), backs the current file up beside it first (<file>.bak.<ISO-timestamp>, colons→dashes — the hosts-file precedent), and replaces atomically (0644); the answer carries the backup FILENAME plus the parsed-back view of what was written (no raw on the PUT answer). Windows applies nameservers to EVERY connected interface via netsh (static + primary/add; an empty array reverts to DHCP) — raw and search_domains/domain/options have no analog and answer 400 naming the field, and backup is "" (no file to back up, honest absence). macOS applies nameservers (and search_domains when sent) to every enabled service via networksetup — domain/options/raw answer 400, backup "". Nameservers must be literal IP addresses everywhere. Writing needs the same OS privilege editing DNS by hand would (root on Unix, Administrator on Windows) — a refusal fails honestly.
+//	@Tags			Host Configuration
+//	@Accept			json
+//	@Produce		json
+//	@Param			body	body	dnsUpdateRequest	true	"DNS configuration to apply"
+//	@Success		200	{object}	dnsUpdateResponse	"DNS configuration updated"
+//	@Failure		400	{object}	wrappedError	"Neither nameservers nor raw present ('Either nameservers array or raw string is required'), a non-IP nameserver, invalid token values, or a field the platform cannot honor (raw / search_domains / domain / options per the per-OS rules above — refused by name, never silently dropped)"
+//	@Failure		500	{object}	wrappedError	"Failed to write DNS configuration (tool failure, backup or write failure — typically missing OS privilege)"
+//	@Router			/system/dns [put]
 func (s *Server) handleUpdateDNS(w http.ResponseWriter, r *http.Request) {
 	var body dnsUpdateRequest
 	if err := decodeBody(r, &body); err != nil {

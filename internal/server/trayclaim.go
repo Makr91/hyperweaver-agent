@@ -35,7 +35,13 @@ const (
 )
 
 type trayClaimRequest struct {
-	Token string `json:"token"`
+	// Single-use tray token from the #tray= URL fragment
+	Token string `json:"token" binding:"required"`
+}
+
+type trayClaimResponse struct {
+	APIKey  string `json:"api_key"`
+	Message string `json:"message"`
 }
 
 // handleTrayClaim exchanges a tray one-time token for a fresh admin API key.
@@ -43,6 +49,17 @@ type trayClaimRequest struct {
 // by the local user's physical tray click, single-use, 60s TTL. This is what
 // lets a desktop user open a signed-in UI without ever seeing a login or the
 // setup token (which remains the headless/remote path).
+//
+//	@Summary		Exchange a tray one-time token for an admin API key
+//	@Description	Public: the token itself is the credential — minted seconds earlier by the local user's physical tray Open click (or an hwa:// protocol invocation), carried in the URL fragment, single-use, 60-second TTL. This is how a desktop user gets a signed-in UI without ever seeing a login screen. Each claim also REAPS older tray-handoff keys beyond the newest 5 (every Open mints a key and nothing else retires them; unbounded piles make the cold-boot bcrypt scan crawl) — a browser tab holding a reaped key re-signs-in via the tray.
+//	@Tags			Local Login
+//	@Accept			json
+//	@Produce		json
+//	@Param			request	body		trayClaimRequest	true	"Tray claim request"
+//	@Success		200		{object}	trayClaimResponse	"Fresh admin key, named after the local OS account"
+//	@Failure		400		{object}	auth.ErrorMsg		"Missing token"
+//	@Failure		403		{object}	auth.ErrorMsg		"Unknown, expired, or already-used token"
+//	@Router			/auth/tray-claim [post]
 func (s *Server) handleTrayClaim(w http.ResponseWriter, r *http.Request) {
 	var body trayClaimRequest
 	if err := decodeBody(r, &body); err != nil || body.Token == "" {
@@ -77,14 +94,19 @@ func (s *Server) handleTrayClaim(w http.ResponseWriter, r *http.Request) {
 		slog.Info("stale tray keys pruned", "removed", removed)
 	}
 
-	writeJSON(w, map[string]any{
-		"api_key": apiKey,
-		"message": "Tray login successful",
+	writeJSON(w, trayClaimResponse{
+		APIKey:  apiKey,
+		Message: "Tray login successful",
 	})
 }
 
 type protocolOpenRequest struct {
-	Secret string `json:"secret"`
+	// Contents of the running agent's protocol.secret file
+	Secret string `json:"secret" binding:"required"`
+}
+
+type protocolOpenResponse struct {
+	Message string `json:"message"`
 }
 
 // handleProtocolOpen serves the hwa:// single-instance handoff (Windows and
@@ -94,6 +116,17 @@ type protocolOpenRequest struct {
 // local files, so possession proves a local same-user process, the same
 // trust a tray click carries. The signed-in token only ever appears in the
 // fresh browser tab this agent opens, never in this response.
+//
+//	@Summary		hwa:// single-instance handoff
+//	@Description	Public but secret-gated: when the OS spawns a fresh agent process for an hwa://open invocation (Windows registry handler, Linux .desktop handler), that process forwards the action here and exits. The per-boot secret file (0600, beside the running agent's config) authenticates it — web pages cannot read local files, so possession proves a local same-user process. On success the running agent opens the signed-in UI in the user's browser, exactly like a tray Open click.
+//	@Tags			Local Login
+//	@Accept			json
+//	@Produce		json
+//	@Param			request	body		protocolOpenRequest	true	"Protocol open request"
+//	@Success		200		{object}	protocolOpenResponse	"Action accepted; the agent is opening the browser"
+//	@Failure		400		{object}	auth.ErrorMsg		"Missing secret"
+//	@Failure		403		{object}	auth.ErrorMsg		"Invalid secret"
+//	@Router			/protocol/open [post]
 func (s *Server) handleProtocolOpen(w http.ResponseWriter, r *http.Request) {
 	var body protocolOpenRequest
 	if err := decodeBody(r, &body); err != nil || body.Secret == "" {
@@ -109,7 +142,7 @@ func (s *Server) handleProtocolOpen(w http.ResponseWriter, r *http.Request) {
 	// The response must not wait on the browser launch.
 	go s.openUI()
 
-	writeJSON(w, map[string]any{
-		"message": "Opening the Hyperweaver UI",
+	writeJSON(w, protocolOpenResponse{
+		Message: "Opening the Hyperweaver UI",
 	})
 }

@@ -65,9 +65,36 @@ func bootTime() time.Time {
 	return time.Now().Add(-time.Duration(seconds) * time.Second).UTC()
 }
 
+type hostStatusUptime struct {
+	Seconds   uint64 `json:"seconds"`
+	Formatted string `json:"formatted"`
+	BootTime  string `json:"boot_time"`
+}
+
+type hostStatusMemory struct {
+	Total uint64 `json:"total"`
+	Free  uint64 `json:"free"`
+	Used  uint64 `json:"used"`
+}
+
+type hostStatusResponse struct {
+	Hostname    string           `json:"hostname"`
+	Uptime      hostStatusUptime `json:"uptime"`
+	LoadAverage []float64        `json:"load_average"`
+	Memory      hostStatusMemory `json:"memory"`
+}
+
 // handleHostStatus mirrors GET /system/host/status (the platform-feasible
 // subset: no runlevel, no reboot-required tracking — init concepts absent
 // here).
+//
+//	@Summary		Host system status
+//	@Description	Minimum role: viewer. Uptime, load averages, and memory. No runlevel or reboot-required tracking — init concepts absent on this platform trio. 503 when host_power.enabled is false.
+//	@Tags			System Host Management
+//	@Produce		json
+//	@Success		200	{object}	hostStatusResponse	"System status"
+//	@Failure		503	"Host power management is disabled in configuration"
+//	@Router			/system/host/status [get]
 func (s *Server) handleHostStatus(w http.ResponseWriter, _ *http.Request) {
 	hostname, err := os.Hostname()
 	if err != nil {
@@ -77,44 +104,77 @@ func (s *Server) handleHostStatus(w http.ResponseWriter, _ *http.Request) {
 	total, free := hostinfo.MemoryStatus()
 	loadavg := hostinfo.LoadAvg()
 
-	writeJSON(w, map[string]any{
-		"hostname": hostname,
-		"uptime": map[string]any{
-			"seconds":   uptime,
-			"formatted": formatUptime(uptime),
-			"boot_time": bootTime().Format(time.RFC3339),
+	writeJSON(w, hostStatusResponse{
+		Hostname: hostname,
+		Uptime: hostStatusUptime{
+			Seconds:   uptime,
+			Formatted: formatUptime(uptime),
+			BootTime:  bootTime().Format(time.RFC3339),
 		},
-		"load_average": []float64{loadavg[0], loadavg[1], loadavg[2]},
-		"memory": map[string]any{
-			"total": total,
-			"free":  free,
-			"used":  total - free,
+		LoadAverage: []float64{loadavg[0], loadavg[1], loadavg[2]},
+		Memory: hostStatusMemory{
+			Total: total,
+			Free:  free,
+			Used:  total - free,
 		},
 	})
 }
 
+type hostUptimeLoadAverages struct {
+	One     float64 `json:"1min"`
+	Five    float64 `json:"5min"`
+	Fifteen float64 `json:"15min"`
+}
+
+type hostUptimeResponse struct {
+	UptimeSeconds   uint64                 `json:"uptime_seconds"`
+	UptimeFormatted string                 `json:"uptime_formatted"`
+	BootTime        string                 `json:"boot_time"`
+	LoadAverages    hostUptimeLoadAverages `json:"load_averages"`
+}
+
 // handleHostUptime mirrors GET /system/host/uptime.
+//
+//	@Summary		Host uptime
+//	@Description	Minimum role: viewer. 503 when host_power.enabled is false.
+//	@Tags			System Host Management
+//	@Produce		json
+//	@Success		200	{object}	hostUptimeResponse	"Uptime information"
+//	@Failure		503	"Host power management is disabled in configuration"
+//	@Router			/system/host/uptime [get]
 func (s *Server) handleHostUptime(w http.ResponseWriter, _ *http.Request) {
 	uptime := hostinfo.UptimeSeconds()
 	loadavg := hostinfo.LoadAvg()
-	writeJSON(w, map[string]any{
-		"uptime_seconds":   uptime,
-		"uptime_formatted": formatUptime(uptime),
-		"boot_time":        bootTime().Format(time.RFC3339),
-		"load_averages": map[string]any{
-			"1min":  loadavg[0],
-			"5min":  loadavg[1],
-			"15min": loadavg[2],
+	writeJSON(w, hostUptimeResponse{
+		UptimeSeconds:   uptime,
+		UptimeFormatted: formatUptime(uptime),
+		BootTime:        bootTime().Format(time.RFC3339),
+		LoadAverages: hostUptimeLoadAverages{
+			One:     loadavg[0],
+			Five:    loadavg[1],
+			Fifteen: loadavg[2],
 		},
 	})
 }
 
 // powerRequest is the shared power-action body.
 type powerRequest struct {
-	Confirm     bool   `json:"confirm"`
-	Emergency   bool   `json:"emergency"`
-	GracePeriod *int   `json:"grace_period"`
-	Message     string `json:"message"`
+	Confirm bool `json:"confirm"`
+	// Halt only: emergency acknowledgement (halt skips graceful shutdown entirely)
+	Emergency bool `json:"emergency"`
+	// Seconds before the action fires (Unix rounds up to minutes)
+	GracePeriod *int `json:"grace_period"`
+	// Warning broadcast to logged-in users where the platform supports one
+	Message string `json:"message"`
+}
+
+type powerTaskResponse struct {
+	Success     bool      `json:"success"`
+	Message     string    `json:"message"`
+	TaskID      string    `json:"task_id"`
+	Status      string    `json:"status"`
+	CreatedAt   time.Time `json:"created_at"`
+	GracePeriod int       `json:"grace_period"`
 }
 
 // queuePowerTask validates the shared body rules and queues the operation.
@@ -184,30 +244,70 @@ func (s *Server) queuePowerTask(w http.ResponseWriter, r *http.Request, operatio
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusAccepted)
-	if werr := json.NewEncoder(w).Encode(map[string]any{
-		"success":      true,
-		"message":      label + " task created successfully",
-		"task_id":      task.ID,
-		"status":       task.Status,
-		"created_at":   task.CreatedAt,
-		"grace_period": grace,
+	if werr := json.NewEncoder(w).Encode(powerTaskResponse{
+		Success:     true,
+		Message:     label + " task created successfully",
+		TaskID:      task.ID,
+		Status:      task.Status,
+		CreatedAt:   task.CreatedAt,
+		GracePeriod: grace,
 	}); werr != nil {
 		slog.Error("write host power response", "error", werr)
 	}
 }
 
+// @Summary		Shut down the host
+// @Description	Minimum role: admin. Queues a task running the platform shutdown command (Windows shutdown /s, Unix shutdown -h). confirm:true is required. The agent needs the OS privilege the command itself demands — a refusal fails the task honestly. 503 when host_power.enabled is false.
+// @Tags			System Host Management
+// @Accept			json
+// @Produce		json
+// @Param			request	body	powerRequest	true	"Power action body (confirm required)"
+// @Success		202	{object}	powerTaskResponse	"Shutdown task created"
+// @Failure		400	"Missing confirmation or invalid parameters"
+// @Failure		503	"Host power management is disabled in configuration"
+// @Router			/system/host/shutdown [post]
 func (s *Server) handleHostShutdown(w http.ResponseWriter, r *http.Request) {
 	s.queuePowerTask(w, r, hostpower.OpShutdown, "shutdown", false)
 }
 
+// @Summary		Restart the host
+// @Description	Minimum role: admin. Same body rules as shutdown. 503 when host_power.enabled is false.
+// @Tags			System Host Management
+// @Accept			json
+// @Produce		json
+// @Param			request	body	powerRequest	true	"Power action body (confirm required)"
+// @Success		202	"Restart task created"
+// @Failure		400	"Missing confirmation or invalid parameters"
+// @Failure		503	"Host power management is disabled in configuration"
+// @Router			/system/host/restart [post]
 func (s *Server) handleHostRestart(w http.ResponseWriter, r *http.Request) {
 	s.queuePowerTask(w, r, hostpower.OpRestart, "restart", false)
 }
 
+// @Summary		Power off the host
+// @Description	Minimum role: admin. Manual intervention required to restart the machine. Same body rules as shutdown; Windows makes no shutdown/poweroff distinction. 503 when host_power.enabled is false.
+// @Tags			System Host Management
+// @Accept			json
+// @Produce		json
+// @Param			request	body	powerRequest	true	"Power action body (confirm required)"
+// @Success		202	"Poweroff task created"
+// @Failure		400	"Missing confirmation or invalid parameters"
+// @Failure		503	"Host power management is disabled in configuration"
+// @Router			/system/host/poweroff [post]
 func (s *Server) handleHostPoweroff(w http.ResponseWriter, r *http.Request) {
 	s.queuePowerTask(w, r, hostpower.OpPoweroff, "poweroff", false)
 }
 
+// @Summary		Immediately halt the host
+// @Description	Minimum role: admin. No grace period, no graceful shutdown — the emergency stop. Requires BOTH confirm:true and emergency:true. 503 when host_power.enabled is false.
+// @Tags			System Host Management
+// @Accept			json
+// @Produce		json
+// @Param			request	body	powerRequest	true	"Power action body (confirm and emergency required)"
+// @Success		202	"Halt task created"
+// @Failure		400	"Missing confirmation or emergency acknowledgement"
+// @Failure		503	"Host power management is disabled in configuration"
+// @Router			/system/host/halt [post]
 func (s *Server) handleHostHalt(w http.ResponseWriter, r *http.Request) {
 	s.queuePowerTask(w, r, hostpower.OpHalt, "halt", true)
 }

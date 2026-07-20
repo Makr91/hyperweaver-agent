@@ -16,10 +16,33 @@ import (
 // carries these as SECRETS_* vars anyway). PUT replaces the submitted
 // categories, the same top-level shallow-merge shape as PUT /settings.
 
+// @Summary		The global secrets document
+// @Description	Minimum role: admin. The whole store, plain — nothing masked (Mark's ruling: the user's local machine; the generated Hosts.yml carries these as SECRETS_* vars anyway).
+// @Tags			Secrets
+// @Produce		json
+// @Success		200	{object}	secrets.Document	"The secrets document"
+// @Router			/secrets [get]
 func (s *Server) handleGetSecrets(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, s.secrets.Get())
 }
 
+// secretsUpdateResponse is PUT /secrets's answer.
+type secretsUpdateResponse struct {
+	// Always true on success
+	Success bool `json:"success"`
+	// Human-readable confirmation
+	Message string `json:"message"`
+}
+
+// @Summary		Update the global secrets
+// @Description	Minimum role: admin. Replaces the submitted categories whole (the same top-level shallow-merge shape as PUT /settings); omitted categories are untouched. Rejected whole on an unknown category or an invalid entry name — the store never half-applies. Persisted atomically to secrets.yaml (0600) beside the config.
+// @Tags			Secrets
+// @Accept			json
+// @Produce		json
+// @Param			body	body	secrets.Document	true	"Secrets categories to replace"
+// @Success		200	{object}	secretsUpdateResponse	"Secrets persisted"
+// @Failure		400	{object}	wrappedError	"Unknown category or invalid entry name"
+// @Router			/secrets [put]
 func (s *Server) handleUpdateSecrets(w http.ResponseWriter, r *http.Request) {
 	var categories map[string]json.RawMessage
 	if err := decodeBody(r, &categories); err != nil || categories == nil {
@@ -41,8 +64,8 @@ func (s *Server) handleUpdateSecrets(w http.ResponseWriter, r *http.Request) {
 	}
 	slog.Info("secrets updated", "by", auth.FromContext(r.Context()).Name)
 
-	writeJSON(w, map[string]any{
-		"success": true,
-		"message": "Secrets updated successfully",
+	writeJSON(w, secretsUpdateResponse{
+		Success: true,
+		Message: "Secrets updated successfully",
 	})
 }

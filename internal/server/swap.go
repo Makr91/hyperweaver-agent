@@ -64,10 +64,54 @@ func utilizationPct(used, total uint64) float64 {
 	return float64(int(raw*100+0.5)) / 100
 }
 
+// swapSummaryArea is one live swap area in the summary's per-area breakdown.
+type swapSummaryArea struct {
+	Path        string  `json:"path"`
+	Pool        *string `json:"pool"`
+	SizeGB      string  `json:"sizeGB"`
+	UsedGB      string  `json:"usedGB"`
+	Utilization float64 `json:"utilization"`
+}
+
+// swapRecommendation is one platform-neutral recommendation entry (the >50%
+// utilization alert is the only rule this agent emits).
+type swapRecommendation struct {
+	Type     string `json:"type"`
+	Category string `json:"category"`
+	Message  string `json:"message"`
+	Action   string `json:"action"`
+}
+
+// swapPoolDistribution is the pool-distribution object, always empty on this
+// host — pools are a ZFS concept with no VirtualBox-host analog.
+type swapPoolDistribution struct{}
+
+// swapSummaryResponse is GET /system/swap/summary's answer.
+type swapSummaryResponse struct {
+	Host                 string               `json:"host"`
+	TotalSwapGB          string               `json:"totalSwapGB"`
+	UsedSwapGB           string               `json:"usedSwapGB"`
+	FreeSwapGB           string               `json:"freeSwapGB"`
+	OverallUtilization   float64              `json:"overallUtilization"`
+	SwapAreaCount        int                  `json:"swapAreaCount"`
+	SwapAreas            []swapSummaryArea    `json:"swapAreas"`
+	PoolDistribution     swapPoolDistribution `json:"poolDistribution"`
+	Recommendations      []swapRecommendation `json:"recommendations"`
+	LastScanned          string               `json:"lastScanned"`
+	MemoryStatsReference any                  `json:"memoryStatsReference"`
+}
+
 // handleSwapSummary mirrors GET /system/swap/summary: aggregate swap figures,
 // the per-area breakdown, and the platform-neutral recommendation rule (the
 // >50% utilization alert). Pool analysis fields stay in the shape but empty —
 // pools are a ZFS concept with no VirtualBox-host analog.
+//
+//	@Summary		Swap configuration summary
+//	@Description	Minimum role: viewer. Aggregate swap figures, per-area breakdown, and utilization recommendations (Node-agent shape). Pool fields are present but empty — ZFS pools have no analog on this host. Read live from the OS; lastScanned is the request time.
+//	@Tags			Swap Management
+//	@Produce		json
+//	@Success		200	{object}	swapSummaryResponse	"Swap summary"
+//	@Router			/system/swap/summary [get]
 func (s *Server) handleSwapSummary(w http.ResponseWriter, _ *http.Request) {
 	hostname, err := os.Hostname()
 	if err != nil {
@@ -83,47 +127,81 @@ func (s *Server) handleSwapSummary(w http.ResponseWriter, _ *http.Request) {
 	devices := swapDevices(swap.Total, swap.Used)
 	overall := utilizationPct(swap.Used, swap.Total)
 
-	areas := make([]map[string]any, 0, len(devices))
+	areas := make([]swapSummaryArea, 0, len(devices))
 	for _, d := range devices {
-		areas = append(areas, map[string]any{
-			"path":        d.path,
-			"pool":        nil,
-			"sizeGB":      gbString(d.sizeBytes),
-			"usedGB":      gbString(d.usedBytes),
-			"utilization": utilizationPct(d.usedBytes, d.sizeBytes),
+		areas = append(areas, swapSummaryArea{
+			Path:        d.path,
+			Pool:        nil,
+			SizeGB:      gbString(d.sizeBytes),
+			UsedGB:      gbString(d.usedBytes),
+			Utilization: utilizationPct(d.usedBytes, d.sizeBytes),
 		})
 	}
 
-	recommendations := []map[string]any{}
+	recommendations := []swapRecommendation{}
 	if overall > 50 {
-		recommendations = append(recommendations, map[string]any{
-			"type":     "alert",
-			"category": "utilization",
-			"message": fmt.Sprintf("Swap utilization is %.1f%% which exceeds the 50%% threshold.",
+		recommendations = append(recommendations, swapRecommendation{
+			Type:     "alert",
+			Category: "utilization",
+			Message: fmt.Sprintf("Swap utilization is %.1f%% which exceeds the 50%% threshold.",
 				overall),
-			"action": "Consider adding more swap space",
+			Action: "Consider adding more swap space",
 		})
 	}
 
-	writeJSON(w, map[string]any{
-		"host":                 hostname,
-		"totalSwapGB":          gbString(swap.Total),
-		"usedSwapGB":           gbString(swap.Used),
-		"freeSwapGB":           gbString(swap.Free),
-		"overallUtilization":   overall,
-		"swapAreaCount":        len(areas),
-		"swapAreas":            areas,
-		"poolDistribution":     map[string]any{},
-		"recommendations":      recommendations,
-		"lastScanned":          time.Now().UTC().Format(time.RFC3339),
-		"memoryStatsReference": nil,
+	writeJSON(w, swapSummaryResponse{
+		Host:                 hostname,
+		TotalSwapGB:          gbString(swap.Total),
+		UsedSwapGB:           gbString(swap.Used),
+		FreeSwapGB:           gbString(swap.Free),
+		OverallUtilization:   overall,
+		SwapAreaCount:        len(areas),
+		SwapAreas:            areas,
+		PoolDistribution:     swapPoolDistribution{},
+		Recommendations:      recommendations,
+		LastScanned:          time.Now().UTC().Format(time.RFC3339),
+		MemoryStatsReference: nil,
 	})
+}
+
+// swapAreaRow is one row in the swap-areas listing.
+type swapAreaRow struct {
+	Host           string  `json:"host"`
+	Swapfile       string  `json:"swapfile"`
+	SizeBytes      uint64  `json:"size_bytes"`
+	UsedBytes      uint64  `json:"used_bytes"`
+	FreeBytes      uint64  `json:"free_bytes"`
+	UtilizationPct float64 `json:"utilization_pct"`
+	ScanTimestamp  string  `json:"scan_timestamp"`
+}
+
+// swapAreasPagination is the swap-areas listing's pagination envelope.
+type swapAreasPagination struct {
+	Limit   int  `json:"limit"`
+	Offset  int  `json:"offset"`
+	HasMore bool `json:"hasMore"`
+}
+
+// swapAreasResponse is GET /system/swap/areas' answer.
+type swapAreasResponse struct {
+	SwapAreas  []swapAreaRow       `json:"swapAreas"`
+	TotalCount int                 `json:"totalCount"`
+	Pagination swapAreasPagination `json:"pagination"`
 }
 
 // handleSwapAreas mirrors GET /system/swap/areas: the row-per-area listing
 // with the Node payload's pagination envelope. Rows are read live (this
 // agent has no collector table); the zvol pool filter has no meaning here
 // and is ignored.
+//
+//	@Summary		List swap areas
+//	@Description	Minimum role: viewer. Row-per-area listing with the Node payload's pagination envelope, read live from the OS. The zvol pool filter has no meaning on this agent and is ignored.
+//	@Tags			Swap Management
+//	@Produce		json
+//	@Param			limit	query	int	false	"Page size"	default(100)
+//	@Param			offset	query	int	false	"Page offset"	default(0)
+//	@Success		200	{object}	swapAreasResponse	"Swap areas"
+//	@Router			/system/swap/areas [get]
 func (s *Server) handleSwapAreas(w http.ResponseWriter, r *http.Request) {
 	hostname, err := os.Hostname()
 	if err != nil {
@@ -151,16 +229,16 @@ func (s *Server) handleSwapAreas(w http.ResponseWriter, r *http.Request) {
 
 	devices := swapDevices(swap.Total, swap.Used)
 	now := time.Now().UTC().Format(time.RFC3339)
-	rows := make([]map[string]any, 0, len(devices))
+	rows := make([]swapAreaRow, 0, len(devices))
 	for _, d := range devices {
-		rows = append(rows, map[string]any{
-			"host":            hostname,
-			"swapfile":        d.path,
-			"size_bytes":      d.sizeBytes,
-			"used_bytes":      d.usedBytes,
-			"free_bytes":      d.sizeBytes - d.usedBytes,
-			"utilization_pct": utilizationPct(d.usedBytes, d.sizeBytes),
-			"scan_timestamp":  now,
+		rows = append(rows, swapAreaRow{
+			Host:           hostname,
+			Swapfile:       d.path,
+			SizeBytes:      d.sizeBytes,
+			UsedBytes:      d.usedBytes,
+			FreeBytes:      d.sizeBytes - d.usedBytes,
+			UtilizationPct: utilizationPct(d.usedBytes, d.sizeBytes),
+			ScanTimestamp:  now,
 		})
 	}
 
@@ -173,13 +251,13 @@ func (s *Server) handleSwapAreas(w http.ResponseWriter, r *http.Request) {
 		end = total
 	}
 
-	writeJSON(w, map[string]any{
-		"swapAreas":  rows[offset:end],
-		"totalCount": total,
-		"pagination": map[string]any{
-			"limit":   limit,
-			"offset":  offset,
-			"hasMore": total > offset+limit,
+	writeJSON(w, swapAreasResponse{
+		SwapAreas:  rows[offset:end],
+		TotalCount: total,
+		Pagination: swapAreasPagination{
+			Limit:   limit,
+			Offset:  offset,
+			HasMore: total > offset+limit,
 		},
 	})
 }

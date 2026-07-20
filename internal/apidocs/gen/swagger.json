@@ -1,6 +1,15 @@
 {
     "components": {
         "schemas": {
+            "auth.ErrorMsg": {
+                "properties": {
+                    "msg": {
+                        "description": "Error message",
+                        "type": "string"
+                    }
+                },
+                "type": "object"
+            },
             "hostinfo.Info": {
                 "properties": {
                     "arch": {
@@ -18,6 +27,35 @@
                 },
                 "type": "object"
             },
+            "machines.PriorityEntry": {
+                "properties": {
+                    "name": {
+                        "type": "string"
+                    },
+                    "priority": {
+                        "type": "integer"
+                    },
+                    "state": {
+                        "type": "string"
+                    }
+                },
+                "type": "object"
+            },
+            "machines.PriorityGroup": {
+                "properties": {
+                    "machines": {
+                        "items": {
+                            "$ref": "#/components/schemas/machines.PriorityEntry"
+                        },
+                        "type": "array",
+                        "uniqueItems": false
+                    },
+                    "priority_range": {
+                        "type": "integer"
+                    }
+                },
+                "type": "object"
+            },
             "prereqs.Tool": {
                 "properties": {
                     "installed": {
@@ -30,6 +68,127 @@
                         "type": "string"
                     },
                     "version": {
+                        "type": "string"
+                    }
+                },
+                "type": "object"
+            },
+            "secrets.CustomResourceURL": {
+                "properties": {
+                    "name": {
+                        "type": "string"
+                    },
+                    "pass": {
+                        "type": "string"
+                    },
+                    "url": {
+                        "type": "string"
+                    },
+                    "useAuth": {
+                        "type": "boolean"
+                    },
+                    "user": {
+                        "type": "string"
+                    }
+                },
+                "type": "object"
+            },
+            "secrets.DockerHub": {
+                "properties": {
+                    "docker_hub_token": {
+                        "type": "string"
+                    },
+                    "docker_hub_user": {
+                        "type": "string"
+                    },
+                    "name": {
+                        "type": "string"
+                    }
+                },
+                "type": "object"
+            },
+            "secrets.Document": {
+                "properties": {
+                    "custom_resource_url": {
+                        "items": {
+                            "$ref": "#/components/schemas/secrets.CustomResourceURL"
+                        },
+                        "type": "array",
+                        "uniqueItems": false
+                    },
+                    "docker_hub": {
+                        "items": {
+                            "$ref": "#/components/schemas/secrets.DockerHub"
+                        },
+                        "type": "array",
+                        "uniqueItems": false
+                    },
+                    "git_api_keys": {
+                        "items": {
+                            "$ref": "#/components/schemas/secrets.NamedKey"
+                        },
+                        "type": "array",
+                        "uniqueItems": false
+                    },
+                    "hcl_download_portal_api_keys": {
+                        "items": {
+                            "$ref": "#/components/schemas/secrets.NamedKey"
+                        },
+                        "type": "array",
+                        "uniqueItems": false
+                    },
+                    "ssh_keys": {
+                        "items": {
+                            "$ref": "#/components/schemas/secrets.NamedKey"
+                        },
+                        "type": "array",
+                        "uniqueItems": false
+                    },
+                    "vagrant_atlas_token": {
+                        "items": {
+                            "$ref": "#/components/schemas/secrets.NamedKey"
+                        },
+                        "type": "array",
+                        "uniqueItems": false
+                    }
+                },
+                "type": "object"
+            },
+            "secrets.NamedKey": {
+                "properties": {
+                    "key": {
+                        "type": "string"
+                    },
+                    "name": {
+                        "type": "string"
+                    }
+                },
+                "type": "object"
+            },
+            "server.bootstrapKeyResponse": {
+                "properties": {
+                    "api_key": {
+                        "type": "string"
+                    },
+                    "message": {
+                        "type": "string"
+                    },
+                    "note": {
+                        "type": "string"
+                    }
+                },
+                "type": "object"
+            },
+            "server.bootstrapRequest": {
+                "properties": {
+                    "description": {
+                        "type": "string"
+                    },
+                    "name": {
+                        "type": "string"
+                    },
+                    "setupToken": {
+                        "description": "64-character claim token from the agent host",
                         "type": "string"
                     }
                 },
@@ -66,6 +225,1002 @@
                     },
                     "user": {
                         "type": "integer"
+                    }
+                },
+                "type": "object"
+            },
+            "server.databaseCleanupResponse": {
+                "properties": {
+                    "cleanup_status": {
+                        "$ref": "#/components/schemas/server.databaseCleanupStatus"
+                    },
+                    "message": {
+                        "type": "string"
+                    },
+                    "success": {
+                        "type": "boolean"
+                    },
+                    "timestamp": {
+                        "type": "string"
+                    }
+                },
+                "type": "object"
+            },
+            "server.databaseCleanupStatus": {
+                "properties": {
+                    "deleted_tasks": {
+                        "type": "integer"
+                    },
+                    "monitoring_retained": {
+                        "type": "string"
+                    },
+                    "monitoring_storage": {
+                        "type": "boolean"
+                    },
+                    "retention_days": {
+                        "type": "integer"
+                    }
+                },
+                "type": "object"
+            },
+            "server.databaseFileSizes": {
+                "properties": {
+                    "database": {
+                        "type": "integer"
+                    },
+                    "shm": {
+                        "type": "integer"
+                    },
+                    "total": {
+                        "type": "integer"
+                    },
+                    "wal": {
+                        "type": "integer"
+                    }
+                },
+                "type": "object"
+            },
+            "server.databaseInternalStats": {
+                "properties": {
+                    "freelist_bytes": {
+                        "type": "integer"
+                    },
+                    "freelist_count": {
+                        "type": "integer"
+                    },
+                    "page_count": {
+                        "type": "integer"
+                    },
+                    "page_size": {
+                        "type": "integer"
+                    }
+                },
+                "type": "object"
+            },
+            "server.databaseRowsPage": {
+                "properties": {
+                    "hasMore": {
+                        "type": "boolean"
+                    },
+                    "limit": {
+                        "type": "integer"
+                    },
+                    "offset": {
+                        "type": "integer"
+                    }
+                },
+                "type": "object"
+            },
+            "server.databaseRowsResponse": {
+                "properties": {
+                    "columns": {
+                        "items": {
+                            "type": "string"
+                        },
+                        "type": "array",
+                        "uniqueItems": false
+                    },
+                    "database": {
+                        "type": "string"
+                    },
+                    "message": {
+                        "type": "string"
+                    },
+                    "pagination": {
+                        "$ref": "#/components/schemas/server.databaseRowsPage"
+                    },
+                    "rows": {
+                        "description": "One array per row, values in columns[] order (TEXT/BLOB render as strings, NULL as null)",
+                        "items": {
+                            "items": {},
+                            "type": "array"
+                        },
+                        "type": "array",
+                        "uniqueItems": false
+                    },
+                    "success": {
+                        "type": "boolean"
+                    },
+                    "table": {
+                        "type": "string"
+                    },
+                    "timestamp": {
+                        "type": "string"
+                    },
+                    "total": {
+                        "description": "Total rows in the table (not the page)",
+                        "type": "integer"
+                    }
+                },
+                "type": "object"
+            },
+            "server.databaseStats": {
+                "properties": {
+                    "databases": {
+                        "items": {
+                            "$ref": "#/components/schemas/server.databaseStatsDB"
+                        },
+                        "type": "array",
+                        "uniqueItems": false
+                    },
+                    "dialect": {
+                        "type": "string"
+                    },
+                    "total_rows": {
+                        "type": "integer"
+                    },
+                    "total_tables": {
+                        "type": "integer"
+                    }
+                },
+                "type": "object"
+            },
+            "server.databaseStatsDB": {
+                "properties": {
+                    "files": {
+                        "$ref": "#/components/schemas/server.databaseFileSizes"
+                    },
+                    "internal": {
+                        "$ref": "#/components/schemas/server.databaseInternalStats"
+                    },
+                    "name": {
+                        "type": "string"
+                    },
+                    "storage_path": {
+                        "type": "string"
+                    },
+                    "tables": {
+                        "items": {
+                            "$ref": "#/components/schemas/server.databaseTableStat"
+                        },
+                        "type": "array",
+                        "uniqueItems": false
+                    },
+                    "total_rows": {
+                        "type": "integer"
+                    },
+                    "total_tables": {
+                        "type": "integer"
+                    }
+                },
+                "type": "object"
+            },
+            "server.databaseTable": {
+                "properties": {
+                    "indexes": {
+                        "items": {
+                            "type": "string"
+                        },
+                        "type": "array",
+                        "uniqueItems": false
+                    },
+                    "name": {
+                        "type": "string"
+                    },
+                    "rows": {
+                        "type": "integer"
+                    }
+                },
+                "type": "object"
+            },
+            "server.databaseTableStat": {
+                "properties": {
+                    "name": {
+                        "type": "string"
+                    },
+                    "row_count": {
+                        "type": "integer"
+                    }
+                },
+                "type": "object"
+            },
+            "server.databaseTablesResponse": {
+                "properties": {
+                    "database": {
+                        "type": "string"
+                    },
+                    "message": {
+                        "type": "string"
+                    },
+                    "success": {
+                        "type": "boolean"
+                    },
+                    "tables": {
+                        "items": {
+                            "$ref": "#/components/schemas/server.databaseTable"
+                        },
+                        "type": "array",
+                        "uniqueItems": false
+                    },
+                    "timestamp": {
+                        "type": "string"
+                    }
+                },
+                "type": "object"
+            },
+            "server.databaseVacuumResponse": {
+                "properties": {
+                    "databases": {
+                        "items": {
+                            "$ref": "#/components/schemas/server.databaseVacuumResult"
+                        },
+                        "type": "array",
+                        "uniqueItems": false
+                    },
+                    "message": {
+                        "type": "string"
+                    },
+                    "size_after": {
+                        "type": "integer"
+                    },
+                    "size_before": {
+                        "type": "integer"
+                    },
+                    "space_reclaimed": {
+                        "type": "integer"
+                    },
+                    "success": {
+                        "type": "boolean"
+                    },
+                    "timestamp": {
+                        "type": "string"
+                    }
+                },
+                "type": "object"
+            },
+            "server.databaseVacuumResult": {
+                "properties": {
+                    "name": {
+                        "type": "string"
+                    },
+                    "size_after": {
+                        "type": "integer"
+                    },
+                    "size_before": {
+                        "type": "integer"
+                    },
+                    "space_reclaimed": {
+                        "type": "integer"
+                    }
+                },
+                "type": "object"
+            },
+            "server.deleteKeyResponse": {
+                "properties": {
+                    "entity_id": {
+                        "type": "string"
+                    },
+                    "message": {
+                        "type": "string"
+                    },
+                    "name": {
+                        "type": "string"
+                    }
+                },
+                "type": "object"
+            },
+            "server.dnsGetResponse": {
+                "properties": {
+                    "domain": {
+                        "description": "The resolv.conf domain directive; null when absent (always null on Windows/macOS)",
+                        "type": "string"
+                    },
+                    "message": {
+                        "type": "string"
+                    },
+                    "nameservers": {
+                        "items": {
+                            "type": "string"
+                        },
+                        "type": "array",
+                        "uniqueItems": false
+                    },
+                    "options": {
+                        "items": {
+                            "type": "string"
+                        },
+                        "type": "array",
+                        "uniqueItems": false
+                    },
+                    "raw": {
+                        "description": "The whole source text: /etc/resolv.conf on Unix, the platform tool's output on Windows/macOS",
+                        "type": "string"
+                    },
+                    "search_domains": {
+                        "items": {
+                            "type": "string"
+                        },
+                        "type": "array",
+                        "uniqueItems": false
+                    },
+                    "success": {
+                        "type": "boolean"
+                    },
+                    "timestamp": {
+                        "type": "string"
+                    }
+                },
+                "type": "object"
+            },
+            "server.dnsUpdateRequest": {
+                "properties": {
+                    "domain": {
+                        "description": "The resolv.conf domain directive (Unix only; 400 on Windows/macOS)",
+                        "type": "string"
+                    },
+                    "nameservers": {
+                        "description": "DNS server IP addresses (required unless raw is present; [] clears — DHCP revert on Windows, Empty on macOS)",
+                        "items": {
+                            "type": "string"
+                        },
+                        "type": "array",
+                        "uniqueItems": false
+                    },
+                    "options": {
+                        "description": "resolv.conf options (Unix only; 400 on Windows/macOS)",
+                        "items": {
+                            "type": "string"
+                        },
+                        "type": "array",
+                        "uniqueItems": false
+                    },
+                    "raw": {
+                        "description": "Raw resolv.conf content, written verbatim (takes precedence; Unix only — 400 on Windows/macOS)",
+                        "type": "string"
+                    },
+                    "search_domains": {
+                        "description": "Search domains (Unix and macOS; 400 on Windows)",
+                        "items": {
+                            "type": "string"
+                        },
+                        "type": "array",
+                        "uniqueItems": false
+                    }
+                },
+                "type": "object"
+            },
+            "server.dnsUpdateResponse": {
+                "properties": {
+                    "backup": {
+                        "description": "The backup FILENAME (\u003cfile\u003e.bak.\u003cISO-timestamp\u003e, colons→dashes) on Unix; \"\" on Windows/macOS — there is no file to back up",
+                        "type": "string"
+                    },
+                    "domain": {
+                        "type": "string"
+                    },
+                    "message": {
+                        "type": "string"
+                    },
+                    "nameservers": {
+                        "items": {
+                            "type": "string"
+                        },
+                        "type": "array",
+                        "uniqueItems": false
+                    },
+                    "options": {
+                        "items": {
+                            "type": "string"
+                        },
+                        "type": "array",
+                        "uniqueItems": false
+                    },
+                    "search_domains": {
+                        "items": {
+                            "type": "string"
+                        },
+                        "type": "array",
+                        "uniqueItems": false
+                    },
+                    "success": {
+                        "type": "boolean"
+                    },
+                    "timestamp": {
+                        "type": "string"
+                    }
+                },
+                "type": "object"
+            },
+            "server.entityJSON": {
+                "properties": {
+                    "created_at": {
+                        "type": "string"
+                    },
+                    "description": {
+                        "type": "string"
+                    },
+                    "id": {
+                        "type": "integer"
+                    },
+                    "is_active": {
+                        "type": "boolean"
+                    },
+                    "last_used": {
+                        "type": "string"
+                    },
+                    "name": {
+                        "type": "string"
+                    },
+                    "role": {
+                        "description": "Authorization role of the key (Agent API v1 role model)",
+                        "type": "string"
+                    }
+                },
+                "type": "object"
+            },
+            "server.generateKeyResponse": {
+                "properties": {
+                    "api_key": {
+                        "type": "string"
+                    },
+                    "description": {
+                        "type": "string"
+                    },
+                    "entity_id": {
+                        "type": "integer"
+                    },
+                    "message": {
+                        "type": "string"
+                    },
+                    "name": {
+                        "type": "string"
+                    },
+                    "role": {
+                        "type": "string"
+                    }
+                },
+                "type": "object"
+            },
+            "server.generateRequest": {
+                "properties": {
+                    "description": {
+                        "type": "string"
+                    },
+                    "name": {
+                        "type": "string"
+                    },
+                    "role": {
+                        "description": "Defaults to admin when omitted",
+                        "type": "string"
+                    }
+                },
+                "type": "object"
+            },
+            "server.hostStatusMemory": {
+                "properties": {
+                    "free": {
+                        "type": "integer"
+                    },
+                    "total": {
+                        "type": "integer"
+                    },
+                    "used": {
+                        "type": "integer"
+                    }
+                },
+                "type": "object"
+            },
+            "server.hostStatusResponse": {
+                "properties": {
+                    "hostname": {
+                        "type": "string"
+                    },
+                    "load_average": {
+                        "items": {
+                            "type": "number"
+                        },
+                        "type": "array",
+                        "uniqueItems": false
+                    },
+                    "memory": {
+                        "$ref": "#/components/schemas/server.hostStatusMemory"
+                    },
+                    "uptime": {
+                        "$ref": "#/components/schemas/server.hostStatusUptime"
+                    }
+                },
+                "type": "object"
+            },
+            "server.hostStatusUptime": {
+                "properties": {
+                    "boot_time": {
+                        "type": "string"
+                    },
+                    "formatted": {
+                        "type": "string"
+                    },
+                    "seconds": {
+                        "type": "integer"
+                    }
+                },
+                "type": "object"
+            },
+            "server.hostUptimeLoadAverages": {
+                "properties": {
+                    "15min": {
+                        "type": "number"
+                    },
+                    "1min": {
+                        "type": "number"
+                    },
+                    "5min": {
+                        "type": "number"
+                    }
+                },
+                "type": "object"
+            },
+            "server.hostUptimeResponse": {
+                "properties": {
+                    "boot_time": {
+                        "type": "string"
+                    },
+                    "load_averages": {
+                        "$ref": "#/components/schemas/server.hostUptimeLoadAverages"
+                    },
+                    "uptime_formatted": {
+                        "type": "string"
+                    },
+                    "uptime_seconds": {
+                        "type": "integer"
+                    }
+                },
+                "type": "object"
+            },
+            "server.hostsEntry": {
+                "properties": {
+                    "hostnames": {
+                        "items": {
+                            "type": "string"
+                        },
+                        "type": "array",
+                        "uniqueItems": false
+                    },
+                    "ip": {
+                        "type": "string"
+                    }
+                },
+                "type": "object"
+            },
+            "server.hostsFileResponse": {
+                "properties": {
+                    "entries": {
+                        "items": {
+                            "$ref": "#/components/schemas/server.hostsEntry"
+                        },
+                        "type": "array",
+                        "uniqueItems": false
+                    },
+                    "message": {
+                        "type": "string"
+                    },
+                    "path": {
+                        "type": "string"
+                    },
+                    "raw": {
+                        "type": "string"
+                    },
+                    "success": {
+                        "type": "boolean"
+                    },
+                    "timestamp": {
+                        "type": "string"
+                    }
+                },
+                "type": "object"
+            },
+            "server.hostsUpdateRequest": {
+                "properties": {
+                    "entries": {
+                        "items": {
+                            "$ref": "#/components/schemas/server.hostsEntry"
+                        },
+                        "type": "array",
+                        "uniqueItems": false
+                    },
+                    "raw": {
+                        "description": "Raw file content (takes precedence over entries)",
+                        "type": "string"
+                    }
+                },
+                "type": "object"
+            },
+            "server.hostsUpdateResponse": {
+                "properties": {
+                    "backup": {
+                        "description": "The backup FILENAME (not a path), shaped \u003cfile\u003e.bak.\u003cISO-timestamp\u003e; on Windows the timestamp's colons become dashes (colons are illegal in NTFS filenames)",
+                        "type": "string"
+                    },
+                    "entries": {
+                        "type": "integer"
+                    },
+                    "message": {
+                        "type": "string"
+                    },
+                    "success": {
+                        "type": "boolean"
+                    },
+                    "timestamp": {
+                        "type": "string"
+                    }
+                },
+                "type": "object"
+            },
+            "server.keyInfoResponse": {
+                "properties": {
+                    "created_at": {
+                        "type": "string"
+                    },
+                    "description": {
+                        "type": "string"
+                    },
+                    "id": {
+                        "type": "integer"
+                    },
+                    "last_used": {
+                        "type": "string"
+                    },
+                    "name": {
+                        "type": "string"
+                    },
+                    "role": {
+                        "type": "string"
+                    }
+                },
+                "type": "object"
+            },
+            "server.listKeysResponse": {
+                "properties": {
+                    "entities": {
+                        "items": {
+                            "$ref": "#/components/schemas/server.entityJSON"
+                        },
+                        "type": "array",
+                        "uniqueItems": false
+                    },
+                    "total": {
+                        "type": "integer"
+                    }
+                },
+                "type": "object"
+            },
+            "server.machineNotesRequest": {
+                "properties": {
+                    "notes": {
+                        "type": "string"
+                    }
+                },
+                "type": "object"
+            },
+            "server.machineNotesResponse": {
+                "properties": {
+                    "machine_name": {
+                        "type": "string"
+                    },
+                    "notes": {
+                        "type": "string"
+                    }
+                },
+                "type": "object"
+            },
+            "server.machinePrioritiesResponse": {
+                "properties": {
+                    "machines": {
+                        "items": {
+                            "$ref": "#/components/schemas/server.machinePriorityEntry"
+                        },
+                        "type": "array",
+                        "uniqueItems": false
+                    },
+                    "message": {
+                        "type": "string"
+                    },
+                    "priority_groups": {
+                        "additionalProperties": {
+                            "items": {
+                                "$ref": "#/components/schemas/machines.PriorityEntry"
+                            },
+                            "type": "array"
+                        },
+                        "type": "object"
+                    },
+                    "success": {
+                        "type": "boolean"
+                    },
+                    "total_machines": {
+                        "type": "integer"
+                    }
+                },
+                "type": "object"
+            },
+            "server.machinePriorityEntry": {
+                "properties": {
+                    "has_custom_priority": {
+                        "type": "boolean"
+                    },
+                    "name": {
+                        "type": "string"
+                    },
+                    "priority": {
+                        "type": "integer"
+                    },
+                    "state": {
+                        "type": "string"
+                    }
+                },
+                "type": "object"
+            },
+            "server.machineTagsRequest": {
+                "properties": {
+                    "tags": {
+                        "items": {
+                            "type": "string"
+                        },
+                        "type": "array",
+                        "uniqueItems": false
+                    }
+                },
+                "type": "object"
+            },
+            "server.machineTagsResponse": {
+                "properties": {
+                    "machine_name": {
+                        "type": "string"
+                    },
+                    "tags": {
+                        "items": {
+                            "type": "string"
+                        },
+                        "type": "array",
+                        "uniqueItems": false
+                    }
+                },
+                "type": "object"
+            },
+            "server.mediaEntry": {
+                "properties": {
+                    "format": {
+                        "type": "string"
+                    },
+                    "in_use_by": {
+                        "description": "Machine names holding the medium (empty = unattached)",
+                        "items": {
+                            "type": "string"
+                        },
+                        "type": "array",
+                        "uniqueItems": false
+                    },
+                    "path": {
+                        "description": "The medium file's agent-host location",
+                        "type": "string"
+                    },
+                    "size_bytes": {
+                        "description": "Logical capacity in bytes",
+                        "type": "integer"
+                    },
+                    "source_stamp": {
+                        "description": "template | blank (agent-created) | clone (data-complete clone media), null = unstamped/foreign",
+                        "type": "string"
+                    }
+                },
+                "type": "object"
+            },
+            "server.mediaListResponse": {
+                "properties": {
+                    "media": {
+                        "items": {
+                            "$ref": "#/components/schemas/server.mediaEntry"
+                        },
+                        "type": "array",
+                        "uniqueItems": false
+                    },
+                    "total": {
+                        "type": "integer"
+                    }
+                },
+                "type": "object"
+            },
+            "server.orchestrationDisableResponse": {
+                "properties": {
+                    "disabled_by": {
+                        "type": "string"
+                    },
+                    "message": {
+                        "type": "string"
+                    },
+                    "success": {
+                        "type": "boolean"
+                    }
+                },
+                "type": "object"
+            },
+            "server.orchestrationEnableRequest": {
+                "properties": {
+                    "confirm": {
+                        "type": "boolean"
+                    }
+                },
+                "type": "object"
+            },
+            "server.orchestrationEnableResponse": {
+                "properties": {
+                    "enabled_by": {
+                        "type": "string"
+                    },
+                    "message": {
+                        "type": "string"
+                    },
+                    "success": {
+                        "type": "boolean"
+                    }
+                },
+                "type": "object"
+            },
+            "server.orchestrationStatusResponse": {
+                "properties": {
+                    "controller": {
+                        "type": "string"
+                    },
+                    "message": {
+                        "type": "string"
+                    },
+                    "orchestration_enabled": {
+                        "type": "boolean"
+                    },
+                    "strategy": {
+                        "type": "string"
+                    },
+                    "success": {
+                        "type": "boolean"
+                    }
+                },
+                "type": "object"
+            },
+            "server.orchestrationTestRequest": {
+                "properties": {
+                    "strategy": {
+                        "enum": [
+                            "sequential",
+                            "parallel_by_priority",
+                            "staggered"
+                        ],
+                        "type": "string"
+                    }
+                },
+                "type": "object"
+            },
+            "server.orchestrationTestResponse": {
+                "properties": {
+                    "estimated_duration": {
+                        "type": "integer"
+                    },
+                    "execution_plan": {
+                        "items": {
+                            "$ref": "#/components/schemas/machines.PriorityGroup"
+                        },
+                        "type": "array",
+                        "uniqueItems": false
+                    },
+                    "message": {
+                        "type": "string"
+                    },
+                    "strategy": {
+                        "type": "string"
+                    },
+                    "success": {
+                        "type": "boolean"
+                    },
+                    "total_machines": {
+                        "type": "integer"
+                    }
+                },
+                "type": "object"
+            },
+            "server.powerRequest": {
+                "properties": {
+                    "confirm": {
+                        "type": "boolean"
+                    },
+                    "emergency": {
+                        "description": "Halt only: emergency acknowledgement (halt skips graceful shutdown entirely)",
+                        "type": "boolean"
+                    },
+                    "grace_period": {
+                        "description": "Seconds before the action fires (Unix rounds up to minutes)",
+                        "type": "integer"
+                    },
+                    "message": {
+                        "description": "Warning broadcast to logged-in users where the platform supports one",
+                        "type": "string"
+                    }
+                },
+                "type": "object"
+            },
+            "server.powerTaskResponse": {
+                "properties": {
+                    "created_at": {
+                        "type": "string"
+                    },
+                    "grace_period": {
+                        "type": "integer"
+                    },
+                    "message": {
+                        "type": "string"
+                    },
+                    "status": {
+                        "type": "string"
+                    },
+                    "success": {
+                        "type": "boolean"
+                    },
+                    "task_id": {
+                        "type": "string"
+                    }
+                },
+                "type": "object"
+            },
+            "server.protocolOpenRequest": {
+                "properties": {
+                    "secret": {
+                        "description": "Contents of the running agent's protocol.secret file",
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "secret"
+                ],
+                "type": "object"
+            },
+            "server.protocolOpenResponse": {
+                "properties": {
+                    "message": {
+                        "type": "string"
+                    }
+                },
+                "type": "object"
+            },
+            "server.revokeKeyResponse": {
+                "properties": {
+                    "entity_id": {
+                        "type": "string"
+                    },
+                    "message": {
+                        "type": "string"
+                    },
+                    "name": {
+                        "type": "string"
+                    }
+                },
+                "type": "object"
+            },
+            "server.secretsUpdateResponse": {
+                "properties": {
+                    "message": {
+                        "description": "Human-readable confirmation",
+                        "type": "string"
+                    },
+                    "success": {
+                        "description": "Always true on success",
+                        "type": "boolean"
                     }
                 },
                 "type": "object"
@@ -148,6 +1303,148 @@
                 },
                 "type": "object"
             },
+            "server.swapAreaRow": {
+                "properties": {
+                    "free_bytes": {
+                        "type": "integer"
+                    },
+                    "host": {
+                        "type": "string"
+                    },
+                    "scan_timestamp": {
+                        "type": "string"
+                    },
+                    "size_bytes": {
+                        "type": "integer"
+                    },
+                    "swapfile": {
+                        "type": "string"
+                    },
+                    "used_bytes": {
+                        "type": "integer"
+                    },
+                    "utilization_pct": {
+                        "type": "number"
+                    }
+                },
+                "type": "object"
+            },
+            "server.swapAreasPagination": {
+                "properties": {
+                    "hasMore": {
+                        "type": "boolean"
+                    },
+                    "limit": {
+                        "type": "integer"
+                    },
+                    "offset": {
+                        "type": "integer"
+                    }
+                },
+                "type": "object"
+            },
+            "server.swapAreasResponse": {
+                "properties": {
+                    "pagination": {
+                        "$ref": "#/components/schemas/server.swapAreasPagination"
+                    },
+                    "swapAreas": {
+                        "items": {
+                            "$ref": "#/components/schemas/server.swapAreaRow"
+                        },
+                        "type": "array",
+                        "uniqueItems": false
+                    },
+                    "totalCount": {
+                        "type": "integer"
+                    }
+                },
+                "type": "object"
+            },
+            "server.swapPoolDistribution": {
+                "type": "object"
+            },
+            "server.swapRecommendation": {
+                "properties": {
+                    "action": {
+                        "type": "string"
+                    },
+                    "category": {
+                        "type": "string"
+                    },
+                    "message": {
+                        "type": "string"
+                    },
+                    "type": {
+                        "type": "string"
+                    }
+                },
+                "type": "object"
+            },
+            "server.swapSummaryArea": {
+                "properties": {
+                    "path": {
+                        "type": "string"
+                    },
+                    "pool": {
+                        "type": "string"
+                    },
+                    "sizeGB": {
+                        "type": "string"
+                    },
+                    "usedGB": {
+                        "type": "string"
+                    },
+                    "utilization": {
+                        "type": "number"
+                    }
+                },
+                "type": "object"
+            },
+            "server.swapSummaryResponse": {
+                "properties": {
+                    "freeSwapGB": {
+                        "type": "string"
+                    },
+                    "host": {
+                        "type": "string"
+                    },
+                    "lastScanned": {
+                        "type": "string"
+                    },
+                    "memoryStatsReference": {},
+                    "overallUtilization": {
+                        "type": "number"
+                    },
+                    "poolDistribution": {
+                        "$ref": "#/components/schemas/server.swapPoolDistribution"
+                    },
+                    "recommendations": {
+                        "items": {
+                            "$ref": "#/components/schemas/server.swapRecommendation"
+                        },
+                        "type": "array",
+                        "uniqueItems": false
+                    },
+                    "swapAreaCount": {
+                        "type": "integer"
+                    },
+                    "swapAreas": {
+                        "items": {
+                            "$ref": "#/components/schemas/server.swapSummaryArea"
+                        },
+                        "type": "array",
+                        "uniqueItems": false
+                    },
+                    "totalSwapGB": {
+                        "type": "string"
+                    },
+                    "usedSwapGB": {
+                        "type": "string"
+                    }
+                },
+                "type": "object"
+            },
             "server.ticketBaseURLValue": {
                 "properties": {
                     "value": {
@@ -204,6 +1501,29 @@
                     },
                     "req_type": {
                         "$ref": "#/components/schemas/server.ticketReqTypeValue"
+                    }
+                },
+                "type": "object"
+            },
+            "server.trayClaimRequest": {
+                "properties": {
+                    "token": {
+                        "description": "Single-use tray token from the #tray= URL fragment",
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "token"
+                ],
+                "type": "object"
+            },
+            "server.trayClaimResponse": {
+                "properties": {
+                    "api_key": {
+                        "type": "string"
+                    },
+                    "message": {
+                        "type": "string"
                     }
                 },
                 "type": "object"
@@ -338,6 +1658,323 @@
         "url": ""
     },
     "paths": {
+        "/api-keys": {
+            "get": {
+                "description": "Minimum role: admin. Hashes are never returned.",
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/server.listKeysResponse"
+                                }
+                            }
+                        },
+                        "description": "All keys, newest first"
+                    },
+                    "401": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/auth.ErrorMsg"
+                                }
+                            }
+                        },
+                        "description": "Missing API key"
+                    },
+                    "403": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/auth.ErrorMsg"
+                                }
+                            }
+                        },
+                        "description": "Invalid key or insufficient role"
+                    }
+                },
+                "summary": "List all API keys",
+                "tags": [
+                    "API Keys"
+                ]
+            }
+        },
+        "/api-keys/bootstrap": {
+            "post": {
+                "description": "Public, but gated: requires `api_keys.bootstrap_enabled`, locks after the first key when `bootstrap_auto_disable` is on, and (by default) demands the setup claim token written to `setup.token` beside the agent's config file and printed to the startup log — proof of host ownership. The first key is always an admin key.",
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "oneOf": [
+                                    {
+                                        "type": "object"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/server.bootstrapRequest",
+                                        "summary": "body",
+                                        "description": "Optional name, description, and setup claim token"
+                                    }
+                                ]
+                            }
+                        }
+                    },
+                    "description": "Optional name, description, and setup claim token"
+                },
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/server.bootstrapKeyResponse"
+                                }
+                            }
+                        },
+                        "description": "Key created — shown once, only a hash is stored"
+                    },
+                    "400": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/auth.ErrorMsg"
+                                }
+                            }
+                        },
+                        "description": "Invalid JSON body"
+                    },
+                    "403": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/auth.ErrorMsg"
+                                }
+                            }
+                        },
+                        "description": "Bootstrap disabled, auto-disabled, or setup token invalid"
+                    }
+                },
+                "summary": "Create the first API key",
+                "tags": [
+                    "API Keys"
+                ]
+            }
+        },
+        "/api-keys/generate": {
+            "post": {
+                "description": "Minimum role: admin.",
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "oneOf": [
+                                    {
+                                        "type": "object"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/server.generateRequest",
+                                        "summary": "body",
+                                        "description": "New key name, optional description, and role"
+                                    }
+                                ]
+                            }
+                        }
+                    },
+                    "description": "New key name, optional description, and role",
+                    "required": true
+                },
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/server.generateKeyResponse"
+                                }
+                            }
+                        },
+                        "description": "Key created — shown once, only a hash is stored"
+                    },
+                    "400": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/auth.ErrorMsg"
+                                }
+                            }
+                        },
+                        "description": "Missing name or invalid role"
+                    },
+                    "401": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/auth.ErrorMsg"
+                                }
+                            }
+                        },
+                        "description": "Missing API key"
+                    },
+                    "403": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/auth.ErrorMsg"
+                                }
+                            }
+                        },
+                        "description": "Invalid key or insufficient role"
+                    }
+                },
+                "summary": "Generate a new API key",
+                "tags": [
+                    "API Keys"
+                ]
+            }
+        },
+        "/api-keys/info": {
+            "get": {
+                "description": "Minimum role: viewer (every valid key may inspect itself).",
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/server.keyInfoResponse"
+                                }
+                            }
+                        },
+                        "description": "The calling key's attributes"
+                    },
+                    "401": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/auth.ErrorMsg"
+                                }
+                            }
+                        },
+                        "description": "Missing API key"
+                    },
+                    "403": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/auth.ErrorMsg"
+                                }
+                            }
+                        },
+                        "description": "Invalid API key"
+                    }
+                },
+                "summary": "Describe the calling key",
+                "tags": [
+                    "API Keys"
+                ]
+            }
+        },
+        "/api-keys/{id}": {
+            "delete": {
+                "description": "Minimum role: admin. Deleting the last active admin key is refused (lockout guard).",
+                "parameters": [
+                    {
+                        "description": "API key id",
+                        "in": "path",
+                        "name": "id",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/server.deleteKeyResponse"
+                                }
+                            }
+                        },
+                        "description": "Key deleted"
+                    },
+                    "404": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/auth.ErrorMsg"
+                                }
+                            }
+                        },
+                        "description": "No key with that id"
+                    },
+                    "409": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/auth.ErrorMsg"
+                                }
+                            }
+                        },
+                        "description": "Would remove the last active admin key"
+                    }
+                },
+                "summary": "Permanently delete an API key",
+                "tags": [
+                    "API Keys"
+                ]
+            }
+        },
+        "/api-keys/{id}/revoke": {
+            "put": {
+                "description": "Minimum role: admin. Revoking the last active admin key is refused (lockout guard).",
+                "parameters": [
+                    {
+                        "description": "API key id",
+                        "in": "path",
+                        "name": "id",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/server.revokeKeyResponse"
+                                }
+                            }
+                        },
+                        "description": "Key deactivated"
+                    },
+                    "404": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/auth.ErrorMsg"
+                                }
+                            }
+                        },
+                        "description": "No key with that id"
+                    },
+                    "409": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/auth.ErrorMsg"
+                                }
+                            }
+                        },
+                        "description": "Would deactivate the last active admin key"
+                    }
+                },
+                "summary": "Deactivate an API key",
+                "tags": [
+                    "API Keys"
+                ]
+            }
+        },
         "/api/config/ticket": {
             "get": {
                 "description": "The Help \u0026 Support link's config feed (the Server's /api/config/ticket served on this agent too, so Direct mode renders the same profile-dropdown link). No authentication. Fields ride BoxVault's {value}-wrapped shape; the UI renders the link only when enabled AND base_url are set, building base_url\u0026req=\u003creq_type\u003e\u0026customerId=\u0026user=\u0026email=\u0026context=\u003ccontext\u003e.",
@@ -441,6 +2078,760 @@
                 ]
             }
         },
+        "/auth/tray-claim": {
+            "post": {
+                "description": "Public: the token itself is the credential — minted seconds earlier by the local user's physical tray Open click (or an hwa:// protocol invocation), carried in the URL fragment, single-use, 60-second TTL. This is how a desktop user gets a signed-in UI without ever seeing a login screen. Each claim also REAPS older tray-handoff keys beyond the newest 5 (every Open mints a key and nothing else retires them; unbounded piles make the cold-boot bcrypt scan crawl) — a browser tab holding a reaped key re-signs-in via the tray.",
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "oneOf": [
+                                    {
+                                        "type": "object"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/server.trayClaimRequest",
+                                        "summary": "request",
+                                        "description": "Tray claim request"
+                                    }
+                                ]
+                            }
+                        }
+                    },
+                    "description": "Tray claim request",
+                    "required": true
+                },
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/server.trayClaimResponse"
+                                }
+                            }
+                        },
+                        "description": "Fresh admin key, named after the local OS account"
+                    },
+                    "400": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/auth.ErrorMsg"
+                                }
+                            }
+                        },
+                        "description": "Missing token"
+                    },
+                    "403": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/auth.ErrorMsg"
+                                }
+                            }
+                        },
+                        "description": "Unknown, expired, or already-used token"
+                    }
+                },
+                "summary": "Exchange a tray one-time token for an admin API key",
+                "tags": [
+                    "Local Login"
+                ]
+            }
+        },
+        "/database/analyze": {
+            "post": {
+                "description": "Minimum role: admin. Refreshes query-planner statistics on every open database file; lightweight and safe anytime.",
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object"
+                                }
+                            }
+                        },
+                        "description": "ANALYZE completed"
+                    },
+                    "500": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/server.wrappedError"
+                                }
+                            }
+                        },
+                        "description": "ANALYZE failed"
+                    }
+                },
+                "summary": "Run ANALYZE",
+                "tags": [
+                    "Database Management"
+                ]
+            }
+        },
+        "/database/cleanup": {
+            "post": {
+                "description": "Minimum role: admin. The same retention pass the periodic cleanup runs: finished tasks past tasks.retention_days plus stored telemetry past monitoring.retention_days.",
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/server.databaseCleanupResponse"
+                                }
+                            }
+                        },
+                        "description": "Cleanup triggered"
+                    },
+                    "500": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/server.wrappedError"
+                                }
+                            }
+                        },
+                        "description": "Cleanup failed"
+                    }
+                },
+                "summary": "Trigger manual cleanup",
+                "tags": [
+                    "Database Management"
+                ]
+            }
+        },
+        "/database/stats": {
+            "get": {
+                "description": "Minimum role: viewer. File sizes (main/WAL/SHM), table row counts, and SQLite internals for EVERY open database file — this agent splits storage by write-contention domain instead of one file.",
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/server.databaseStats"
+                                }
+                            }
+                        },
+                        "description": "Database statistics"
+                    },
+                    "500": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/server.wrappedError"
+                                }
+                            }
+                        },
+                        "description": "Failed to retrieve database statistics"
+                    }
+                },
+                "summary": "Database statistics",
+                "tags": [
+                    "Database Management"
+                ]
+            }
+        },
+        "/database/vacuum": {
+            "post": {
+                "description": "Minimum role: admin. Rebuilds every open database file to reclaim space; temporarily doubles disk usage per file.",
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/server.databaseVacuumResponse"
+                                }
+                            }
+                        },
+                        "description": "VACUUM completed"
+                    },
+                    "500": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/server.wrappedError"
+                                }
+                            }
+                        },
+                        "description": "VACUUM failed"
+                    }
+                },
+                "summary": "Run VACUUM",
+                "tags": [
+                    "Database Management"
+                ]
+            }
+        },
+        "/database/{db}/tables": {
+            "get": {
+                "description": "Minimum role: viewer. The read-only explorer drill-down (zoneweaver's contract, same wire on both agents): one open database's tables with row counts and index names. {db} is a GET /database/stats databases[].name value. SQLite internals (sqlite_*) and auto-indexes are excluded.",
+                "parameters": [
+                    {
+                        "description": "Database name from GET /database/stats databases[].name",
+                        "in": "path",
+                        "name": "db",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/server.databaseTablesResponse"
+                                }
+                            }
+                        },
+                        "description": "Tables retrieved"
+                    },
+                    "404": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/server.wrappedError"
+                                }
+                            }
+                        },
+                        "description": "Unknown database (the message names the legal values)"
+                    },
+                    "500": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/server.wrappedError"
+                                }
+                            }
+                        },
+                        "description": "Failed to list database tables"
+                    }
+                },
+                "summary": "List a database's tables",
+                "tags": [
+                    "Database Management"
+                ]
+            }
+        },
+        "/database/{db}/tables/{table}/rows": {
+            "get": {
+                "description": "Minimum role: viewer. The explorer's row browser — NO arbitrary SQL. The table must exist in the named database and order_by must name one of ITS columns; both are looked up in the database's own catalog and quoted as identifiers, never interpolated raw, and limit/offset ride as bind parameters. order_by takes a column name optionally suffixed :desc (e.g. created_at:desc); without it rows come in the table's natural rowid order. rows[] are VALUE ARRAYS in columns[] order.",
+                "parameters": [
+                    {
+                        "description": "Database name from GET /database/stats databases[].name",
+                        "in": "path",
+                        "name": "db",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    {
+                        "description": "Table name",
+                        "in": "path",
+                        "name": "table",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    {
+                        "description": "Page size",
+                        "in": "query",
+                        "name": "limit",
+                        "schema": {
+                            "default": 50,
+                            "type": "integer"
+                        }
+                    },
+                    {
+                        "description": "Page offset",
+                        "in": "query",
+                        "name": "offset",
+                        "schema": {
+                            "default": 0,
+                            "type": "integer"
+                        }
+                    },
+                    {
+                        "description": "Column name, optionally with :desc",
+                        "in": "query",
+                        "name": "order_by",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/server.databaseRowsResponse"
+                                }
+                            }
+                        },
+                        "description": "Rows retrieved"
+                    },
+                    "400": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/server.wrappedError"
+                                }
+                            }
+                        },
+                        "description": "order_by does not name a column of the table"
+                    },
+                    "404": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/server.wrappedError"
+                                }
+                            }
+                        },
+                        "description": "Unknown database or unknown table"
+                    },
+                    "500": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/server.wrappedError"
+                                }
+                            }
+                        },
+                        "description": "Failed to browse database table"
+                    }
+                },
+                "summary": "Browse a table's rows (read-only, paged)",
+                "tags": [
+                    "Database Management"
+                ]
+            }
+        },
+        "/machines/orchestration/disable": {
+            "post": {
+                "description": "Minimum role: operator. Persists machines.orchestration.enabled: false.",
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/server.orchestrationDisableResponse"
+                                }
+                            }
+                        },
+                        "description": "Orchestration disabled"
+                    }
+                },
+                "summary": "Disable machine orchestration",
+                "tags": [
+                    "Machine Management"
+                ]
+            }
+        },
+        "/machines/orchestration/enable": {
+            "post": {
+                "description": "Minimum role: operator. Requires {\"confirm\": true}. Persists machines.orchestration.enabled to config.yaml and applies live: on the NEXT agent startup, autostart machines (vbox.autostart.enabled in the spec) boot in settings.boot_priority order, highest first; agent exit with keep_running_on_exit false stops machines lowest-first.",
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "oneOf": [
+                                    {
+                                        "type": "object"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/server.orchestrationEnableRequest",
+                                        "summary": "request",
+                                        "description": "Requires confirm: true"
+                                    }
+                                ]
+                            }
+                        }
+                    },
+                    "description": "Requires confirm: true",
+                    "required": true
+                },
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/server.orchestrationEnableResponse"
+                                }
+                            }
+                        },
+                        "description": "Orchestration enabled"
+                    },
+                    "400": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "additionalProperties": {
+                                        "type": "string"
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        },
+                        "description": "Missing confirmation"
+                    }
+                },
+                "summary": "Enable machine orchestration",
+                "tags": [
+                    "Machine Management"
+                ]
+            }
+        },
+        "/machines/orchestration/status": {
+            "get": {
+                "description": "Minimum role: viewer. Whether ordered startup/shutdown is enabled (machines.orchestration.enabled) and the configured strategy. The base's SMF-controller handoff is illumos-only — this agent is the only lifecycle controller on its platform, so controller is hyperweaver-agent or none.",
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/server.orchestrationStatusResponse"
+                                }
+                            }
+                        },
+                        "description": "Orchestration status"
+                    }
+                },
+                "summary": "Orchestration status",
+                "tags": [
+                    "Machine Management"
+                ]
+            }
+        },
+        "/machines/orchestration/test": {
+            "post": {
+                "description": "Minimum role: operator. Computes the SHUTDOWN execution plan over running machines — priority groups of ten, lowest first — without executing anything, plus a duration estimate (30s between groups + 120s per machine in the largest group, the base's arithmetic).",
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "oneOf": [
+                                    {
+                                        "type": "object"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/server.orchestrationTestRequest",
+                                        "summary": "request",
+                                        "description": "Optional shutdown strategy selector"
+                                    }
+                                ]
+                            }
+                        }
+                    },
+                    "description": "Optional shutdown strategy selector"
+                },
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/server.orchestrationTestResponse"
+                                }
+                            }
+                        },
+                        "description": "Execution plan"
+                    },
+                    "400": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "additionalProperties": {
+                                        "type": "string"
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        },
+                        "description": "Invalid strategy"
+                    }
+                },
+                "summary": "Test orchestration (dry run)",
+                "tags": [
+                    "Machine Management"
+                ]
+            }
+        },
+        "/machines/priorities": {
+            "get": {
+                "description": "Minimum role: viewer. Every machine with its boot priority (settings.boot_priority, 1-100, default 95 — set via PUT /machines/{name} {boot_priority}, DB-immediate) plus the tens-range grouping.",
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/server.machinePrioritiesResponse"
+                                }
+                            }
+                        },
+                        "description": "Priorities"
+                    }
+                },
+                "summary": "Machine boot priorities",
+                "tags": [
+                    "Machine Management"
+                ]
+            }
+        },
+        "/machines/{machineName}/notes": {
+            "get": {
+                "description": "Minimum role: viewer.",
+                "parameters": [
+                    {
+                        "description": "Machine name",
+                        "in": "path",
+                        "name": "machineName",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/server.machineNotesResponse"
+                                }
+                            }
+                        },
+                        "description": "Notes"
+                    },
+                    "404": {
+                        "description": "Machine not found"
+                    }
+                },
+                "summary": "Machine notes",
+                "tags": [
+                    "Machine Management"
+                ]
+            },
+            "put": {
+                "description": "Minimum role: operator. Registry-only, no task.",
+                "parameters": [
+                    {
+                        "description": "Machine name",
+                        "in": "path",
+                        "name": "machineName",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "oneOf": [
+                                    {
+                                        "type": "object"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/server.machineNotesRequest",
+                                        "summary": "request",
+                                        "description": "Notes to set"
+                                    }
+                                ]
+                            }
+                        }
+                    },
+                    "description": "Notes to set",
+                    "required": true
+                },
+                "responses": {
+                    "200": {
+                        "description": "Notes updated"
+                    },
+                    "404": {
+                        "description": "Machine not found"
+                    }
+                },
+                "summary": "Update machine notes",
+                "tags": [
+                    "Machine Management"
+                ]
+            }
+        },
+        "/machines/{machineName}/tags": {
+            "get": {
+                "description": "Minimum role: viewer.",
+                "parameters": [
+                    {
+                        "description": "Machine name",
+                        "in": "path",
+                        "name": "machineName",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/server.machineTagsResponse"
+                                }
+                            }
+                        },
+                        "description": "Tags"
+                    },
+                    "404": {
+                        "description": "Machine not found"
+                    }
+                },
+                "summary": "Machine tags",
+                "tags": [
+                    "Machine Management"
+                ]
+            },
+            "put": {
+                "description": "Minimum role: operator. Registry-only, no task.",
+                "parameters": [
+                    {
+                        "description": "Machine name",
+                        "in": "path",
+                        "name": "machineName",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "oneOf": [
+                                    {
+                                        "type": "object"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/server.machineTagsRequest",
+                                        "summary": "request",
+                                        "description": "Tags to set"
+                                    }
+                                ]
+                            }
+                        }
+                    },
+                    "description": "Tags to set",
+                    "required": true
+                },
+                "responses": {
+                    "200": {
+                        "description": "Tags updated"
+                    },
+                    "404": {
+                        "description": "Machine not found"
+                    }
+                },
+                "summary": "Update machine tags",
+                "tags": [
+                    "Machine Management"
+                ]
+            }
+        },
+        "/media": {
+            "get": {
+                "description": "Minimum role: viewer (an ordinary GET list — no capability token of its own). The typed disk spec's media inventory (converged, sync 2026-07-17): every disk medium VirtualBox's media registry knows (`VBoxManage list hdds --long`), each with its PROVENANCE STAMP — source_stamp is the hyperweaver:source medium property (the .hw-source sidecar as fallback) the agent writes on media it CREATES (template = a box clone, blank = a fresh VDI); null = unstamped/foreign, a medium the agent never made and the delete flow always preserves. in_use_by names the machines holding the medium (the image attach pre-check's same data — a typed image attach refuses a medium another machine holds unless the entry carries force: true).",
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/server.mediaListResponse"
+                                }
+                            }
+                        },
+                        "description": "The media inventory"
+                    },
+                    "500": {
+                        "description": "VBoxManage list hdds failed"
+                    },
+                    "503": {
+                        "description": "VirtualBox is not installed"
+                    }
+                },
+                "summary": "List the host's disk media",
+                "tags": [
+                    "Machine Management"
+                ]
+            }
+        },
+        "/protocol/open": {
+            "post": {
+                "description": "Public but secret-gated: when the OS spawns a fresh agent process for an hwa://open invocation (Windows registry handler, Linux .desktop handler), that process forwards the action here and exits. The per-boot secret file (0600, beside the running agent's config) authenticates it — web pages cannot read local files, so possession proves a local same-user process. On success the running agent opens the signed-in UI in the user's browser, exactly like a tray Open click.",
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "oneOf": [
+                                    {
+                                        "type": "object"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/server.protocolOpenRequest",
+                                        "summary": "request",
+                                        "description": "Protocol open request"
+                                    }
+                                ]
+                            }
+                        }
+                    },
+                    "description": "Protocol open request",
+                    "required": true
+                },
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/server.protocolOpenResponse"
+                                }
+                            }
+                        },
+                        "description": "Action accepted; the agent is opening the browser"
+                    },
+                    "400": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/auth.ErrorMsg"
+                                }
+                            }
+                        },
+                        "description": "Missing secret"
+                    },
+                    "403": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/auth.ErrorMsg"
+                                }
+                            }
+                        },
+                        "description": "Invalid secret"
+                    }
+                },
+                "summary": "hwa:// single-instance handoff",
+                "tags": [
+                    "Local Login"
+                ]
+            }
+        },
         "/provisioning/status": {
             "get": {
                 "description": "Minimum role: viewer. A bare tool-name → installed map; this agent's tools are vagrant, virtualbox, git, ansible, rsync, scp, and builtin_sync (always true — the embedded pure-Go rsync client + SFTP that make vagrant optional), plus utm on macOS agents ONLY (never reported off darwin). rsync/scp probe with the pipeline's own lookup: PATH, vagrant's embedded toolchain, and the Windows OpenSSH directory. ansible probes the host control node — the native binary, or on Windows the default WSL distribution's ansible-playbook (the transports matrix's WSL rows). (The Node agent lists its OmniOS set — same endpoint, platform-appropriate contents.)",
@@ -462,6 +2853,76 @@
                 "summary": "Provisioning prerequisite availability",
                 "tags": [
                     "System"
+                ]
+            }
+        },
+        "/secrets": {
+            "get": {
+                "description": "Minimum role: admin. The whole store, plain — nothing masked (Mark's ruling: the user's local machine; the generated Hosts.yml carries these as SECRETS_* vars anyway).",
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/secrets.Document"
+                                }
+                            }
+                        },
+                        "description": "The secrets document"
+                    }
+                },
+                "summary": "The global secrets document",
+                "tags": [
+                    "Secrets"
+                ]
+            },
+            "put": {
+                "description": "Minimum role: admin. Replaces the submitted categories whole (the same top-level shallow-merge shape as PUT /settings); omitted categories are untouched. Rejected whole on an unknown category or an invalid entry name — the store never half-applies. Persisted atomically to secrets.yaml (0600) beside the config.",
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "oneOf": [
+                                    {
+                                        "type": "object"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/secrets.Document",
+                                        "summary": "body",
+                                        "description": "Secrets categories to replace"
+                                    }
+                                ]
+                            }
+                        }
+                    },
+                    "description": "Secrets categories to replace",
+                    "required": true
+                },
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/server.secretsUpdateResponse"
+                                }
+                            }
+                        },
+                        "description": "Secrets persisted"
+                    },
+                    "400": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/server.wrappedError"
+                                }
+                            }
+                        },
+                        "description": "Unknown category or invalid entry name"
+                    }
+                },
+                "summary": "Update the global secrets",
+                "tags": [
+                    "Secrets"
                 ]
             }
         },
@@ -509,6 +2970,484 @@
                 "summary": "Host statistics and machine lists",
                 "tags": [
                     "System"
+                ]
+            }
+        },
+        "/system/dns": {
+            "get": {
+                "description": "Minimum role: viewer (the dns capability token). The converged wire (sync 2026-07-17 — both agents answer the same shape): the standard success envelope with nameservers/search_domains/domain/options plus raw. Per-OS mechanics behind the one shape: Unix parses /etc/resolv.conf (grammar: blanks and #/; comment lines skipped; nameserver appends, search extends, domain sets, options extends; raw = the whole file). Windows has no resolv.conf — nameservers are the unique server IPs (static or DHCP-configured) across CONNECTED interfaces via netsh, search_domains/domain/options stay empty (the honest platform subset; DNS suffixes live elsewhere), raw = the netsh output. macOS resolv.conf is generated and ignored by the resolver — nameservers/search_domains union networksetup's per-enabled-service answers, domain/options stay empty, raw = the concatenated tool output.",
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/server.dnsGetResponse"
+                                }
+                            }
+                        },
+                        "description": "DNS configuration"
+                    },
+                    "500": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/server.wrappedError"
+                                }
+                            }
+                        },
+                        "description": "Failed to read DNS configuration"
+                    }
+                },
+                "summary": "Read the DNS configuration",
+                "tags": [
+                    "Host Configuration"
+                ]
+            },
+            "put": {
+                "description": "Minimum role: operator. The converged wire (sync 2026-07-17): raw WINS when present; a body carrying neither raw nor nameservers answers 400 \"Either nameservers array or raw string is required\". Unix serializes the structured fields into /etc/resolv.conf (manager header, then domain, search, one nameserver per entry, options), backs the current file up beside it first (\u003cfile\u003e.bak.\u003cISO-timestamp\u003e, colons→dashes — the hosts-file precedent), and replaces atomically (0644); the answer carries the backup FILENAME plus the parsed-back view of what was written (no raw on the PUT answer). Windows applies nameservers to EVERY connected interface via netsh (static + primary/add; an empty array reverts to DHCP) — raw and search_domains/domain/options have no analog and answer 400 naming the field, and backup is \"\" (no file to back up, honest absence). macOS applies nameservers (and search_domains when sent) to every enabled service via networksetup — domain/options/raw answer 400, backup \"\". Nameservers must be literal IP addresses everywhere. Writing needs the same OS privilege editing DNS by hand would (root on Unix, Administrator on Windows) — a refusal fails honestly.",
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "oneOf": [
+                                    {
+                                        "type": "object"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/server.dnsUpdateRequest",
+                                        "summary": "body",
+                                        "description": "DNS configuration to apply"
+                                    }
+                                ]
+                            }
+                        }
+                    },
+                    "description": "DNS configuration to apply",
+                    "required": true
+                },
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/server.dnsUpdateResponse"
+                                }
+                            }
+                        },
+                        "description": "DNS configuration updated"
+                    },
+                    "400": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/server.wrappedError"
+                                }
+                            }
+                        },
+                        "description": "Neither nameservers nor raw present ('Either nameservers array or raw string is required'), a non-IP nameserver, invalid token values, or a field the platform cannot honor (raw / search_domains / domain / options per the per-OS rules above — refused by name, never silently dropped)"
+                    },
+                    "500": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/server.wrappedError"
+                                }
+                            }
+                        },
+                        "description": "Failed to write DNS configuration (tool failure, backup or write failure — typically missing OS privilege)"
+                    }
+                },
+                "summary": "Replace the DNS configuration",
+                "tags": [
+                    "Host Configuration"
+                ]
+            }
+        },
+        "/system/host/halt": {
+            "post": {
+                "description": "Minimum role: admin. No grace period, no graceful shutdown — the emergency stop. Requires BOTH confirm:true and emergency:true. 503 when host_power.enabled is false.",
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "oneOf": [
+                                    {
+                                        "type": "object"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/server.powerRequest",
+                                        "summary": "request",
+                                        "description": "Power action body (confirm and emergency required)"
+                                    }
+                                ]
+                            }
+                        }
+                    },
+                    "description": "Power action body (confirm and emergency required)",
+                    "required": true
+                },
+                "responses": {
+                    "202": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object"
+                                }
+                            }
+                        },
+                        "description": "Halt task created"
+                    },
+                    "400": {
+                        "description": "Missing confirmation or emergency acknowledgement"
+                    },
+                    "503": {
+                        "description": "Host power management is disabled in configuration"
+                    }
+                },
+                "summary": "Immediately halt the host",
+                "tags": [
+                    "System Host Management"
+                ]
+            }
+        },
+        "/system/host/poweroff": {
+            "post": {
+                "description": "Minimum role: admin. Manual intervention required to restart the machine. Same body rules as shutdown; Windows makes no shutdown/poweroff distinction. 503 when host_power.enabled is false.",
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "oneOf": [
+                                    {
+                                        "type": "object"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/server.powerRequest",
+                                        "summary": "request",
+                                        "description": "Power action body (confirm required)"
+                                    }
+                                ]
+                            }
+                        }
+                    },
+                    "description": "Power action body (confirm required)",
+                    "required": true
+                },
+                "responses": {
+                    "202": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object"
+                                }
+                            }
+                        },
+                        "description": "Poweroff task created"
+                    },
+                    "400": {
+                        "description": "Missing confirmation or invalid parameters"
+                    },
+                    "503": {
+                        "description": "Host power management is disabled in configuration"
+                    }
+                },
+                "summary": "Power off the host",
+                "tags": [
+                    "System Host Management"
+                ]
+            }
+        },
+        "/system/host/restart": {
+            "post": {
+                "description": "Minimum role: admin. Same body rules as shutdown. 503 when host_power.enabled is false.",
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "oneOf": [
+                                    {
+                                        "type": "object"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/server.powerRequest",
+                                        "summary": "request",
+                                        "description": "Power action body (confirm required)"
+                                    }
+                                ]
+                            }
+                        }
+                    },
+                    "description": "Power action body (confirm required)",
+                    "required": true
+                },
+                "responses": {
+                    "202": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object"
+                                }
+                            }
+                        },
+                        "description": "Restart task created"
+                    },
+                    "400": {
+                        "description": "Missing confirmation or invalid parameters"
+                    },
+                    "503": {
+                        "description": "Host power management is disabled in configuration"
+                    }
+                },
+                "summary": "Restart the host",
+                "tags": [
+                    "System Host Management"
+                ]
+            }
+        },
+        "/system/host/shutdown": {
+            "post": {
+                "description": "Minimum role: admin. Queues a task running the platform shutdown command (Windows shutdown /s, Unix shutdown -h). confirm:true is required. The agent needs the OS privilege the command itself demands — a refusal fails the task honestly. 503 when host_power.enabled is false.",
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "oneOf": [
+                                    {
+                                        "type": "object"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/server.powerRequest",
+                                        "summary": "request",
+                                        "description": "Power action body (confirm required)"
+                                    }
+                                ]
+                            }
+                        }
+                    },
+                    "description": "Power action body (confirm required)",
+                    "required": true
+                },
+                "responses": {
+                    "202": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/server.powerTaskResponse"
+                                }
+                            }
+                        },
+                        "description": "Shutdown task created"
+                    },
+                    "400": {
+                        "description": "Missing confirmation or invalid parameters"
+                    },
+                    "503": {
+                        "description": "Host power management is disabled in configuration"
+                    }
+                },
+                "summary": "Shut down the host",
+                "tags": [
+                    "System Host Management"
+                ]
+            }
+        },
+        "/system/host/status": {
+            "get": {
+                "description": "Minimum role: viewer. Uptime, load averages, and memory. No runlevel or reboot-required tracking — init concepts absent on this platform trio. 503 when host_power.enabled is false.",
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/server.hostStatusResponse"
+                                }
+                            }
+                        },
+                        "description": "System status"
+                    },
+                    "503": {
+                        "description": "Host power management is disabled in configuration"
+                    }
+                },
+                "summary": "Host system status",
+                "tags": [
+                    "System Host Management"
+                ]
+            }
+        },
+        "/system/host/uptime": {
+            "get": {
+                "description": "Minimum role: viewer. 503 when host_power.enabled is false.",
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/server.hostUptimeResponse"
+                                }
+                            }
+                        },
+                        "description": "Uptime information"
+                    },
+                    "503": {
+                        "description": "Host power management is disabled in configuration"
+                    }
+                },
+                "summary": "Host uptime",
+                "tags": [
+                    "System Host Management"
+                ]
+            }
+        },
+        "/system/hosts": {
+            "get": {
+                "description": "Minimum role: viewer. Parses the platform hosts file (Windows System32\\drivers\\etc\\hosts, /etc/hosts elsewhere) into structured entries plus the raw content, wrapped in the standard success envelope (the converged wire, Mark's ruling 2026-07-17 — both agents answer identically). entries carries only the parsed address lines; comments and blank lines live only in raw.",
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/server.hostsFileResponse"
+                                }
+                            }
+                        },
+                        "description": "Hosts file"
+                    },
+                    "500": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/server.wrappedError"
+                                }
+                            }
+                        },
+                        "description": "Failed to read hosts file"
+                    }
+                },
+                "summary": "Read the system hosts file",
+                "tags": [
+                    "Host Configuration"
+                ]
+            },
+            "put": {
+                "description": "Minimum role: operator. Provide structured entries or raw content (raw wins when both are present; entries validate per field — no whitespace or # inside an ip or hostname). A timestamped backup lands beside the file before the atomic replace, and the answer carries its filename (the converged wire, Mark's ruling 2026-07-17 — no path field). Writing needs the same OS privilege editing the file by hand would (Administrator on Windows, root on Unix) — a refusal fails honestly.",
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "oneOf": [
+                                    {
+                                        "type": "object"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/server.hostsUpdateRequest",
+                                        "summary": "body",
+                                        "description": "Structured entries or raw content (raw wins)"
+                                    }
+                                ]
+                            }
+                        }
+                    },
+                    "description": "Structured entries or raw content (raw wins)",
+                    "required": true
+                },
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/server.hostsUpdateResponse"
+                                }
+                            }
+                        },
+                        "description": "Hosts file updated"
+                    },
+                    "400": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/server.wrappedError"
+                                }
+                            }
+                        },
+                        "description": "Invalid body or entry values"
+                    },
+                    "500": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/server.wrappedError"
+                                }
+                            }
+                        },
+                        "description": "Backup or write failure (typically missing OS privilege)"
+                    }
+                },
+                "summary": "Replace the system hosts file",
+                "tags": [
+                    "Host Configuration"
+                ]
+            }
+        },
+        "/system/swap/areas": {
+            "get": {
+                "description": "Minimum role: viewer. Row-per-area listing with the Node payload's pagination envelope, read live from the OS. The zvol pool filter has no meaning on this agent and is ignored.",
+                "parameters": [
+                    {
+                        "description": "Page size",
+                        "in": "query",
+                        "name": "limit",
+                        "schema": {
+                            "default": 100,
+                            "type": "integer"
+                        }
+                    },
+                    {
+                        "description": "Page offset",
+                        "in": "query",
+                        "name": "offset",
+                        "schema": {
+                            "default": 0,
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/server.swapAreasResponse"
+                                }
+                            }
+                        },
+                        "description": "Swap areas"
+                    }
+                },
+                "summary": "List swap areas",
+                "tags": [
+                    "Swap Management"
+                ]
+            }
+        },
+        "/system/swap/summary": {
+            "get": {
+                "description": "Minimum role: viewer. Aggregate swap figures, per-area breakdown, and utilization recommendations (Node-agent shape). Pool fields are present but empty — ZFS pools have no analog on this host. Read live from the OS; lastScanned is the request time.",
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/server.swapSummaryResponse"
+                                }
+                            }
+                        },
+                        "description": "Swap summary"
+                    }
+                },
+                "summary": "Swap configuration summary",
+                "tags": [
+                    "Swap Management"
                 ]
             }
         },

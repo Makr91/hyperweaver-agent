@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // Read-only database explorer (GET /database/{db}/tables and
@@ -122,7 +123,31 @@ func tableRowCount(ctx context.Context, db *sql.DB, table string) (int64, error)
 	return count, err
 }
 
+type databaseTable struct {
+	Indexes []string `json:"indexes"`
+	Name    string   `json:"name"`
+	Rows    int64    `json:"rows"`
+}
+
+type databaseTablesResponse struct {
+	Database  string          `json:"database"`
+	Message   string          `json:"message"`
+	Success   bool            `json:"success"`
+	Tables    []databaseTable `json:"tables"`
+	Timestamp string          `json:"timestamp"`
+}
+
 // handleListDatabaseTables serves GET /database/{db}/tables.
+//
+//	@Summary		List a database's tables
+//	@Description	Minimum role: viewer. The read-only explorer drill-down (zoneweaver's contract, same wire on both agents): one open database's tables with row counts and index names. {db} is a GET /database/stats databases[].name value. SQLite internals (sqlite_*) and auto-indexes are excluded.
+//	@Tags			Database Management
+//	@Produce		json
+//	@Param			db	path	string	true	"Database name from GET /database/stats databases[].name"
+//	@Success		200	{object}	databaseTablesResponse	"Tables retrieved"
+//	@Failure		404	{object}	wrappedError	"Unknown database (the message names the legal values)"
+//	@Failure		500	{object}	wrappedError	"Failed to list database tables"
+//	@Router			/database/{db}/tables [get]
 func (s *Server) handleListDatabaseTables(w http.ResponseWriter, r *http.Request) {
 	handle := s.findDatabase(w, r)
 	if handle == nil {
@@ -141,7 +166,7 @@ func (s *Server) handleListDatabaseTables(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	tables := make([]map[string]any, 0, len(names))
+	tables := make([]databaseTable, 0, len(names))
 	for _, name := range names {
 		count, cerr := tableRowCount(r.Context(), handle.DB, name)
 		if cerr != nil {
@@ -153,15 +178,18 @@ func (s *Server) handleListDatabaseTables(w http.ResponseWriter, r *http.Request
 		if list == nil {
 			list = []string{}
 		}
-		tables = append(tables, map[string]any{
-			"name":    name,
-			"rows":    count,
-			"indexes": list,
+		tables = append(tables, databaseTable{
+			Name:    name,
+			Rows:    count,
+			Indexes: list,
 		})
 	}
-	successResponse(w, "Database tables retrieved successfully", map[string]any{
-		"database": handle.Name,
-		"tables":   tables,
+	writeJSON(w, databaseTablesResponse{
+		Database:  handle.Name,
+		Message:   "Database tables retrieved successfully",
+		Success:   true,
+		Tables:    tables,
+		Timestamp: time.Now().UTC().Format(time.RFC3339),
 	})
 }
 
@@ -225,9 +253,44 @@ func scanValues(rows *sql.Rows) ([][]any, error) {
 	return values, rows.Err()
 }
 
+type databaseRowsPage struct {
+	HasMore bool `json:"hasMore"`
+	Limit   int  `json:"limit"`
+	Offset  int  `json:"offset"`
+}
+
+type databaseRowsResponse struct {
+	Columns    []string         `json:"columns"`
+	Database   string           `json:"database"`
+	Message    string           `json:"message"`
+	Pagination databaseRowsPage `json:"pagination"`
+	// One array per row, values in columns[] order (TEXT/BLOB render as strings, NULL as null)
+	Rows      [][]any `json:"rows"`
+	Success   bool    `json:"success"`
+	Table     string  `json:"table"`
+	Timestamp string  `json:"timestamp"`
+	// Total rows in the table (not the page)
+	Total int64 `json:"total"`
+}
+
 // handleBrowseDatabaseTable serves GET
 // /database/{db}/tables/{table}/rows?limit&offset&order_by — order_by is a
 // column name, optionally suffixed :desc (e.g. created_at:desc).
+//
+//	@Summary		Browse a table's rows (read-only, paged)
+//	@Description	Minimum role: viewer. The explorer's row browser — NO arbitrary SQL. The table must exist in the named database and order_by must name one of ITS columns; both are looked up in the database's own catalog and quoted as identifiers, never interpolated raw, and limit/offset ride as bind parameters. order_by takes a column name optionally suffixed :desc (e.g. created_at:desc); without it rows come in the table's natural rowid order. rows[] are VALUE ARRAYS in columns[] order.
+//	@Tags			Database Management
+//	@Produce		json
+//	@Param			db	path	string	true	"Database name from GET /database/stats databases[].name"
+//	@Param			table	path	string	true	"Table name"
+//	@Param			limit	query	integer	false	"Page size"	default(50)
+//	@Param			offset	query	integer	false	"Page offset"	default(0)
+//	@Param			order_by	query	string	false	"Column name, optionally with :desc"
+//	@Success		200	{object}	databaseRowsResponse	"Rows retrieved"
+//	@Failure		400	{object}	wrappedError	"order_by does not name a column of the table"
+//	@Failure		404	{object}	wrappedError	"Unknown database or unknown table"
+//	@Failure		500	{object}	wrappedError	"Failed to browse database table"
+//	@Router			/database/{db}/tables/{table}/rows [get]
 func (s *Server) handleBrowseDatabaseTable(w http.ResponseWriter, r *http.Request) {
 	handle := s.findDatabase(w, r)
 	if handle == nil {
@@ -282,16 +345,19 @@ func (s *Server) handleBrowseDatabaseTable(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	successResponse(w, "Table rows retrieved successfully", map[string]any{
-		"database": handle.Name,
-		"table":    table,
-		"columns":  columns,
-		"rows":     values,
-		"total":    total,
-		"pagination": map[string]any{
-			"limit":   limit,
-			"offset":  offset,
-			"hasMore": int64(offset+len(values)) < total,
+	writeJSON(w, databaseRowsResponse{
+		Columns:  columns,
+		Database: handle.Name,
+		Message:  "Table rows retrieved successfully",
+		Pagination: databaseRowsPage{
+			HasMore: int64(offset+len(values)) < total,
+			Limit:   limit,
+			Offset:  offset,
 		},
+		Rows:      values,
+		Success:   true,
+		Table:     table,
+		Timestamp: time.Now().UTC().Format(time.RFC3339),
+		Total:     total,
 	})
 }

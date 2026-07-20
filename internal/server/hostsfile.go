@@ -61,9 +61,26 @@ func parseHostsFile(raw string) []hostsEntry {
 	return entries
 }
 
+type hostsFileResponse struct {
+	Success   bool         `json:"success"`
+	Message   string       `json:"message"`
+	Timestamp string       `json:"timestamp"`
+	Entries   []hostsEntry `json:"entries"`
+	Raw       string       `json:"raw"`
+	Path      string       `json:"path"`
+}
+
 // handleGetHostsFile mirrors GET /system/hosts — zoneweaver's shipped wire
 // (Mark's ruling 2026-07-17: Go matches zoneweaver here): the standard
 // success envelope with entries/raw/path spread top-level.
+//
+//	@Summary		Read the system hosts file
+//	@Description	Minimum role: viewer. Parses the platform hosts file (Windows System32\drivers\etc\hosts, /etc/hosts elsewhere) into structured entries plus the raw content, wrapped in the standard success envelope (the converged wire, Mark's ruling 2026-07-17 — both agents answer identically). entries carries only the parsed address lines; comments and blank lines live only in raw.
+//	@Tags			Host Configuration
+//	@Produce		json
+//	@Success		200	{object}	hostsFileResponse	"Hosts file"
+//	@Failure		500	{object}	wrappedError	"Failed to read hosts file"
+//	@Router			/system/hosts [get]
 func (s *Server) handleGetHostsFile(w http.ResponseWriter, _ *http.Request) {
 	path := hostsFilePath()
 	raw, err := os.ReadFile(filepath.Clean(path))
@@ -71,10 +88,13 @@ func (s *Server) handleGetHostsFile(w http.ResponseWriter, _ *http.Request) {
 		errorResponse(w, http.StatusInternalServerError, "Failed to read hosts file", err.Error())
 		return
 	}
-	successResponse(w, "Hosts file retrieved successfully", map[string]any{
-		"entries": parseHostsFile(string(raw)),
-		"raw":     string(raw),
-		"path":    path,
+	writeJSON(w, hostsFileResponse{
+		Success:   true,
+		Message:   "Hosts file retrieved successfully",
+		Timestamp: time.Now().UTC().Format(time.RFC3339),
+		Entries:   parseHostsFile(string(raw)),
+		Raw:       string(raw),
+		Path:      path,
 	})
 }
 
@@ -82,7 +102,8 @@ func (s *Server) handleGetHostsFile(w http.ResponseWriter, _ *http.Request) {
 // (raw wins).
 type hostsUpdateRequest struct {
 	Entries []hostsEntry `json:"entries"`
-	Raw     *string      `json:"raw"`
+	// Raw file content (takes precedence over entries)
+	Raw *string `json:"raw"`
 }
 
 // renderHostsFile serializes structured entries into hosts-file text.
@@ -99,10 +120,30 @@ func renderHostsFile(entries []hostsEntry) string {
 	return b.String()
 }
 
+type hostsUpdateResponse struct {
+	Success   bool   `json:"success"`
+	Message   string `json:"message"`
+	Timestamp string `json:"timestamp"`
+	// The backup FILENAME (not a path), shaped <file>.bak.<ISO-timestamp>; on Windows the timestamp's colons become dashes (colons are illegal in NTFS filenames)
+	Backup  string `json:"backup"`
+	Entries int    `json:"entries"`
+}
+
 // handleUpdateHostsFile mirrors PUT /system/hosts: timestamped backup beside
 // the file, then an atomic replace. Writing the file requires the same
 // privilege editing it by hand would (Administrator on Windows, root on
 // Unix) — a permission refusal fails honestly.
+//
+//	@Summary		Replace the system hosts file
+//	@Description	Minimum role: operator. Provide structured entries or raw content (raw wins when both are present; entries validate per field — no whitespace or # inside an ip or hostname). A timestamped backup lands beside the file before the atomic replace, and the answer carries its filename (the converged wire, Mark's ruling 2026-07-17 — no path field). Writing needs the same OS privilege editing the file by hand would (Administrator on Windows, root on Unix) — a refusal fails honestly.
+//	@Tags			Host Configuration
+//	@Accept			json
+//	@Produce		json
+//	@Param			body	body	hostsUpdateRequest	true	"Structured entries or raw content (raw wins)"
+//	@Success		200	{object}	hostsUpdateResponse	"Hosts file updated"
+//	@Failure		400	{object}	wrappedError	"Invalid body or entry values"
+//	@Failure		500	{object}	wrappedError	"Backup or write failure (typically missing OS privilege)"
+//	@Router			/system/hosts [put]
 func (s *Server) handleUpdateHostsFile(w http.ResponseWriter, r *http.Request) {
 	var body hostsUpdateRequest
 	if err := decodeBody(r, &body); err != nil {
@@ -168,8 +209,11 @@ func (s *Server) handleUpdateHostsFile(w http.ResponseWriter, r *http.Request) {
 		"by", auth.FromContext(r.Context()).Name)
 	// The converged PUT answer carries backup + entries only — no path
 	// (zoneweaver's shipped shape; Mark: Go matches zoneweaver).
-	successResponse(w, "Hosts file updated successfully", map[string]any{
-		"backup":  filepath.Base(backup),
-		"entries": len(parseHostsFile(content)),
+	writeJSON(w, hostsUpdateResponse{
+		Success:   true,
+		Message:   "Hosts file updated successfully",
+		Timestamp: time.Now().UTC().Format(time.RFC3339),
+		Backup:    filepath.Base(backup),
+		Entries:   len(parseHostsFile(content)),
 	})
 }

@@ -37,9 +37,25 @@ func decodeBody(r *http.Request, dst any) error {
 type bootstrapRequest struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
-	SetupToken  string `json:"setupToken"`
+	SetupToken  string `json:"setupToken"` // 64-character claim token from the agent host
 }
 
+type bootstrapKeyResponse struct {
+	APIKey  string `json:"api_key"`
+	Message string `json:"message"`
+	Note    string `json:"note"`
+}
+
+// @Summary		Create the first API key
+// @Description	Public, but gated: requires `api_keys.bootstrap_enabled`, locks after the first key when `bootstrap_auto_disable` is on, and (by default) demands the setup claim token written to `setup.token` beside the agent's config file and printed to the startup log — proof of host ownership. The first key is always an admin key.
+// @Tags			API Keys
+// @Accept			json
+// @Produce		json
+// @Param			body	body	bootstrapRequest	false	"Optional name, description, and setup claim token"
+// @Success		200	{object}	bootstrapKeyResponse	"Key created — shown once, only a hash is stored"
+// @Failure		400	{object}	auth.ErrorMsg	"Invalid JSON body"
+// @Failure		403	{object}	auth.ErrorMsg	"Bootstrap disabled, auto-disabled, or setup token invalid"
+// @Router			/api-keys/bootstrap [post]
 func (s *Server) handleBootstrapKey(w http.ResponseWriter, r *http.Request) {
 	akCfg := s.cfg.APIKeys
 
@@ -98,19 +114,39 @@ func (s *Server) handleBootstrapKey(w http.ResponseWriter, r *http.Request) {
 	}
 	slog.Info("bootstrap api key created", "name", name)
 
-	writeJSON(w, map[string]any{
-		"api_key": apiKey,
-		"message": "Bootstrap API key generated successfully",
-		"note":    note,
+	writeJSON(w, bootstrapKeyResponse{
+		APIKey:  apiKey,
+		Message: "Bootstrap API key generated successfully",
+		Note:    note,
 	})
 }
 
 type generateRequest struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
-	Role        string `json:"role"`
+	Role        string `json:"role"` // Defaults to admin when omitted
 }
 
+type generateKeyResponse struct {
+	APIKey      string `json:"api_key"`
+	EntityID    int64  `json:"entity_id"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Role        string `json:"role"`
+	Message     string `json:"message"`
+}
+
+// @Summary		Generate a new API key
+// @Description	Minimum role: admin.
+// @Tags			API Keys
+// @Accept			json
+// @Produce		json
+// @Param			body	body	generateRequest	true	"New key name, optional description, and role"
+// @Success		200	{object}	generateKeyResponse	"Key created — shown once, only a hash is stored"
+// @Failure		400	{object}	auth.ErrorMsg	"Missing name or invalid role"
+// @Failure		401	{object}	auth.ErrorMsg	"Missing API key"
+// @Failure		403	{object}	auth.ErrorMsg	"Invalid key or insufficient role"
+// @Router			/api-keys/generate [post]
 func (s *Server) handleGenerateKey(w http.ResponseWriter, r *http.Request) {
 	var body generateRequest
 	if err := decodeBody(r, &body); err != nil {
@@ -148,13 +184,13 @@ func (s *Server) handleGenerateKey(w http.ResponseWriter, r *http.Request) {
 	slog.Info("api key created", "name", entity.Name, "role", entity.Role,
 		"created_by", auth.FromContext(r.Context()).Name)
 
-	writeJSON(w, map[string]any{
-		"api_key":     apiKey,
-		"entity_id":   entity.ID,
-		"name":        entity.Name,
-		"description": entity.Description,
-		"role":        entity.Role,
-		"message":     "API key generated successfully",
+	writeJSON(w, generateKeyResponse{
+		APIKey:      apiKey,
+		EntityID:    entity.ID,
+		Name:        entity.Name,
+		Description: entity.Description,
+		Role:        entity.Role,
+		Message:     "API key generated successfully",
 	})
 }
 
@@ -163,12 +199,25 @@ type entityJSON struct {
 	ID          int64     `json:"id"`
 	Name        string    `json:"name"`
 	Description string    `json:"description"`
-	Role        string    `json:"role"`
+	Role        string    `json:"role"` // Authorization role of the key (Agent API v1 role model)
 	IsActive    bool      `json:"is_active"`
 	CreatedAt   time.Time `json:"created_at"`
 	LastUsed    time.Time `json:"last_used"`
 }
 
+type listKeysResponse struct {
+	Entities []entityJSON `json:"entities"`
+	Total    int          `json:"total"`
+}
+
+// @Summary		List all API keys
+// @Description	Minimum role: admin. Hashes are never returned.
+// @Tags			API Keys
+// @Produce		json
+// @Success		200	{object}	listKeysResponse	"All keys, newest first"
+// @Failure		401	{object}	auth.ErrorMsg	"Missing API key"
+// @Failure		403	{object}	auth.ErrorMsg	"Invalid key or insufficient role"
+// @Router			/api-keys [get]
 func (s *Server) handleListKeys(w http.ResponseWriter, _ *http.Request) {
 	list := s.keys.List()
 	entities := make([]entityJSON, 0, len(list))
@@ -183,12 +232,29 @@ func (s *Server) handleListKeys(w http.ResponseWriter, _ *http.Request) {
 			LastUsed:    k.LastUsed,
 		})
 	}
-	writeJSON(w, map[string]any{
-		"entities": entities,
-		"total":    len(entities),
+	writeJSON(w, listKeysResponse{
+		Entities: entities,
+		Total:    len(entities),
 	})
 }
 
+type keyInfoResponse struct {
+	ID          int64     `json:"id"`
+	Name        string    `json:"name"`
+	Description string    `json:"description"`
+	Role        string    `json:"role"`
+	CreatedAt   time.Time `json:"created_at"`
+	LastUsed    time.Time `json:"last_used"`
+}
+
+// @Summary		Describe the calling key
+// @Description	Minimum role: viewer (every valid key may inspect itself).
+// @Tags			API Keys
+// @Produce		json
+// @Success		200	{object}	keyInfoResponse	"The calling key's attributes"
+// @Failure		401	{object}	auth.ErrorMsg	"Missing API key"
+// @Failure		403	{object}	auth.ErrorMsg	"Invalid API key"
+// @Router			/api-keys/info [get]
 func (s *Server) handleKeyInfo(w http.ResponseWriter, r *http.Request) {
 	identity := auth.FromContext(r.Context())
 	if identity == nil {
@@ -201,16 +267,31 @@ func (s *Server) handleKeyInfo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Same attribute set the Node agent selects for /api-keys/info.
-	writeJSON(w, map[string]any{
-		"id":          k.ID,
-		"name":        k.Name,
-		"description": k.Description,
-		"role":        k.Role,
-		"created_at":  k.CreatedAt,
-		"last_used":   k.LastUsed,
+	writeJSON(w, keyInfoResponse{
+		ID:          k.ID,
+		Name:        k.Name,
+		Description: k.Description,
+		Role:        k.Role,
+		CreatedAt:   k.CreatedAt,
+		LastUsed:    k.LastUsed,
 	})
 }
 
+type deleteKeyResponse struct {
+	Message  string `json:"message"`
+	EntityID string `json:"entity_id"`
+	Name     string `json:"name"`
+}
+
+// @Summary		Permanently delete an API key
+// @Description	Minimum role: admin. Deleting the last active admin key is refused (lockout guard).
+// @Tags			API Keys
+// @Produce		json
+// @Param			id	path	int	true	"API key id"
+// @Success		200	{object}	deleteKeyResponse	"Key deleted"
+// @Failure		404	{object}	auth.ErrorMsg	"No key with that id"
+// @Failure		409	{object}	auth.ErrorMsg	"Would remove the last active admin key"
+// @Router			/api-keys/{id} [delete]
 func (s *Server) handleDeleteKey(w http.ResponseWriter, r *http.Request) {
 	idStr := r.PathValue("id")
 	id, err := strconv.ParseInt(idStr, 10, 64)
@@ -236,13 +317,28 @@ func (s *Server) handleDeleteKey(w http.ResponseWriter, r *http.Request) {
 	slog.Info("api key deleted", "name", entity.Name,
 		"deleted_by", auth.FromContext(r.Context()).Name)
 
-	writeJSON(w, map[string]any{
-		"message":   "API key deleted successfully",
-		"entity_id": idStr,
-		"name":      entity.Name,
+	writeJSON(w, deleteKeyResponse{
+		Message:  "API key deleted successfully",
+		EntityID: idStr,
+		Name:     entity.Name,
 	})
 }
 
+type revokeKeyResponse struct {
+	Message  string `json:"message"`
+	EntityID string `json:"entity_id"`
+	Name     string `json:"name"`
+}
+
+// @Summary		Deactivate an API key
+// @Description	Minimum role: admin. Revoking the last active admin key is refused (lockout guard).
+// @Tags			API Keys
+// @Produce		json
+// @Param			id	path	int	true	"API key id"
+// @Success		200	{object}	revokeKeyResponse	"Key deactivated"
+// @Failure		404	{object}	auth.ErrorMsg	"No key with that id"
+// @Failure		409	{object}	auth.ErrorMsg	"Would deactivate the last active admin key"
+// @Router			/api-keys/{id}/revoke [put]
 func (s *Server) handleRevokeKey(w http.ResponseWriter, r *http.Request) {
 	idStr := r.PathValue("id")
 	id, err := strconv.ParseInt(idStr, 10, 64)
@@ -268,9 +364,9 @@ func (s *Server) handleRevokeKey(w http.ResponseWriter, r *http.Request) {
 	slog.Info("api key revoked", "name", entity.Name,
 		"revoked_by", auth.FromContext(r.Context()).Name)
 
-	writeJSON(w, map[string]any{
-		"message":   "API key revoked successfully",
-		"entity_id": idStr,
-		"name":      entity.Name,
+	writeJSON(w, revokeKeyResponse{
+		Message:  "API key revoked successfully",
+		EntityID: idStr,
+		Name:     entity.Name,
 	})
 }
