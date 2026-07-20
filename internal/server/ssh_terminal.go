@@ -133,6 +133,16 @@ func (s *Server) sshTransport(ctx context.Context, machine *machines.Machine,
 
 // handleStartSSHSession mints an SSH terminal session (the base's POST
 // /machines/{name}/ssh/start — each call is an independent session).
+//
+//	@Summary		Start an SSH terminal session
+//	@Description	Minimum role: operator. Mints an SSH terminal session for a RUNNING machine; connect the terminal at the /ssh/{sessionId} WebSocket. Each call is an independent session. Credentials come from the stored configuration (settings.vagrant_user/vagrant_user_pass/vagrant_user_private_key_path; the agent's provisioning key is the last-resort fallback). Transport = the pipeline's ladder: the provisioning NAT ssh port-forward first (immune to guest network reconfiguration), the document's control IP as fallback.
+//	@Tags			Console
+//	@Produce		json
+//	@Param			machineName	path	string	true	"Machine name"
+//	@Success		200	{object}	sshSession	"Session created"
+//	@Failure		400	"Machine not running, no credentials configured, or no SSH transport"
+//	@Failure		404	"Machine not found"
+//	@Router			/machines/{machineName}/ssh/start [post]
 func (s *Server) handleStartSSHSession(w http.ResponseWriter, r *http.Request) {
 	machine := s.findMachine(w, r)
 	if machine == nil {
@@ -178,11 +188,27 @@ func (s *Server) handleStartSSHSession(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleListSSHSessions mirrors GET /ssh/sessions.
+//
+//	@Summary		List SSH terminal sessions
+//	@Description	Minimum role: viewer. Newest first. Sessions are in-memory — an agent restart closes them all (shells cannot survive it).
+//	@Tags			Console
+//	@Produce		json
+//	@Success		200	{array}	sshSession	"Sessions"
+//	@Router			/ssh/sessions [get]
 func (s *Server) handleListSSHSessions(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, s.sshSessions.snapshot())
 }
 
 // handleSSHSessionInfo mirrors GET /ssh/sessions/{sessionId}.
+//
+//	@Summary		SSH session information
+//	@Description	Minimum role: viewer.
+//	@Tags			Console
+//	@Produce		json
+//	@Param			sessionId	path	string	true	"SSH session id"
+//	@Success		200	{object}	sshSession	"The session"
+//	@Failure		404	"SSH session not found"
+//	@Router			/ssh/sessions/{sessionId} [get]
 func (s *Server) handleSSHSessionInfo(w http.ResponseWriter, r *http.Request) {
 	session := s.sshSessions.get(r.PathValue("sessionId"))
 	if session == nil {
@@ -193,6 +219,15 @@ func (s *Server) handleSSHSessionInfo(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleStopSSHSession mirrors DELETE /ssh/sessions/{sessionId}/stop.
+//
+//	@Summary		Stop an SSH session
+//	@Description	Minimum role: operator. Closes the shell and marks the session closed.
+//	@Tags			Console
+//	@Produce		json
+//	@Param			sessionId	path	string	true	"SSH session id"
+//	@Success		200	{object}	map[string]interface{}	"Session stopped"
+//	@Failure		404	"SSH session not found"
+//	@Router			/ssh/sessions/{sessionId}/stop [delete]
 func (s *Server) handleStopSSHSession(w http.ResponseWriter, r *http.Request) {
 	if !s.sshSessions.close(r.PathValue("sessionId")) {
 		taskError(w, http.StatusNotFound, "SSH session not found")

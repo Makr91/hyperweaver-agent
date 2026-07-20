@@ -41,14 +41,22 @@ func parseMonitoringQuery(r *http.Request) monitoringQuery {
 	return q
 }
 
-// samplingMeta is the time-series sampling metadata block: this agent never
-// downsamples, so applied is always false — the strategy names which mode
-// answered (realtime = single live sample, stored = database rows).
-func samplingMeta(strategy string, returned int) map[string]any {
-	return map[string]any{
-		"applied":         false,
-		"strategy":        strategy,
-		"samplesReturned": returned,
+// monitoringSamplingMeta is the time-series sampling metadata block (the
+// MonitoringSampling contract): this agent never downsamples, so applied is
+// always false — strategy names which mode answered (realtime = single live
+// sample, stored = database rows).
+type monitoringSamplingMeta struct {
+	Applied         bool   `json:"applied"`
+	Strategy        string `json:"strategy"`
+	SamplesReturned int    `json:"samplesReturned"`
+}
+
+// samplingMeta builds the sampling metadata block.
+func samplingMeta(strategy string, returned int) monitoringSamplingMeta {
+	return monitoringSamplingMeta{
+		Applied:         false,
+		Strategy:        strategy,
+		SamplesReturned: returned,
 	}
 }
 
@@ -85,6 +93,27 @@ func (s *Server) cpuSamples(r *http.Request, q monitoringQuery) ([]monitoring.CP
 	return []monitoring.CPUSample{*sample}, "realtime", nil
 }
 
+// cpuStatsResponse is GET /monitoring/system/cpu's answer.
+type cpuStatsResponse struct {
+	CPU           []monitoring.CPUSample `json:"cpu"`
+	TotalCount    int                    `json:"totalCount"`
+	ReturnedCount int                    `json:"returnedCount"`
+	Sampling      monitoringSamplingMeta `json:"sampling"`
+	QueryTime     string                 `json:"queryTime"`
+	// The newest sample; null when none
+	Latest *monitoring.CPUSample `json:"latest"`
+}
+
+// @Summary		CPU statistics
+// @Description	Minimum role: viewer. Realtime mode (storage disabled, the default): one live sample; since is effectively ignored. Storage mode: stored samples, newest first.
+// @Tags			Host Monitoring
+// @Produce		json
+// @Param			limit			query	int		false	"Maximum samples"	default(100)
+// @Param			since			query	string	false	"Stored samples at or after this time (storage mode)"
+// @Param			include_cores	query	bool	false	"Include the per_core_parsed array on every sample"	default(false)
+// @Success		200	{object}	cpuStatsResponse	"CPU statistics"
+// @Failure		500	{object}	wrappedError		"Failed to get CPU statistics"
+// @Router			/monitoring/system/cpu [get]
 func (s *Server) handleMonitoringCPU(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
 	q := parseMonitoringQuery(r)
@@ -97,21 +126,39 @@ func (s *Server) handleMonitoringCPU(w http.ResponseWriter, r *http.Request) {
 	}
 	samples = stripCores(samples, includeCores)
 
-	payload := map[string]any{
-		"cpu":           samples,
-		"totalCount":    len(samples),
-		"returnedCount": len(samples),
-		"sampling":      samplingMeta(strategy, len(samples)),
-		"queryTime":     queryTimeSince(start),
+	response := cpuStatsResponse{
+		CPU:           samples,
+		TotalCount:    len(samples),
+		ReturnedCount: len(samples),
+		Sampling:      samplingMeta(strategy, len(samples)),
+		QueryTime:     queryTimeSince(start),
 	}
 	if len(samples) > 0 {
-		payload["latest"] = samples[0]
-	} else {
-		payload["latest"] = nil
+		response.Latest = &samples[0]
 	}
-	writeJSON(w, payload)
+	writeJSON(w, response)
 }
 
+// memoryStatsResponse is GET /monitoring/system/memory's answer.
+type memoryStatsResponse struct {
+	Memory        []monitoring.MemorySample `json:"memory"`
+	TotalCount    int                       `json:"totalCount"`
+	ReturnedCount int                       `json:"returnedCount"`
+	Sampling      monitoringSamplingMeta    `json:"sampling"`
+	QueryTime     string                    `json:"queryTime"`
+	// The newest sample; null when none
+	Latest *monitoring.MemorySample `json:"latest"`
+}
+
+// @Summary		Memory statistics
+// @Description	Minimum role: viewer. Realtime mode: one live sample; storage mode: stored samples, newest first.
+// @Tags			Host Monitoring
+// @Produce		json
+// @Param			limit	query	int		false	"Maximum samples"	default(100)
+// @Param			since	query	string	false	"Stored samples at or after this time (storage mode)"
+// @Success		200	{object}	memoryStatsResponse	"Memory statistics"
+// @Failure		500	{object}	wrappedError		"Failed to get memory statistics"
+// @Router			/monitoring/system/memory [get]
 func (s *Server) handleMonitoringMemory(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
 	q := parseMonitoringQuery(r)
@@ -135,40 +182,85 @@ func (s *Server) handleMonitoringMemory(w http.ResponseWriter, r *http.Request) 
 		samples, strategy = []monitoring.MemorySample{*sample}, "realtime"
 	}
 
-	payload := map[string]any{
-		"memory":        samples,
-		"totalCount":    len(samples),
-		"returnedCount": len(samples),
-		"sampling":      samplingMeta(strategy, len(samples)),
-		"queryTime":     queryTimeSince(start),
+	response := memoryStatsResponse{
+		Memory:        samples,
+		TotalCount:    len(samples),
+		ReturnedCount: len(samples),
+		Sampling:      samplingMeta(strategy, len(samples)),
+		QueryTime:     queryTimeSince(start),
 	}
 	if len(samples) > 0 {
-		payload["latest"] = samples[0]
-	} else {
-		payload["latest"] = nil
+		response.Latest = &samples[0]
 	}
-	writeJSON(w, payload)
+	writeJSON(w, response)
+}
+
+// loadAveragesBlock is the 1/5/15-minute load-average trio (zeros on
+// Windows — the platform has no concept).
+type loadAveragesBlock struct {
+	OneMin     float64 `json:"one_min"`
+	FiveMin    float64 `json:"five_min"`
+	FifteenMin float64 `json:"fifteen_min"`
+}
+
+// processActivityBlock carries the run-queue counts where the platform
+// reports them (Linux); zeros elsewhere.
+type processActivityBlock struct {
+	Running int `json:"running"`
+	Blocked int `json:"blocked"`
+}
+
+// loadMetricsEntry is one load-metrics chart item.
+type loadMetricsEntry struct {
+	Timestamp       time.Time            `json:"timestamp"`
+	LoadAverages    loadAveragesBlock    `json:"load_averages"`
+	ProcessActivity processActivityBlock `json:"process_activity"`
+	CPUCount        int                  `json:"cpu_count"`
+}
+
+// loadMetricsMetadata describes the load listing.
+type loadMetricsMetadata struct {
+	Description     string   `json:"description"`
+	MetricsIncluded []string `json:"metrics_included"`
+}
+
+// loadMetricsResponse is GET /monitoring/system/load's answer.
+type loadMetricsResponse struct {
+	Load       []loadMetricsEntry  `json:"load"`
+	TotalCount int                 `json:"totalCount"`
+	Metadata   loadMetricsMetadata `json:"metadata"`
+	// The newest entry; null when none
+	Latest *loadMetricsEntry `json:"latest"`
 }
 
 // loadEntry reshapes a CPU sample into the load-metrics chart shape (the
 // Node agent's /monitoring/system/load items). Activity counters the
 // platform does not report stay zero.
-func loadEntry(sample *monitoring.CPUSample) map[string]any {
-	return map[string]any{
-		"timestamp": sample.ScanTimestamp,
-		"load_averages": map[string]any{
-			"one_min":     sample.LoadAvg1Min,
-			"five_min":    sample.LoadAvg5Min,
-			"fifteen_min": sample.LoadAvg15Min,
+func loadEntry(sample *monitoring.CPUSample) loadMetricsEntry {
+	return loadMetricsEntry{
+		Timestamp: sample.ScanTimestamp,
+		LoadAverages: loadAveragesBlock{
+			OneMin:     sample.LoadAvg1Min,
+			FiveMin:    sample.LoadAvg5Min,
+			FifteenMin: sample.LoadAvg15Min,
 		},
-		"process_activity": map[string]any{
-			"running": sample.ProcessesRunning,
-			"blocked": sample.ProcessesBlocked,
+		ProcessActivity: processActivityBlock{
+			Running: sample.ProcessesRunning,
+			Blocked: sample.ProcessesBlocked,
 		},
-		"cpu_count": sample.CPUCount,
+		CPUCount: sample.CPUCount,
 	}
 }
 
+// @Summary		System load metrics
+// @Description	Minimum role: viewer. Load averages and process activity reshaped for charting. Load averages are zeros on Windows; run-queue counts are Linux-only — absent counters stay zero, honestly.
+// @Tags			Host Monitoring
+// @Produce		json
+// @Param			limit	query	int		false	"Maximum entries"	default(100)
+// @Param			since	query	string	false	"Stored samples at or after this time (storage mode)"
+// @Success		200	{object}	loadMetricsResponse	"Load metrics"
+// @Failure		500	{object}	wrappedError		"Failed to get system load metrics"
+// @Router			/monitoring/system/load [get]
 func (s *Server) handleMonitoringLoad(w http.ResponseWriter, r *http.Request) {
 	q := parseMonitoringQuery(r)
 
@@ -178,58 +270,105 @@ func (s *Server) handleMonitoringLoad(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	entries := make([]map[string]any, 0, len(samples))
+	entries := make([]loadMetricsEntry, 0, len(samples))
 	for i := range samples {
 		entries = append(entries, loadEntry(&samples[i]))
 	}
-	payload := map[string]any{
-		"load":       entries,
-		"totalCount": len(entries),
-		"metadata": map[string]any{
-			"description": "Load averages and process activity (load averages are zeros on Windows — the platform has no concept)",
-			"metrics_included": []string{
+	response := loadMetricsResponse{
+		Load:       entries,
+		TotalCount: len(entries),
+		Metadata: loadMetricsMetadata{
+			Description: "Load averages and process activity (load averages are zeros on Windows — the platform has no concept)",
+			MetricsIncluded: []string{
 				"load_averages", "process_activity", "cpu_count",
 			},
 		},
 	}
 	if len(entries) > 0 {
-		payload["latest"] = entries[0]
-	} else {
-		payload["latest"] = nil
+		response.Latest = &entries[0]
 	}
-	writeJSON(w, payload)
+	writeJSON(w, response)
 }
 
+// monitoringHostResponse is GET /monitoring/host's answer.
+type monitoringHostResponse struct {
+	Host           string `json:"host"`
+	Hostname       string `json:"hostname"`
+	Platform       string `json:"platform"`
+	Release        string `json:"release"`
+	Arch           string `json:"arch"`
+	Uptime         uint64 `json:"uptime"`
+	OS             string `json:"os"`
+	CPUs           int    `json:"cpus"`
+	MemoryBytes    uint64 `json:"memory_bytes"`
+	StorageEnabled bool   `json:"storage_enabled"`
+	// The last successful collection; null when none (or realtime-only mode)
+	LastCollection *string `json:"last_collection"`
+}
+
+// @Summary		Host information and monitoring state
+// @Description	Minimum role: viewer.
+// @Tags			Host Monitoring
+// @Produce		json
+// @Success		200	{object}	monitoringHostResponse	"Host information"
+// @Router			/monitoring/host [get]
 func (s *Server) handleMonitoringHost(w http.ResponseWriter, _ *http.Request) {
 	info := hostinfo.Get()
-	payload := map[string]any{
-		"host":            s.monitor.Sampler().Hostname(),
-		"hostname":        s.monitor.Sampler().Hostname(),
-		"platform":        nodePlatform(),
-		"release":         hostinfo.KernelRelease(),
-		"arch":            info.Arch,
-		"uptime":          hostinfo.UptimeSeconds(),
-		"os":              info.OS,
-		"cpus":            info.CPUs,
-		"memory_bytes":    info.MemoryBytes,
-		"storage_enabled": s.monitor.StorageEnabled(),
+	response := monitoringHostResponse{
+		Host:           s.monitor.Sampler().Hostname(),
+		Hostname:       s.monitor.Sampler().Hostname(),
+		Platform:       nodePlatform(),
+		Release:        hostinfo.KernelRelease(),
+		Arch:           info.Arch,
+		Uptime:         hostinfo.UptimeSeconds(),
+		OS:             info.OS,
+		CPUs:           info.CPUs,
+		MemoryBytes:    info.MemoryBytes,
+		StorageEnabled: s.monitor.StorageEnabled(),
 	}
 	if last := s.monitor.LastCollection(); !last.IsZero() {
-		payload["last_collection"] = last.UTC().Format(time.RFC3339)
-	} else {
-		payload["last_collection"] = nil
+		formatted := last.UTC().Format(time.RFC3339)
+		response.LastCollection = &formatted
 	}
-	writeJSON(w, payload)
+	writeJSON(w, response)
 }
 
+// monitoringSummaryFlags is the summary's mode block.
+type monitoringSummaryFlags struct {
+	StorageEnabled bool `json:"storage_enabled"`
+	Collector      bool `json:"collector"`
+}
+
+// monitoringSummaryResponse is GET /monitoring/summary's answer.
+type monitoringSummaryResponse struct {
+	Host    string                 `json:"host"`
+	Summary monitoringSummaryFlags `json:"summary"`
+	// Per-table row counts (empty in realtime mode — nothing is stored)
+	RecordCounts map[string]int64 `json:"recordCounts"`
+	// Per-table latest sample times, RFC 3339
+	LatestData map[string]string `json:"latestData"`
+	// The last collection time; null when none
+	LastCollected *string `json:"lastCollected"`
+	QueryTime     string  `json:"queryTime"`
+}
+
+// @Summary		Monitoring summary
+// @Description	Minimum role: viewer. Record counts and latest sample times per telemetry table (empty in realtime mode — nothing is stored).
+// @Tags			Host Monitoring
+// @Produce		json
+// @Success		200	{object}	monitoringSummaryResponse	"Monitoring summary"
+// @Failure		500	{object}	wrappedError				"Failed to get monitoring summary"
+// @Router			/monitoring/summary [get]
 func (s *Server) handleMonitoringSummary(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
-	payload := map[string]any{
-		"host": s.monitor.Sampler().Hostname(),
-		"summary": map[string]any{
-			"storage_enabled": s.monitor.StorageEnabled(),
-			"collector":       s.monitor.Running(),
+	response := monitoringSummaryResponse{
+		Host: s.monitor.Sampler().Hostname(),
+		Summary: monitoringSummaryFlags{
+			StorageEnabled: s.monitor.StorageEnabled(),
+			Collector:      s.monitor.Running(),
 		},
+		RecordCounts: map[string]int64{},
+		LatestData:   map[string]string{},
 	}
 
 	if s.monitor.StorageEnabled() {
@@ -238,45 +377,79 @@ func (s *Server) handleMonitoringSummary(w http.ResponseWriter, r *http.Request)
 			errorResponse(w, http.StatusInternalServerError, "Failed to get monitoring summary", err.Error())
 			return
 		}
-		payload["recordCounts"] = counts
-		latestData := map[string]any{}
+		response.RecordCounts = counts
 		for table, at := range latest {
 			if at != nil {
-				latestData[table] = at.UTC().Format(time.RFC3339)
+				response.LatestData[table] = at.UTC().Format(time.RFC3339)
 			}
 		}
-		payload["latestData"] = latestData
-	} else {
-		payload["recordCounts"] = map[string]int64{}
-		payload["latestData"] = map[string]any{}
 	}
 	if last := s.monitor.LastCollection(); !last.IsZero() {
-		payload["lastCollected"] = last.UTC().Format(time.RFC3339)
-	} else {
-		payload["lastCollected"] = nil
+		formatted := last.UTC().Format(time.RFC3339)
+		response.LastCollected = &formatted
 	}
-	payload["queryTime"] = queryTimeSince(start)
-	writeJSON(w, payload)
+	response.QueryTime = queryTimeSince(start)
+	writeJSON(w, response)
 }
 
+// monitoringStatusResponse is GET /monitoring/status's answer. config and
+// stats are the service's own free-form documents.
+type monitoringStatusResponse struct {
+	IsRunning     bool           `json:"isRunning"`
+	IsInitialized bool           `json:"isInitialized"`
+	Config        map[string]any `json:"config"`
+	Stats         map[string]any `json:"stats"`
+	Note          string         `json:"note"`
+}
+
+// @Summary		Monitoring service status
+// @Description	Minimum role: viewer.
+// @Tags			Host Monitoring
+// @Produce		json
+// @Success		200	{object}	monitoringStatusResponse	"Service status"
+// @Router			/monitoring/status [get]
 func (s *Server) handleMonitoringStatus(w http.ResponseWriter, _ *http.Request) {
 	note := "Realtime mode: every request samples the OS live; enable monitoring.storage_enabled for stored history."
 	if s.monitor.StorageEnabled() {
 		note = "Storage mode: a background collector writes time series into per-datatype database files."
 	}
-	writeJSON(w, map[string]any{
-		"isRunning":     s.monitor.Running() || !s.monitor.StorageEnabled(),
-		"isInitialized": true,
-		"config": map[string]any{
+	writeJSON(w, monitoringStatusResponse{
+		IsRunning:     s.monitor.Running() || !s.monitor.StorageEnabled(),
+		IsInitialized: true,
+		Config: map[string]any{
 			"storage_enabled":     s.cfg.Monitoring.StorageEnabled,
 			"collection_interval": s.cfg.Monitoring.CollectionInterval,
 			"retention_days":      s.cfg.Monitoring.RetentionDays,
 		},
-		"stats": s.monitor.Stats(),
-		"note":  note,
+		Stats: s.monitor.Stats(),
+		Note:  note,
 	})
 }
 
+// monitoringHealthService is the health answer's service block.
+type monitoringHealthService struct {
+	StorageEnabled bool           `json:"storage_enabled"`
+	Collector      bool           `json:"collector"`
+	Stats          map[string]any `json:"stats"`
+}
+
+// monitoringHealthResponse is GET /monitoring/health's answer.
+type monitoringHealthResponse struct {
+	// healthy | degraded (collector errors) | stopped (storage on, collector down)
+	Status  string                  `json:"status"`
+	Uptime  uint64                  `json:"uptime"`
+	Version string                  `json:"version"`
+	Service monitoringHealthService `json:"service"`
+	// The last collection time; null when none
+	LastUpdate *string `json:"lastUpdate"`
+}
+
+// @Summary		Monitoring health check
+// @Description	Minimum role: viewer. healthy | degraded (collector errors) | stopped (storage on, collector down). No fault-management rollup — fmadm is illumos-only.
+// @Tags			Host Monitoring
+// @Produce		json
+// @Success		200	{object}	monitoringHealthResponse	"Health information"
+// @Router			/monitoring/health [get]
 func (s *Server) handleMonitoringHealth(w http.ResponseWriter, _ *http.Request) {
 	status := "healthy"
 	if s.monitor.StorageEnabled() && !s.monitor.Running() {
@@ -287,28 +460,47 @@ func (s *Server) handleMonitoringHealth(w http.ResponseWriter, _ *http.Request) 
 		status = "degraded"
 	}
 
-	payload := map[string]any{
-		"status":  status,
-		"uptime":  hostinfo.UptimeSeconds(),
-		"version": version.Version,
-		"service": map[string]any{
-			"storage_enabled": s.monitor.StorageEnabled(),
-			"collector":       s.monitor.Running(),
-			"stats":           stats,
+	response := monitoringHealthResponse{
+		Status:  status,
+		Uptime:  hostinfo.UptimeSeconds(),
+		Version: version.Version,
+		Service: monitoringHealthService{
+			StorageEnabled: s.monitor.StorageEnabled(),
+			Collector:      s.monitor.Running(),
+			Stats:          stats,
 		},
 	}
 	if last := s.monitor.LastCollection(); !last.IsZero() {
-		payload["lastUpdate"] = last.UTC().Format(time.RFC3339)
-	} else {
-		payload["lastUpdate"] = nil
+		formatted := last.UTC().Format(time.RFC3339)
+		response.LastUpdate = &formatted
 	}
-	writeJSON(w, payload)
+	writeJSON(w, response)
 }
 
+// monitoringCollectRequest is POST /monitoring/collect's optional body.
+type monitoringCollectRequest struct {
+	// network | storage | all (default all) — echoed for contract parity
+	Type string `json:"type"`
+}
+
+// monitoringCollectResponse is POST /monitoring/collect's answer.
+type monitoringCollectResponse struct {
+	Success bool   `json:"success"`
+	Type    string `json:"type"`
+	// Per-family outcomes (collected | sampled | failed: ...)
+	Results map[string]string `json:"results"`
+}
+
+// @Summary		Trigger immediate collection
+// @Description	Minimum role: operator. One collection pass over every telemetry family this host has (cpu, memory, network); samples persist when storage is enabled. The type field is accepted for contract parity — there is no illumos storage family to exclude here.
+// @Tags			Host Monitoring
+// @Accept			json
+// @Produce		json
+// @Param			request	body		monitoringCollectRequest	false	"Collection type (contract parity)"
+// @Success		200		{object}	monitoringCollectResponse	"Collection triggered"
+// @Router			/monitoring/collect [post]
 func (s *Server) handleMonitoringCollect(w http.ResponseWriter, r *http.Request) {
-	var body struct {
-		Type string `json:"type"`
-	}
+	var body monitoringCollectRequest
 	if err := decodeBody(r, &body); err != nil {
 		errorResponse(w, http.StatusBadRequest, "Failed to trigger collection", "Invalid JSON body")
 		return
@@ -322,13 +514,38 @@ func (s *Server) handleMonitoringCollect(w http.ResponseWriter, r *http.Request)
 	// echoed for contract parity (there is no illumos storage family to
 	// exclude here).
 	results := s.monitor.CollectOnce(r.Context())
-	writeJSON(w, map[string]any{
-		"success": true,
-		"type":    collectionType,
-		"results": results,
+	writeJSON(w, monitoringCollectResponse{
+		Success: true,
+		Type:    collectionType,
+		Results: results,
 	})
 }
 
+// monitoringPagination is the monitoring listings' pagination envelope.
+type monitoringPagination struct {
+	Limit   int  `json:"limit"`
+	Offset  int  `json:"offset"`
+	HasMore bool `json:"hasMore"`
+}
+
+// monitoringInterfacesResponse is GET /monitoring/network/interfaces' answer.
+type monitoringInterfacesResponse struct {
+	Interfaces []monitoring.Interface `json:"interfaces"`
+	TotalCount int                    `json:"totalCount"`
+	Pagination monitoringPagination   `json:"pagination"`
+}
+
+// @Summary		Network interfaces
+// @Description	Minimum role: viewer. Live configuration view (name, MTU, state, MAC, addresses). dladm-only fields (over, speed, vid, zone) have no analog and are absent.
+// @Tags			Host Monitoring
+// @Produce		json
+// @Param			limit	query	int		false	"Maximum rows"	default(100)
+// @Param			offset	query	int		false	"Page offset"	default(0)
+// @Param			state	query	string	false	"Filter by state (up | down)"
+// @Param			link	query	string	false	"Filter by interface name"
+// @Success		200	{object}	monitoringInterfacesResponse	"Network interfaces"
+// @Failure		500	{object}	wrappedError					"Failed to get network interfaces"
+// @Router			/monitoring/network/interfaces [get]
 func (s *Server) handleMonitoringInterfaces(w http.ResponseWriter, r *http.Request) {
 	q := parseMonitoringQuery(r)
 	interfaces, err := s.monitor.Sampler().Interfaces(r.Context())
@@ -371,17 +588,43 @@ func (s *Server) handleMonitoringInterfaces(w http.ResponseWriter, r *http.Reque
 		end = total
 	}
 
-	writeJSON(w, map[string]any{
-		"interfaces": interfaces[offset:end],
-		"totalCount": total,
-		"pagination": map[string]any{
-			"limit":   q.limit,
-			"offset":  offset,
-			"hasMore": total > end,
+	writeJSON(w, monitoringInterfacesResponse{
+		Interfaces: interfaces[offset:end],
+		TotalCount: total,
+		Pagination: monitoringPagination{
+			Limit:   q.limit,
+			Offset:  offset,
+			HasMore: total > end,
 		},
 	})
 }
 
+// networkUsageMetadata is the network-usage listing's interface roster.
+type networkUsageMetadata struct {
+	ActiveInterfacesCount int      `json:"activeInterfacesCount"`
+	InterfaceList         []string `json:"interfaceList"`
+}
+
+// networkUsageResponse is GET /monitoring/network/usage's answer.
+type networkUsageResponse struct {
+	Usage         []monitoring.NetworkSample `json:"usage"`
+	TotalCount    int                        `json:"totalCount"`
+	ReturnedCount int                        `json:"returnedCount"`
+	Sampling      monitoringSamplingMeta     `json:"sampling"`
+	Metadata      networkUsageMetadata       `json:"metadata"`
+	QueryTime     string                     `json:"queryTime"`
+}
+
+// @Summary		Network usage
+// @Description	Minimum role: viewer. Per-interface counters with computed rates. Realtime mode: one live observation per interface; storage mode: stored samples, newest first.
+// @Tags			Host Monitoring
+// @Produce		json
+// @Param			limit	query	int		false	"Maximum samples"	default(100)
+// @Param			since	query	string	false	"Stored samples at or after this time (storage mode)"
+// @Param			link	query	string	false	"Filter by interface name"
+// @Success		200	{object}	networkUsageResponse	"Network usage"
+// @Failure		500	{object}	wrappedError			"Failed to get network usage"
+// @Router			/monitoring/network/usage [get]
 func (s *Server) handleMonitoringNetworkUsage(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
 	q := parseMonitoringQuery(r)
@@ -424,19 +667,54 @@ func (s *Server) handleMonitoringNetworkUsage(w http.ResponseWriter, r *http.Req
 		interfaceList = append(interfaceList, name)
 	}
 
-	writeJSON(w, map[string]any{
-		"usage":         samples,
-		"totalCount":    len(samples),
-		"returnedCount": len(samples),
-		"sampling":      samplingMeta(strategy, len(samples)),
-		"metadata": map[string]any{
-			"activeInterfacesCount": len(interfaceList),
-			"interfaceList":         interfaceList,
+	writeJSON(w, networkUsageResponse{
+		Usage:         samples,
+		TotalCount:    len(samples),
+		ReturnedCount: len(samples),
+		Sampling:      samplingMeta(strategy, len(samples)),
+		Metadata: networkUsageMetadata{
+			ActiveInterfacesCount: len(interfaceList),
+			InterfaceList:         interfaceList,
 		},
-		"queryTime": queryTimeSince(start),
+		QueryTime: queryTimeSince(start),
 	})
 }
 
+// monitoringIPAddress is one live IP-address assignment row.
+type monitoringIPAddress struct {
+	AddrObj   string `json:"addrobj"`
+	Interface string `json:"interface"`
+	Addr      string `json:"addr"`
+	IPVersion string `json:"ip_version"`
+	State     string `json:"state"`
+	Source    string `json:"source"`
+}
+
+// monitoringIPPage is the IP listing's pagination block.
+type monitoringIPPage struct {
+	Limit  int `json:"limit"`
+	Offset int `json:"offset"`
+}
+
+// monitoringIPAddressesResponse is GET /monitoring/network/ipaddresses'
+// answer.
+type monitoringIPAddressesResponse struct {
+	Addresses  []monitoringIPAddress `json:"addresses"`
+	Returned   int                   `json:"returned"`
+	Pagination monitoringIPPage      `json:"pagination"`
+}
+
+// @Summary		IP address assignments
+// @Description	Minimum role: viewer. Live view derived from the interface list (the reduced live shape — this agent has no ipadm address-object database).
+// @Tags			Host Monitoring
+// @Produce		json
+// @Param			limit		query	int		false	"Maximum rows"	default(100)
+// @Param			offset		query	int		false	"Page offset"	default(0)
+// @Param			interface	query	string	false	"Filter by interface name"
+// @Param			ip_version	query	string	false	"Filter by IP version (v4 | v6)"
+// @Success		200	{object}	monitoringIPAddressesResponse	"IP addresses"
+// @Failure		500	{object}	wrappedError					"Failed to get IP addresses"
+// @Router			/monitoring/network/ipaddresses [get]
 func (s *Server) handleMonitoringIPAddresses(w http.ResponseWriter, r *http.Request) {
 	q := parseMonitoringQuery(r)
 	interfaces, err := s.monitor.Sampler().Interfaces(r.Context())
@@ -447,7 +725,7 @@ func (s *Server) handleMonitoringIPAddresses(w http.ResponseWriter, r *http.Requ
 
 	wantVersion := r.URL.Query().Get("ip_version")
 	wantInterface := r.URL.Query().Get("interface")
-	addresses := []map[string]any{}
+	addresses := []monitoringIPAddress{}
 	for _, iface := range interfaces {
 		if wantInterface != "" && iface.Link != wantInterface {
 			continue
@@ -464,13 +742,13 @@ func (s *Server) handleMonitoringIPAddresses(w http.ResponseWriter, r *http.Requ
 			if iface.State != "up" {
 				state = "down"
 			}
-			addresses = append(addresses, map[string]any{
-				"addrobj":    iface.Link + "/" + ipVersion,
-				"interface":  iface.Link,
-				"addr":       addr,
-				"ip_version": ipVersion,
-				"state":      state,
-				"source":     "live",
+			addresses = append(addresses, monitoringIPAddress{
+				AddrObj:   iface.Link + "/" + ipVersion,
+				Interface: iface.Link,
+				Addr:      addr,
+				IPVersion: ipVersion,
+				State:     state,
+				Source:    "live",
 			})
 		}
 	}
@@ -490,19 +768,43 @@ func (s *Server) handleMonitoringIPAddresses(w http.ResponseWriter, r *http.Requ
 		end = total
 	}
 
-	writeJSON(w, map[string]any{
-		"addresses": addresses[offset:end],
-		"returned":  end - offset,
-		"pagination": map[string]any{
-			"limit":  q.limit,
-			"offset": offset,
+	writeJSON(w, monitoringIPAddressesResponse{
+		Addresses: addresses[offset:end],
+		Returned:  end - offset,
+		Pagination: monitoringIPPage{
+			Limit:  q.limit,
+			Offset: offset,
 		},
 	})
+}
+
+// lowSwapHost is one host row in the low-swap listing.
+type lowSwapHost struct {
+	Host               string    `json:"host"`
+	SwapTotalGB        string    `json:"swap_total_gb"`
+	SwapUsedGB         string    `json:"swap_used_gb"`
+	SwapUtilizationPct float64   `json:"swap_utilization_pct"`
+	LastChecked        time.Time `json:"last_checked"`
+}
+
+// lowSwapHostsResponse is GET /monitoring/hosts/low-swap's answer.
+type lowSwapHostsResponse struct {
+	HostsWithLowSwap []lowSwapHost `json:"hostsWithLowSwap"`
+	TotalCount       int           `json:"totalCount"`
+	Threshold        float64       `json:"threshold"`
 }
 
 // handleLowSwapHosts mirrors GET /monitoring/hosts/low-swap for the
 // single-host case: this host appears in the list when its live swap
 // utilization exceeds the threshold.
+//
+//	@Summary		Hosts above the swap-utilization threshold
+//	@Description	Minimum role: viewer. Single-host agent: this host appears in the list when its live swap utilization exceeds the threshold.
+//	@Tags			Swap Management
+//	@Produce		json
+//	@Param			threshold	query	number	false	"Utilization threshold percentage"	default(50)
+//	@Success		200	{object}	lowSwapHostsResponse	"Hosts with low swap space"
+//	@Router			/monitoring/hosts/low-swap [get]
 func (s *Server) handleLowSwapHosts(w http.ResponseWriter, r *http.Request) {
 	threshold := 50.0
 	if raw := r.URL.Query().Get("threshold"); raw != "" {
@@ -517,19 +819,19 @@ func (s *Server) handleLowSwapHosts(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	hosts := []map[string]any{}
+	hosts := []lowSwapHost{}
 	if sample.SwapUtilizationPct > threshold {
-		hosts = append(hosts, map[string]any{
-			"host":                 sample.Host,
-			"swap_total_gb":        gbString(sample.SwapTotalBytes),
-			"swap_used_gb":         gbString(sample.SwapUsedBytes),
-			"swap_utilization_pct": sample.SwapUtilizationPct,
-			"last_checked":         sample.ScanTimestamp,
+		hosts = append(hosts, lowSwapHost{
+			Host:               sample.Host,
+			SwapTotalGB:        gbString(sample.SwapTotalBytes),
+			SwapUsedGB:         gbString(sample.SwapUsedBytes),
+			SwapUtilizationPct: sample.SwapUtilizationPct,
+			LastChecked:        sample.ScanTimestamp,
 		})
 	}
-	writeJSON(w, map[string]any{
-		"hostsWithLowSwap": hosts,
-		"totalCount":       len(hosts),
-		"threshold":        threshold,
+	writeJSON(w, lowSwapHostsResponse{
+		HostsWithLowSwap: hosts,
+		TotalCount:       len(hosts),
+		Threshold:        threshold,
 	})
 }

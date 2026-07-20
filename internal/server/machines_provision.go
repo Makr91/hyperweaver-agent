@@ -842,6 +842,19 @@ func (s *Server) provisionOnStartPipeline(ctx context.Context, machine *machines
 }
 
 // handleProvisionMachine starts the provisioning pipeline (provisionZone).
+//
+//	@Summary		Start the provisioning pipeline
+//	@Description	Minimum role: operator. Orchestrates the full provisioning run against the STORED provisioner document (the zoneweaver mechanism). THERE ARE NO PHASES: the run executes the stored document's provisioning: section AS WRITTEN — method keys in the order they appear in the stored document, entries within each method in list order — bracketed by the folder sync (outermost) and the pre[]/post[] hooks; the method children chain DIRECTLY under the orchestration parent. The chain: machine_prepare (re-render + refresh the working copy — regenerated before every provision) → boot (the plain start operation as a child, skipped when running or skip_boot) → machine_wait_ssh (credentials = settings.vagrant_user/vagrant_user_pass/vagrant_user_private_key_path — SSH keys resolve over the THREE-TIER ladder (Mark's three-tier ruling, sync 2026-07-17): tier 1 = the working copy's vagrant_user_private_key_path when the file EXISTS (rotated, or user-supplied); tier 2 = the packaged bootstrap key inside the working copy (driver/ssh_keys/id_rsa, then the legacy core/ssh_keys/id_rsa) when the named key is missing or none is named — never a guest fetch; the agent provisioning key is the last existence-checked candidate, and password auth engages ONLY when no key file exists anywhere — a key file on disk always beats a document password (zoneweaver's exact ladder). TIER 3 is RECOVERY ONLY: when the wait exhausts on key auth and the guest-agent channel is enabled, the agent recovers the rotated key over QGA (guest-exec cat of /home/<vagrant_user>/.ssh/id_ssh_rsa), lands it at the working-copy key path (0600), and retries the wait ONCE — without a QGA channel the failure honestly names 'both known keys were rejected and no SSH-free transport exists'; transport = the provisioning NIC's NAT ssh port-forward at 127.0.0.1 when the machine carries one — vagrant's model, immune to guest network reconfiguration — else the control IP from networks[] is_control → provisional → first; neither existing is a 400) → machine_sync_parent + one machine_sync per folders[] entry (transport per folder.type: rsync | scp, each with a pure-Go fallback when the binary is absent — embedded rsync client / SFTP, loudly narrated in the task output; vagrant is optional; disabled entries skipped; type virtualbox registers a REAL VirtualBox shared folder instead of copying — hot-added with automount, guest-mounted via vboxsf when Guest Additions run, a failed guest mount narrates and never fails the pipeline) → one machine_hook per provisioning.pre[] SEQUENCE HOOK entry, before the first method ({script, target: host|guest default guest, on_failure: abort|continue default abort, run: always|once default always} — design §5's ruled shape: guest hooks upload+sudo-run like shell scripts, host hooks run the working-copy script ON THE AGENT HOST gated by provisioning.host_hooks (default ON here), on_failure continue narrates and proceeds, run once skips after the first successful provision) → THE METHOD WALK — provisioning:'s keys in stored-document order, entries in list order: shell → one machine_shell per scripts[] string (the package-relative path resolves against the working copy, uploads over the built-in SFTP to a /tmp path, chmod +x, runs with sudo — shebang honored — then removes itself; a nonzero exit fails the task; bare string entries carry no run directive and execute every time the walk reaches them); ansible → groups in list order, each group's local[] then its remote[] per its own lists — ONE chain, each entry local (machine_provision) or remote (machine_provision_remote — design §5: ansible-playbook ON THE AGENT HOST dialing the guest over the pipeline transport, inventory pinned to the resolved ip/port, credentials from the stored settings with the agent provisioning key as fallback, ANSIBLE_CONFIG/ANSIBLE_COLLECTIONS_PATH resolved against the working copy, remote_collections galaxy-installs host-side; the control node resolves natively where the OS carries ansible and through WSL on Windows hosts — the default WSL distribution's ansible, host paths translated to their /mnt form, extra-vars via an @file in the working copy, the private key riding a chmod-600 mktemp copy (keys on /mnt mounts are world-readable and OpenSSH refuses them), and 127.0.0.1 forward targets (ssh and winrm alike) reached through a RUN-SCOPED twin forward bound to the WSL gateway address (NAT-mode WSL2 shares no loopback with the Windows host and the create-time forwards bind 127.0.0.1 — the twin is added before the run, removed after, host-internal, and the loopback rule is untouched) — and NO control node anywhere fails honestly) per its OWN list, never all-locals-then-all-remotes; run directives filter PER ENTRY (always = every run; not_first = only after a prior success; once/unset = only when never provisioned — judged by configuration.provisioner_state.last_provisioned_at); docker → one machine_docker_compose per docker_compose[] (or docker-compose[]) file (guest path, `up -d`, compose v2 plugin first then docker-compose) — NO engine installation: an absent guest engine fails the task honestly, and compose entries carry no run pin; UNKNOWN method keys SURVIVE in the stored document and are narrate-skipped by the walk — named loudly in the response and the parent's metadata, never a failure → one machine_hook per provisioning.post[] entry, after the last method → when any folder carries syncback: true, machine_syncback_parent + one machine_syncback per flagged folder pulls those folders guest→host — the post-provision results landing (folder.to → folder.map reversed; delete never honored on a pull, no chown) → KEY ROTATION (settings.vagrant_ssh_insert_key, the on/true/1/yes vocabulary — the key_rotate proposal, sync 2026-07-17): ONE machine_key_rotate child AFTER the syncback bracket adopts the box's ROTATED private key — SFTP-reads /home/<vagrant_user>/.ssh/id_ssh_rsa from the guest (a missing remote file is a narrated skip and the task SUCCEEDS — box built without rotation), lands it at settings.vagrant_user_private_key_path in the working copy (0600), then strips the bootstrap pubkey line from the guest file (sed '/vagrantup/d' — Hosts.rb:706's hack; a strip failure fails the task HONESTLY — the landed key stays, and the whole-walk stamp never sits on this child). It NEVER owns the whole-walk stamp; the response task_chain[] carries {step: 'key_rotate', task_id}, and winrm guests get the response-only {step: 'key_rotate_skipped_winrm'} entry instead. THE STAMP: provisioner_state.last_provisioned_at records ONLY when the ENTIRE walk succeeds, whatever type its last entry is — it rides the chain's final task, and the linear chain makes that equivalent to whole-run success; a partial run never marks the machine provisioned. THE PIPELINE-OWNED POWER CYCLE (Mark's execution ruling, sync 2026-07-18): when the machine is flagged for transport removal (settings.remove_transport_on_completion true, or any networks[] entry's remove_on_completion — absent = this agent's default FALSE) the chain appends stop → machine_transport_remove → start AFTER the stamp (task_chain steps post_provision_stop / transport_remove / post_provision_boot): the flagged adapters are removed (the intrinsic NAT's forwards deleted with it), the document updates to match (entries removed, is_control flipped to the first survivor, the settings flag cleared), and the post-removal boot gates on NOTHING — the run is COMPLETE at the boot, the machine comes up on its real NICs. vbox.post_provision_boot (the cycle-after-provisioning knob — per-hypervisor key, sync 2026-07-19) triggers the SAME stop→start cycle without the removal step. The extra_vars networks[] carry each adapter's LIVE MAC when the document leaves mac auto/empty (adapter = network index + 2; resolved into the run's variable document only — the stored document is never modified). Prerequisites: provisioner config stored (create auto-fills it; PUT overrides) and a control IP in networks[]. WINRM MACHINES (settings.communicator: winrm — the converged transport, sync 2026-07-17): the wait step verifies the guest via HOST-ANSIBLE win_ping instead of an SSH dial (ansible + pywinrm on the AGENT HOST are required — on Windows hosts that means ansible + pywinrm inside WSL's default distribution; their absence is an honest task failure, never a pre-flight); shell scripts and guest hooks run via host-ansible win_copy/win_shell/win_file; remote playbooks connect over winrm. Folder sync/syncback, ansible LOCAL playbooks, and docker compose CANNOT run over winrm — they are skipped as RESPONSE-ONLY task_chain entries ({step: 'sync_skipped_winrm', folder_count}, {step: 'syncback_skipped_winrm', folder_count}, {step: 'ansible_local_skipped_winrm', playbook_count}, {step: 'docker_skipped_winrm'}), and unknown methods additionally emit {step: 'method_not_executable', method}.
+//	@Tags			Machine Management
+//	@Accept			json
+//	@Produce		json
+//	@Param			machineName	path	string	true	"Machine name"
+//	@Param			request		body	map[string]interface{}	false	"Optional {skip_boot, confirm_host_hooks}"
+//	@Success		200	{object}	map[string]interface{}	"Provisioning pipeline started"
+//	@Failure		400	"No provisioner config stored, missing settings.vagrant_user, no control IP in networks[], or host-target hooks while provisioning.host_hooks is false"
+//	@Failure		404	"Machine not found"
+//	@Failure		409	{object}	map[string]interface{}	"Host-target hooks need the one-time confirmation — STRICTLY pre-flight, never a mid-sequence failure"
+//	@Router			/machines/{machineName}/provision [post]
 func (s *Server) handleProvisionMachine(w http.ResponseWriter, r *http.Request) {
 	machine := s.findMachine(w, r)
 	if machine == nil {
@@ -912,6 +925,18 @@ func (s *Server) handleProvisionMachine(w http.ResponseWriter, r *http.Request) 
 // Body {"syncback": true} reverses it: ONLY the syncback-flagged folders
 // pull guest→host (folders[].syncback — the on-demand half of Mark's ruling
 // 2026-07-12; the plain call stays host→guest for every folder).
+//
+//	@Summary		Sync folders to a machine ad-hoc
+//	@Description	Minimum role: operator. Creates the parentless sync chain: one machine_sync per folders[] entry from the stored document (transport per folder.type), independent of the full pipeline — the machine must be running with SSH reachable. Body {"syncback": true} REVERSES it (folders[].syncback — the on-demand half of the syncback contract): ONLY the syncback-flagged folders pull guest→host (guest folder.to → host folder.map, one machine_syncback per folder; folder.delete is never honored on a pull, no chown, args/exclude apply on the rsync path; the remote sender runs sudo rsync so root-owned results are readable). The provision walk ends with this same syncback (after the post[] hooks) when any folder carries the flag. WINRM machines are refused outright — 400 "Folder sync needs ssh (rsync/scp) — this machine uses the winrm communicator, which cannot carry folders".
+//	@Tags			Machine Management
+//	@Accept			json
+//	@Produce		json
+//	@Param			machineName	path	string	true	"Machine name"
+//	@Param			request		body	map[string]interface{}	false	"Optional {syncback}"
+//	@Success		200	{object}	map[string]interface{}	"Sync (or syncback) chain created"
+//	@Failure		400	"No provisioner config, no folders configured, (syncback) no folders flagged syncback: true, or the machine uses the winrm communicator (folder sync needs ssh)"
+//	@Failure		404	"Machine not found"
+//	@Router			/machines/{machineName}/sync [post]
 func (s *Server) handleSyncMachine(w http.ResponseWriter, r *http.Request) {
 	machine := s.findMachine(w, r)
 	if machine == nil {
@@ -1022,6 +1047,16 @@ func (s *Server) handleSyncMachine(w http.ResponseWriter, r *http.Request) {
 // in stored-document key order → post[] hooks; the last planned child
 // carries the whole-walk stamp. Nothing configured is a 400; everything
 // run-skipped answers a 200 no-op with the skipped list.
+//
+//	@Summary		Run provisioners ad-hoc
+//	@Description	Minimum role: operator. The SAME document walk as POST /provision minus the infra and folder brackets, under a machine_provision_parent anchor: one machine_hook per provisioning.pre[] entry, then the stored document's provisioning: method keys in the order they appear (shell scripts, ansible local/remote entries — run-filtered per entry, and docker compose entries all execute here too), then one machine_hook per post[] entry. The machine must be running with SSH reachable. The whole-walk stamp rides the final task — last_provisioned_at records only when the ENTIRE walk succeeds. All entries skipped by their run directives answers a 200 no-op carrying the skipped list; an empty provisioning: section is a 400. The response carries task_chain[] like /provision, and the WINRM rules apply here too (settings.communicator: winrm): shell scripts and guest hooks run via host-ansible win_copy/win_shell/win_file, remote playbooks connect over winrm, while ansible LOCAL playbooks and docker compose entries are skipped as response-only task_chain entries ({step: 'ansible_local_skipped_winrm', playbook_count}, {step: 'docker_skipped_winrm'}) and unknown methods emit {step: 'method_not_executable', method}.
+//	@Tags			Machine Management
+//	@Produce		json
+//	@Param			machineName	path	string	true	"Machine name"
+//	@Success		200	{object}	map[string]interface{}	"Provisioner tasks created (or the all-skipped no-op)"
+//	@Failure		400	"No provisioner config, no playbooks configured, missing credentials, or no control IP"
+//	@Failure		404	"Machine not found"
+//	@Router			/machines/{machineName}/run-provisioners [post]
 func (s *Server) handleRunProvisioners(w http.ResponseWriter, r *http.Request) {
 	machine := s.findMachine(w, r)
 	if machine == nil {
@@ -1170,6 +1205,15 @@ func (s *Server) handleRunProvisioners(w http.ResponseWriter, r *http.Request) {
 // handleProvisionStatus reports the pipeline state (getProvisioningStatus):
 // configured flag, provisioned|not_started, last_provisioned_at, and the 20
 // most recent provisioning tasks.
+//
+//	@Summary		Provisioning pipeline status
+//	@Description	Minimum role: viewer. Whether provisioner config is stored, whether a provision ever succeeded, and the most recent provisioning tasks.
+//	@Tags			Machine Management
+//	@Produce		json
+//	@Param			machineName	path	string	true	"Machine name"
+//	@Success		200	{object}	map[string]interface{}	"Provisioning status"
+//	@Failure		404	"Machine not found"
+//	@Router			/machines/{machineName}/provision/status [get]
 func (s *Server) handleProvisionStatus(w http.ResponseWriter, r *http.Request) {
 	machine := s.findMachine(w, r)
 	if machine == nil {
@@ -1223,6 +1267,13 @@ func nullableString(s string) any {
 }
 
 // handleListTemplates lists the local box-template registry.
+//
+//	@Summary		List box templates
+//	@Description	Minimum role: viewer. The local box-template registry: downloaded box disk images machines clone from (organization/box_name/version/architecture tuples; stale rows whose disk image vanished self-delete on resolution).
+//	@Tags			Machine Management
+//	@Produce		json
+//	@Success		200	{object}	map[string]interface{}	"Templates retrieved"
+//	@Router			/templates [get]
 func (s *Server) handleListTemplates(w http.ResponseWriter, r *http.Request) {
 	list, err := s.machines.ListTemplates(r.Context())
 	if err != nil {
@@ -1238,6 +1289,15 @@ func (s *Server) handleListTemplates(w http.ResponseWriter, r *http.Request) {
 
 // handleGetTemplate serves one local template row (the base's GET
 // /templates/local/{id}).
+//
+//	@Summary		Local template details
+//	@Description	Minimum role: viewer. One local template registry row (the base's GET /templates/local/{id}).
+//	@Tags			Machine Management
+//	@Produce		json
+//	@Param			templateId	path	int	true	"Template ID"
+//	@Success		200	"The template row"
+//	@Failure		404	"Template not found"
+//	@Router			/templates/{templateId} [get]
 func (s *Server) handleGetTemplate(w http.ResponseWriter, r *http.Request) {
 	id, err := strconv.ParseInt(r.PathValue("templateId"), 10, 64)
 	if err != nil {
@@ -1259,6 +1319,15 @@ func (s *Server) handleGetTemplate(w http.ResponseWriter, r *http.Request) {
 
 // handleDeleteTemplate queues a template_delete task (the base's DELETE
 // /templates/local/{id}: remove the stored artifact + the row, async).
+//
+//	@Summary		Delete a local template
+//	@Description	Minimum role: operator. Queues template_delete: the disk image is released from VirtualBox's media registry and deleted, the version directory pruned, the row removed. Machines built with clone_strategy copy (the default) are untouched — they cloned their own media. THE CHILDREN GATE (frozen, sync 2026-07-19): a template whose clone-base (clone-base.vdi beside the disk image) still feeds differencing children is LIVE infrastructure — clone-strategy machines boot from it; the task refuses naming the holding machines (`template clone base is still linked by machine(s): <names> — delete those machines first`); orphaned children from failed creates are swept, and a child-free base is removed with the template.
+//	@Tags			Machine Management
+//	@Produce		json
+//	@Param			templateId	path	int	true	"Template ID"
+//	@Success		202	"Delete task created"
+//	@Failure		404	"Template not found"
+//	@Router			/templates/{templateId} [delete]
 func (s *Server) handleDeleteTemplate(w http.ResponseWriter, r *http.Request) {
 	id, err := strconv.ParseInt(r.PathValue("templateId"), 10, 64)
 	if err != nil {
@@ -1300,6 +1369,17 @@ func (s *Server) handleDeleteTemplate(w http.ResponseWriter, r *http.Request) {
 // handleExportTemplate queues a template_export task (the base's POST
 // /templates/export: machine → local .box; here VBoxManage export + tar.gz →
 // a standard Vagrant virtualbox box under <templates root>/exports).
+//
+//	@Summary		Export a machine to a local .box
+//	@Description	Minimum role: operator. Queues template_export (the machine must be powered off): VBoxManage export writes the machine as OVF + disk images, metadata.json marks provider virtualbox, and the tar.gz lands as a standard Vagrant box under <templates root>/exports/ — the path and sha256 in the task output. The base's zone → .box export in VirtualBox terms.
+//	@Tags			Machine Management
+//	@Accept			json
+//	@Produce		json
+//	@Param			request	body	map[string]interface{}	true	"{machine_name, filename}"
+//	@Success		202	"Export task created"
+//	@Failure		400	"Missing machine_name"
+//	@Failure		404	"Machine not found"
+//	@Router			/templates/export [post]
 func (s *Server) handleExportTemplate(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		MachineName string `json:"machine_name"`
@@ -1350,6 +1430,17 @@ func (s *Server) handleExportTemplate(w http.ResponseWriter, r *http.Request) {
 // upload → release). Registry credentials live on the configured source only
 // — the base's per-request auth_token has no analog here (tokens never ride
 // task metadata).
+//
+//	@Summary		Publish a template to a registry
+//	@Description	Minimum role: operator. Queues template_upload (the base's publish): exports the machine (or takes an existing .box by path), ensures the registry structure (box → version → provider virtualbox → architecture; duplicates tolerated), chunk-uploads the artifact (100MB chunks, three retries with backoff), and releases the box. While the upload runs, the TASK carries real byte progress (the converged wire, sync 2026-07-17): progress_info is exactly {status: "uploading", received_bytes, total_bytes} — received_bytes is bytes SENT so far (the uniform field name for both directions), total_bytes the .box file size — and progress_percent maps the bytes into the step's existing 85→95 window, throttled to one update per 1s or 1% of total (whichever first), final update always emitted; a retried chunk re-reports its own range instead of inflating the count. Registry credentials live on the configured source ONLY (auth_token — the registry API key, a BoxVault service-account token sent as Bearer; ca_file trusts self-signed registries) — tokens never ride task metadata, so the base's per-request auth_token has no analog.
+//	@Tags			Machine Management
+//	@Accept			json
+//	@Produce		json
+//	@Param			request	body	map[string]interface{}	true	"{machine_name|box_path, source_name, organization, box_name, version, description, architecture}"
+//	@Success		202	"Publish task created"
+//	@Failure		400	"Missing required fields"
+//	@Failure		404	"Machine not found"
+//	@Router			/templates/publish [post]
 func (s *Server) handlePublishTemplate(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		MachineName  string `json:"machine_name"`
@@ -1418,6 +1509,18 @@ func (s *Server) handlePublishTemplate(w http.ResponseWriter, r *http.Request) {
 // handleMoveTemplate queues a template_move task (the base's POST
 // /templates/local/{id}/move: relocate the stored artifact — file move here,
 // zfs rename/send-recv there).
+//
+//	@Summary		Move a template's storage
+//	@Description	Minimum role: operator. Queues template_move: the disk image relocates to <target_path>/<org>/<box>/<version>/ (same-volume rename; cross-volume copy+delete) and the row's disk_path updates — the base's template move (zfs rename vs send-recv) in file terms.
+//	@Tags			Machine Management
+//	@Accept			json
+//	@Produce		json
+//	@Param			templateId	path	int	true	"Template ID"
+//	@Param			request		body	map[string]interface{}	true	"{target_path}"
+//	@Success		202	"Move task created"
+//	@Failure		400	"Missing target_path"
+//	@Failure		404	"Template not found"
+//	@Router			/templates/{templateId}/move [post]
 func (s *Server) handleMoveTemplate(w http.ResponseWriter, r *http.Request) {
 	id, err := strconv.ParseInt(r.PathValue("templateId"), 10, 64)
 	if err != nil {
@@ -1473,6 +1576,17 @@ func (s *Server) handleMoveTemplate(w http.ResponseWriter, r *http.Request) {
 // handlePullTemplate queues a template_download task (the base's
 // /templates/pull): the caller names the source (or the default is used) and
 // the exact box tuple.
+//
+//	@Summary		Download a box template
+//	@Description	Minimum role: operator. Queues a template_download task: the .box streams from the named source (or the default registry), its disk image lands in the template storage, and the registry row is created. While the download runs, the TASK carries real byte progress (the converged wire, sync 2026-07-17): progress_info is exactly {status: "downloading", received_bytes, total_bytes|null} and progress_percent maps the bytes into the step's existing 10→60 window — throttled to one update per 1s or 1% of total (whichever first), final update always emitted; an unknown Content-Length parks the percent at 10 while received_bytes streams. An already-local tuple answers an honest 409 with the existing row's id instead of queueing a no-op download (the shared already-exists pre-check; a row whose disk image vanished self-heals, so re-pull after manual cleanup works). Private-box credentials live on the configured source (template_sources.sources[].auth_token) — never in task metadata.
+//	@Tags			Machine Management
+//	@Accept			json
+//	@Produce		json
+//	@Param			request	body	map[string]interface{}	true	"{organization, box_name, version, source_name, provider, architecture}"
+//	@Success		202	"Template download task queued"
+//	@Failure		400	"Missing tuple fields, non-specific version, an invalid provider, or no usable source"
+//	@Failure		409	{object}	map[string]interface{}	"Template already exists locally"
+//	@Router			/templates/pull [post]
 func (s *Server) handlePullTemplate(w http.ResponseWriter, r *http.Request) {
 	var meta machines.TemplateDownloadMetadata
 	if err := decodeBody(r, &meta); err != nil {

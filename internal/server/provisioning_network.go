@@ -21,6 +21,14 @@ import (
 // handleProvisioningNetworkStatus mirrors GET /provisioning/network/status:
 // the disabled branch is bare {enabled:false, message}; enabled answers
 // ready + per-component existence + the effective configuration.
+//
+//	@Summary		Provisioning network status
+//	@Description	Minimum role: viewer. The dedicated provisioning network (the zoneweaver mechanism's etherstub+dhcpd, as ONE VirtualBox host-only interface — identified by provisioning.network.host_ip, since VirtualBox assigns interface names itself — plus its DHCP server). Disabled answers just {enabled:false, message}; enabled answers ready + per-component existence + the effective configuration. macOS hosts (Oracle's split) answer components.network ({name: "hyperweaver-provision", exists}) instead of interface/ip_address, with dhcp {exists, enabled, embedded: true} — the hostonlynet's own embedded range serves DHCP. The base's NAT/forwarding components translate to the create-time NAT adapter + ssh port-forward transport (the provisioning NIC); this host-only machinery stays dormant-but-available for host-type networks[] entries and build-it-yourself setups.
+//	@Tags			Provisioning
+//	@Produce		json
+//	@Success		200	{object}	map[string]interface{}	"Provisioning network status"
+//	@Failure		503	"VirtualBox is not installed"
+//	@Router			/provisioning/network/status [get]
 func (s *Server) handleProvisioningNetworkStatus(w http.ResponseWriter, r *http.Request) {
 	network := s.cfg.Provisioning.Network
 	if !network.Enabled {
@@ -106,6 +114,16 @@ func (s *Server) handleProvisioningNetworkStatus(w http.ResponseWriter, r *http.
 	})
 }
 
+// networkTaskResponse is the 202 task-queued answer to POST
+// /provisioning/network/setup and DELETE /provisioning/network/teardown
+// (the acceptedTask shape, typed).
+type networkTaskResponse struct {
+	Success bool   `json:"success"`
+	TaskID  string `json:"task_id"`
+	Status  string `json:"status"`
+	Message string `json:"message"`
+}
+
 // queueNetworkTask queues one provisioning-network operation as a system
 // task (the base's parent container, minus the chained children — this
 // agent's whole setup is one executor).
@@ -127,10 +145,23 @@ func (s *Server) queueNetworkTask(w http.ResponseWriter, r *http.Request, operat
 	}
 	slog.Info("provisioning network task queued", "operation", operation,
 		"task_id", task.ID, "by", auth.FromContext(r.Context()).Name)
-	acceptedTask(w, task.ID, message)
+	writeJSONStatus(w, http.StatusAccepted, networkTaskResponse{
+		Success: true,
+		TaskID:  task.ID,
+		Status:  tasks.StatusPending,
+		Message: message,
+	})
 }
 
 // handleProvisioningNetworkSetup mirrors POST /provisioning/network/setup.
+//
+//	@Summary		Set up the provisioning network
+//	@Description	Minimum role: operator. Queues a provisioning_network_setup task (category-locked — one network mutation at a time), idempotent at every component: the host-only interface is created only when none carries the configured host_ip, its address always converges onto the configuration, and the DHCP server (subnet range, its own dhcp_server_ip) is added or modified to match. Machines with host-type networks[] entries then attach to this interface at create, and each entry's address pins as a per-VM-NIC DHCP fixed lease — the guest's ordinary DHCP request receives the document's own control IP, so wait_ssh dials a deterministic address. macOS hosts (Oracle's split — host-only adapters died with VirtualBox 7 there) create/converge ONE named host-only NETWORK instead: hyperweaver-provision, a hostonlynet whose embedded lower/upper range IS the DHCP (no dhcpserver verbs exist in that family; host_ip is vmnet's to assign, and per-VM fixed leases have no analog — pinned addresses narrate honestly and the networking role applies them in-guest; the pipeline's transport rides the NAT forward regardless). Host-type machines there attach via --nic hostonlynet + --host-only-net.
+//	@Tags			Provisioning
+//	@Produce		json
+//	@Success		202	{object}	networkTaskResponse	"Setup task queued"
+//	@Failure		400	"Provisioning network is disabled in configuration"
+//	@Router			/provisioning/network/setup [post]
 func (s *Server) handleProvisioningNetworkSetup(w http.ResponseWriter, r *http.Request) {
 	s.queueNetworkTask(w, r, machines.OpNetworkSetup,
 		"Provisioning network setup task queued")
@@ -138,6 +169,14 @@ func (s *Server) handleProvisioningNetworkSetup(w http.ResponseWriter, r *http.R
 
 // handleProvisioningNetworkTeardown mirrors DELETE
 // /provisioning/network/teardown.
+//
+//	@Summary		Tear down the provisioning network
+//	@Description	Minimum role: operator. Queues a provisioning_network_teardown task: the DHCP server first, then the host-only interface (the base's reverse order); absent components are noted, never errors. macOS hosts remove the hyperweaver-provision host-only network instead.
+//	@Tags			Provisioning
+//	@Produce		json
+//	@Success		202	{object}	networkTaskResponse	"Teardown task queued"
+//	@Failure		400	"Provisioning network is disabled in configuration"
+//	@Router			/provisioning/network/teardown [delete]
 func (s *Server) handleProvisioningNetworkTeardown(w http.ResponseWriter, r *http.Request) {
 	s.queueNetworkTask(w, r, machines.OpNetworkTeardown,
 		"Provisioning network teardown task queued")

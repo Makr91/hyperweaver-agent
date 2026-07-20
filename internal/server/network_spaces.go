@@ -211,10 +211,38 @@ func requireHostOnlyIfPlatform(w http.ResponseWriter) bool {
 	return false
 }
 
+// hostOnlySpaceResponse is the host-only families' mutation answer —
+// {success, name, message}.
+type hostOnlySpaceResponse struct {
+	Success bool   `json:"success"`
+	Name    string `json:"name"`
+	Message string `json:"message"`
+}
+
+// hostOnlySpaceCreateRequest is POST /network/spaces/hostonly's body.
+type hostOnlySpaceCreateRequest struct {
+	IP      string `json:"ip"`
+	Netmask string `json:"netmask"`
+	// {server_ip, lower_ip, upper_ip, netmask?} to add in the same call
+	DHCP *hostOnlyDHCPBody `json:"dhcp"`
+}
+
 // handleCreateHostOnlySpace serves POST /network/spaces/hostonly — create a
 // host-only interface (VirtualBox assigns its name), optionally configure
 // its static IP and add its DHCP server in one call. A failed follow-up step
 // names the already-created interface — it is NOT rolled back.
+//
+//	@Summary		Create a host-only interface
+//	@Description	Minimum role: operator. VBoxManage hostonlyif create — VirtualBox assigns the interface name (the answer carries it); the request may configure the static IPv4 (ip + netmask, netmask defaulting to 255.255.255.0) and add the interface's DHCP server (dhcp {server_ip, lower_ip, upper_ip, netmask?}) in the same call. A failed follow-up step answers 500 NAMING the already-created interface — it is not rolled back (delete it explicitly if unwanted). Windows hosts may need driver-install privileges — VirtualBox's own error rides through. macOS hosts REFUSE the whole hostonly-interface family with a 400 (VirtualBox 7 removed host-only adapters there — manage /network/spaces/hostonlynet instead).
+//	@Tags			Host Configuration
+//	@Accept			json
+//	@Produce		json
+//	@Param			request	body	hostOnlySpaceCreateRequest	false	"Optional static IP and DHCP server"
+//	@Success		201	{object}	hostOnlySpaceResponse	"Interface created ({success, name, message})"
+//	@Failure		400	"Invalid body, dhcp missing server_ip/lower_ip/upper_ip, or a macOS host (host-only interfaces died with VirtualBox 7 there — use hostonlynet)"
+//	@Failure		500	"Creation or a follow-up step failed (the message names the created interface when one exists)"
+//	@Failure		503	"VirtualBox is not installed"
+//	@Router			/network/spaces/hostonly [post]
 func (s *Server) handleCreateHostOnlySpace(w http.ResponseWriter, r *http.Request) {
 	exe := s.requireVBox(w, r)
 	if exe == "" {
@@ -223,11 +251,7 @@ func (s *Server) handleCreateHostOnlySpace(w http.ResponseWriter, r *http.Reques
 	if !requireHostOnlyIfPlatform(w) {
 		return
 	}
-	var body struct {
-		IP      string            `json:"ip"`
-		Netmask string            `json:"netmask"`
-		DHCP    *hostOnlyDHCPBody `json:"dhcp"`
-	}
+	var body hostOnlySpaceCreateRequest
 	if err := decodeBody(r, &body); err != nil {
 		taskError(w, http.StatusBadRequest, "Invalid JSON body")
 		return
@@ -266,16 +290,37 @@ func (s *Server) handleCreateHostOnlySpace(w http.ResponseWriter, r *http.Reques
 	}
 	slog.Info("hostonly network space created", "interface", name,
 		"ip", body.IP, "by", auth.FromContext(r.Context()).Name)
-	writeJSONStatus(w, http.StatusCreated, map[string]any{
-		"success": true,
-		"name":    name,
-		"message": "Host-only interface " + name + " created",
+	writeJSONStatus(w, http.StatusCreated, hostOnlySpaceResponse{
+		Success: true,
+		Name:    name,
+		Message: "Host-only interface " + name + " created",
 	})
+}
+
+// hostOnlySpaceModifyRequest is PUT /network/spaces/hostonly/{name}'s body.
+type hostOnlySpaceModifyRequest struct {
+	IP      string `json:"ip"`
+	Netmask string `json:"netmask"`
+	// {server_ip, lower_ip, upper_ip, netmask?} to add/converge; null to remove
+	DHCP json.RawMessage `json:"dhcp"`
 }
 
 // handleModifyHostOnlySpace serves PUT /network/spaces/hostonly/{name} —
 // reconfigure the static IP and/or the DHCP server (dhcp: null REMOVES the
 // server; an absent dhcp key leaves it alone).
+//
+//	@Summary		Reconfigure a host-only interface
+//	@Description	Minimum role: operator. ip (+ netmask, defaulting to the interface's current mask) reassigns the static IPv4 (hostonlyif ipconfig); dhcp {server_ip, lower_ip, upper_ip, netmask?} adds or converges the interface's DHCP server; dhcp: null REMOVES the server (an absent dhcp key leaves it alone). At least one of ip/dhcp is required.
+//	@Tags			Host Configuration
+//	@Accept			json
+//	@Produce		json
+//	@Param			name	path	string	true	"The interface name from GET /network/spaces (URL-encode spaces)"
+//	@Param			request	body	hostOnlySpaceModifyRequest	true	"IP and/or DHCP changes"
+//	@Success		200	{object}	hostOnlySpaceResponse	"Interface updated"
+//	@Failure		400	"Nothing to change, an invalid dhcp document, or a macOS host (use hostonlynet)"
+//	@Failure		404	"No host-only interface by that name"
+//	@Failure		503	"VirtualBox is not installed"
+//	@Router			/network/spaces/hostonly/{name} [put]
 func (s *Server) handleModifyHostOnlySpace(w http.ResponseWriter, r *http.Request) {
 	exe := s.requireVBox(w, r)
 	if exe == "" {
@@ -297,11 +342,7 @@ func (s *Server) handleModifyHostOnlySpace(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	var body struct {
-		IP      string          `json:"ip"`
-		Netmask string          `json:"netmask"`
-		DHCP    json.RawMessage `json:"dhcp"`
-	}
+	var body hostOnlySpaceModifyRequest
 	if err := decodeBody(r, &body); err != nil {
 		taskError(w, http.StatusBadRequest, "Invalid JSON body")
 		return
@@ -367,6 +408,17 @@ func (s *Server) handleModifyHostOnlySpace(w http.ResponseWriter, r *http.Reques
 
 // handleDeleteHostOnlySpace serves DELETE /network/spaces/hostonly/{name} —
 // DHCP server first (tolerantly), then the interface (the teardown order).
+//
+//	@Summary		Remove a host-only interface
+//	@Description	Minimum role: operator. The teardown order: the interface's DHCP server first (tolerantly — absence is fine), then hostonlyif remove. Machines still attached to the interface lose their uplink — VirtualBox does not refuse; check GET /network/spaces consumers first.
+//	@Tags			Host Configuration
+//	@Produce		json
+//	@Param			name	path	string	true	"The interface name from GET /network/spaces (URL-encode spaces)"
+//	@Success		200	{object}	hostOnlySpaceResponse	"Interface removed"
+//	@Failure		400	"A macOS host (use hostonlynet)"
+//	@Failure		404	"No host-only interface by that name"
+//	@Failure		503	"VirtualBox is not installed"
+//	@Router			/network/spaces/hostonly/{name} [delete]
 func (s *Server) handleDeleteHostOnlySpace(w http.ResponseWriter, r *http.Request) {
 	exe := s.requireVBox(w, r)
 	if exe == "" {
@@ -396,10 +448,10 @@ func (s *Server) handleDeleteHostOnlySpace(w http.ResponseWriter, r *http.Reques
 	}
 	slog.Info("hostonly network space removed", "interface", name,
 		"by", auth.FromContext(r.Context()).Name)
-	writeJSON(w, map[string]any{
-		"success": true,
-		"name":    name,
-		"message": "Host-only interface " + name + " removed",
+	writeJSON(w, hostOnlySpaceResponse{
+		Success: true,
+		Name:    name,
+		Message: "Host-only interface " + name + " removed",
 	})
 }
 
@@ -415,9 +467,29 @@ func requireHostOnlyNetPlatform(w http.ResponseWriter) bool {
 	return false
 }
 
+// hostOnlyNetCreateRequest is POST /network/spaces/hostonlynet's body.
+type hostOnlyNetCreateRequest struct {
+	Name    string `json:"name"`
+	Netmask string `json:"netmask"`
+	LowerIP string `json:"lower_ip"`
+	UpperIP string `json:"upper_ip"`
+	Enabled *bool  `json:"enabled"`
+}
+
 // handleCreateHostOnlyNet serves POST /network/spaces/hostonlynet — create a
 // host-only NETWORK (VirtualBox 7's vmnet-backed family; the caller names
 // it, unlike interfaces).
+//
+//	@Summary		Create a host-only network
+//	@Description	Minimum role: operator. VBoxManage hostonlynet add — VirtualBox's macOS-ONLY vmnet-backed host-only NETWORK family (the caller names it, unlike interfaces): name, netmask, lower_ip, upper_ip required; enabled defaults true. Non-macOS hosts answer 400 (Oracle's platform split — every other host OS lacks the verb; manage /network/spaces/hostonly there).
+//	@Tags			Host Configuration
+//	@Accept			json
+//	@Produce		json
+//	@Param			request	body	hostOnlyNetCreateRequest	true	"The network to create"
+//	@Success		201	{object}	hostOnlySpaceResponse	"Host-only network created ({success, name, message})"
+//	@Failure		400	"Missing name/netmask/lower_ip/upper_ip"
+//	@Failure		503	"VirtualBox is not installed"
+//	@Router			/network/spaces/hostonlynet [post]
 func (s *Server) handleCreateHostOnlyNet(w http.ResponseWriter, r *http.Request) {
 	exe := s.requireVBox(w, r)
 	if exe == "" {
@@ -426,13 +498,7 @@ func (s *Server) handleCreateHostOnlyNet(w http.ResponseWriter, r *http.Request)
 	if !requireHostOnlyNetPlatform(w) {
 		return
 	}
-	var body struct {
-		Name    string `json:"name"`
-		Netmask string `json:"netmask"`
-		LowerIP string `json:"lower_ip"`
-		UpperIP string `json:"upper_ip"`
-		Enabled *bool  `json:"enabled"`
-	}
+	var body hostOnlyNetCreateRequest
 	if err := decodeBody(r, &body); err != nil {
 		taskError(w, http.StatusBadRequest, "Invalid JSON body")
 		return
@@ -457,10 +523,10 @@ func (s *Server) handleCreateHostOnlyNet(w http.ResponseWriter, r *http.Request)
 	}
 	slog.Info("hostonly network created", "name", body.Name,
 		"by", auth.FromContext(r.Context()).Name)
-	writeJSONStatus(w, http.StatusCreated, map[string]any{
-		"success": true,
-		"name":    body.Name,
-		"message": "Host-only network " + body.Name + " created",
+	writeJSONStatus(w, http.StatusCreated, hostOnlySpaceResponse{
+		Success: true,
+		Name:    body.Name,
+		Message: "Host-only network " + body.Name + " created",
 	})
 }
 
@@ -482,7 +548,28 @@ func (s *Server) findHostOnlyNet(w http.ResponseWriter, r *http.Request, exe str
 	return "", false
 }
 
+// hostOnlyNetModifyRequest is PUT /network/spaces/hostonlynet/{name}'s body.
+type hostOnlyNetModifyRequest struct {
+	Netmask string `json:"netmask"`
+	LowerIP string `json:"lower_ip"`
+	UpperIP string `json:"upper_ip"`
+	Enabled *bool  `json:"enabled"`
+}
+
 // handleModifyHostOnlyNet serves PUT /network/spaces/hostonlynet/{name}.
+//
+//	@Summary		Modify a host-only network
+//	@Description	Minimum role: operator. Converges the sent knobs (netmask, lower_ip, upper_ip, enabled — hostonlynet modify). At least one is required.
+//	@Tags			Host Configuration
+//	@Accept			json
+//	@Produce		json
+//	@Param			name	path	string	true	"The network name"
+//	@Param			request	body	hostOnlyNetModifyRequest	true	"Knobs to converge"
+//	@Success		200	{object}	hostOnlySpaceResponse	"Host-only network updated"
+//	@Failure		400	"Nothing to change, or a non-macOS host (hostonlynet is VirtualBox's macOS-only family)"
+//	@Failure		404	"No host-only network by that name"
+//	@Failure		503	"VirtualBox is not installed"
+//	@Router			/network/spaces/hostonlynet/{name} [put]
 func (s *Server) handleModifyHostOnlyNet(w http.ResponseWriter, r *http.Request) {
 	exe := s.requireVBox(w, r)
 	if exe == "" {
@@ -495,12 +582,7 @@ func (s *Server) handleModifyHostOnlyNet(w http.ResponseWriter, r *http.Request)
 	if !found {
 		return
 	}
-	var body struct {
-		Netmask string `json:"netmask"`
-		LowerIP string `json:"lower_ip"`
-		UpperIP string `json:"upper_ip"`
-		Enabled *bool  `json:"enabled"`
-	}
+	var body hostOnlyNetModifyRequest
 	if err := decodeBody(r, &body); err != nil {
 		taskError(w, http.StatusBadRequest, "Invalid JSON body")
 		return
@@ -520,14 +602,25 @@ func (s *Server) handleModifyHostOnlyNet(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	slog.Info("hostonly network modified", "name", name, "by", auth.FromContext(r.Context()).Name)
-	writeJSON(w, map[string]any{
-		"success": true,
-		"name":    name,
-		"message": "Host-only network " + name + " updated",
+	writeJSON(w, hostOnlySpaceResponse{
+		Success: true,
+		Name:    name,
+		Message: "Host-only network " + name + " updated",
 	})
 }
 
 // handleDeleteHostOnlyNet serves DELETE /network/spaces/hostonlynet/{name}.
+//
+//	@Summary		Remove a host-only network
+//	@Description	Minimum role: operator. VBoxManage hostonlynet remove. Machines whose adapters name the network lose their uplink — VirtualBox does not refuse.
+//	@Tags			Host Configuration
+//	@Produce		json
+//	@Param			name	path	string	true	"The network name"
+//	@Success		200	{object}	hostOnlySpaceResponse	"Host-only network removed"
+//	@Failure		400	"A non-macOS host (hostonlynet is VirtualBox's macOS-only family)"
+//	@Failure		404	"No host-only network by that name"
+//	@Failure		503	"VirtualBox is not installed"
+//	@Router			/network/spaces/hostonlynet/{name} [delete]
 func (s *Server) handleDeleteHostOnlyNet(w http.ResponseWriter, r *http.Request) {
 	exe := s.requireVBox(w, r)
 	if exe == "" {
@@ -546,9 +639,9 @@ func (s *Server) handleDeleteHostOnlyNet(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	slog.Info("hostonly network removed", "name", name, "by", auth.FromContext(r.Context()).Name)
-	writeJSON(w, map[string]any{
-		"success": true,
-		"name":    name,
-		"message": "Host-only network " + name + " removed",
+	writeJSON(w, hostOnlySpaceResponse{
+		Success: true,
+		Name:    name,
+		Message: "Host-only network " + name + " removed",
 	})
 }

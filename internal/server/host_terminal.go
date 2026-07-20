@@ -98,6 +98,13 @@ func (s *termSessions) close(id string) bool {
 
 // handleStartTermSession mints a host terminal session (POST /term/start);
 // the shell itself opens when the WebSocket connects.
+//
+//	@Summary		Start a host terminal session
+//	@Description	Minimum role: ADMIN (the host-terminal capability token — every /term REST verb is admin-only: a shell on the agent host as the agent's own user is full host access). Mints a session; connect the terminal at the /term/{sessionId} WebSocket, where the shell actually opens (PowerShell/cmd via ConPTY on Windows, $SHELL login shell via a real PTY elsewhere). Sessions are in-memory — an agent restart closes them all.
+//	@Tags			Console
+//	@Produce		json
+//	@Success		200	{object}	termSession	"Session created"
+//	@Router			/term/start [post]
 func (s *Server) handleStartTermSession(w http.ResponseWriter, _ *http.Request) {
 	id, err := randomID()
 	if err != nil {
@@ -116,11 +123,27 @@ func (s *Server) handleStartTermSession(w http.ResponseWriter, _ *http.Request) 
 }
 
 // handleListTermSessions mirrors GET /term/sessions.
+//
+//	@Summary		List host terminal sessions
+//	@Description	Minimum role: admin. Newest first.
+//	@Tags			Console
+//	@Produce		json
+//	@Success		200	{array}	termSession	"Sessions"
+//	@Router			/term/sessions [get]
 func (s *Server) handleListTermSessions(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, s.termSessions.snapshot())
 }
 
 // handleTermSessionInfo mirrors GET /term/sessions/{sessionId}.
+//
+//	@Summary		Host terminal session information
+//	@Description	Minimum role: admin.
+//	@Tags			Console
+//	@Produce		json
+//	@Param			sessionId	path	string	true	"Terminal session ID"
+//	@Success		200	{object}	termSession	"The session"
+//	@Failure		404	"Terminal session not found"
+//	@Router			/term/sessions/{sessionId} [get]
 func (s *Server) handleTermSessionInfo(w http.ResponseWriter, r *http.Request) {
 	session := s.termSessions.get(r.PathValue("sessionId"))
 	if session == nil {
@@ -131,6 +154,15 @@ func (s *Server) handleTermSessionInfo(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleStopTermSession mirrors DELETE /term/sessions/{sessionId}/stop.
+//
+//	@Summary		Stop a host terminal session
+//	@Description	Minimum role: admin. Closes the shell and marks the session closed.
+//	@Tags			Console
+//	@Produce		json
+//	@Param			sessionId	path	string	true	"Terminal session ID"
+//	@Success		200	{object}	map[string]interface{}	"Session stopped"
+//	@Failure		404	"Terminal session not found"
+//	@Router			/term/sessions/{sessionId}/stop [delete]
 func (s *Server) handleStopTermSession(w http.ResponseWriter, r *http.Request) {
 	if !s.termSessions.close(r.PathValue("sessionId")) {
 		taskError(w, http.StatusNotFound, "Terminal session not found")

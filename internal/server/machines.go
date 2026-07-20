@@ -83,8 +83,23 @@ func (s *Server) findMachine(w http.ResponseWriter, r *http.Request) *machines.M
 	return machine
 }
 
+// machineListResponse is GET /machines' answer: the filtered rows and their
+// total count.
+type machineListResponse struct {
+	Machines []*machines.Machine `json:"machines"`
+	Total    int                 `json:"total"`
+}
+
 // handleListMachines: status/orphaned filters, post-filter on tag,
 // name-ascending.
+//
+//	@Summary		List machines
+//	@Description	Minimum role: viewer. Machines built outside the agent appear here once the reconciliation sweep imports them.
+//	@Tags			Machine Management
+//	@Produce		json
+//	@Param			tag	query	string	false	"Only machines carrying this tag"
+//	@Success		200	{object}	machineListResponse	"Machines retrieved"
+//	@Router			/machines [get]
 func (s *Server) handleListMachines(w http.ResponseWriter, r *http.Request) {
 	query := r.URL.Query()
 	filter := machines.ListFilter{Status: query.Get("status")}
@@ -119,15 +134,21 @@ func (s *Server) handleListMachines(w http.ResponseWriter, r *http.Request) {
 		list = filtered
 	}
 
-	writeJSON(w, map[string]any{
-		"machines": list,
-		"total":    len(list),
-	})
+	writeJSON(w, machineListResponse{Machines: list, Total: len(list)})
 }
 
 // handleMachineDetails: live status check (updating the registry when it
 // drifted), the machine record, its live configuration, and its pending
 // tasks.
+//
+//	@Summary		Machine details
+//	@Description	Minimum role: viewer. Live-checks VirtualBox (updating the registry on drift) and returns the record, its live configuration, pending tasks, and knob_current — the current values in PUT's own vocabulary (the Edit-surface prefill).
+//	@Tags			Machine Management
+//	@Produce		json
+//	@Param			machineName	path	string	true	"Machine name"
+//	@Success		200	{object}	map[string]interface{}	"Machine details"
+//	@Failure		404	"Machine not found"
+//	@Router			/machines/{machineName} [get]
 func (s *Server) handleMachineDetails(w http.ResponseWriter, r *http.Request) {
 	machine := s.findMachine(w, r)
 	if machine == nil {
@@ -251,6 +272,15 @@ func (s *Server) handleMachineDetails(w http.ResponseWriter, r *http.Request) {
 
 // handleMachineConfig: the live configuration document (VirtualBox's
 // machinereadable view on this agent).
+//
+//	@Summary		Machine configuration
+//	@Description	Minimum role: viewer. The live configuration document (VBoxManage showvminfo --machinereadable view on this agent), falling back to the last reconciled copy.
+//	@Tags			Machine Management
+//	@Produce		json
+//	@Param			machineName	path	string	true	"Machine name"
+//	@Success		200	{object}	map[string]interface{}	"Machine configuration"
+//	@Failure		404	"Machine not found"
+//	@Router			/machines/{machineName}/config [get]
 func (s *Server) handleMachineConfig(w http.ResponseWriter, r *http.Request) {
 	machine := s.findMachine(w, r)
 	if machine == nil {
@@ -350,6 +380,15 @@ func (s *Server) queuePendingApply(ctx context.Context, machine *machines.Machin
 // handleStartMachine queues a start task — one native VBoxManage boot for
 // every machine (the provision pipeline queues this same operation as its
 // boot child).
+//
+//	@Summary		Start a machine
+//	@Description	Minimum role: operator. One native start task for EVERY machine (VBoxManage startvm --type headless) — the provision pipeline queues this same operation as its boot child. Idempotent: already-running machines answer already_running; an existing pending/running start task is reused. Accrued pending changes (the accrue-changes contract) apply FIRST — a machine_modify task is chained ahead and the start DEPENDS on it, so a bad pending value fails the boot honestly (clear via DELETE /machines/{name}/pending-changes or re-PUT the value). With machines.provision_on_start enabled, a machine's VERY FIRST start (stored provisioner document, never provisioned) queues the full provision pipeline instead — the answer carries operation machine_provision_orchestration and the parent task id; later starts, restarts, and document-less machines always boot plainly.
+//	@Tags			Machine Management
+//	@Produce		json
+//	@Param			machineName	path	string	true	"Machine name"
+//	@Success		200	{object}	queuedOperation	"Start task queued (or machine already running)"
+//	@Failure		404	"Machine not found"
+//	@Router			/machines/{machineName}/start [post]
 func (s *Server) handleStartMachine(w http.ResponseWriter, r *http.Request) {
 	machine := s.findMachine(w, r)
 	if machine == nil {
@@ -431,6 +470,15 @@ func (s *Server) cancelPendingStarts(ctx context.Context, machineName string) {
 }
 
 // handleStopMachine queues a stop task (?force=true powers off hard).
+//
+//	@Summary		Stop a machine
+//	@Description	Minimum role: operator. Queues a stop task and cancels pending starts. The graceful ladder (Mark's ruling 2026-07-12): QEMU guest-agent shutdown first (the guest OS acting on itself — honored even by a locked Windows console that ignores ACPI; channels with no qemu-ga fall through in <5s) → ACPI power button → hard poweroff when the guest ignores both (each graceful rung waits machines.shutdown_timeout once, never twice). force=true goes straight to poweroff. Accrued pending changes (the accrue-changes contract) apply right after the power-off via a chained machine_modify task.
+//	@Tags			Machine Management
+//	@Produce		json
+//	@Param			machineName	path	string	true	"Machine name"
+//	@Success		200	{object}	queuedOperation	"Stop task queued (or machine already stopped)"
+//	@Failure		404	"Machine not found"
+//	@Router			/machines/{machineName}/stop [post]
 func (s *Server) handleStopMachine(w http.ResponseWriter, r *http.Request) {
 	machine := s.findMachine(w, r)
 	if machine == nil {
@@ -495,6 +543,15 @@ func stopMetadataJSON(force bool) (*string, error) {
 
 // handleRestartMachine queues a HIGH-priority stop and a MEDIUM-priority
 // start chained on it.
+//
+//	@Summary		Restart a machine
+//	@Description	Minimum role: operator. Queues a HIGH-priority stop and a MEDIUM-priority start chained on it. Accrued pending changes (the accrue-changes contract) slot between the two — the power cycle that applies them.
+//	@Tags			Machine Management
+//	@Produce		json
+//	@Param			machineName	path	string	true	"Machine name"
+//	@Success		200	{object}	map[string]interface{}	"Restart tasks queued"
+//	@Failure		404	"Machine not found"
+//	@Router			/machines/{machineName}/restart [post]
 func (s *Server) handleRestartMachine(w http.ResponseWriter, r *http.Request) {
 	machine := s.findMachine(w, r)
 	if machine == nil {
@@ -553,6 +610,16 @@ func (s *Server) handleRestartMachine(w http.ResponseWriter, r *http.Request) {
 
 // handleSuspendMachine queues a suspend (vagrant suspend / savestate) — SHI
 // parity; the Node agent has no zone analog.
+//
+//	@Summary		Suspend a machine
+//	@Description	Minimum role: operator. Saves the machine's state (VBoxManage controlvm savestate). Advertised by the machine-suspend capability token — the UI shows Suspend only on agents that carry it.
+//	@Tags			Machine Management
+//	@Produce		json
+//	@Param			machineName	path	string	true	"Machine name"
+//	@Success		200	{object}	queuedOperation	"Suspend task queued"
+//	@Failure		400	"Machine is not running"
+//	@Failure		404	"Machine not found"
+//	@Router			/machines/{machineName}/suspend [post]
 func (s *Server) handleSuspendMachine(w http.ResponseWriter, r *http.Request) {
 	machine := s.findMachine(w, r)
 	if machine == nil {
@@ -625,6 +692,16 @@ func (s *Server) queueMachineOp(w http.ResponseWriter, r *http.Request,
 
 // handleResetMachine queues a hard reset (`controlvm reset` — the reboot
 // VirtualBox offers beyond the stop→start chain).
+//
+//	@Summary		Hard-reset a machine
+//	@Description	Minimum role: operator. VBoxManage controlvm reset — the hard reboot beyond the stop→start chain (no guest shutdown; like pressing the reset button).
+//	@Tags			Machine Management
+//	@Produce		json
+//	@Param			machineName	path	string	true	"Machine name"
+//	@Success		200	{object}	queuedOperation	"Reset task queued"
+//	@Failure		400	"Machine is not running"
+//	@Failure		404	"Machine not found"
+//	@Router			/machines/{machineName}/reset [post]
 func (s *Server) handleResetMachine(w http.ResponseWriter, r *http.Request) {
 	machine := s.findMachine(w, r)
 	if machine == nil {
@@ -640,6 +717,16 @@ func (s *Server) handleResetMachine(w http.ResponseWriter, r *http.Request) {
 
 // handlePauseMachine queues a pause (`controlvm pause` — execution freezes in
 // RAM; resume continues it, unlike suspend's save-to-disk).
+//
+//	@Summary		Pause a machine
+//	@Description	Minimum role: operator. VBoxManage controlvm pause — execution freezes in RAM (resume continues it; unlike suspend's save-to-disk).
+//	@Tags			Machine Management
+//	@Produce		json
+//	@Param			machineName	path	string	true	"Machine name"
+//	@Success		200	{object}	queuedOperation	"Pause task queued"
+//	@Failure		400	"Machine is not running"
+//	@Failure		404	"Machine not found"
+//	@Router			/machines/{machineName}/pause [post]
 func (s *Server) handlePauseMachine(w http.ResponseWriter, r *http.Request) {
 	machine := s.findMachine(w, r)
 	if machine == nil {
@@ -654,6 +741,16 @@ func (s *Server) handlePauseMachine(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleResumeMachine queues a resume (`controlvm resume`).
+//
+//	@Summary		Resume a paused machine
+//	@Description	Minimum role: operator. VBoxManage controlvm resume.
+//	@Tags			Machine Management
+//	@Produce		json
+//	@Param			machineName	path	string	true	"Machine name"
+//	@Success		200	{object}	queuedOperation	"Resume task queued"
+//	@Failure		400	"Machine is not paused"
+//	@Failure		404	"Machine not found"
+//	@Router			/machines/{machineName}/resume [post]
 func (s *Server) handleResumeMachine(w http.ResponseWriter, r *http.Request) {
 	machine := s.findMachine(w, r)
 	if machine == nil {
@@ -667,12 +764,31 @@ func (s *Server) handleResumeMachine(w http.ResponseWriter, r *http.Request) {
 		"Resume task queued successfully")
 }
 
+// injectNMIResponse is POST /machines/{machineName}/nmi's synchronous answer.
+type injectNMIResponse struct {
+	Success     bool   `json:"success"`
+	MachineName string `json:"machine_name"`
+	Message     string `json:"message"`
+}
+
 // handleInjectNMI serves POST /machines/{machineName}/nmi — inject a
 // non-maskable interrupt into the running machine (VBoxManage debugvm
 // injectnmi): the diagnostic trigger for guest crash dumps / kernel
 // debuggers, zoneweaver's bhyvectl --inject-nmi mirror (Mark's parity go
 // 2026-07-12). Synchronous like the base's — the injection is instantaneous,
 // no task row.
+//
+//	@Summary		Inject an NMI into a running machine
+//	@Description	Minimum role: operator. VBoxManage debugvm injectnmi — a non-maskable interrupt into the running guest: the diagnostic trigger for guest crash dumps and kernel debuggers (zoneweaver's bhyvectl --inject-nmi, same wire on both agents). SYNCHRONOUS — the injection is instantaneous, no task row. What happens next is the guest's own policy (Windows: crash dump when configured; Linux: kernel NMI handler/panic per sysctl).
+//	@Tags			Machine Management
+//	@Produce		json
+//	@Param			machineName	path	string	true	"Machine name"
+//	@Success		200	{object}	injectNMIResponse	"NMI injected"
+//	@Failure		400	"Machine is not running"
+//	@Failure		404	"Machine not found"
+//	@Failure		500	"VBoxManage debugvm failed"
+//	@Failure		503	"VirtualBox is not installed"
+//	@Router			/machines/{machineName}/nmi [post]
 func (s *Server) handleInjectNMI(w http.ResponseWriter, r *http.Request) {
 	machine := s.findMachine(w, r)
 	if machine == nil {
@@ -694,16 +810,27 @@ func (s *Server) handleInjectNMI(w http.ResponseWriter, r *http.Request) {
 	}
 	slog.Info("nmi injected", "machine", machine.Name,
 		"by", auth.FromContext(r.Context()).Name)
-	writeJSON(w, map[string]any{
-		"success":      true,
-		"machine_name": machine.Name,
-		"message":      "NMI injected",
+	writeJSON(w, injectNMIResponse{
+		Success:     true,
+		MachineName: machine.Name,
+		Message:     "NMI injected",
 	})
 }
 
 // handleMachineScreenshot serves a PNG of the running machine's framebuffer
 // (`controlvm screenshotpng`) — the base's no-session screenshot endpoint;
 // synchronous, no console session needed.
+//
+//	@Summary		Console screenshot
+//	@Description	Minimum role: viewer (the machine-screenshot capability token). Synchronous PNG capture of the running machine's framebuffer (VBoxManage controlvm screenshotpng) — no console session or extpack needed.
+//	@Tags			Console
+//	@Produce		png
+//	@Param			machineName	path	string	true	"Machine name"
+//	@Success		200	{file}	binary	"PNG screenshot"
+//	@Failure		404	"Machine not found"
+//	@Failure		502	"Machine not running, or capture failed"
+//	@Failure		503	"VirtualBox is not installed"
+//	@Router			/machines/{machineName}/vnc/screenshot [get]
 func (s *Server) handleMachineScreenshot(w http.ResponseWriter, r *http.Request) {
 	machine := s.findMachine(w, r)
 	if machine == nil {
@@ -754,6 +881,16 @@ func (s *Server) handleMachineScreenshot(w http.ResponseWriter, r *http.Request)
 // handleListSnapshots serves the machine's snapshot tree (read-only,
 // synchronous — VBoxManage snapshot list; qemu-img snapshot -l on utm, where
 // even the list needs the stopped machine's qcow2 write lock).
+//
+//	@Summary		List a machine's snapshots
+//	@Description	Minimum role: viewer (the machine-snapshots capability token). Synchronous — the live VirtualBox snapshot tree. node encodes the tree position (SnapshotName, SnapshotName-1, SnapshotName-1-1, ...); current marks the snapshot the machine's state derives from.
+//	@Tags			Machine Management
+//	@Produce		json
+//	@Param			machineName	path	string	true	"Machine name"
+//	@Success		200	{object}	map[string]interface{}	"The snapshot tree (empty array when none)"
+//	@Failure		404	"Machine not found, or no VM exists behind it yet"
+//	@Failure		503	"VirtualBox is not installed"
+//	@Router			/machines/{machineName}/snapshots [get]
 func (s *Server) handleListSnapshots(w http.ResponseWriter, r *http.Request) {
 	machine := s.findMachine(w, r)
 	if machine == nil {
@@ -839,6 +976,17 @@ var snapshotNamePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.:-]{0,255}
 // retention?} (Snapshoter-style rotation naming <prefix>-YYYYMMDD-HHMM with
 // keep-newest-N pruning — zoneweaver's take contract), plus description?,
 // quiesce? (qga fsfreeze around the take), live? (--live, no pause).
+//
+//	@Summary		Take a snapshot
+//	@Description	Minimum role: operator. Queues snapshot_take (VBoxManage snapshot take). Works on running and stopped machines; live=true avoids pausing a running machine. Body carries a literal name, OR prefix (+ retention) — the Snapshoter-style rotation contract shared with zoneweaver: the snapshot is named <prefix>-YYYYMMDD-HHMM and retention keeps the newest N <prefix>-* snapshots after the take (0 = keep all; on this hypervisor pruning is a physical disk merge — keep retention low). quiesce runs qga fsfreeze around the take when the guest agent answers (application-consistent; a silent channel narrates and the snapshot proceeds crash-consistent). The scheduled rotation service (config snapshots.*, per-machine override via the PUT snapshots field) queues this same operation. UTM MACHINES: snapshots are OFFLINE qemu-img operations against the bundle qcow2 — the machine must be STOPPED, and live/quiesce/description narrate as skipped.
+//	@Tags			Machine Management
+//	@Accept			json
+//	@Produce		json
+//	@Param			machineName	path	string	true	"Machine name"
+//	@Success		200	{object}	queuedOperation	"Snapshot task queued"
+//	@Failure		400	"Missing name/prefix, or unsupported characters"
+//	@Failure		404	"Machine not found"
+//	@Router			/machines/{machineName}/snapshots [post]
 func (s *Server) handleTakeSnapshot(w http.ResponseWriter, r *http.Request) {
 	machine := s.findMachine(w, r)
 	if machine == nil {
@@ -900,6 +1048,16 @@ func snapshotNameFromPath(w http.ResponseWriter, r *http.Request) string {
 
 // handleRestoreSnapshot queues snapshot_restore (machine must be stopped —
 // the executor refuses running machines with a clear message).
+//
+//	@Summary		Restore a snapshot
+//	@Description	Minimum role: operator. Queues snapshot_restore — the machine reverts to the snapshot's state. VirtualBox only restores powered-off machines; the task fails with guidance while it runs. UTM machines restore offline via qemu-img (stopped only).
+//	@Tags			Machine Management
+//	@Produce		json
+//	@Param			machineName	path	string	true	"Machine name"
+//	@Param			snapshotName	path	string	true	"Snapshot name"
+//	@Success		200	{object}	queuedOperation	"Restore task queued"
+//	@Failure		404	"Machine not found"
+//	@Router			/machines/{machineName}/snapshots/{snapshotName}/restore [post]
 func (s *Server) handleRestoreSnapshot(w http.ResponseWriter, r *http.Request) {
 	machine := s.findMachine(w, r)
 	if machine == nil {
@@ -919,6 +1077,16 @@ func (s *Server) handleRestoreSnapshot(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleDeleteSnapshot queues snapshot_delete.
+//
+//	@Summary		Delete a snapshot
+//	@Description	Minimum role: operator. Queues snapshot_delete — the snapshot's state merges into its children.
+//	@Tags			Machine Management
+//	@Produce		json
+//	@Param			machineName	path	string	true	"Machine name"
+//	@Param			snapshotName	path	string	true	"Snapshot name"
+//	@Success		200	{object}	queuedOperation	"Snapshot delete task queued"
+//	@Failure		404	"Machine not found"
+//	@Router			/machines/{machineName}/snapshots/{snapshotName} [delete]
 func (s *Server) handleDeleteSnapshot(w http.ResponseWriter, r *http.Request) {
 	machine := s.findMachine(w, r)
 	if machine == nil {
@@ -941,6 +1109,18 @@ func (s *Server) handleDeleteSnapshot(w http.ResponseWriter, r *http.Request) {
 // description edit, zoneweaver's converged wire 2026-07-17): body {new_name?,
 // description?}, either or both, 400 when neither. Pointers distinguish
 // absent from empty — description present-but-empty ("") CLEARS the text.
+//
+//	@Summary		Modify a snapshot
+//	@Description	Minimum role: operator. Queues snapshot_modify (VBoxManage snapshot edit): new_name renames the snapshot, description replaces its description — either or both; an explicit "" description CLEARS it, and a body carrying neither field is a 400. Not supported on utm machines (qemu-img cannot rename) — the task fails honestly.
+//	@Tags			Machine Management
+//	@Accept			json
+//	@Produce		json
+//	@Param			machineName	path	string	true	"Machine name"
+//	@Param			snapshotName	path	string	true	"Snapshot name"
+//	@Success		200	{object}	queuedOperation	"Snapshot modify task queued"
+//	@Failure		400	"Neither new_name nor description supplied"
+//	@Failure		404	"Machine not found"
+//	@Router			/machines/{machineName}/snapshots/{snapshotName} [put]
 func (s *Server) handleModifySnapshot(w http.ResponseWriter, r *http.Request) {
 	machine := s.findMachine(w, r)
 	if machine == nil {
@@ -983,6 +1163,16 @@ func (s *Server) handleModifySnapshot(w http.ResponseWriter, r *http.Request) {
 // handleGuestProperties serves the machine's full guest-property set
 // (VBoxManage guestproperty enumerate) — the post-boot view: guest-additions
 // IPs, OS info, and this agent's cloud-init keys. Read-only, synchronous.
+//
+//	@Summary		Enumerate guest properties
+//	@Description	Minimum role: viewer. Synchronous VBoxManage guestproperty enumerate — the post-boot view: guest-additions data (/VirtualBox/GuestInfo/Net/* carries the guest's live IPs), OS info, and this agent's cloud-init keys.
+//	@Tags			Machine Management
+//	@Produce		json
+//	@Param			machineName	path	string	true	"Machine name"
+//	@Success		200	{object}	map[string]interface{}	"Guest properties"
+//	@Failure		404	"Machine not found, or no VM exists behind it yet"
+//	@Failure		503	"VirtualBox is not installed"
+//	@Router			/machines/{machineName}/guest-properties [get]
 func (s *Server) handleGuestProperties(w http.ResponseWriter, r *http.Request) {
 	machine := s.findMachine(w, r)
 	if machine == nil {
@@ -1010,8 +1200,26 @@ func (s *Server) handleGuestProperties(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// clearPendingChangesResponse is DELETE /machines/{machineName}/pending-changes'
+// answer: the top-level keys that were pending, now cleared.
+type clearPendingChangesResponse struct {
+	Success     bool     `json:"success"`
+	MachineName string   `json:"machine_name"`
+	ClearedKeys []string `json:"cleared_keys"`
+	Message     string   `json:"message"`
+}
+
 // handleClearPendingChanges cancels the machine's accrued pending changes
 // (the accrue-changes contract's cancel path — v1 clears the whole set).
+//
+//	@Summary		Cancel accrued pending changes
+//	@Description	Minimum role: operator. Clears the machine's WHOLE pending set (the accrue-changes contract's cancel path — there is no per-key cancel; re-PUT the old value instead). Idempotent: clearing an empty set succeeds with an empty cleared_keys.
+//	@Tags			Machine Management
+//	@Produce		json
+//	@Param			machineName	path	string	true	"Machine name"
+//	@Success		200	{object}	clearPendingChangesResponse	"Pending changes cleared"
+//	@Failure		404	"Machine not found"
+//	@Router			/machines/{machineName}/pending-changes [delete]
 func (s *Server) handleClearPendingChanges(w http.ResponseWriter, r *http.Request) {
 	machine := s.findMachine(w, r)
 	if machine == nil {
@@ -1030,17 +1238,27 @@ func (s *Server) handleClearPendingChanges(w http.ResponseWriter, r *http.Reques
 	}
 	slog.Info("pending changes cleared", "machine", machine.Name,
 		"keys", len(keys), "by", auth.FromContext(r.Context()).Name)
-	writeJSON(w, map[string]any{
-		"success":      true,
-		"machine_name": machine.Name,
-		"cleared_keys": keys,
-		"message":      "Pending changes cleared",
+	writeJSON(w, clearPendingChangesResponse{
+		Success:     true,
+		MachineName: machine.Name,
+		ClearedKeys: keys,
+		Message:     "Pending changes cleared",
 	})
 }
 
 // handleApplyPendingChanges applies the accrued pending changes NOW, without
 // a power transition — the stopped-with-pending case (machine shut down from
 // inside the guest or the GUI, user wants the changes in without booting).
+//
+//	@Summary		Apply accrued pending changes now
+//	@Description	Minimum role: operator. Queues the machine_modify apply immediately, WITHOUT a power transition — for a machine that accrued changes while running and then got shut down outside the agent (inside the guest, or the VirtualBox GUI). The machine must be powered off; anything else answers 400 (the changes apply automatically at the next agent-driven power cycle anyway). Success clears the pending set.
+//	@Tags			Machine Management
+//	@Produce		json
+//	@Param			machineName	path	string	true	"Machine name"
+//	@Success		200	{object}	queuedOperation	"Apply task queued"
+//	@Failure		400	"No pending changes, or machine is not powered off"
+//	@Failure		404	"Machine not found"
+//	@Router			/machines/{machineName}/pending-changes/apply [post]
 func (s *Server) handleApplyPendingChanges(w http.ResponseWriter, r *http.Request) {
 	machine := s.findMachine(w, r)
 	if machine == nil {
@@ -1069,6 +1287,17 @@ func (s *Server) handleApplyPendingChanges(w http.ResponseWriter, r *http.Reques
 
 // handleDeleteMachine: running machines need force=true, which chains a
 // CRITICAL stop before the CRITICAL delete.
+//
+//	@Summary		Delete a machine
+//	@Description	Minimum role: operator. Running machines need force=true, which chains a CRITICAL stop before the CRITICAL delete. The machine is powered off if still running, unregistered from VirtualBox — with media deletion when cleanup_disks (default true) — its working directory removed (only when it sits under the machines root), its registry row removed, and its leftover pending tasks cancelled. SAFETY — the PROVENANCE STAMP rule (typed disk spec, converged sync 2026-07-17; it replaced the workdir-prefix heuristic): before the unregister, every attached medium is checked for the agent's stamp (the hyperweaver:source medium property, .hw-source sidecar fallback — written when the agent CREATED the medium: template clones, blank VDIs). Stamped = ours, cleanup_disks destroys it; UNSTAMPED = foreign (image attaches, external ISOs, pre-stamp media) — detached and preserved with a narrated skip, wherever it lives. One honest caveat, narrated in the task output: cleanup_disks also removes the working directory, so a foreign medium whose FILE sits inside it still goes with the directory. cleanup_disks=false unregisters only — every medium file and the working directory stay on disk. GET /media lists every registered medium with its stamp.
+//	@Tags			Machine Management
+//	@Produce		json
+//	@Param			machineName	path	string	true	"Machine name"
+//	@Param			cleanup_disks	query	boolean	false	"false preserves every medium file and the working directory (the base's keep-datasets default, as an explicit flag)"
+//	@Success		200	{object}	map[string]interface{}	"Delete tasks queued"
+//	@Failure		400	"Machine is running and force is not set"
+//	@Failure		404	"Machine not found"
+//	@Router			/machines/{machineName} [delete]
 func (s *Server) handleDeleteMachine(w http.ResponseWriter, r *http.Request) {
 	machine := s.findMachine(w, r)
 	if machine == nil {

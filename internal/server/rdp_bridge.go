@@ -516,6 +516,16 @@ func (s *Server) handleRDPBridge(w http.ResponseWriter, r *http.Request) {
 // kept as the explicit prep path. Method stays Negotiate so mstsc and other
 // native clients keep connecting however they like; the bridge always asks
 // for TLS and gets it.
+//
+//	@Summary		Set up VRDE TLS (Enhanced RDP Security)
+//	@Description	Minimum role: operator. Explicit VRDE TLS prep — NEAR-OBSOLETE since machine creation mints the TLS material from birth and the rdp-bridge SELF-HEALS unconfigured machines live at first connect (Mark's zero-click ruling 2026-07-11); kept as the manual prep path. Mints the machine's VRDE certificate signed by the AGENT CA (loopback SANs; files under <config dir>/ssl/vrde/<machine>/ — reused, never regenerated) and applies Security/Method=Negotiate + the certificate/key/CA paths. RUNNING machines: applied LIVE via controlvm vrdeproperty (status applied_live, requires_restart false — the VRDP server reads Security/* per connection; the VRDE listener restarts, dropping active RDP sessions, VM untouched), with the modifyvm-bound console extras (multi-con, reuse-con, usbtablet, usb keyboard, xHCI, clipboard) accrued for the next power cycle (pending_changes in the answer). POWERED-OFF machines: everything as one queued machine_modify. Negotiate keeps native clients (mstsc) connecting however they like; the bridge always asks for TLS and gets it.
+//	@Tags			Console
+//	@Produce		json
+//	@Param			machineName	path	string	true	"Machine name"
+//	@Success		200	{object}	map[string]interface{}	"TLS applied live (running), setup queued (powered off), or accrued (live apply failed)"
+//	@Failure		404	"Machine not found, or no VM exists behind it yet"
+//	@Failure		503	"VirtualBox is not installed"
+//	@Router			/machines/{machineName}/vrde-tls [post]
 func (s *Server) handleVRDETLSSetup(w http.ResponseWriter, r *http.Request) {
 	machine := s.findMachine(w, r)
 	if machine == nil {
