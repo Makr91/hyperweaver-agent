@@ -1,14 +1,15 @@
-// Package apidocs serves the interactive Agent API documentation: the
-// hand-maintained OpenAPI fragment (openapi.json — info/tags/components/
-// security and every not-yet-migrated path) merged with the swag-generated
-// document (gen/ — swag v2 annotations above handlers, regenerated at build
-// time via go:generate), rendered by a vendored Swagger UI at /api-docs — the
-// same page (URL shape, dark theme, public spec route) the Node
-// zoneweaver-agent serves. The spec's info.version is the frozen Agent API
-// contract line (architecture D1); info.x-app-version is stamped with the
-// running build at serve time. The merged document stays OpenAPI 3.0: 3.1-only
-// constructs in the generated half are rejected loudly and the fragment serves
-// alone rather than serving a dirty document.
+// Package apidocs serves the interactive Agent API documentation, assembled
+// ENTIRELY from code: the swag-generated document (gen/ — swag v2
+// annotations above handlers and struct fields, regenerated at build time
+// via go:generate) supplies info/tags/externalDocs/paths/schemas;
+// securitySchemes, the global security requirement, and the public-path list
+// live in this package's code — rendered by a vendored Swagger UI at
+// /api-docs, the same page (URL shape, dark theme, public spec route) the
+// Node zoneweaver-agent serves. The spec's info.version is the frozen Agent
+// API contract line (architecture D1); info.x-app-version is stamped with
+// the running build at serve time. The served document stays OpenAPI 3.0:
+// 3.1-only constructs in the generated half are rejected loudly and the doc
+// degrades to its base rather than serving a dirty document.
 package apidocs
 
 //go:generate swag init --v3.1 --dir ../../ --generalInfo main.go --output gen --outputTypes json --parseDependency --parseInternal
@@ -17,7 +18,6 @@ import (
 	"embed"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io/fs"
 	"log/slog"
 	"net/http"
@@ -25,9 +25,6 @@ import (
 
 	"github.com/Makr91/hyperweaver-agent/internal/version"
 )
-
-//go:embed openapi.json
-var specJSON []byte
 
 //go:embed gen
 var genFS embed.FS
@@ -44,11 +41,9 @@ const vendoredMinBytes = 10_000
 // to render this agent's API in aggregated mode) and the Swagger UI page at
 // /api-docs/.
 func Mount(mux *http.ServeMux) error {
-	var spec map[string]any
-	if err := json.Unmarshal(specJSON, &spec); err != nil {
-		return fmt.Errorf("parse embedded openapi.json: %w", err)
-	}
+	spec := map[string]any{"openapi": "3.0.0"}
 	mergeGenerated(spec)
+	injectSecurity(spec)
 	stampPublicPaths(spec)
 
 	sub, err := fs.Sub(assets, "assets")
@@ -102,11 +97,12 @@ func mergeGenerated(spec map[string]any) {
 	}
 }
 
-// foldGenerated adopts the generated document's paths and component schemas
-// into the fragment. THE FRAGMENT WINS every collision (a shadowed generated
-// path means its fragment copy was not deleted yet — the migration switch is
-// exactly that deletion), and the fragment alone owns info/tags/security/
-// servers. Validation runs before any mutation.
+// foldGenerated adopts the generated document's info/tags/externalDocs,
+// paths, and component schemas into the fragment. THE FRAGMENT WINS every
+// path/schema collision (a shadowed generated key means its fragment copy was
+// not deleted yet — the migration switch is exactly that deletion); security
+// and the public-path list are injected from this package's code. Validation
+// runs before any mutation.
 func foldGenerated(spec, gen map[string]any) error {
 	if _, ok := gen["swagger"]; ok {
 		return errors.New("generated document is Swagger 2.0 — regenerate with swag v2 and --v3.1")
@@ -119,10 +115,16 @@ func foldGenerated(spec, gen map[string]any) error {
 	if err := rejectOAS31(genSchemas, false); err != nil {
 		return err
 	}
+	for _, key := range []string{"info", "tags", "externalDocs"} {
+		if value, ok := gen[key]; ok {
+			spec[key] = value
+		}
+	}
 
 	specPaths, ok := spec["paths"].(map[string]any)
 	if !ok {
-		return errors.New("fragment has no paths object")
+		specPaths = map[string]any{}
+		spec["paths"] = specPaths
 	}
 	for path, item := range genPaths {
 		if _, exists := specPaths[path]; exists {
@@ -135,7 +137,13 @@ func foldGenerated(spec, gen map[string]any) error {
 	if len(genSchemas) > 0 {
 		specSchemas := schemaMap(spec)
 		if specSchemas == nil {
-			return errors.New("fragment has no components.schemas object")
+			components, _ := spec["components"].(map[string]any)
+			if components == nil {
+				components = map[string]any{}
+				spec["components"] = components
+			}
+			specSchemas = map[string]any{}
+			components["schemas"] = specSchemas
 		}
 		for name, schema := range genSchemas {
 			if _, exists := specSchemas[name]; exists {
@@ -154,27 +162,67 @@ func schemaMap(doc map[string]any) map[string]any {
 	return schemas
 }
 
-// stampPublicPaths applies the fragment's x-public-paths list: every listed
-// path's operations get an EMPTY security array (public — overriding the
-// document's global security). swag annotations cannot express "no security"
-// (omitting @Security inherits the global schemes), so the fragment names the
-// public surface and the merge stamps it — idempotent over fragment paths
-// that already carry it. The extension key never reaches the served document.
+// publicPaths is the served document's public surface: every listed path's
+// operations get an EMPTY security array (public — overriding the document's
+// global security). swag annotations cannot express "no security" (omitting
+// @Security inherits the global schemes), so this list names the public
+// surface and the merge stamps it.
+var publicPaths = []string{
+	"/status",
+	"/api/status",
+	"/api/config/ticket",
+	"/api-keys/bootstrap",
+	"/auth/tray-claim",
+	"/protocol/open",
+	"/tasks/{taskId}/stream",
+	"/term/{sessionId}",
+	"/ssh/{sessionId}",
+	"/machines/{machineName}/vnc/websockify",
+	"/machines/{machineName}/rdp-bridge",
+}
+
+// stampPublicPaths applies publicPaths to the merged document.
 func stampPublicPaths(spec map[string]any) {
-	list, _ := spec["x-public-paths"].([]any)
-	delete(spec, "x-public-paths")
 	paths, _ := spec["paths"].(map[string]any)
-	if len(list) == 0 || paths == nil {
+	if paths == nil {
 		return
 	}
-	for _, entry := range list {
-		path, _ := entry.(string)
+	for _, path := range publicPaths {
 		item, _ := paths[path].(map[string]any)
 		for _, operation := range item {
 			if op, ok := operation.(map[string]any); ok {
 				op["security"] = []any{}
 			}
 		}
+	}
+}
+
+// injectSecurity sets the document's security schemes and global security
+// requirement — code-owned: swag's general-info annotations cannot express
+// the http-bearer scheme this contract publishes.
+func injectSecurity(spec map[string]any) {
+	components, _ := spec["components"].(map[string]any)
+	if components == nil {
+		components = map[string]any{}
+		spec["components"] = components
+	}
+	components["securitySchemes"] = map[string]any{
+		"ApiKeyAuth": map[string]any{
+			"type":         "http",
+			"scheme":       "bearer",
+			"bearerFormat": "API Key",
+			"description":  "API key in Bearer format: `Authorization: Bearer hw_your_api_key_here`",
+		},
+		"XApiKeyAuth": map[string]any{
+			"type":        "apiKey",
+			"in":          "header",
+			"name":        "X-API-Key",
+			"description": "API key in the X-API-Key header (equivalent to the Bearer form)",
+		},
+	}
+	spec["security"] = []any{
+		map[string]any{"ApiKeyAuth": []any{}},
+		map[string]any{"XApiKeyAuth": []any{}},
 	}
 }
 

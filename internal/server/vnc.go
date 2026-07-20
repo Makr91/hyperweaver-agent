@@ -76,6 +76,14 @@ func vrdePort(info *vbox.Info) (enabled bool, port int) {
 	return true, 0
 }
 
+// videoDimensions is the guest display's parsed mode (the structured-JSON
+// convergence's replacement for the packed WxHxD string).
+type videoDimensions struct {
+	Width  int `json:"width"`
+	Height int `json:"height"`
+	Depth  int `json:"depth"`
+}
+
 // vncStateResponse is GET /machines/{name}/vnc's answer — the machine's live
 // VRDE console state the UI reads before connecting.
 type vncStateResponse struct {
@@ -85,18 +93,18 @@ type vncStateResponse struct {
 	VNCCapable  bool   `json:"vnc_capable"`
 	Running     bool   `json:"running"`
 	// Console-details facts (the UI AI's third ask, 2026-07-10): the guest
-	// display's WxHxD (empty when unknown) and the Guest Additions run level
-	// (0 none, 1 system, 2 userland, 3 desktop).
-	VideoMode         string `json:"video_mode"`
-	AdditionsRunLevel int    `json:"additions_run_level"`
-	WebSocketURL      string `json:"websocket_url"`
+	// display's {width, height, depth} (null when unknown) and the Guest
+	// Additions run level (0 none, 1 system, 2 userland, 3 desktop).
+	Video             *videoDimensions `json:"video"`
+	AdditionsRunLevel int              `json:"additions_run_level"`
+	WebSocketURL      string           `json:"websocket_url"`
 }
 
 // handleVncInfo serves GET /machines/{name}/vnc: the live console state
 // (VRDE on/off, port, whether the host can actually speak VNC on it).
 //
 //	@Summary		VNC console state
-//	@Description	Minimum role: viewer. The machine's live VRDE console state — everything the UI needs before connecting: whether VRDE is on and its port, whether the host can actually speak VNC on it (vnc_capable: a usable VBoxVNC extpack module; without it the VRDE port speaks RDP, which noVNC cannot), the websockify URL, plus the console-details facts (the UI AI's third ask, 2026-07-10): video_mode (the guest display's WxHxD, e.g. 1024x768x32; empty when unknown) and additions_run_level (0 = no Guest Additions running, 1 = system, 2 = userland, 3 = desktop).
+//	@Description	Minimum role: viewer. The machine's live VRDE console state — everything the UI needs before connecting: whether VRDE is on and its port, whether the host can actually speak VNC on it (vnc_capable: a usable VBoxVNC extpack module; without it the VRDE port speaks RDP, which noVNC cannot), the websockify URL, plus the console-details facts (the UI AI's third ask, 2026-07-10): video ({width, height, depth} — the guest display's mode, structured per the cross-agent structured-JSON convergence; null when unknown) and additions_run_level (0 = no Guest Additions running, 1 = system, 2 = userland, 3 = desktop).
 //	@Tags			Console
 //	@Produce		json
 //	@Param			machineName	path	string	true	"Machine name"
@@ -132,24 +140,34 @@ func (s *Server) handleVncInfo(w http.ResponseWriter, r *http.Request) {
 		VNCCapable:  vncConsoleAvailable(r.Context()),
 		Running:     machines.MapVBoxState(info.State) == machines.StatusRunning,
 		// Console-details facts (the UI AI's third ask, 2026-07-10).
-		VideoMode:         videoMode(info),
+		Video:             videoDims(info),
 		AdditionsRunLevel: additionsRunLevel(info),
 		WebSocketURL:      "/machines/" + machine.Name + "/vnc/websockify",
 	})
 }
 
-// videoMode renders the machinereadable VideoMode value ("1024,768,32"@0,0 1
-// — width,height,depth plus origin/monitor) as the familiar WxHxD string
-// ("" when unknown).
-func videoMode(info *vbox.Info) string {
+// videoDims parses the machinereadable VideoMode value ("1024,768,32"@0,0 1
+// — width,height,depth plus origin/monitor) into structured dimensions (nil
+// when unknown or unparseable).
+func videoDims(info *vbox.Info) *videoDimensions {
 	raw, ok := info.Raw["VideoMode"]
 	if !ok {
-		return ""
+		return nil
 	}
 	if at := strings.IndexByte(raw, '@'); at >= 0 {
 		raw = raw[:at]
 	}
-	return strings.ReplaceAll(strings.Trim(raw, `"`), ",", "x")
+	parts := strings.Split(strings.Trim(raw, `"`), ",")
+	if len(parts) != 3 {
+		return nil
+	}
+	width, werr := strconv.Atoi(strings.TrimSpace(parts[0]))
+	height, herr := strconv.Atoi(strings.TrimSpace(parts[1]))
+	depth, derr := strconv.Atoi(strings.TrimSpace(parts[2]))
+	if werr != nil || herr != nil || derr != nil {
+		return nil
+	}
+	return &videoDimensions{Width: width, Height: height, Depth: depth}
 }
 
 // additionsRunLevel reads the Guest Additions run level (0 = none/not

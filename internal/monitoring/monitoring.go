@@ -42,8 +42,9 @@ type CoreUsage struct {
 	IdlePct        float64 `json:"idle_pct"`
 }
 
-// CPUSample is one CPU telemetry observation (the CPUStats schema's
-// platform-feasible subset; illumos-only counters stay zero).
+// CPUSample is one CPU telemetry observation (the shared CPUStats shape's
+// platform-feasible subset — illumos-only counters are absent). Utilization
+// percentages are deltas against the previous observation.
 type CPUSample struct {
 	Host              string  `json:"host"`
 	CPUCount          int     `json:"cpu_count"`
@@ -51,21 +52,22 @@ type CPUSample struct {
 	UserPct           float64 `json:"user_pct"`
 	SystemPct         float64 `json:"system_pct"`
 	IdlePct           float64 `json:"idle_pct"`
-	LoadAvg1Min       float64 `json:"load_avg_1min"`
-	LoadAvg5Min       float64 `json:"load_avg_5min"`
-	LoadAvg15Min      float64 `json:"load_avg_15min"`
-	ProcessesRunning  int     `json:"processes_running"`
-	ProcessesBlocked  int     `json:"processes_blocked"`
-	// IODelayPct is the converged cross-agent IO-delay series (sync
-	// 2026-07-19): the window's CPU-iowait share on Linux; absent (nil) where
-	// the kernel accounts no iowait — never a faked zero.
-	IODelayPct    *float64    `json:"io_delay_pct,omitempty"`
+	// Zeros on Windows — the platform has no load averages
+	LoadAvg1Min  float64 `json:"load_avg_1min"`
+	LoadAvg5Min  float64 `json:"load_avg_5min"`
+	LoadAvg15Min float64 `json:"load_avg_15min"`
+	// Run-queue count where the platform reports one (Linux); zero elsewhere
+	ProcessesRunning int `json:"processes_running"`
+	ProcessesBlocked int `json:"processes_blocked"`
+	// The converged cross-agent IO-delay series (sync 2026-07-19, Proxmox's IO delay): this agent derives it from the window's CPU-iowait share — PRESENT on Linux hosts only, ABSENT (omitted, never zero) on Windows/macOS whose kernels account no iowait. zoneweaver serves the same field from its own illumos-truthful derivation (max per-device %w).
+	IODelayPct *float64 `json:"io_delay_pct,omitempty"`
+	// Present only when include_cores=true
 	PerCoreParsed []CoreUsage `json:"per_core_parsed,omitempty"`
 	ScanTimestamp time.Time   `json:"scan_timestamp"`
 }
 
-// MemorySample is one memory telemetry observation (the MemoryStats schema's
-// platform-feasible subset; ZFS ARC fields have no analog and stay absent).
+// MemorySample is one memory + swap telemetry observation (the shared
+// MemoryStats shape's platform-feasible subset — ZFS ARC fields are absent).
 type MemorySample struct {
 	Host                 string    `json:"host"`
 	TotalMemoryBytes     uint64    `json:"total_memory_bytes"`
@@ -80,9 +82,9 @@ type MemorySample struct {
 	ScanTimestamp        time.Time `json:"scan_timestamp"`
 }
 
-// NetworkSample is one interface's telemetry observation (the NetworkUsage
-// schema's platform-feasible subset): cumulative counters plus rates
-// computed from the previous observation.
+// NetworkSample is one interface's telemetry observation (the shared
+// NetworkUsage shape's platform-feasible subset): cumulative OS counters plus
+// rates computed from the previous observation.
 type NetworkSample struct {
 	Host             string    `json:"host"`
 	Link             string    `json:"link"`

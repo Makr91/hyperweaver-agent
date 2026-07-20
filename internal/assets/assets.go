@@ -192,16 +192,21 @@ func newLocationID() (string, error) {
 	return s[0:8] + "-" + s[8:12] + "-" + s[12:16] + "-" + s[16:20] + "-" + s[20:32], nil
 }
 
-// Artifact is one registry row. JSON names follow zoneweaver's Artifact
-// schema (checksum/file_type/discovered_at) with the SHI extras
-// (role/expected_sha256/version/file_exists) alongside.
+// Artifact is one artifact registry row (zoneweaver's Artifact shape with
+// the SHI extras alongside). checksum is what the file actually hashed to
+// when last verified; expected_sha256 is the recorded expectation (bundled
+// registry seed, caller-supplied, or the HCL catalog). file_exists:false rows
+// are expectations awaiting their binary (SHI's model).
 type Artifact struct {
-	ID             int64      `json:"id"`
-	LocationID     string     `json:"storage_location_id"`
-	Role           string     `json:"role,omitempty"`
-	Kind           string     `json:"file_type"`
-	Filename       string     `json:"filename"`
-	Path           string     `json:"path"`
+	ID         int64  `json:"id"`
+	LocationID string `json:"storage_location_id"`
+	// Installer-family rows only — the role directory
+	Role     string `json:"role,omitempty"`
+	Kind     string `json:"file_type"`
+	Filename string `json:"filename"`
+	// File location (empty on expectation-only rows)
+	Path string `json:"path"`
+	// The file's actual SHA-256
 	SHA256         string     `json:"checksum"`
 	ExpectedSHA256 string     `json:"expected_sha256,omitempty"`
 	Size           int64      `json:"size"`
@@ -252,10 +257,11 @@ func (a *Artifact) MimeType() string {
 	return "application/octet-stream"
 }
 
-// Location is one storage location (zoneweaver's artifact_storage_locations
-// row). source records who owns the entry: builtin (seeded under the
-// artifact root, never removed), config (artifact_storage.paths[] — the API
-// creates these too, persisting them back into config.yaml).
+// Location is one typed storage location (zoneweaver's
+// artifact_storage_locations shape). source builtin = the five
+// always-present locations under artifact_storage.dir (never deletable —
+// disable instead); source config = artifact_storage.paths[] entries, which
+// the storage-path API also creates and persists back into config.yaml.
 type Location struct {
 	ID         string     `json:"id"`
 	Name       string     `json:"name"`
@@ -267,10 +273,11 @@ type Location struct {
 	FileCount  int64      `json:"file_count"`
 	TotalSize  int64      `json:"total_size"`
 	LastScanAt *time.Time `json:"last_scan_at"`
-	ScanErrors int        `json:"scan_errors"`
-	LastError  string     `json:"last_error_message,omitempty"`
-	CreatedAt  time.Time  `json:"created_at"`
-	UpdatedAt  time.Time  `json:"updated_at"`
+	// Consecutive scan failures
+	ScanErrors int       `json:"scan_errors"`
+	LastError  string    `json:"last_error_message,omitempty"`
+	CreatedAt  time.Time `json:"created_at"`
+	UpdatedAt  time.Time `json:"updated_at"`
 }
 
 // Store persists locations and artifacts in agent.sqlite; root is the

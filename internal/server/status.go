@@ -19,8 +19,9 @@ import (
 // Hyperweaver dual-mode contract (Agent API v1). Field names and semantics
 // mirror the Zoneweaver Agent's StatusController exactly.
 type statusPayload struct {
-	Role               string   `json:"role"`
-	Agent              string   `json:"agent"`
+	Role  string `json:"role"`
+	Agent string `json:"agent"`
+	// virtualbox always; utm joins on macOS agents where utmctl is present and UTM meets the 4.6.5 floor (cached capability probe)
 	Hypervisors        []string `json:"hypervisors"`
 	Platform           string   `json:"platform"`
 	Arch               string   `json:"arch"`
@@ -28,13 +29,14 @@ type statusPayload struct {
 	Hostname           string   `json:"hostname"`
 	Auth               []string `json:"auth"`
 	BootstrapAvailable bool     `json:"bootstrapAvailable"`
-	Console            []string `json:"console"`
-	Features           []string `json:"features"`
-	// SHIMode advertises the "I Can't Believe it's not Super.Human.Installer"
-	// presentation toggle (ui.shi_mode) — Direct-mode UI theming; absent/false
-	// on agents without the concept.
-	SHIMode bool  `json:"shi_mode"`
-	Uptime  int64 `json:"uptime"`
+	// EMERGENCY consoles only (Mark's placement ruling 2026-07-12 — hypervisor-level surfaces that work with zero guest cooperation): rdp always (base VRDP ships in VirtualBox 7.2 — the IronRDP web client rides the /machines/{name}/rdp-bridge RDCleanPath WebSocket); vnc only when a USABLE VBoxVNC VRDE module is installed (the websockify bridge needs RFB on the VRDE port). The machine SSH terminal is guest-network access and advertises as features 'ssh' instead.
+	Console []string `json:"console"`
+	// Capability tokens (platform support ∧ config state): host-power is absent when host_power.enabled is false, artifacts when artifact_storage.enabled is false, file-browser when file_browser.enabled is false, guest-agent when guest_agent.enabled is false. provisioner-registry names the SHI-format package registry surface and secrets the global secrets store — finer than the cross-agent provisioning/machine-create tokens, which are true on every provisioning-capable agent regardless of wire shape (Mark's gating ruling, 2026-07-06). machine-modify names PUT's infrastructure-modify surface (the base's zone_modify contract). ssh names the machine SSH-terminal family (POST /machines/{name}/ssh/start + the /ssh/{id} WebSocket) — a FEATURE, not a console, per Mark's placement ruling 2026-07-12: console[] carries emergency consoles only. hosts-file names the /system/hosts editor surface (the converged wire, minted 2026-07-17) — a platform token, always advertised on both agents. dns names the /system/dns surface beside it (minted 2026-07-17, same converged wire — per-OS mechanics, wire identical; the UI's Network-tab DNS section gates on it). hostname names the /network/hostname surface (minted 2026-07-17, the converged wire): GET is the live view, PUT queues the async set_hostname task. ip-addresses names the /network/addresses surface (minted 2026-07-17; mutations shipped 2026-07-19 per Mark's build order): the live listing plus the zoneweaver-converged task mutations — create (static everywhere, dhcp Windows-only, addrconf refused), delete (?address= disambiguator), and the INTERFACE-level enable/disable toggles. network-spaces names the /network/spaces surface (minted 2026-07-19): enumerate + manage VirtualBox's network spaces (host-only interfaces with DHCP, NAT networks with port forwards, read-only internal networks) — the UI topology mapper gates its network-space fetch on it.
+	Features []string `json:"features"`
+	// "I Can't Believe it's not Super.Human.Installer" presentation toggle (ui.shi_mode): the SPA renders the opinionated SHI-style theme/flow in Direct mode when true. Absent/false on agents without the concept.
+	SHIMode bool `json:"shi_mode"`
+	// Seconds since the agent started
+	Uptime int64 `json:"uptime"`
 }
 
 // platformFeatures are the capability tokens this agent always advertises

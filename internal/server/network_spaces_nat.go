@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/Makr91/hyperweaver-agent/internal/auth"
@@ -21,11 +22,19 @@ type natForwardBody struct {
 	IPv6 bool `json:"ipv6"`
 }
 
-// natLoopbackBody is one loopback mapping on the natnetwork wire — the rule
-// string verbatim (the listing's own form).
+// natLoopbackBody is one loopback mapping on the natnetwork wire — structured
+// (the cross-agent structured-JSON convergence): the host loopback address
+// and its offset into the NAT network's range; the agent renders VirtualBox's
+// own "address=offset" rule form itself.
 type natLoopbackBody struct {
-	Rule string `json:"rule"`
-	IPv6 bool   `json:"ipv6"`
+	Address string `json:"address"`
+	Offset  int    `json:"offset"`
+	IPv6    bool   `json:"ipv6"`
+}
+
+// rule renders the VBoxManage loopback rule vocabulary.
+func (b *natLoopbackBody) rule() string {
+	return b.Address + "=" + strconv.Itoa(b.Offset)
 }
 
 // natForwardRemoveBody names one port-forward rule to drop on the natnetwork
@@ -137,7 +146,7 @@ type natNetworkModifyRequest struct {
 // first, so a rule can be replaced in one call).
 //
 //	@Summary		Modify a NAT network
-//	@Description	Minimum role: operator. Converges the sent knobs (cidr, enabled, dhcp, ipv6 — natnetwork modify) and applies rule changes, removes before adds so one call replaces a rule: port forwards (add_port_forwards[] {name, protocol tcp|udp (default tcp), host_ip?, host_port, guest_ip, guest_port, ipv6? (rule family, default IPv4)} / remove_port_forwards[] {name, ipv6?}) and loopback mappings (add_loopbacks[]/remove_loopbacks[] {rule, ipv6?} — the rule string VERBATIM in VirtualBox's own form, e.g. 127.0.0.1=2; the listing's loopback_mappings shows the same strings back). At least one change is required.
+//	@Description	Minimum role: operator. Converges the sent knobs (cidr, enabled, dhcp, ipv6 — natnetwork modify) and applies rule changes, removes before adds so one call replaces a rule: port forwards (add_port_forwards[] {name, protocol tcp|udp (default tcp), host_ip?, host_port, guest_ip, guest_port, ipv6? (rule family, default IPv4)} / remove_port_forwards[] {name, ipv6?}) and loopback mappings (add_loopbacks[]/remove_loopbacks[] {address, offset, ipv6?} — structured rows, the cross-agent structured-JSON convergence; the agent renders VirtualBox's own address=offset rule itself, and the listing's loopback_mappings answers the same structured shape back). At least one change is required.
 //	@Tags			Host Configuration
 //	@Accept			json
 //	@Produce		json
@@ -169,14 +178,14 @@ func (s *Server) handleModifyNATNetwork(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	for _, loopback := range body.AddLoopbacks {
-		if loopback.Rule == "" {
-			taskError(w, http.StatusBadRequest, "loopback entries need rule")
+		if loopback.Address == "" || loopback.Offset <= 0 {
+			taskError(w, http.StatusBadRequest, "loopback entries need address and offset")
 			return
 		}
 	}
 	for _, loopback := range body.RemoveLoopbacks {
-		if loopback.Rule == "" {
-			taskError(w, http.StatusBadRequest, "loopback entries need rule")
+		if loopback.Address == "" || loopback.Offset <= 0 {
+			taskError(w, http.StatusBadRequest, "loopback entries need address and offset")
 			return
 		}
 	}
@@ -231,18 +240,18 @@ func (s *Server) handleModifyNATNetwork(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 	for _, remove := range body.RemoveLoopbacks {
-		if err := vbox.RemoveNATNetworkLoopback(r.Context(), exe, name, remove.IPv6, remove.Rule); err != nil {
-			slog.Error("remove nat network loopback", "name", name, "rule", remove.Rule, "error", err)
+		if err := vbox.RemoveNATNetworkLoopback(r.Context(), exe, name, remove.IPv6, remove.rule()); err != nil {
+			slog.Error("remove nat network loopback", "name", name, "rule", remove.rule(), "error", err)
 			taskError(w, http.StatusInternalServerError,
-				"Failed to remove loopback "+remove.Rule+": "+err.Error())
+				"Failed to remove loopback "+remove.rule()+": "+err.Error())
 			return
 		}
 	}
 	for _, add := range body.AddLoopbacks {
-		if err := vbox.AddNATNetworkLoopback(r.Context(), exe, name, add.IPv6, add.Rule); err != nil {
-			slog.Error("add nat network loopback", "name", name, "rule", add.Rule, "error", err)
+		if err := vbox.AddNATNetworkLoopback(r.Context(), exe, name, add.IPv6, add.rule()); err != nil {
+			slog.Error("add nat network loopback", "name", name, "rule", add.rule(), "error", err)
 			taskError(w, http.StatusInternalServerError,
-				"Failed to add loopback "+add.Rule+": "+err.Error())
+				"Failed to add loopback "+add.rule()+": "+err.Error())
 			return
 		}
 	}

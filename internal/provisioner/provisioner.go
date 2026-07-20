@@ -65,35 +65,50 @@ func ValidName(s string) bool {
 	return namePattern.MatchString(s)
 }
 
-// Collection is one provisioner family on disk. Name is the directory name —
-// the stable identity URLs address; the manifest's own display fields ride in
-// Metadata verbatim.
+// Collection is one provisioner family on disk. name is the registry
+// directory name — the stable identity URLs address; the manifest's own
+// display fields ride in Metadata verbatim.
 type Collection struct {
-	Name        string         `json:"name"`
-	Description string         `json:"description"`
-	Valid       bool           `json:"valid"`
-	Metadata    map[string]any `json:"metadata"`
-	Versions    []*Version     `json:"versions"`
-	// Source is the family's git-import provenance (.source.json) — JSON
-	// null, never absent, for families without one (list AND detail expose
-	// it; the converged wire shape).
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	// false marks a family with no parseable versions (SHI's invalid placeholder) — still listed, still deletable
+	Valid bool `json:"valid"`
+	// provisioner-collection.yml, verbatim
+	Metadata map[string]any `json:"metadata"`
+	// Newest first
+	Versions []*Version `json:"versions"`
+	// Stored git provenance — recorded at git import, NEVER inside package files: {source_type: "git", url, branch?}. null for folder/archive imports and catalog installs (catalog families update through the catalog). Feeds POST /provisioning/provisioners/{name}/refresh-from-source.
 	Source *Source `json:"source"`
 }
 
-// Version is one package version. Metadata is the full provisioner.yml —
-// metadata.roles and configuration.basicFields/advancedFields drive the UI
-// forms exactly as in SHI's custom-provisioner stack. Dir is the version
-// directory name (the URL segment); Version is the manifest's version field,
-// falling back to Dir.
+// Version is one provisioner package version. metadata is the full
+// provisioner.yml — metadata.roles plus the Field DSL (metadata.configuration
+// = {groups, fields}, design §3.1: the closed 12-type set, ordered groups
+// with an advanced toggle, the closed show_if grammar, validate blocks) drive
+// the machine-create forms; metadata.presentation and metadata.forked_from
+// ride through verbatim. Imports LINT the DSL fail-closed (unknown type =
+// refusal listing every problem) and derive schema.json (JSON Schema 2020-12)
+// beside role-specs.yml. The VERSION-DETAIL read additionally carries
+// role_specs (Mark's argument-specs ruling 2026-07-12, shared wire with
+// zoneweaver): every shipped role's meta/argument_specs.yml folded into
+// role_specs.roles[<name>] = {collection, short_description, options} —
+// derived into a role-specs.yml cache beside provisioner.yml at import
+// (self-healing at read for hand-dropped packages; POST
+// /provisioning/provisioners/refresh-specs re-derives everything). The UI
+// builds its per-role knob FORMS from options; absent when the package ships
+// no specs.
 type Version struct {
-	Version     string         `json:"version"`
-	Dir         string         `json:"dir"`
-	Name        string         `json:"name"`
-	Description string         `json:"description"`
-	Root        string         `json:"root"`
-	Metadata    map[string]any `json:"metadata"`
-	// RoleSpecs is the derived per-role argument-spec cache — attached on
-	// the version-detail read only (GetVersion), never in listings.
+	// The manifest's version field (falls back to the directory name)
+	Version string `json:"version"`
+	// Version directory name — the URL segment
+	Dir         string `json:"dir"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	// Absolute path of the version directory on the agent host
+	Root string `json:"root"`
+	// provisioner.yml, verbatim
+	Metadata map[string]any `json:"metadata"`
+	// Version-detail read only: {roles: {<role>: {collection, short_description, options}}} — the cached argument specs; absent in listings and when the package ships none
 	RoleSpecs *RoleSpecs `json:"role_specs,omitempty"`
 }
 

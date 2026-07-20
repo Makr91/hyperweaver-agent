@@ -52,14 +52,20 @@ type DockerHub struct {
 	DockerHubToken string `yaml:"docker_hub_token" json:"docker_hub_token"`
 }
 
-// Document is the whole secrets file — SHI's six category names, verbatim.
+// Document is the whole secrets store — SHI's six category names, verbatim.
+// Every entry name must match [a-zA-Z0-9_-]+. SECRETS_* template-var
+// derivation: name→uppercase, hyphens→underscores; key categories become
+// SECRETS_<NAME>, custom_resource_url becomes SECRETS_<NAME>_URL
+// (+_USER/_PASS when useAuth), docker_hub becomes SECRETS_<NAME>_USER/_TOKEN,
+// ssh_keys becomes SECRETS_<NAME>_SSH.
 type Document struct {
-	HCLDownloadPortalAPIKeys []NamedKey          `yaml:"hcl_download_portal_api_keys" json:"hcl_download_portal_api_keys"`
-	GitAPIKeys               []NamedKey          `yaml:"git_api_keys"                 json:"git_api_keys"`
-	VagrantAtlasToken        []NamedKey          `yaml:"vagrant_atlas_token"          json:"vagrant_atlas_token"`
-	CustomResourceURL        []CustomResourceURL `yaml:"custom_resource_url"          json:"custom_resource_url"`
-	DockerHub                []DockerHub         `yaml:"docker_hub"                   json:"docker_hub"`
-	SSHKeys                  []NamedKey          `yaml:"ssh_keys"                     json:"ssh_keys"`
+	HCLDownloadPortalAPIKeys []NamedKey `yaml:"hcl_download_portal_api_keys" json:"hcl_download_portal_api_keys"`
+	// Also referenced by provisioner git imports via token_name
+	GitAPIKeys        []NamedKey          `yaml:"git_api_keys"        json:"git_api_keys"`
+	VagrantAtlasToken []NamedKey          `yaml:"vagrant_atlas_token" json:"vagrant_atlas_token"`
+	CustomResourceURL []CustomResourceURL `yaml:"custom_resource_url" json:"custom_resource_url"`
+	DockerHub         []DockerHub         `yaml:"docker_hub"          json:"docker_hub"`
+	SSHKeys           []NamedKey          `yaml:"ssh_keys"            json:"ssh_keys"`
 }
 
 // emptyDocument returns a Document whose slices are non-nil, so the API

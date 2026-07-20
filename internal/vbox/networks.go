@@ -47,6 +47,16 @@ type NATNetworkForward struct {
 	GuestPort int    `json:"guest_port"`
 }
 
+// NATNetworkLoopback is one parsed loopback mapping (the listing's verbatim
+// "address=offset" rule line, structured — the cross-agent structured-JSON
+// convergence): the host loopback address and its offset into the NAT
+// network's range.
+type NATNetworkLoopback struct {
+	Address string `json:"address"`
+	Offset  int    `json:"offset"`
+	IPv6    bool   `json:"ipv6"`
+}
+
 // NATNetwork is one `list natnetworks` entry.
 type NATNetwork struct {
 	Name             string
@@ -58,7 +68,7 @@ type NATNetwork struct {
 	IPv6Prefix       string
 	PortForwards4    []NATNetworkForward
 	PortForwards6    []NATNetworkForward
-	LoopbackMappings []string
+	LoopbackMappings []NATNetworkLoopback
 }
 
 // ListNATNetworks parses `VBoxManage list natnetworks` — Key: value blocks
@@ -92,7 +102,10 @@ func ListNATNetworks(ctx context.Context, vboxManage string) ([]NATNetwork, erro
 			section = "pf6"
 			continue
 		case strings.HasPrefix(lower, "loopback mappings"):
-			section = "loopback"
+			section = "loopback4"
+			if strings.Contains(lower, "ipv6") {
+				section = "loopback6"
+			}
 			continue
 		}
 		if section != "" && current != nil {
@@ -105,8 +118,10 @@ func ListNATNetworks(ctx context.Context, vboxManage string) ([]NATNetwork, erro
 				if fw, ok := parseNATForward(trimmed); ok {
 					current.PortForwards6 = append(current.PortForwards6, fw)
 				}
-			case "loopback":
-				current.LoopbackMappings = append(current.LoopbackMappings, trimmed)
+			case "loopback4", "loopback6":
+				if lb, ok := parseNATLoopback(trimmed, section == "loopback6"); ok {
+					current.LoopbackMappings = append(current.LoopbackMappings, lb)
+				}
 			}
 			continue
 		}
@@ -183,6 +198,23 @@ func parseNATForward(rule string) (NATNetworkForward, bool) {
 		HostPort:  hostPort,
 		GuestIP:   guestIP,
 		GuestPort: guestPort,
+	}, true
+}
+
+// parseNATLoopback reads one listed loopback line ("address=offset").
+func parseNATLoopback(rule string, ipv6 bool) (NATNetworkLoopback, bool) {
+	address, offsetText, ok := strings.Cut(rule, "=")
+	if !ok {
+		return NATNetworkLoopback{}, false
+	}
+	offset, err := strconv.Atoi(strings.TrimSpace(offsetText))
+	if err != nil {
+		return NATNetworkLoopback{}, false
+	}
+	return NATNetworkLoopback{
+		Address: strings.TrimSpace(address),
+		Offset:  offset,
+		IPv6:    ipv6,
 	}, true
 }
 

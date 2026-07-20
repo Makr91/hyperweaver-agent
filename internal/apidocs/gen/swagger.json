@@ -4,6 +4,7 @@
             "assets.Artifact": {
                 "properties": {
                     "checksum": {
+                        "description": "The file's actual SHA-256",
                         "type": "string"
                     },
                     "discovered_at": {
@@ -28,9 +29,11 @@
                         "type": "string"
                     },
                     "path": {
+                        "description": "File location (empty on expectation-only rows)",
                         "type": "string"
                     },
                     "role": {
+                        "description": "Installer-family rows only — the role directory",
                         "type": "string"
                     },
                     "size": {
@@ -98,6 +101,7 @@
                         "type": "string"
                     },
                     "scan_errors": {
+                        "description": "Consecutive scan failures",
                         "type": "integer"
                     },
                     "source": {
@@ -1113,12 +1117,15 @@
             "machines.Machine": {
                 "properties": {
                     "auto_discovered": {
+                        "description": "Imported by the reconciliation sweep rather than created through the agent",
                         "type": "boolean"
                     },
                     "backing": {
+                        "description": "Provenance metadata: vagrant means a vagrant project (home) owns this VM — used by provisioning operations. Lifecycle always drives VBoxManage directly.",
                         "type": "string"
                     },
                     "configuration": {
+                        "description": "Live machine configuration (VBoxManage showvminfo --machinereadable key/value map on this agent). RUNNING machines additionally carry guest_info — the discovery sweep's stored LIVE-IP observation {ips: [\"192.168.1.50\"], source: \"guest-agent\"|\"additions\"|\"\", agent_responding: bool, checked_at}: QGA channel first, Guest Additions properties as fallback, NEVER the provisioning-plan control IP. The UI gates direct RDP/SSH/connect buttons on a non-empty ips[] straight from this LIST data (never query per machine); non-running machines lose the section. Refreshed every machines.discovery_interval sweep; connect-time target resolution stays live.",
                         "items": {
                             "type": "integer"
                         },
@@ -1129,18 +1136,22 @@
                         "type": "string"
                     },
                     "home": {
+                        "description": "Vagrant project directory (vagrant-owned machines)",
                         "type": "string"
                     },
                     "host": {
+                        "description": "Hostname of the machine's host",
                         "type": "string"
                     },
                     "hypervisor": {
+                        "description": "The machine's hypervisor identity — lifecycle, modify, snapshots, and clone dispatch on it (backing stays provenance). utm machines exist on macOS agents only.",
                         "type": "string"
                     },
                     "id": {
                         "type": "integer"
                     },
                     "is_orphaned": {
+                        "description": "In the registry but no longer present in VirtualBox",
                         "type": "boolean"
                     },
                     "last_seen": {
@@ -1153,9 +1164,11 @@
                         "type": "string"
                     },
                     "server_id": {
+                        "description": "Numeric server identifier (assigned at creation; see /machines/ids)",
                         "type": "string"
                     },
                     "spec": {
+                        "description": "The creation document (machines this agent created; discovered VMs have none) — the user's intent, never overwritten by discovery. THE DOCUMENT SHAPE (the Hosts.yml-shaped MachineSpec, design §4), stored verbatim on the machine row. The provisioner reference is OPTIONAL — a machine is just a machine, provisioning is optional (the base's provisioner-free create). WITH a provisioner: machine_prepare renders the package's Jinja2 templates/Hosts.template.yml — at create and again before every provision — and the rendered hosts[0] drives everything: its settings/networks/disks build the VM natively (VBoxManage), and its folders/provisioning/vars/roles become the stored provisioner document the pipeline consumes. WITHOUT one: no prepare/render step exists, the spec's own settings/networks build the VM directly, finalize persists no provisioner, and a provisioner document can attach later via PUT /machines/{name} + POST /provision. Template context precedence (package-based creates): settings (also flattened UPPERCASE) → per-role \u003cROLE\u003e_INSTALLER/_INSTALLER_HASH/_INSTALLER_VERSION/_FIXPACK*/_HOTFIX* vars + boolean role flags (both casings) → the Field DSL's contribution (metadata.configuration {groups, fields} — defaults merge BEFORE conditional evaluation, answers apply by exact field name, hidden fields are ABSENT from the context) → SECRETS_* vars. Structured settings/networks/disks/roles ride alongside — disks joined the context 2026-07-17 (the converged ask, the networks model exactly): the request's disks section, structured and VERBATIM, inert until a template echoes it (the agent guarantees no keys; the Provisioner's next release adds the echo). Answers are validated authoritatively pre-render: a failing create answers 422 whose body IS the {FIELD: message} map (design §3.1, ruled 2026-07-16). KEY VOCABULARY — provisioner: OPTIONAL package reference; omit it entirely for a provisioner-less machine; when present, both name and version are required and must exist in the registry. hypervisor: OPTIONAL per-machine hypervisor selection (default virtualbox); utm requires a macOS agent host and a box template (settings.box — the .box carries a box.utm bundle imported whole); other boot types are not yet supported on utm. settings: Hosts.yml settings vocabulary. hostname and domain are REQUIRED (machine_domain optionally overrides the naming domain); with machines.prefix_machine_names server_id is REQUIRED too (numeric 1-8 digits, padded to 4 — never auto-assigned; GET /machines/ids/next prefills it). box/box_version/box_arch/box_url select the template (package defaults apply); vcpus/memory/os_type/firmware_type/consoleport/consolehost/setup_wait/vagrant_user* drive the build and the pipeline. boot_order: ordered list of floppy|dvd|disk|net|none → --boot1..4 (remaining slots cleared) — the ISO-first install story with disks.cdroms. firmware_type (BIOS|UEFI) is generic — both hypervisors consume it (Hosts.rb reads it for the virtualbox AND zone providers). THE COMMUNICATOR FAMILY (the winrm convergence, sync 2026-07-17): communicator selects the guest transport — ssh (default) or winrm (Windows guests); winrm_port (default 5985, 5986 when winrm_transport is ssl), winrm_transport (default negotiate), and winrm_ssl_peer_verification (default true) tune it. Each of these FOUR keys has a RULED vagrant_-prefixed alias (vagrant_communicator, vagrant_winrm_port, vagrant_winrm_transport, vagrant_winrm_ssl_peer_verification) — these four pairs ONLY, a ruled exception to the no-alias rule; the new spelling WINS when both are present and the shadowed key is narrated as a {step: 'communicator_keys_shadowed', keys: []} task_chain entry on the provision response. networks: Hosts.yml networks vocabulary; entry i rides adapter i+2 (adapter 1 is the reserved NAT transport). dns DECLARE-normalizes at ad-hoc create: wire strings become the document's map shape [{nameserver: ip}] (converged contract, sync 2026-07-18 — the networking role hard-consumes dns[0]['nameserver']; packaged renders already emit maps). disks: OPTIONAL disks section at create (omit entirely = the SPELLED default: boot type template when settings.box is present, else none — a DISKLESS stub; attach media later via modify). THE TYPED DISK SPEC (Mark's word, sync 2026-07-17 — the ZERO-inference model): boot.type is REQUIRED whenever boot is present and is the ONLY dispatcher — template (clone settings.box's image; size = the grow-to; takes no path) | image (attach the EXISTING file at path AS-IS — never created/deleted/resized; size/volume_name refused; force: true skips the task-time attached-elsewhere pre-check) | blank (fresh VDI; size REQUIRED; sparse?/volume_name? legal; takes no path) | none (diskless; no other keys). THE DIRECTORY ADDENDUM (converged, sync 2026-07-17 — the pool/dataset mirror for VBox): blank and template entries may additionally carry directory — the agent-host folder the CREATED disk file lands in; ABSENT = the machine folder (the spelled default). The folder must already exist and be absolute — the agent NEVER creates it (task-time refusal: `\u003cwhere\u003e directory \u003cpath\u003e is not an absolute existing directory on this host`); image entries refuse the key outright (`\u003cwhere\u003e type image does not take directory` — an image's own path already places it). Template clones name their file by volume_name (absent = \"boot\"), keeping the template's own extension. THE CLONE STRATEGY (frozen, sync 2026-07-19 — the converged cross-platform vocabulary): a template boot may carry clone_strategy — copy (DEFAULT everywhere, Mark's ruling: an independent full copy of the template image, exactly today's behavior) | clone (a differencing child off the template's shared multiattach clone base: the base materializes ONCE beside the template image as clone-base.vdi — a one-time full copy, promoted to multiattach — and every clone machine links from it, so creates are near-instant and siblings share the base's blocks; VirtualBox creates the child in the machine folder at the template's size, so clone takes NO size, volume_name, or directory — each is refused; the child is stamped template like any agent-created boot, and template delete gains a children gate). localize is zfs vocabulary (the cross-pool cure — no analog here, clonemedium already crosses drives) and is REFUSED, never warned; a clone_strategy on a non-template boot is refused too. additional_disks[]: type REQUIRED, image|blank only, same per-type rules — {type: \"blank\", size, volume_name?, sparse?, directory?, controller?, port?, device?} or {type: \"image\", path, force?, controller?, port?, device?} (refusal indexes are 1-based). Unknown keys in disk entries are never read for behavior and always preserved verbatim. Agent-created media (template clones, blank VDIs) are provenance-stamped at materialization (hyperweaver:source property / .hw-source sidecar — GET /media lists the stamps; delete destroys ONLY stamped media). THE DEVICE MODEL (VirtualBox's real storage surface): controllers[] declares the storage controllers ({name?, type: ide|sata|scsi|sas|nvme|virtio|usb|floppy, ports?, bootable?} — name defaults per type, e.g. \"NVMe Controller\"); every media entry may address one by `controller` name plus `port`/`device` (device matters on IDE — two devices per port). Omitting controllers[] creates ONE controller named \"SATA Controller\" of type sata — the original shape. boot lands on the FIRST controller port 0 unless it names its own controller/port/device. cdroms[]: [{path: agent-host ISO path | iso: a cached-ISO FILENAME resolved through the artifact registry (GET /artifacts/iso lists them; the file must exist in an enabled location) — EXACTLY one of the two, controller?, port?, device?}] — the attach-an-ISO-and-install-yourself flow. With a provisioner package the render's disks win. zones: DEAD ON THIS AGENT (Mark's ruling, sync 2026-07-19): zones is Solaris/bhyve configuration — zoneweaver's own section. This agent reads NOTHING from it; a document carrying one stores and survives verbatim, inert (foreign-hypervisor vocabulary, preserved like bhyve disk keys). The keys it used to drive have per-hypervisor homes now: diskif → disks.controllers[].type, bootrom → settings.firmware_type, netif → networks[].nic_type per entry (generic — Hosts.rb consumes those for both providers), and the rest under the vbox key: hostbridge → vbox.platform.chipset, acpi → vbox.platform.acpi, xhci → vbox.usb.xhci, vnc → vbox.vrde.enabled, autostart → vbox.autostart.enabled, guest_agent → vbox.guest_agent, post_provision_boot → vbox.post_provision_boot. cloud_init: OPTIONAL cloud-init section at create (enabled/dns_domain/password/resolvers/sshkey — set as guest properties under /Hyperweaver/CloudInit/). vbox: OPTIONAL vbox section at create — VirtualBox's own PER-HYPERVISOR key (Mark's ruling, sync 2026-07-19: zones is bhyve's, vbox is VirtualBox's, utm reserved; the former top-level hardware key is DEAD — its whole tree lives here now). Contents: (1) the first-class knob vocabulary, vbox.\u003csection\u003e.\u003ckey\u003e grouped by VBoxManage's own usage sections: cpu (hotplug, execution_cap, profile, pae, long_mode, hwvirtex, nested_paging, large_pages, nested_hw_virt, virt_vmsave_vmload, vtx_vpid, vtx_ux, apic, x2apic, hpet, spec_ctrl, ibpb_on_vm_exit/entry, l1d_flush_on_sched/vm_entry, mds_clear_on_sched/vm_entry, arm_gic_its, cpuid_portability_level) · memory (vram, page_fusion, balloon) · graphics (controller, monitor_count, accelerate_3d) · audio (enabled, driver, controller, codec, in, out) · usb (ohci, ehci, xhci, card_reader) · integration (clipboard_mode, clipboard_file_transfers, drag_and_drop, mouse, keyboard) · platform (acpi, chipset, iommu, tpm_type, tpm_location, rtc_use_utc, paravirt_provider, ioapic, triple_fault_reset, hardware_uuid, system_uuid_le, snapshot_folder, description, groups, icon_file, default_frontend, vm_process_priority, vm_execution_engine) · firmware (boot_menu, apic, logo_fade_in/out, logo_display_time, logo_image_path, system_time_offset, pxe_debug) · recording (enabled, screens, file, max_size_mb, max_time_seconds, opts, video_fps, video_rate, video_res) · vrde (enabled, port — range strings allowed, extpack, address, auth_type, auth_library, multi_con, reuse_con, video_channel, video_channel_quality) · autostart (enabled, delay — enabled also drives the agent's startup orchestration) · serial[] ({port 1-4, io_base|\"off\", irq, mode, type}) · parallel[] ({port 1-2, io_base|\"off\", irq, device}) — values pass to VirtualBox UNVALIDATED, unknown sections/keys fail honestly; (2) directives[] = [{directive, value}], the generic modifyvm passthrough (any --flag=value) and the FINAL word after the knobs — the passthrough-only exotica (teleporter, cpuid-set, tracing/testing, guest-debug, pci-attach, plug/unplug-cpu) rides it; (3) guest_agent (boolean, default false — the QEMU guest-agent UART opt-in, the Proxmox model, under the guest_agent.enabled master gate; a document claiming serial port 2 itself always wins) and post_provision_boot (boolean, default false — cycle the machine stop→start after a successful provision run). networks[] entries additionally take per-adapter cable_connected, promisc (deny|allow-vms|allow-all), speed (kbps), boot_prio (0-4), bandwidth_group, nic_type (raw VirtualBox adapter type). notes: free-form notes, persisted onto the machine row at finalize (the base's create contract). tags: tags, persisted at finalize. roles[].files: installer assignments, resolved against the artifact registry at every prepare (artifact_storage.enabled): the named file must exist under (role, type, filename) and pass SHA-256 verification or the start FAILS; hashes are auto-filled from the registry into the template vars, and a spec-supplied hash must match the stored one. Files mount into the working copy's installers/\u003crole\u003e/ tree as hard links or hash-verified copies. properties: THE answers map — one flat map keyed by each Field-DSL field's EXACT name (multiselect answers are native lists). The old basic/advanced split (advanced_properties) died in the one cut. Validated authoritatively pre-render: failures answer 422 {FIELD: message}. sync_method: per-machine file-sync preference (SHI's Rsync/SCP setting), default rsync. Platform rules apply at render time: forced rsync on Windows hosts; macOS auto-falls back to SCP when the system rsync is the ancient Apple 2.x build. The EFFECTIVE value reaches the template context as settings.sync_method / SYNC_METHOD; the stored spec keeps the preference. safe_id_path: agent-host path of a Domino safe-ID file, placed under id-files per the package's id_files metadata (safe_id_dir, keep_original_name). start_after_create: POST /machines only — queue the first start immediately. remove_transport_on_completion: the wizard's per-create transport signal (the converged cross-agent key, sync 2026-07-18): true asks the provision pipeline to remove the provisioning transport NIC (the intrinsic NAT, adapter 1 — it has no networks[] entry, so a per-entry flag can never express it) after the whole-walk stamp, via the pipeline-owned power cycle (Mark's execution ruling — stop → machine_transport_remove → start; the post-removal boot gates on NOTHING). ABSENT = this agent's ruled default FALSE (keep — the home/dev model, vagrant-ssh keeps working; zoneweaver's absent-default is true, the datacenter model — knob_defaults['transport.remove_on_completion'] serves each agent's own). Finalize persists the chosen value at configuration.settings.remove_transport_on_completion; flip it later via PUT nics[] {adapter: 1, remove_on_completion}. Document networks[] entries additionally take a per-entry remove_on_completion boolean targeting their own adapters (i+2), same semantics, same cycle.",
                         "items": {
                             "type": "integer"
                         },
@@ -1163,6 +1176,7 @@
                         "uniqueItems": false
                     },
                     "status": {
+                        "description": "VirtualBox is authoritative; configured means a registry row with no VM behind it yet",
                         "type": "string"
                     },
                     "tags": {
@@ -1176,6 +1190,7 @@
                         "type": "string"
                     },
                     "uuid": {
+                        "description": "VirtualBox machine UUID",
                         "type": "string"
                     }
                 },
@@ -1259,19 +1274,21 @@
                         "type": "number"
                     },
                     "io_delay_pct": {
-                        "description": "IODelayPct is the converged cross-agent IO-delay series (sync\n2026-07-19): the window's CPU-iowait share on Linux; absent (nil) where\nthe kernel accounts no iowait — never a faked zero.",
+                        "description": "The converged cross-agent IO-delay series (sync 2026-07-19, Proxmox's IO delay): this agent derives it from the window's CPU-iowait share — PRESENT on Linux hosts only, ABSENT (omitted, never zero) on Windows/macOS whose kernels account no iowait. zoneweaver serves the same field from its own illumos-truthful derivation (max per-device %w).",
                         "type": "number"
                     },
                     "load_avg_15min": {
                         "type": "number"
                     },
                     "load_avg_1min": {
+                        "description": "Zeros on Windows — the platform has no load averages",
                         "type": "number"
                     },
                     "load_avg_5min": {
                         "type": "number"
                     },
                     "per_core_parsed": {
+                        "description": "Present only when include_cores=true",
                         "items": {
                             "$ref": "#/components/schemas/monitoring.CoreUsage"
                         },
@@ -1282,6 +1299,7 @@
                         "type": "integer"
                     },
                     "processes_running": {
+                        "description": "Run-queue count where the platform reports one (Linux); zero elsewhere",
                         "type": "integer"
                     },
                     "scan_timestamp": {
@@ -1538,6 +1556,7 @@
                     },
                     "metadata": {
                         "additionalProperties": {},
+                        "description": "provisioner-collection.yml, verbatim",
                         "type": "object"
                     },
                     "name": {
@@ -1547,9 +1566,11 @@
                         "$ref": "#/components/schemas/provisioner.Source"
                     },
                     "valid": {
+                        "description": "false marks a family with no parseable versions (SHI's invalid placeholder) — still listed, still deletable",
                         "type": "boolean"
                     },
                     "versions": {
+                        "description": "Newest first",
                         "items": {
                             "$ref": "#/components/schemas/provisioner.Version"
                         },
@@ -1619,7 +1640,7 @@
                 "type": "object"
             },
             "provisioner.RoleSpecs": {
-                "description": "RoleSpecs is the derived per-role argument-spec cache — attached on\nthe version-detail read only (GetVersion), never in listings.",
+                "description": "Version-detail read only: {roles: {\u003crole\u003e: {collection, short_description, options}}} — the cached argument specs; absent in listings and when the package ships none",
                 "properties": {
                     "roles": {
                         "additionalProperties": {
@@ -1631,7 +1652,7 @@
                 "type": "object"
             },
             "provisioner.Source": {
-                "description": "Source is the family's git-import provenance (.source.json) — JSON\nnull, never absent, for families without one (list AND detail expose\nit; the converged wire shape).",
+                "description": "Stored git provenance — recorded at git import, NEVER inside package files: {source_type: \"git\", url, branch?}. null for folder/archive imports and catalog installs (catalog families update through the catalog). Feeds POST /provisioning/provisioners/{name}/refresh-from-source.",
                 "properties": {
                     "branch": {
                         "type": "string"
@@ -1654,10 +1675,12 @@
                         "type": "string"
                     },
                     "dir": {
+                        "description": "Version directory name — the URL segment",
                         "type": "string"
                     },
                     "metadata": {
                         "additionalProperties": {},
+                        "description": "provisioner.yml, verbatim",
                         "type": "object"
                     },
                     "name": {
@@ -1667,9 +1690,11 @@
                         "$ref": "#/components/schemas/provisioner.RoleSpecs"
                     },
                     "root": {
+                        "description": "Absolute path of the version directory on the agent host",
                         "type": "string"
                     },
                     "version": {
+                        "description": "The manifest's version field (falls back to the directory name)",
                         "type": "string"
                     }
                 },
@@ -1726,6 +1751,7 @@
                         "uniqueItems": false
                     },
                     "git_api_keys": {
+                        "description": "Also referenced by provisioner git imports via token_name",
                         "items": {
                             "$ref": "#/components/schemas/secrets.NamedKey"
                         },
@@ -4582,11 +4608,14 @@
             },
             "server.natLoopbackBody": {
                 "properties": {
+                    "address": {
+                        "type": "string"
+                    },
                     "ipv6": {
                         "type": "boolean"
                     },
-                    "rule": {
-                        "type": "string"
+                    "offset": {
+                        "type": "integer"
                     }
                 },
                 "type": "object"
@@ -5672,6 +5701,7 @@
                         "type": "boolean"
                     },
                     "console": {
+                        "description": "EMERGENCY consoles only (Mark's placement ruling 2026-07-12 — hypervisor-level surfaces that work with zero guest cooperation): rdp always (base VRDP ships in VirtualBox 7.2 — the IronRDP web client rides the /machines/{name}/rdp-bridge RDCleanPath WebSocket); vnc only when a USABLE VBoxVNC VRDE module is installed (the websockify bridge needs RFB on the VRDE port). The machine SSH terminal is guest-network access and advertises as features 'ssh' instead.",
                         "items": {
                             "type": "string"
                         },
@@ -5679,6 +5709,7 @@
                         "uniqueItems": false
                     },
                     "features": {
+                        "description": "Capability tokens (platform support ∧ config state): host-power is absent when host_power.enabled is false, artifacts when artifact_storage.enabled is false, file-browser when file_browser.enabled is false, guest-agent when guest_agent.enabled is false. provisioner-registry names the SHI-format package registry surface and secrets the global secrets store — finer than the cross-agent provisioning/machine-create tokens, which are true on every provisioning-capable agent regardless of wire shape (Mark's gating ruling, 2026-07-06). machine-modify names PUT's infrastructure-modify surface (the base's zone_modify contract). ssh names the machine SSH-terminal family (POST /machines/{name}/ssh/start + the /ssh/{id} WebSocket) — a FEATURE, not a console, per Mark's placement ruling 2026-07-12: console[] carries emergency consoles only. hosts-file names the /system/hosts editor surface (the converged wire, minted 2026-07-17) — a platform token, always advertised on both agents. dns names the /system/dns surface beside it (minted 2026-07-17, same converged wire — per-OS mechanics, wire identical; the UI's Network-tab DNS section gates on it). hostname names the /network/hostname surface (minted 2026-07-17, the converged wire): GET is the live view, PUT queues the async set_hostname task. ip-addresses names the /network/addresses surface (minted 2026-07-17; mutations shipped 2026-07-19 per Mark's build order): the live listing plus the zoneweaver-converged task mutations — create (static everywhere, dhcp Windows-only, addrconf refused), delete (?address= disambiguator), and the INTERFACE-level enable/disable toggles. network-spaces names the /network/spaces surface (minted 2026-07-19): enumerate + manage VirtualBox's network spaces (host-only interfaces with DHCP, NAT networks with port forwards, read-only internal networks) — the UI topology mapper gates its network-space fetch on it.",
                         "items": {
                             "type": "string"
                         },
@@ -5689,6 +5720,7 @@
                         "type": "string"
                     },
                     "hypervisors": {
+                        "description": "virtualbox always; utm joins on macOS agents where utmctl is present and UTM meets the 4.6.5 floor (cached capability probe)",
                         "items": {
                             "type": "string"
                         },
@@ -5702,10 +5734,11 @@
                         "type": "string"
                     },
                     "shi_mode": {
-                        "description": "SHIMode advertises the \"I Can't Believe it's not Super.Human.Installer\"\npresentation toggle (ui.shi_mode) — Direct-mode UI theming; absent/false\non agents without the concept.",
+                        "description": "\"I Can't Believe it's not Super.Human.Installer\" presentation toggle (ui.shi_mode): the SPA renders the opinionated SHI-style theme/flow in Direct mode when true. Absent/false on agents without the concept.",
                         "type": "boolean"
                     },
                     "uptime": {
+                        "description": "Seconds since the agent started",
                         "type": "integer"
                     },
                     "version": {
@@ -6455,6 +6488,21 @@
                 },
                 "type": "object"
             },
+            "server.videoDimensions": {
+                "description": "Console-details facts (the UI AI's third ask, 2026-07-10): the guest\ndisplay's {width, height, depth} (null when unknown) and the Guest\nAdditions run level (0 none, 1 system, 2 userland, 3 desktop).",
+                "properties": {
+                    "depth": {
+                        "type": "integer"
+                    },
+                    "height": {
+                        "type": "integer"
+                    },
+                    "width": {
+                        "type": "integer"
+                    }
+                },
+                "type": "object"
+            },
             "server.vncStateResponse": {
                 "properties": {
                     "additions_run_level": {
@@ -6466,9 +6514,8 @@
                     "running": {
                         "type": "boolean"
                     },
-                    "video_mode": {
-                        "description": "Console-details facts (the UI AI's third ask, 2026-07-10): the guest\ndisplay's WxHxD (empty when unknown) and the Guest Additions run level\n(0 none, 1 system, 2 userland, 3 desktop).",
-                        "type": "string"
+                    "video": {
+                        "$ref": "#/components/schemas/server.videoDimensions"
                     },
                     "vnc_capable": {
                         "type": "boolean"
@@ -6578,9 +6625,11 @@
                         "type": "string"
                     },
                     "created_by": {
+                        "description": "API key name (or system source) that created the task",
                         "type": "string"
                     },
                     "depends_on": {
+                        "description": "Predecessor that must complete first; its failure or cancellation cancels this task",
                         "type": "string"
                     },
                     "error_message": {
@@ -6590,24 +6639,31 @@
                         "type": "string"
                     },
                     "machine_name": {
+                        "description": "Target machine name",
                         "type": "string"
                     },
                     "metadata": {
+                        "description": "JSON-encoded execution parameters",
                         "type": "string"
                     },
                     "operation": {
+                        "description": "Operation kind. Vocabulary: start, stop, suspend, delete, discover, machine_modify (PUT's infrastructure changes), machine_import (OVA/OVF appliance import), machine_move (movevm relocation), machine_unattended_install (VBoxManage answer-file install), restart (never dispatched — a restart is a stop→start chain); create orchestration: machine_create_orchestration (parent), machine_prepare, machine_create_storage, machine_create_config, machine_create_finalize, template_download; provisioning pipeline: machine_provision_orchestration (parent — the document-walk children chain directly under it), machine_wait_ssh, machine_sync_parent, machine_sync (one per folder), machine_hook (one per provisioning.pre[]/post[] sequence-hook entry — pre entries before the first method, post entries after the last), machine_shell (one per provisioning.shell.scripts[] entry, in the document walk), machine_provision (one per ansible local[] playbook entry), machine_provision_remote (one per ansible remote[] entry — ansible-playbook ON the agent host over the guest transport; needs host ansible), machine_docker_compose (one per provisioning.docker.docker_compose[] file — no engine setup; an absent guest engine fails the task honestly), machine_provision_parent (ONLY as the /run-provisioners anchor), machine_syncback_parent, machine_syncback (one per syncback-flagged folder — the post-provision guest→host pull), machine_key_rotate (queued only when settings.vagrant_ssh_insert_key is set and the communicator is not winrm — adopts the box's rotated private key into the working copy after the syncback bracket; never the whole-walk stamp owner); network: provisioning_network_setup, provisioning_network_teardown; consoles/snapshots: reset, pause, resume, snapshot_take (user takes AND the rotation service's scheduled rows — created_by snapshot_rotation), snapshot_restore, snapshot_delete, snapshot_modify (rename and/or description edit via PUT), machine_clone_current (clonevm current-state clone); templates: template_download, template_delete, template_export, template_upload (publish), template_move; filesystem (machine_name \"filesystem\"): file_move, file_copy, file_archive_create, file_archive_extract; registry/artifacts/system: provisioner_import, provisioner_export (one version → registry-shaped tar.gz + archive sha256 sidecar), provisioner_catalog_install (fetch catalog.json → download the versioned asset → verify sha256 → import), artifact_scan, artifact_download, artifact_upload, artifact_move, artifact_copy, artifact_delete_file, artifact_delete_folder, hcl_download, agent_update, set_hostname (PUT /network/hostname's queued rename — zoneweaver's exact op name, machine_name \"system\"; the converged wire, sync 2026-07-17).",
                         "type": "string"
                     },
                     "output": {
+                        "description": "JSON-encoded array of output entries as last flushed — ALWAYS null on GET /tasks (the list never carries output blobs); GET /tasks/{taskId} (detail), GET /tasks/{taskId}/output, and the /tasks/{taskId}/stream WebSocket serve it in full",
                         "type": "string"
                     },
                     "parent_task_id": {
+                        "description": "Progress-aggregation anchor this task reports into",
                         "type": "string"
                     },
                     "priority": {
+                        "description": "Higher runs first: 100 critical, 80 high, 60 medium, 50 service, 40 low, 20 background",
                         "type": "integer"
                     },
                     "progress_info": {
+                        "description": "Freeform progress detail; parent tasks carry {completed_tasks, failed_tasks, total_tasks, status}. machine_provision tasks carry {status} at the coarse phases and — while the playbook runs — the STARTcloud progress callback's live reports as {status: \"running_playbook\", ansible_percent, message} (the guest's own 0-100% and role label, parsed from the packages' PROGRESS::{json} stdout marker; progress_percent maps it into this task's 40→90 window). Playbooks without the callback simply keep the coarse phases. REGISTRY TRANSFERS (the converged task wire, sync 2026-07-17 — no new endpoints, both agents identical): while template_download streams the .box, template_upload chunk-uploads to the registry, or provisioner_catalog_install downloads the catalog archive, progress_info carries exactly {status: \"downloading\"|\"uploading\", received_bytes: \u003cint\u003e, total_bytes: \u003cint|null\u003e} — received_bytes is bytes transferred so far (the ONE field name for BOTH directions), total_bytes is the Content-Length or known file size, JSON null when unknown — and progress_percent maps the bytes into that step's existing window (download 10→60, publish upload 85→95, catalog install 0→90). Updates emit at most every 1s OR every 1% of the total, whichever comes first, with a final update always emitted at completion; an unknown total parks the percent at the window floor (no fake percent) while received_bytes still streams.",
                         "items": {
                             "type": "integer"
                         },
@@ -6621,9 +6677,11 @@
                         "type": "string"
                     },
                     "status": {
+                        "description": "completed_with_errors is a parent-task terminal state: some children failed, some completed. prepared is the artifact-upload handshake's holding state (never dispatched; the upload landing at POST /artifacts/upload/{taskId} flips it to pending; agent restart cancels it).",
                         "type": "string"
                     },
                     "updatedAt": {
+                        "description": "Last modification — the since query parameter compares against this",
                         "type": "string"
                     }
                 },
@@ -6687,13 +6745,21 @@
         }
     },
     "info": {
-        "description": "The swag-generated half of the Agent API v1 document. Serve-time authority lives in internal/apidocs: the hand-maintained fragment (openapi.json) owns info/tags/components/security and every not-yet-migrated path, and this generated document's paths merge into it.",
+        "contact": {
+            "name": "Hyperweaver Agent",
+            "url": "https://github.com/Makr91/hyperweaver-agent"
+        },
+        "description": "Hyperweaver Agent API v1 — the shared host-agent contract (architecture D1), as implemented by hyperweaver-agent (VirtualBox/Vagrant, Go). Reference implementation: zoneweaver-agent (Bhyve/OmniOS, Node). Capabilities are advertised by the public GET /api/status (role, hypervisors, console, auth, features) and drive conditional UI rendering. This document describes only the endpoints this agent implements today and grows with it; the console group lands with the console phase. The implementing application version is `info.x-app-version`; `info.version` is the frozen contract line. Authorization is role-based (admin \u003e operator \u003e viewer) and enforced by a central method+path policy; each operation notes its minimum role.",
+        "license": {
+            "name": "GPL-3.0",
+            "url": "https://github.com/Makr91/hyperweaver-agent/blob/main/LICENSE.md"
+        },
         "title": "Agent API",
         "version": "1.0.0"
     },
     "externalDocs": {
-        "description": "",
-        "url": ""
+        "description": "View on GitHub",
+        "url": "https://github.com/Makr91/hyperweaver-agent"
     },
     "paths": {
         "/api-keys": {
@@ -12717,7 +12783,7 @@
         },
         "/machines/{machineName}/vnc": {
             "get": {
-                "description": "Minimum role: viewer. The machine's live VRDE console state — everything the UI needs before connecting: whether VRDE is on and its port, whether the host can actually speak VNC on it (vnc_capable: a usable VBoxVNC extpack module; without it the VRDE port speaks RDP, which noVNC cannot), the websockify URL, plus the console-details facts (the UI AI's third ask, 2026-07-10): video_mode (the guest display's WxHxD, e.g. 1024x768x32; empty when unknown) and additions_run_level (0 = no Guest Additions running, 1 = system, 2 = userland, 3 = desktop).",
+                "description": "Minimum role: viewer. The machine's live VRDE console state — everything the UI needs before connecting: whether VRDE is on and its port, whether the host can actually speak VNC on it (vnc_capable: a usable VBoxVNC extpack module; without it the VRDE port speaks RDP, which noVNC cannot), the websockify URL, plus the console-details facts (the UI AI's third ask, 2026-07-10): video ({width, height, depth} — the guest display's mode, structured per the cross-agent structured-JSON convergence; null when unknown) and additions_run_level (0 = no Guest Additions running, 1 = system, 2 = userland, 3 = desktop).",
                 "parameters": [
                     {
                         "description": "Machine name",
@@ -13825,7 +13891,7 @@
         },
         "/network/spaces": {
             "get": {
-                "description": "Minimum role: viewer (the network-spaces capability token, minted 2026-07-19 — the UI topology mapper's network-card feed; devices.nics rows join here by their network field). One typed row per space: hostonly = a host-only INTERFACE (VBoxManage list hostonlyifs; VirtualBox assigns names itself) with its DHCP server joined by VBoxNetworkName (best-effort — a failed dhcpservers read degrades to {exists:false} rows, narrated in the log); hostonlynet = a host-only NETWORK (list hostonlynets — VirtualBox's macOS-ONLY vmnet family; Oracle's platform split: VirtualBox 7 on macOS REMOVED host-only adapters while every other host OS lacks the hostonlynet verb entirely, so darwin agents carry hostonlynet rows, every other host carries hostonly rows, and off darwin the verb is never even probed); intnet = an implicit internal network (list intnets — exists while a VM references it, no other attributes); natnetwork = a NAT network (list natnetworks) with its port-forward rules (IPv4 + IPv6 folded into one port_forwards[] with an ipv6 flag) and loopback mappings (verbatim rule strings). VirtualBox-only — utm machines join no spaces.",
+                "description": "Minimum role: viewer (the network-spaces capability token, minted 2026-07-19 — the UI topology mapper's network-card feed; devices.nics rows join here by their network field). One typed row per space: hostonly = a host-only INTERFACE (VBoxManage list hostonlyifs; VirtualBox assigns names itself) with its DHCP server joined by VBoxNetworkName (best-effort — a failed dhcpservers read degrades to {exists:false} rows, narrated in the log); hostonlynet = a host-only NETWORK (list hostonlynets — VirtualBox's macOS-ONLY vmnet family; Oracle's platform split: VirtualBox 7 on macOS REMOVED host-only adapters while every other host OS lacks the hostonlynet verb entirely, so darwin agents carry hostonlynet rows, every other host carries hostonly rows, and off darwin the verb is never even probed); intnet = an implicit internal network (list intnets — exists while a VM references it, no other attributes); natnetwork = a NAT network (list natnetworks) with its port-forward rules (IPv4 + IPv6 folded into one port_forwards[] with an ipv6 flag) and loopback mappings (structured rows — the listing's \"address=offset\" rules parsed into {address, offset, ipv6}; the cross-agent structured-JSON convergence). VirtualBox-only — utm machines join no spaces.",
                 "responses": {
                     "200": {
                         "content": {
@@ -14232,7 +14298,7 @@
                 ]
             },
             "put": {
-                "description": "Minimum role: operator. Converges the sent knobs (cidr, enabled, dhcp, ipv6 — natnetwork modify) and applies rule changes, removes before adds so one call replaces a rule: port forwards (add_port_forwards[] {name, protocol tcp|udp (default tcp), host_ip?, host_port, guest_ip, guest_port, ipv6? (rule family, default IPv4)} / remove_port_forwards[] {name, ipv6?}) and loopback mappings (add_loopbacks[]/remove_loopbacks[] {rule, ipv6?} — the rule string VERBATIM in VirtualBox's own form, e.g. 127.0.0.1=2; the listing's loopback_mappings shows the same strings back). At least one change is required.",
+                "description": "Minimum role: operator. Converges the sent knobs (cidr, enabled, dhcp, ipv6 — natnetwork modify) and applies rule changes, removes before adds so one call replaces a rule: port forwards (add_port_forwards[] {name, protocol tcp|udp (default tcp), host_ip?, host_port, guest_ip, guest_port, ipv6? (rule family, default IPv4)} / remove_port_forwards[] {name, ipv6?}) and loopback mappings (add_loopbacks[]/remove_loopbacks[] {address, offset, ipv6?} — structured rows, the cross-agent structured-JSON convergence; the agent renders VirtualBox's own address=offset rule itself, and the listing's loopback_mappings answers the same structured shape back). At least one change is required.",
                 "parameters": [
                     {
                         "description": "The NAT network name",
@@ -17482,5 +17548,83 @@
             }
         }
     },
-    "openapi": "3.1.0"
+    "openapi": "3.1.0",
+    "tags": [
+        {
+            "description": "Public identity and capability discovery (Hyperweaver dual-mode contract)",
+            "name": "Status"
+        },
+        {
+            "description": "API-key lifecycle (Agent API v1 local auth tier)",
+            "name": "API Keys"
+        },
+        {
+            "description": "Local-presence sign-in: the tray Open handoff and the hwa:// protocol handler",
+            "name": "Local Login"
+        },
+        {
+            "description": "Version, update checking, prerequisite detection",
+            "name": "System"
+        },
+        {
+            "description": "The task queue: every machine operation runs as a prioritized, dependency-chained task with streamed output",
+            "name": "Task Management"
+        },
+        {
+            "description": "VirtualBox machines, built and provisioned natively by the agent (the zoneweaver mechanism: create orchestration → SSH/ansible pipeline; vagrant is never executed — externally-created vagrant projects are still discovered read-only), operated through queued tasks",
+            "name": "Machine Management"
+        },
+        {
+            "description": "Machine consoles: SSH terminal sessions (interactive shell over the provisioning transport), the VNC websockify bridge onto the machine's VRDE port (requires a usable VBoxVNC extpack — the console list in /api/status advertises vnc only then), the browser-RDP bridge (the IronRDP web client's RDCleanPath transport onto the VRDE port — base VRDP, no extpack; advertised as rdp), the turnkey VRDE TLS setup that path demands, no-session framebuffer screenshots, and the WebSocket ticket every upgrade requires. WebSocket upgrades authenticate by ?ticket= (minted at GET /ws-ticket), never by API-key headers — browser WebSocket clients cannot send them.",
+            "name": "Console"
+        },
+        {
+            "description": "Provisioner package registry (the provisioner-registry capability token — finer than the cross-agent provisioning token, which any provisioning-capable agent advertises regardless of wire shape): packages in SHI's on-disk format — \u003cname\u003e/provisioner-collection.yml with \u003cversion\u003e/provisioner.yml trees — listed, imported (folder, archive, or git clone; task-queued), and deleted only while no machine references them. One system for every package family; installer-bundled packages seed on startup without ever overwriting existing versions. Hosts.template.yml renders with TRUE Jinja2 semantics (gonja): parenthesized filter args, loop.*, is defined; undefined variables render empty; includes resolve inside the package's templates/ dir only.",
+            "name": "Provisioning"
+        },
+        {
+            "description": "The merged artifact system (the artifacts capability token, config-gated by artifact_storage.enabled — Mark's 2026-07-09 ruling: ONE zoneweaver-shaped system): typed storage locations where iso, image, installer, fixpack, and hotfix are ALL location types — one scan, one SHA-256 checksum store (the ONLY algorithm; md5/sha1 are rejected everywhere), one surface. Five BUILT-IN locations always exist under artifact_storage.dir (isos, images, installers, fixpacks, hotfixes; source builtin, never deletable — disable instead); operator locations come from artifact_storage.paths[] and the storage-path API (which persists into config.yaml). Installer-family locations store per role (\u003clocation\u003e/\u003crole\u003e/\u003cfile\u003e); iso/image locations are flat and extension-filtered. SHI's hash-expectation model rides on top: bundled registry seeds + the HCL catalog's authoritative hashes; machine prepare REFUSES any referenced file that is absent, unhashed, or hash-mismatched. Automatic scans (startup + artifact_storage.scanning.periodic_scan_interval) run agent-side without task rows; user-triggered scans are tasks. cdroms[] entries reference cached ISOs by filename ({iso}) alongside raw paths.",
+            "name": "Artifacts"
+        },
+        {
+            "description": "Host file browser (the file-browser capability token, config-gated by file_browser.enabled — zoneweaver's FULL surface, 1:1 where the platform allows): GET /filesystem lists agent-host directories, and the mutate family edits them — create folder, text content read/write (bounded by security.max_edit_size_mb), upload/download, rename, move/copy (task-queued: file_move/file_copy), delete, archives (task-queued create/extract under file_browser.archive), permissions. Every path passes the same security bounds (traversal guard, browse-root containment, forbidden paths/patterns); the whole surface is operator-gated by the central policy. Platform honesty: uid/gid ownership applies on Unix hosts only (Windows answers 400 where it matters and mode toggles the read-only attribute); archive CREATION speaks zip/tar/tar.gz (Go's bzip2 is decompress-only), extraction adds tar.bz2 and .gz. Mutations are native Go file operations — the base's pfexec shell-outs have no analog.",
+            "name": "File System"
+        },
+        {
+            "description": "The QEMU guest-agent channel (the guest-agent capability token, config-gated by guest_agent.enabled — Mark's go 2026-07-10): credential-less structured guest control with NO SSH and NO Guest Additions. The UART is a PER-MACHINE create option (vbox.guest_agent: true, default false, under the guest_agent.enabled master gate — Mark's Proxmox-model ruling 2026-07-12; per-hypervisor key, sync 2026-07-19): opted-in creates wire a COM2 UART onto a host pipe (\\\\.\\pipe\\hyperweaver-qga-\u003cmachine\u003e on Windows hosts, qga.sock under the machine's working directory elsewhere); the box templates run qemu-ga on that port (isa-serial — auto-transport images pick virtio on bhyve, serial here); the agent opens the pipe per request (the channel takes ONE client), resyncs via guest-sync-delimited, and runs one command. The guest's live IPs also feed the RDP guest-target and SSH transport ladders as the live-truth rung. The DISCOVERY SWEEP additionally probes every running machine (QGA channel first, Guest Additions properties as fallback) and STORES the observation on the machine row (configuration.guest_info: {ips[], source, agent_responding, checked_at}) — the machine list the UI already polls carries the direct-connect gate, so per-machine polling of these endpoints is never needed for gating. Channel access is SERIALIZED per machine agent-side: concurrent commands queue on the single-client pipe instead of colliding.",
+            "name": "Guest Agent"
+        },
+        {
+            "description": "Read-only swap information (the swap capability token); add/remove are OmniOS semantics and not implemented on this agent",
+            "name": "Swap Management"
+        },
+        {
+            "description": "Host telemetry (the monitoring capability token): always-on realtime sampling via gopsutil; monitoring.storage_enabled adds stored time series in per-datatype database files. Illumos-only families (ZFS pools/datasets/ARC, zpool-iostat disk IO, netstat routes) have no analog on this host and are absent.",
+            "name": "Host Monitoring"
+        },
+        {
+            "description": "Host process listing and control (the processes capability token). The zone concept does not exist here: the zone field is absent and ?zone= filters are ignored. Absent by platform: /{pid}/stack, /{pid}/limits (pstack/plimit are illumos tools) and trace/start (DTrace).",
+            "name": "Processes"
+        },
+        {
+            "description": "Host power management (the host-power capability token, config-gated by host_power.enabled — every endpoint answers 503 and the token disappears from /api/status when disabled). Absent by platform: runlevels, single-user/multi-user transitions, fast reboot, reboot-required tracking (init semantics with no cross-platform analog).",
+            "name": "System Host Management"
+        },
+        {
+            "description": "System hosts-file and DNS control on all three platforms (the hosts-file and dns capability tokens — platform tokens, always advertised). Hosts file: Windows System32\\drivers\\etc\\hosts, /etc/hosts elsewhere. DNS (/system/dns, the converged wire, sync 2026-07-17): one wire shape everywhere — nameservers/search_domains/domain/options — with per-OS mechanics: /etc/resolv.conf read/written on Unix; netsh per connected interface on Windows (nameservers only; raw and the resolv.conf-only fields answer 400, backup is \"\"); networksetup per enabled service on macOS (nameservers + search_domains; domain/options/raw answer 400, backup \"\"). Host network configuration (/network/hostname and /network/addresses, the hostname and ip-addresses capability tokens — the converged wire, sync 2026-07-17): zoneweaver's shipped network-controller family, BARE documents (no success/message/timestamp envelope; errors are {error, details?}). Hostname: GET is the live view (persisted name vs live system hostname), PUT queues the async set_hostname task. Addresses: GET is the real live listing over Go's stdlib interface enumeration; mutations (shipped 2026-07-19, Mark's build order) queue zoneweaver's create/delete/enable/disable_ip_address tasks with per-OS honesty — static creates everywhere, dhcp on Windows only, addrconf refused (SLAAC is automatic), enable/disable toggle the INTERFACE the addrobj names. Network spaces (/network/spaces*, the network-spaces token, minted 2026-07-19): enumerate and manage VirtualBox's network spaces — host-only interfaces (create/configure/delete + their DHCP servers — every host OS EXCEPT macOS, where VirtualBox 7 removed the family), host-only NETWORKS (VirtualBox's macOS-only vmnet family: create/modify/delete — Oracle's platform split, each side refusing the other's family with an honest 400), NAT networks (create/modify/delete/start/stop + port-forward and loopback rules), and the implicit internal networks (read-only: VirtualBox has no intnet verbs — they exist while a VM references them).",
+            "name": "Host Configuration"
+        },
+        {
+            "description": "SQLite statistics and maintenance across every open database file (tasks.sqlite, agent.sqlite, and the monitoring files when storage is enabled), plus the read-only explorer drill-down (tables with row counts and indexes, then paged rows — zoneweaver's contract, shared wire; no arbitrary SQL, every table and order_by column verified against the database's own catalog)",
+            "name": "Database Management"
+        },
+        {
+            "description": "Agent configuration over the API (admin only)",
+            "name": "Settings"
+        },
+        {
+            "description": "Global secrets store (the secrets capability token; admin only): SHI's six categories in secrets.yaml beside the config — kept OUT of /settings so that surface stays a pure configuration document. Values are plain text by design (it is the user's local machine; the generated Hosts.yml carries them as SECRETS_* template vars). Independently, Hosts.rb merges the working copy's secrets.yml/.secrets.yml at vagrant runtime — both mechanisms coexist.",
+            "name": "Secrets"
+        }
+    ]
 }
