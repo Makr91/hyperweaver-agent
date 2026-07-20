@@ -28,19 +28,48 @@ type natLoopbackBody struct {
 	IPv6 bool   `json:"ipv6"`
 }
 
+// natForwardRemoveBody names one port-forward rule to drop on the natnetwork
+// wire (ipv6 selects the rule family).
+type natForwardRemoveBody struct {
+	Name string `json:"name"`
+	IPv6 bool   `json:"ipv6"`
+}
+
+// natNetworkResponse is the create/modify/delete/start/stop answer — the small
+// {success, name, message} envelope.
+type natNetworkResponse struct {
+	Success bool   `json:"success"`
+	Name    string `json:"name"`
+	Message string `json:"message"`
+}
+
+// natNetworkCreateRequest is POST /network/spaces/natnetwork's body.
+type natNetworkCreateRequest struct {
+	Name    string `json:"name"`
+	CIDR    string `json:"cidr"`
+	Enabled *bool  `json:"enabled"`
+	DHCP    *bool  `json:"dhcp"`
+	IPv6    *bool  `json:"ipv6"`
+}
+
 // handleCreateNATNetwork serves POST /network/spaces/natnetwork.
+//
+//	@Summary		Create a NAT network
+//	@Description	Minimum role: operator. VBoxManage natnetwork add: name + cidr required; enabled defaults true; dhcp/ipv6 toggle the built-in DHCP server and IPv6 support.
+//	@Tags			Host Configuration
+//	@Accept			json
+//	@Produce		json
+//	@Param			request	body	natNetworkCreateRequest	true	"NAT network to create"
+//	@Success		201	{object}	natNetworkResponse	"NAT network created ({success, name, message})"
+//	@Failure		400	"Missing name or cidr"
+//	@Failure		503	"VirtualBox is not installed"
+//	@Router			/network/spaces/natnetwork [post]
 func (s *Server) handleCreateNATNetwork(w http.ResponseWriter, r *http.Request) {
 	exe := s.requireVBox(w, r)
 	if exe == "" {
 		return
 	}
-	var body struct {
-		Name    string `json:"name"`
-		CIDR    string `json:"cidr"`
-		Enabled *bool  `json:"enabled"`
-		DHCP    *bool  `json:"dhcp"`
-		IPv6    *bool  `json:"ipv6"`
-	}
+	var body natNetworkCreateRequest
 	if err := decodeBody(r, &body); err != nil {
 		taskError(w, http.StatusBadRequest, "Invalid JSON body")
 		return
@@ -65,10 +94,10 @@ func (s *Server) handleCreateNATNetwork(w http.ResponseWriter, r *http.Request) 
 	}
 	slog.Info("nat network created", "name", body.Name, "cidr", body.CIDR,
 		"by", auth.FromContext(r.Context()).Name)
-	writeJSONStatus(w, http.StatusCreated, map[string]any{
-		"success": true,
-		"name":    body.Name,
-		"message": "NAT network " + body.Name + " created",
+	writeJSONStatus(w, http.StatusCreated, natNetworkResponse{
+		Success: true,
+		Name:    body.Name,
+		Message: "NAT network " + body.Name + " created",
 	})
 }
 
@@ -90,9 +119,35 @@ func (s *Server) findNATNetwork(w http.ResponseWriter, r *http.Request, exe stri
 	return "", false
 }
 
+// natNetworkModifyRequest is PUT /network/spaces/natnetwork/{name}'s body —
+// knob changes plus port-forward and loopback rule add/remove lists.
+type natNetworkModifyRequest struct {
+	CIDR               string                 `json:"cidr"`
+	Enabled            *bool                  `json:"enabled"`
+	DHCP               *bool                  `json:"dhcp"`
+	IPv6               *bool                  `json:"ipv6"`
+	AddPortForwards    []natForwardBody       `json:"add_port_forwards"`
+	RemovePortForwards []natForwardRemoveBody `json:"remove_port_forwards"`
+	AddLoopbacks       []natLoopbackBody      `json:"add_loopbacks"`
+	RemoveLoopbacks    []natLoopbackBody      `json:"remove_loopbacks"`
+}
+
 // handleModifyNATNetwork serves PUT /network/spaces/natnetwork/{name} —
 // converge the knobs and apply port-forward/loopback rule changes (removes
 // first, so a rule can be replaced in one call).
+//
+//	@Summary		Modify a NAT network
+//	@Description	Minimum role: operator. Converges the sent knobs (cidr, enabled, dhcp, ipv6 — natnetwork modify) and applies rule changes, removes before adds so one call replaces a rule: port forwards (add_port_forwards[] {name, protocol tcp|udp (default tcp), host_ip?, host_port, guest_ip, guest_port, ipv6? (rule family, default IPv4)} / remove_port_forwards[] {name, ipv6?}) and loopback mappings (add_loopbacks[]/remove_loopbacks[] {rule, ipv6?} — the rule string VERBATIM in VirtualBox's own form, e.g. 127.0.0.1=2; the listing's loopback_mappings shows the same strings back). At least one change is required.
+//	@Tags			Host Configuration
+//	@Accept			json
+//	@Produce		json
+//	@Param			name	path	string	true	"The NAT network name"
+//	@Param			request	body	natNetworkModifyRequest	true	"Knobs and rule changes to apply"
+//	@Success		200	{object}	natNetworkResponse	"NAT network updated"
+//	@Failure		400	"Nothing to change, or an invalid rule entry"
+//	@Failure		404	"No NAT network by that name"
+//	@Failure		503	"VirtualBox is not installed"
+//	@Router			/network/spaces/natnetwork/{name} [put]
 func (s *Server) handleModifyNATNetwork(w http.ResponseWriter, r *http.Request) {
 	exe := s.requireVBox(w, r)
 	if exe == "" {
@@ -102,19 +157,7 @@ func (s *Server) handleModifyNATNetwork(w http.ResponseWriter, r *http.Request) 
 	if !found {
 		return
 	}
-	var body struct {
-		CIDR               string           `json:"cidr"`
-		Enabled            *bool            `json:"enabled"`
-		DHCP               *bool            `json:"dhcp"`
-		IPv6               *bool            `json:"ipv6"`
-		AddPortForwards    []natForwardBody `json:"add_port_forwards"`
-		RemovePortForwards []struct {
-			Name string `json:"name"`
-			IPv6 bool   `json:"ipv6"`
-		} `json:"remove_port_forwards"`
-		AddLoopbacks    []natLoopbackBody `json:"add_loopbacks"`
-		RemoveLoopbacks []natLoopbackBody `json:"remove_loopbacks"`
-	}
+	var body natNetworkModifyRequest
 	if err := decodeBody(r, &body); err != nil {
 		taskError(w, http.StatusBadRequest, "Invalid JSON body")
 		return
@@ -204,14 +247,24 @@ func (s *Server) handleModifyNATNetwork(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 	slog.Info("nat network modified", "name", name, "by", auth.FromContext(r.Context()).Name)
-	writeJSON(w, map[string]any{
-		"success": true,
-		"name":    name,
-		"message": "NAT network " + name + " updated",
+	writeJSON(w, natNetworkResponse{
+		Success: true,
+		Name:    name,
+		Message: "NAT network " + name + " updated",
 	})
 }
 
 // handleDeleteNATNetwork serves DELETE /network/spaces/natnetwork/{name}.
+//
+//	@Summary		Remove a NAT network
+//	@Description	Minimum role: operator. VBoxManage natnetwork remove. Machines whose adapters name the network lose their uplink — VirtualBox does not refuse.
+//	@Tags			Host Configuration
+//	@Produce		json
+//	@Param			name	path	string	true	"The NAT network name"
+//	@Success		200	{object}	natNetworkResponse	"NAT network removed"
+//	@Failure		404	"No NAT network by that name"
+//	@Failure		503	"VirtualBox is not installed"
+//	@Router			/network/spaces/natnetwork/{name} [delete]
 func (s *Server) handleDeleteNATNetwork(w http.ResponseWriter, r *http.Request) {
 	exe := s.requireVBox(w, r)
 	if exe == "" {
@@ -227,19 +280,38 @@ func (s *Server) handleDeleteNATNetwork(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	slog.Info("nat network removed", "name", name, "by", auth.FromContext(r.Context()).Name)
-	writeJSON(w, map[string]any{
-		"success": true,
-		"name":    name,
-		"message": "NAT network " + name + " removed",
+	writeJSON(w, natNetworkResponse{
+		Success: true,
+		Name:    name,
+		Message: "NAT network " + name + " removed",
 	})
 }
 
 // handleStartNATNetwork / handleStopNATNetwork serve POST
 // /network/spaces/natnetwork/{name}/start|stop — the service process.
+//
+//	@Summary		Start a NAT network's service
+//	@Description	Minimum role: operator. VBoxManage natnetwork start — the network's NAT service process (an enabled network normally starts with its first attached VM; this is the explicit control).
+//	@Tags			Host Configuration
+//	@Produce		json
+//	@Param			name	path	string	true	"The NAT network name"
+//	@Success		200	{object}	natNetworkResponse	"Service started"
+//	@Failure		404	"No NAT network by that name"
+//	@Failure		503	"VirtualBox is not installed"
+//	@Router			/network/spaces/natnetwork/{name}/start [post]
 func (s *Server) handleStartNATNetwork(w http.ResponseWriter, r *http.Request) {
 	s.natNetworkService(w, r, vbox.StartNATNetwork, "started")
 }
 
+// @Summary		Stop a NAT network's service
+// @Description	Minimum role: operator. VBoxManage natnetwork stop — attached running machines lose connectivity until it starts again.
+// @Tags			Host Configuration
+// @Produce		json
+// @Param			name	path	string	true	"The NAT network name"
+// @Success		200	{object}	natNetworkResponse	"Service stopped"
+// @Failure		404	"No NAT network by that name"
+// @Failure		503	"VirtualBox is not installed"
+// @Router			/network/spaces/natnetwork/{name}/stop [post]
 func (s *Server) handleStopNATNetwork(w http.ResponseWriter, r *http.Request) {
 	s.natNetworkService(w, r, vbox.StopNATNetwork, "stopped")
 }
@@ -261,9 +333,9 @@ func (s *Server) natNetworkService(w http.ResponseWriter, r *http.Request,
 		return
 	}
 	slog.Info("nat network "+past, "name", name, "by", auth.FromContext(r.Context()).Name)
-	writeJSON(w, map[string]any{
-		"success": true,
-		"name":    name,
-		"message": "NAT network " + name + " " + past,
+	writeJSON(w, natNetworkResponse{
+		Success: true,
+		Name:    name,
+		Message: "NAT network " + name + " " + past,
 	})
 }

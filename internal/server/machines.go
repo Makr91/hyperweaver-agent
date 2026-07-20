@@ -299,15 +299,15 @@ func (s *Server) dedupTask(ctx context.Context, machineName, operation string) (
 
 // operationResponse is the queued-operation answer shape.
 func operationResponse(w http.ResponseWriter, taskID any, machineName, operation, status, message string) {
-	payload := map[string]any{
-		"success":      true,
-		"machine_name": machineName,
-		"operation":    operation,
-		"status":       status,
-		"message":      message,
+	payload := queuedOperation{
+		Success:     true,
+		MachineName: machineName,
+		Operation:   operation,
+		Status:      status,
+		Message:     message,
 	}
-	if taskID != nil {
-		payload["task_id"] = taskID
+	if id, ok := taskID.(string); ok {
+		payload.TaskID = id
 	}
 	writeJSON(w, payload)
 }

@@ -143,16 +143,39 @@ func parseOctalMode(raw string) (os.FileMode, error) {
 	return os.FileMode(value), nil
 }
 
+// createFolderRequest is POST /filesystem/folder's body.
+type createFolderRequest struct {
+	Path string `json:"path"`
+	Name string `json:"name"`
+	// Octal permission string, e.g. "755"
+	Mode string `json:"mode"`
+	UID  *int   `json:"uid"`
+	GID  *int   `json:"gid"`
+}
+
+// createFolderResponse is POST /filesystem/folder's answer.
+type createFolderResponse struct {
+	Success bool           `json:"success"`
+	Message string         `json:"message"`
+	Item    fileSystemItem `json:"item"`
+}
+
 // handleCreateFolder serves POST /filesystem/folder — the base's createFolder:
 // {path, name, mode?, uid?, gid?} → 201 with the new directory's item.
+//
+//	@Summary		Create a directory
+//	@Description	Minimum role: operator. {path, name, mode?, uid?, gid?} — mode is octal ("755"); uid/gid apply on Unix hosts (failures narrate to the log, never block — the base's tolerance). Synchronous.
+//	@Tags			File System
+//	@Accept			json
+//	@Produce		json
+//	@Param			request	body	createFolderRequest	true	"Parent path, folder name, and optional mode/uid/gid"
+//	@Success		201	{object}	createFolderResponse	"Directory created ({success, message, item})"
+//	@Failure		400	"Missing fields, bad mode, or directory already exists"
+//	@Failure		403	"Path forbidden"
+//	@Failure		503	"File browser is disabled"
+//	@Router			/filesystem/folder [post]
 func (s *Server) handleCreateFolder(w http.ResponseWriter, r *http.Request) {
-	var body struct {
-		Path string `json:"path"`
-		Name string `json:"name"`
-		Mode string `json:"mode"`
-		UID  *int   `json:"uid"`
-		GID  *int   `json:"gid"`
-	}
+	var body createFolderRequest
 	if err := decodeBody(r, &body); err != nil {
 		taskError(w, http.StatusBadRequest, "Invalid JSON body")
 		return
@@ -194,15 +217,35 @@ func (s *Server) handleCreateFolder(w http.ResponseWriter, r *http.Request) {
 		writeBrowseError(w, ierr, "Failed to create directory")
 		return
 	}
-	writeJSONStatus(w, http.StatusCreated, map[string]any{
-		"success": true,
-		"message": "Directory '" + body.Name + "' created successfully",
-		"item":    item,
+	writeJSONStatus(w, http.StatusCreated, createFolderResponse{
+		Success: true,
+		Message: "Directory '" + body.Name + "' created successfully",
+		Item:    item,
 	})
+}
+
+// readFileContentResponse is GET /filesystem/content's answer.
+type readFileContentResponse struct {
+	Content   string         `json:"content"`
+	FileInfo  fileSystemItem `json:"file_info"`
+	Encoding  string         `json:"encoding"`
+	SizeBytes int            `json:"size_bytes"`
 }
 
 // handleReadFileContent serves GET /filesystem/content — the base's readFile:
 // text files only, bounded by security.max_edit_size_mb.
+//
+//	@Summary		Read text file content
+//	@Description	Minimum role: operator. Text files only (the 8KB binary sample refuses binaries) bounded by security.max_edit_size_mb — the file-manager editor's read.
+//	@Tags			File System
+//	@Produce		json
+//	@Param			path	query	string	true	"File path to read"
+//	@Success		200	{object}	readFileContentResponse	"File content"
+//	@Failure		400	"Binary file, over the edit limit, or a directory"
+//	@Failure		403	"Path forbidden"
+//	@Failure		404	"File not found"
+//	@Failure		503	"File browser is disabled"
+//	@Router			/filesystem/content [get]
 func (s *Server) handleReadFileContent(w http.ResponseWriter, r *http.Request) {
 	path := r.URL.Query().Get("path")
 	if path == "" {
@@ -239,27 +282,51 @@ func (s *Server) handleReadFileContent(w http.ResponseWriter, r *http.Request) {
 		writeBrowseError(w, err, "Failed to read file")
 		return
 	}
-	writeJSON(w, map[string]any{
-		"content":    string(content),
-		"file_info":  browseItemInfo(normalized, info),
-		"encoding":   "utf8",
-		"size_bytes": len(content),
+	writeJSON(w, readFileContentResponse{
+		Content:   string(content),
+		FileInfo:  browseItemInfo(normalized, info),
+		Encoding:  "utf8",
+		SizeBytes: len(content),
 	})
+}
+
+// writeFileContentRequest is PUT /filesystem/content's body.
+type writeFileContentRequest struct {
+	Path    string  `json:"path"`
+	Content *string `json:"content"`
+	Backup  bool    `json:"backup"`
+	// Octal permission string, e.g. "644"
+	Mode string `json:"mode"`
+	UID  *int   `json:"uid"`
+	GID  *int   `json:"gid"`
+}
+
+// writeFileContentResponse is PUT /filesystem/content's answer.
+type writeFileContentResponse struct {
+	Success     bool           `json:"success"`
+	Message     string         `json:"message"`
+	FileInfo    fileSystemItem `json:"file_info"`
+	ContentSize int            `json:"content_size"`
 }
 
 // handleWriteFileContent serves PUT /filesystem/content — the base's
 // writeFile: {path, content, backup?, uid?, gid?, mode?}; backup copies the
 // existing file to <path>.backup.<unix-ms> first (failure narrates, never
 // blocks — the base's rule).
+//
+//	@Summary		Write text file content
+//	@Description	Minimum role: operator. {path, content, backup?, uid?, gid?, mode?} bounded by security.max_edit_size_mb; backup copies the existing file to <path>.backup.<unix-ms> first (failure narrates, never blocks). Synchronous.
+//	@Tags			File System
+//	@Accept			json
+//	@Produce		json
+//	@Param			request	body	writeFileContentRequest	true	"Path, content, and optional backup/mode/uid/gid"
+//	@Success		200	{object}	writeFileContentResponse	"File written ({success, message, file_info, content_size})"
+//	@Failure		400	"Missing fields, bad mode, or content over the edit limit"
+//	@Failure		403	"Path forbidden"
+//	@Failure		503	"File browser is disabled"
+//	@Router			/filesystem/content [put]
 func (s *Server) handleWriteFileContent(w http.ResponseWriter, r *http.Request) {
-	var body struct {
-		Path    string  `json:"path"`
-		Content *string `json:"content"`
-		Backup  bool    `json:"backup"`
-		Mode    string  `json:"mode"`
-		UID     *int    `json:"uid"`
-		GID     *int    `json:"gid"`
-	}
+	var body writeFileContentRequest
 	if err := decodeBody(r, &body); err != nil {
 		taskError(w, http.StatusBadRequest, "Invalid JSON body")
 		return
@@ -315,16 +382,28 @@ func (s *Server) handleWriteFileContent(w http.ResponseWriter, r *http.Request) 
 	if body.Backup {
 		message += " (backup created)"
 	}
-	writeJSON(w, map[string]any{
-		"success":      true,
-		"message":      message,
-		"file_info":    item,
-		"content_size": len(*body.Content),
+	writeJSON(w, writeFileContentResponse{
+		Success:     true,
+		Message:     message,
+		FileInfo:    item,
+		ContentSize: len(*body.Content),
 	})
 }
 
 // handleDownloadFile serves GET /filesystem/download — streams one file as an
 // attachment (directories are refused: "use archive creation instead").
+//
+//	@Summary		Download a file
+//	@Description	Minimum role: operator. Streams the file as an attachment (range requests honored); directories are refused — archive them instead.
+//	@Tags			File System
+//	@Produce		octet-stream
+//	@Param			path	query	string	true	"File path to download"
+//	@Success		200	{file}		binary	"The file"
+//	@Failure		400	"Missing path, or path is a directory"
+//	@Failure		403	"Path forbidden"
+//	@Failure		404	"File not found"
+//	@Failure		503	"File browser is disabled"
+//	@Router			/filesystem/download [get]
 func (s *Server) handleDownloadFile(w http.ResponseWriter, r *http.Request) {
 	path := r.URL.Query().Get("path")
 	if path == "" {
@@ -357,10 +436,42 @@ func (s *Server) handleDownloadFile(w http.ResponseWriter, r *http.Request) {
 	http.ServeContent(w, r, filepath.Base(normalized), info.ModTime(), file)
 }
 
+// uploadedFileInfo is the created file's summary in an upload's answer.
+type uploadedFileInfo struct {
+	Name        string `json:"name"`
+	Path        string `json:"path"`
+	IsDirectory bool   `json:"isDirectory"`
+	Size        int64  `json:"size"`
+}
+
+// uploadFileResponse is POST /filesystem/upload's answer.
+type uploadFileResponse struct {
+	Success bool             `json:"success"`
+	Message string           `json:"message"`
+	File    uploadedFileInfo `json:"file"`
+}
+
 // handleUploadFile serves POST /filesystem/upload — the base's uploadFile:
 // multipart with the metadata fields BEFORE the file part (uploadPath,
 // overwrite, mode), streamed to the destination through a temp file. Body
 // bounded by file_browser.upload_size_limit_gb.
+//
+//	@Summary		Upload a file
+//	@Description	Minimum role: operator. multipart/form-data with the metadata fields BEFORE the file part (multipart streams in order — the base's multer has the same rule): uploadPath (required), overwrite ("true"), mode (octal string). The filename is sanitized to [a-zA-Z0-9._-]; the body is capped by file_browser.upload_size_limit_gb and streams to the destination through a temp file.
+//	@Tags			File System
+//	@Accept			mpfd
+//	@Produce		json
+//	@Param			uploadPath	formData	string	true	"Destination directory (must precede the file part)"
+//	@Param			overwrite	formData	string	false	"Set to true to overwrite an existing file"
+//	@Param			mode		formData	string	false	"Octal permission string, e.g. 644"
+//	@Param			file		formData	file	true	"The file to upload"
+//	@Success		201	{object}	uploadFileResponse	"File uploaded ({success, message, file})"
+//	@Failure		400	"Not multipart, no file part, uploadPath missing or after the file part"
+//	@Failure		403	"Path forbidden"
+//	@Failure		409	"File already exists (set overwrite)"
+//	@Failure		413	"Body exceeds file_browser.upload_size_limit_gb"
+//	@Failure		503	"File browser is disabled"
+//	@Router			/filesystem/upload [post]
 func (s *Server) handleUploadFile(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, int64(s.cfg.FileBrowser.UploadSizeLimitGB)<<30)
 	reader, err := r.MultipartReader()
@@ -465,27 +576,53 @@ func (s *Server) handleUploadFile(w http.ResponseWriter, r *http.Request) {
 
 		slog.Info("file uploaded", "path", normalized, "size", size,
 			"by", auth.FromContext(r.Context()).Name)
-		writeJSONStatus(w, http.StatusCreated, map[string]any{
-			"success": true,
-			"message": "File '" + filename + "' uploaded successfully",
-			"file": map[string]any{
-				"name":        filename,
-				"path":        filepath.ToSlash(normalized),
-				"isDirectory": false,
-				"size":        size,
+		writeJSONStatus(w, http.StatusCreated, uploadFileResponse{
+			Success: true,
+			Message: "File '" + filename + "' uploaded successfully",
+			File: uploadedFileInfo{
+				Name:        filename,
+				Path:        filepath.ToSlash(normalized),
+				IsDirectory: false,
+				Size:        size,
 			},
 		})
 		return
 	}
 }
 
+// renameItemRequest is PATCH /filesystem/rename's body.
+type renameItemRequest struct {
+	Path    string `json:"path"`
+	NewName string `json:"new_name"`
+}
+
+// renameItemResponse is PATCH /filesystem/rename's answer.
+type renameItemResponse struct {
+	Success bool           `json:"success"`
+	Message string         `json:"message"`
+	Item    fileSystemItem `json:"item"`
+	OldPath string         `json:"old_path"`
+	NewPath string         `json:"new_path"`
+}
+
 // handleRenameItem serves PATCH /filesystem/rename — the base's renameItem:
 // {path, new_name}, the name sanitized to [a-zA-Z0-9._-], same directory.
+//
+//	@Summary		Rename an item
+//	@Description	Minimum role: operator. {path, new_name} — the new name is sanitized to [a-zA-Z0-9._-] and stays in the same directory. Synchronous.
+//	@Tags			File System
+//	@Accept			json
+//	@Produce		json
+//	@Param			request	body	renameItemRequest	true	"Path and new_name"
+//	@Success		200	{object}	renameItemResponse	"Item renamed ({success, message, item, old_path, new_path})"
+//	@Failure		400	"Missing fields"
+//	@Failure		403	"Path forbidden"
+//	@Failure		404	"Item not found"
+//	@Failure		409	"Target name already exists"
+//	@Failure		503	"File browser is disabled"
+//	@Router			/filesystem/rename [patch]
 func (s *Server) handleRenameItem(w http.ResponseWriter, r *http.Request) {
-	var body struct {
-		Path    string `json:"path"`
-		NewName string `json:"new_name"`
-	}
+	var body renameItemRequest
 	if err := decodeBody(r, &body); err != nil {
 		taskError(w, http.StatusBadRequest, "Invalid JSON body")
 		return
@@ -518,24 +655,57 @@ func (s *Server) handleRenameItem(w http.ResponseWriter, r *http.Request) {
 		writeBrowseError(w, ierr, "Failed to rename item")
 		return
 	}
-	writeJSON(w, map[string]any{
-		"success":  true,
-		"message":  "Item renamed to '" + sanitized + "' successfully",
-		"item":     item,
-		"old_path": filepath.ToSlash(normalized),
-		"new_path": filepath.ToSlash(target),
+	writeJSON(w, renameItemResponse{
+		Success: true,
+		Message: "Item renamed to '" + sanitized + "' successfully",
+		Item:    item,
+		OldPath: filepath.ToSlash(normalized),
+		NewPath: filepath.ToSlash(target),
 	})
+}
+
+// deleteFileItemRequest is DELETE /filesystem's body.
+type deleteFileItemRequest struct {
+	Path      string `json:"path"`
+	Recursive bool   `json:"recursive"`
+	Force     bool   `json:"force"`
+}
+
+// deletedItemInfo describes the removed item in a delete's answer.
+type deletedItemInfo struct {
+	Name        string `json:"name"`
+	Path        string `json:"path"`
+	IsDirectory bool   `json:"isDirectory"`
+	// Byte size, files only (absent for directories)
+	Size *int64 `json:"size,omitempty"`
+}
+
+// deleteFileItemResponse is DELETE /filesystem's answer.
+type deleteFileItemResponse struct {
+	Success bool   `json:"success"`
+	Message string `json:"message"`
+	// Absent on the already-absent (force) branch
+	DeletedItem *deletedItemInfo `json:"deleted_item,omitempty"`
 }
 
 // handleDeleteFileItem serves DELETE /filesystem — the base's deleteFileItem:
 // body {path, recursive?, force?}. Directories need recursive (a non-empty
 // directory without it fails honestly); force tolerates already-gone paths.
+//
+//	@Summary		Delete a file or directory
+//	@Description	Minimum role: operator. The base's deleteFileItem: directories need recursive (a non-empty directory without it fails honestly); force tolerates already-absent paths. Synchronous.
+//	@Tags			File System
+//	@Accept			json
+//	@Produce		json
+//	@Param			request	body	deleteFileItemRequest	true	"Path, and optional recursive/force"
+//	@Success		200	{object}	deleteFileItemResponse	"Item deleted ({success, message, deleted_item})"
+//	@Failure		400	"Missing path or invalid body"
+//	@Failure		403	"Path forbidden"
+//	@Failure		404	"Item not found"
+//	@Failure		503	"File browser is disabled"
+//	@Router			/filesystem [delete]
 func (s *Server) handleDeleteFileItem(w http.ResponseWriter, r *http.Request) {
-	var body struct {
-		Path      string `json:"path"`
-		Recursive bool   `json:"recursive"`
-		Force     bool   `json:"force"`
-	}
+	var body deleteFileItemRequest
 	if err := decodeBody(r, &body); err != nil {
 		taskError(w, http.StatusBadRequest, "Invalid JSON body")
 		return
@@ -552,22 +722,23 @@ func (s *Server) handleDeleteFileItem(w http.ResponseWriter, r *http.Request) {
 	info, serr := os.Stat(filepath.Clean(normalized))
 	if serr != nil {
 		if body.Force && errors.Is(serr, os.ErrNotExist) {
-			writeJSON(w, map[string]any{
-				"success": true,
-				"message": "Item already absent",
+			writeJSON(w, deleteFileItemResponse{
+				Success: true,
+				Message: "Item already absent",
 			})
 			return
 		}
 		writeBrowseError(w, serr, "Failed to delete item")
 		return
 	}
-	deletedItem := map[string]any{
-		"name":        filepath.Base(normalized),
-		"path":        filepath.ToSlash(normalized),
-		"isDirectory": info.IsDir(),
+	deletedItem := deletedItemInfo{
+		Name:        filepath.Base(normalized),
+		Path:        filepath.ToSlash(normalized),
+		IsDirectory: info.IsDir(),
 	}
 	if !info.IsDir() {
-		deletedItem["size"] = info.Size()
+		size := info.Size()
+		deletedItem.Size = &size
 	}
 
 	var derr error
@@ -587,25 +758,58 @@ func (s *Server) handleDeleteFileItem(w http.ResponseWriter, r *http.Request) {
 	}
 	slog.Info("filesystem item deleted", "path", normalized,
 		"by", auth.FromContext(r.Context()).Name)
-	writeJSON(w, map[string]any{
-		"success":      true,
-		"message":      kind + " '" + filepath.Base(normalized) + "' deleted successfully",
-		"deleted_item": deletedItem,
+	writeJSON(w, deleteFileItemResponse{
+		Success:     true,
+		Message:     kind + " '" + filepath.Base(normalized) + "' deleted successfully",
+		DeletedItem: &deletedItem,
 	})
+}
+
+// changePermissionsRequest is PATCH /filesystem/permissions's body.
+type changePermissionsRequest struct {
+	Path string `json:"path"`
+	UID  *int   `json:"uid"`
+	GID  *int   `json:"gid"`
+	// Octal permission string, e.g. "644"
+	Mode      string `json:"mode"`
+	Recursive bool   `json:"recursive"`
+}
+
+// permissionChanges echoes the requested changes in a permissions answer.
+type permissionChanges struct {
+	UID       *int   `json:"uid"`
+	GID       *int   `json:"gid"`
+	Mode      string `json:"mode"`
+	Recursive bool   `json:"recursive"`
+}
+
+// changePermissionsResponse is PATCH /filesystem/permissions's answer.
+type changePermissionsResponse struct {
+	Success        bool              `json:"success"`
+	Message        string            `json:"message"`
+	Item           fileSystemItem    `json:"item"`
+	ChangesApplied permissionChanges `json:"changes_applied"`
 }
 
 // handleChangePermissions serves PATCH /filesystem/permissions — the base's
 // changePermissions: {path, uid?, gid?, mode?, recursive?}. mode chmods (on
 // Windows that is the read-only attribute — Go's honest mapping); uid/gid
 // chown on Unix hosts and answer 400 on Windows.
+//
+//	@Summary		Change permissions or ownership
+//	@Description	Minimum role: operator. {path, uid?, gid?, mode?, recursive?} — at least one of uid/gid/mode. mode chmods (on Windows that is Go's honest mapping: the read-only attribute); uid/gid chown on Unix hosts — a Windows host answers 400 (no analog, never a silent no-op). Synchronous.
+//	@Tags			File System
+//	@Accept			json
+//	@Produce		json
+//	@Param			request	body	changePermissionsRequest	true	"Path plus at least one of uid/gid/mode, optional recursive"
+//	@Success		200	{object}	changePermissionsResponse	"Permissions updated ({success, message, item, changes_applied})"
+//	@Failure		400	"Missing path, nothing to change, bad mode, or uid/gid on a Windows host"
+//	@Failure		403	"Path forbidden"
+//	@Failure		404	"Item not found"
+//	@Failure		503	"File browser is disabled"
+//	@Router			/filesystem/permissions [patch]
 func (s *Server) handleChangePermissions(w http.ResponseWriter, r *http.Request) {
-	var body struct {
-		Path      string `json:"path"`
-		UID       *int   `json:"uid"`
-		GID       *int   `json:"gid"`
-		Mode      string `json:"mode"`
-		Recursive bool   `json:"recursive"`
-	}
+	var body changePermissionsRequest
 	if err := decodeBody(r, &body); err != nil {
 		taskError(w, http.StatusBadRequest, "Invalid JSON body")
 		return
@@ -649,15 +853,15 @@ func (s *Server) handleChangePermissions(w http.ResponseWriter, r *http.Request)
 		writeBrowseError(w, ierr, "Failed to update permissions")
 		return
 	}
-	writeJSON(w, map[string]any{
-		"success": true,
-		"message": "Permissions updated successfully for '" + item.Name + "'",
-		"item":    item,
-		"changes_applied": map[string]any{
-			"uid":       body.UID,
-			"gid":       body.GID,
-			"mode":      body.Mode,
-			"recursive": body.Recursive,
+	writeJSON(w, changePermissionsResponse{
+		Success: true,
+		Message: "Permissions updated successfully for '" + item.Name + "'",
+		Item:    item,
+		ChangesApplied: permissionChanges{
+			UID:       body.UID,
+			GID:       body.GID,
+			Mode:      body.Mode,
+			Recursive: body.Recursive,
 		},
 	})
 }

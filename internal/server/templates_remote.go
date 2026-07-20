@@ -29,22 +29,43 @@ import (
 // (the base's user-token rule); the configured auth_token never leaves the
 // agent.
 
+// templateSourceSummary is one enabled registry in the sources list —
+// credentials (auth_token) withheld.
+type templateSourceSummary struct {
+	Name    string `json:"name"`
+	URL     string `json:"url"`
+	Enabled bool   `json:"enabled"`
+	Default bool   `json:"default"`
+}
+
+// templateSourcesResponse is GET /templates/sources' answer.
+type templateSourcesResponse struct {
+	Sources []templateSourceSummary `json:"sources"`
+}
+
 // handleListTemplateSources mirrors GET /templates/sources: the enabled
 // registries, credentials withheld.
+//
+//	@Summary		List configured template sources
+//	@Description	Minimum role: viewer. The enabled Vagrant/BoxVault-compatible registries (name, url, default) — credentials are never returned. The base's GET /templates/sources.
+//	@Tags			Machine Management
+//	@Produce		json
+//	@Success		200	{object}	templateSourcesResponse	"Enabled sources"
+//	@Router			/templates/sources [get]
 func (s *Server) handleListTemplateSources(w http.ResponseWriter, _ *http.Request) {
-	sources := []map[string]any{}
+	sources := []templateSourceSummary{}
 	for _, source := range s.cfg.TemplateSources.Sources {
 		if !source.Enabled {
 			continue
 		}
-		sources = append(sources, map[string]any{
-			"name":    source.Name,
-			"url":     source.URL,
-			"enabled": source.Enabled,
-			"default": source.Default,
+		sources = append(sources, templateSourceSummary{
+			Name:    source.Name,
+			URL:     source.URL,
+			Enabled: source.Enabled,
+			Default: source.Default,
 		})
 	}
-	writeJSON(w, map[string]any{"sources": sources})
+	writeJSON(w, templateSourcesResponse{Sources: sources})
 }
 
 // findRegistrySource resolves an enabled source by name (the base's
@@ -206,6 +227,16 @@ func compatibleMetadataVersions(versions []any, providerSet map[string]bool) []a
 // multi-endpoint aggregation died with it), filtered to what THIS agent can
 // consume (compatibleVersions); boxes left with no versions are dropped.
 // Plain UA — see registryJSON.
+//
+//	@Summary		List a source's remote box catalog
+//	@Description	Minimum role: viewer. The registry's discovery catalog — the machine wizard's box-picker feed. ONE /api/discover call: public boxes for everyone, and when the source carries an API key (a BoxVault service-account token, sent as Bearer) the registry additionally answers the key's own organization's boxes. FILTERED to what this agent can consume: only versions carrying a provider in the host's set (virtualbox always; utm too on a UTM-capable macOS agent) in the host's architecture survive (foreign providers/architectures are pruned; boxes left with no versions are dropped) — a zone/docker/aws-only or foreign-arch box never reaches the picker. An x-registry-token request header overrides the source's configured key (never returned). The base's GET /templates/remote/{sourceName}.
+//	@Tags			Machine Management
+//	@Produce		json
+//	@Param			sourceName	path	string	true	"The configured template source"
+//	@Success		200	{object}	map[string]interface{}	"The registry's catalog document, relayed verbatim"
+//	@Failure		404	"Source not found or disabled"
+//	@Failure		502	"Remote source unreachable or answered an error"
+//	@Router			/templates/remote/{sourceName} [get]
 func (s *Server) handleRemoteTemplates(w http.ResponseWriter, r *http.Request) {
 	source := s.findRegistrySource(r.PathValue("sourceName"))
 	if source == nil {
@@ -249,6 +280,18 @@ func (s *Server) handleRemoteTemplates(w http.ResponseWriter, r *http.Request) {
 // metadata document for one box (versions + providers + download URLs),
 // filtered to what THIS agent can consume — a box that exists upstream but
 // carries nothing downloadable here answers 404, same as absent.
+//
+//	@Summary		Get one remote box's metadata
+//	@Description	Minimum role: viewer. The registry's Vagrant-compatible /{org}/{box} metadata document: versions with providers and download URLs, FILTERED to what this agent can consume (the host's provider set — virtualbox always, utm on a UTM-capable macOS agent — in the host architecture). A box that exists upstream but carries nothing downloadable here answers 404, same as absent. The base's GET /templates/remote/{sourceName}/{org}/{boxName}.
+//	@Tags			Machine Management
+//	@Produce		json
+//	@Param			sourceName	path	string	true	"The configured template source"
+//	@Param			org			path	string	true	"The box's organization"
+//	@Param			boxName		path	string	true	"The box name"
+//	@Success		200	{object}	map[string]interface{}	"The box's metadata document, relayed verbatim"
+//	@Failure		404	"Source disabled, or box not on the remote"
+//	@Failure		502	"Remote source unreachable or answered an error"
+//	@Router			/templates/remote/{sourceName}/{org}/{boxName} [get]
 func (s *Server) handleRemoteTemplateDetails(w http.ResponseWriter, r *http.Request) {
 	source := s.findRegistrySource(r.PathValue("sourceName"))
 	if source == nil {

@@ -59,6 +59,13 @@ var machineCreateDefaults = map[string]any{
 }
 
 // handleMachineCreateDefaults serves the static defaults document.
+//
+//	@Summary		Create-time defaults
+//	@Description	Minimum role: viewer. What a create spec that OMITS each field actually gets — the wizard's "(default: …)" labels. Two classes, both listed: the agent's own fallbacks (settings.vcpus/memory/os_type) and VirtualBox's own defaults the agent passes no flag for. knob_values is the ENUM-DROPDOWN FEED (Mark's ruling 2026-07-09): every closed-vocabulary knob's allowed values as FLAT DOTTED KEYS mapping to string arrays — the ONE wire shape, shared with zoneweaver (the 2026-07-12 one-wire ruling); never nested objects. Keys: knob_values["vbox.<section>.<key>"] (all on|off knobs list ["on","off"]; the usage dump's enums e.g. vbox.graphics.controller none|vboxvga|vmsvga|vboxsvga|qemuramfb, vbox.integration.clipboard_mode disabled|hosttoguest|guesttohost|bidirectional, vbox.audio.driver, vbox.platform.chipset/iommu/tpm_type/paravirt_provider/vm_process_priority/vm_execution_engine, vbox.firmware.boot_menu/apic, vbox.vrde.auth_type, vbox.cpu.profile, vbox.serial.type), knob_values["nics.<key>"] (promisc/nic_type/cable_connected), knob_values["settings.firmware_type"] (BIOS|UEFI), knob_values["disks.controller_type"], knob_values["disks.boot.clone_strategy"] (clone|copy — this platform's legal set of the converged clone-strategy vocabulary, sync 2026-07-19; zoneweaver's localize is refused here and never appears), knob_values["boot_order"] (entry values), knob_values["settings.sync_method"]. A knob present there renders a dropdown; absent means free-form or numeric. Values still pass to VirtualBox unvalidated. knob_defaults is the companion to the detail GET's knob_current (current = what is SET, knob_defaults = what an unset knob RUNS with): the same flat dotted keys, values in knob_current's own types (int ram/vcpus/boot_priority, on|off strings). It is SOURCED FROM THE CREATE PATH, never a guessed VirtualBox internal — the agent's forced console baseline (xhci on, usbtablet mouse, usb keyboard, bidirectional clipboard, VRDE multi/reuse-con), the vcpus/memory fallbacks, and agent-policy defaults (diskif sata, boot_priority 95, sync_method rsync). VirtualBox's OS-type recommendations (vram/chipset/audio/firmware/mitigations) are DELIBERATELY ABSENT: they vary by guest OS type, knob_current serves each machine's real value live, and the create-time labels for those read the settings section. zones is DEAD on this agent and the former top-level hardware key with it (per-hypervisor keys — Mark's ruling, sync 2026-07-19): every VirtualBox knob serves under vbox.<section>.<key>, plus vbox.guest_agent / vbox.post_provision_boot and the generic settings.firmware_type / disks / nics keys. An absent key keeps the UI's own default label. notes carries the per-section caveats.
+//	@Tags			Machine Management
+//	@Produce		json
+//	@Success		200	{object}	map[string]interface{}	"Defaults document"
+//	@Router			/machines/defaults [get]
 func (s *Server) handleMachineCreateDefaults(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, machineCreateDefaults)
 }
@@ -67,6 +74,14 @@ func (s *Server) handleMachineCreateDefaults(w http.ResponseWriter, _ *http.Requ
 // /machines/ostypes) — the wizard's settings.os_type dropdown feed (Mark's
 // go 2026-07-09). Live enumeration: whatever THIS VirtualBox build
 // supports, never a baked-in list.
+//
+//	@Summary		Guest OS type vocabulary
+//	@Description	Minimum role: viewer. Live VBoxManage list ostypes enumeration — every guest OS type THIS VirtualBox build supports (the settings.os_type vocabulary; the wizard's searchable dropdown feed). family groups the picker ("Windows", "Linux / Debian", "BSD / FreeBSD", ...); architecture is VirtualBox's own vocabulary (x86, x86 (64-bit), ARMv8 (64-bit)).
+//	@Tags			Machine Management
+//	@Produce		json
+//	@Success		200	{object}	map[string]interface{}	"OS types"
+//	@Failure		503	{object}	map[string]string	"VirtualBox is not installed"
+//	@Router			/machines/ostypes [get]
 func (s *Server) handleMachineOSTypes(w http.ResponseWriter, r *http.Request) {
 	exe := machines.VBoxManagePath(r.Context())
 	if exe == "" {

@@ -14,9 +14,51 @@ import (
 // The /network/addresses mutation surface — zoneweaver's task wire;
 // impossible-for-this-platform shapes refuse at the HTTP layer.
 
+// addressTaskResponse is the bare 202 task-queued document every
+// /network/addresses mutation answers (creation adds type+interface,
+// deletion adds release, enable/disable add note).
+type addressTaskResponse struct {
+	// Always true on a queued mutation.
+	Success bool `json:"success"`
+	// Human-readable confirmation naming the addrobj.
+	Message string `json:"message"`
+	// The queued task's id — poll it via GET /tasks/{taskId}.
+	TaskID string `json:"task_id"`
+	// The address object the task targets (the synthetic <interface>/v4|v6).
+	AddrObj string `json:"addrobj"`
+	// Creation only: the requested address type.
+	Type string `json:"type,omitempty"`
+	// Creation only: the interface the address was created on.
+	Interface string `json:"interface,omitempty"`
+	// Deletion only: whether a DHCP-lease release was requested.
+	Release *bool `json:"release,omitempty"`
+	// Enable/disable only: the interface-level honesty note.
+	Note string `json:"note,omitempty"`
+}
+
+// createNetworkAddressRequest is POST /network/addresses' JSON body.
+type createNetworkAddressRequest struct {
+	// The host interface the address lives on.
+	Interface string `json:"interface"`
+	// One of static (everywhere), dhcp (Windows only), addrconf (always refused).
+	Type string `json:"type"`
+	// The synthetic <interface>/v4|v6 name (the listing's vocabulary).
+	AddrObj string `json:"addrobj"`
+	// CIDR, required for static.
+	Address string `json:"address"`
+	// ipadm vocabulary with no analog here — accepted for wire parity, narrated as skipped.
+	Primary bool `json:"primary"`
+	// ipadm vocabulary with no analog here — accepted for wire parity, narrated as skipped.
+	Wait int `json:"wait"`
+	// ipadm vocabulary with no analog here — accepted for wire parity, narrated as skipped.
+	Temporary bool `json:"temporary"`
+	// ipadm vocabulary with no analog here — accepted for wire parity, narrated as skipped.
+	Down bool `json:"down"`
+}
+
 // queueAddressTask creates one address task and answers zoneweaver's 202.
 func (s *Server) queueAddressTask(w http.ResponseWriter, r *http.Request,
-	operation string, meta *netaddr.Metadata, message string, extra map[string]any,
+	operation string, meta *netaddr.Metadata, resp *addressTaskResponse,
 ) {
 	metadata, err := netaddr.MetadataJSON(meta)
 	if err != nil {
@@ -37,30 +79,25 @@ func (s *Server) queueAddressTask(w http.ResponseWriter, r *http.Request,
 	}
 	slog.Info("address task queued", "operation", operation, "addrobj", meta.AddrObj,
 		"by", auth.FromContext(r.Context()).Name)
-	payload := map[string]any{
-		"success": true,
-		"message": message,
-		"task_id": task.ID,
-		"addrobj": meta.AddrObj,
-	}
-	for k, v := range extra {
-		payload[k] = v
-	}
-	writeJSONStatus(w, http.StatusAccepted, payload)
+	resp.Success = true
+	resp.TaskID = task.ID
+	resp.AddrObj = meta.AddrObj
+	writeJSONStatus(w, http.StatusAccepted, resp)
 }
 
 // handleCreateNetworkAddress serves POST /network/addresses.
+//
+//	@Summary		Create an IP address (task)
+//	@Description	Minimum role: operator. Queues create_ip_address (zoneweaver's op, machine_name "system" — Mark's build order 2026-07-19 replaced the 501 stub). PER-OS HONESTY, refused at the POST so no doomed task queues: type static works everywhere (Windows netsh, Linux `ip addr add`, macOS ifconfig alias — the macOS apply is LIVE and does not persist across reboot, narrated in the task output); type dhcp is Windows-only (netsh source=dhcp — Linux/macOS have no cross-distro verb → 400); type addrconf always 400 (IPv6 SLAAC configures itself). address must be CIDR for static. primary/wait/temporary/down are ipadm vocabulary with no analog here — accepted for wire parity, narrated as skipped.
+//	@Tags			Host Configuration
+//	@Accept			json
+//	@Produce		json
+//	@Param			request	body	createNetworkAddressRequest	true	"Address creation request"
+//	@Success		202	{object}	addressTaskResponse	"Creation task queued ({success, message, task_id, addrobj, type, interface})"
+//	@Failure		400	"Missing interface/type/addrobj, missing address for static, non-CIDR address, dhcp off-Windows, or addrconf"
+//	@Router			/network/addresses [post]
 func (s *Server) handleCreateNetworkAddress(w http.ResponseWriter, r *http.Request) {
-	var body struct {
-		Interface string `json:"interface"`
-		Type      string `json:"type"`
-		AddrObj   string `json:"addrobj"`
-		Address   string `json:"address"`
-		Primary   bool   `json:"primary"`
-		Wait      int    `json:"wait"`
-		Temporary bool   `json:"temporary"`
-		Down      bool   `json:"down"`
-	}
+	var body createNetworkAddressRequest
 	if err := decodeBody(r, &body); err != nil {
 		netconfigError(w, http.StatusBadRequest, "Invalid JSON body", "")
 		return
@@ -98,13 +135,26 @@ func (s *Server) handleCreateNetworkAddress(w http.ResponseWriter, r *http.Reque
 		Wait:      body.Wait,
 		Temporary: body.Temporary,
 		Down:      body.Down,
-	}, "IP address creation task created for "+body.AddrObj, map[string]any{
-		"type":      body.Type,
-		"interface": body.Interface,
+	}, &addressTaskResponse{
+		Message:   "IP address creation task created for " + body.AddrObj,
+		Type:      body.Type,
+		Interface: body.Interface,
 	})
 }
 
 // handleDeleteNetworkAddress serves DELETE /network/addresses/{addrobj...}.
+//
+//	@Summary		Delete an IP address (task)
+//	@Description	Minimum role: operator. Queues delete_ip_address (netsh / `ip addr del` / ifconfig -alias). The synthetic <interface>/<version> addrobj can cover SEVERAL live addresses — ?address= disambiguates (this agent's extension; without it, exactly one live address of that version must exist or the request answers 400 listing the candidates). ?release=true releases the DHCP lease first on Windows (ipconfig /release; narrated skip elsewhere). A missing interface or an addrobj with no live address answers 404.
+//	@Tags			Host Configuration
+//	@Produce		json
+//	@Param			addrobj	path	string	true	"The listing's addrobj value — may carry a slash (<interface>/v4)"
+//	@Param			address	query	string	false	"Which of the addrobj's live addresses to delete (IP or CIDR) — required when several exist"
+//	@Param			release	query	bool	false	"Release the DHCP lease first (Windows; narrated skip elsewhere)"
+//	@Success		202	{object}	addressTaskResponse	"Deletion task queued ({success, message, task_id, addrobj, release})"
+//	@Failure		400	"Malformed addrobj, or several live addresses without ?address="
+//	@Failure		404	"Address object not found ({error, details})"
+//	@Router			/network/addresses/{addrobj} [delete]
 func (s *Server) handleDeleteNetworkAddress(w http.ResponseWriter, r *http.Request) {
 	addrobj := r.PathValue("addrobj")
 	iface, version, ok := netaddr.SplitAddrObj(addrobj)
@@ -135,13 +185,25 @@ func (s *Server) handleDeleteNetworkAddress(w http.ResponseWriter, r *http.Reque
 		AddrObj: addrobj,
 		Address: address,
 		Release: release,
-	}, "IP address deletion task created for "+addrobj, map[string]any{
-		"release": release,
+	}, &addressTaskResponse{
+		Message: "IP address deletion task created for " + addrobj,
+		Release: &release,
 	})
 }
 
 // handleNetworkAddressAction serves PUT /network/addresses/{rest...} — the
 // enable/disable verbs split from the one wildcard here.
+//
+//	@Summary		Enable an address's interface (task)
+//	@Description	Minimum role: operator. Queues enable_ip_address. HONESTY, loud: no platform here has illumos's per-address enable — the toggle applies to the INTERFACE the addrobj names (netsh set interface / `ip link set up` / ifconfig up), affecting every address on it; the 202 body and the task output both say so. (Route mechanics: one PUT wildcard under /network/addresses/ splits the enable/disable suffix — Go 1.22 ServeMux forbids literal segments after a trailing wildcard.)
+//	@Tags			Host Configuration
+//	@Produce		json
+//	@Param			addrobj	path	string	true	"The listing's addrobj value — may carry a slash (<interface>/v4)"
+//	@Success		202	{object}	addressTaskResponse	"Enable task queued ({success, message, task_id, addrobj, note})"
+//	@Failure		400	"Malformed addrobj"
+//	@Failure		404	"Unknown action suffix"
+//	@Router			/network/addresses/{addrobj}/enable [put]
+//	@Router			/network/addresses/{addrobj}/disable [put]
 func (s *Server) handleNetworkAddressAction(w http.ResponseWriter, r *http.Request) {
 	rest := r.PathValue("rest")
 	addrobj, action := "", ""
@@ -166,8 +228,8 @@ func (s *Server) handleNetworkAddressAction(w http.ResponseWriter, r *http.Reque
 	if action == "disable" {
 		operation = netaddr.OpDisable
 	}
-	s.queueAddressTask(w, r, operation, &netaddr.Metadata{AddrObj: addrobj},
-		"IP address "+action+" task created for "+addrobj, map[string]any{
-			"note": "no per-address enable exists on " + runtime.GOOS + " — the toggle applies to interface " + iface + " itself",
-		})
+	s.queueAddressTask(w, r, operation, &netaddr.Metadata{AddrObj: addrobj}, &addressTaskResponse{
+		Message: "IP address " + action + " task created for " + addrobj,
+		Note:    "no per-address enable exists on " + runtime.GOOS + " — the toggle applies to interface " + iface + " itself",
+	})
 }

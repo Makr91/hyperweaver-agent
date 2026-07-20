@@ -32,6 +32,17 @@ type fileTransferMetadata struct {
 	Destination string `json:"destination"`
 }
 
+// transferTaskResponse is the 202 body of PUT /filesystem/move and
+// POST /filesystem/copy: the queued file_move / file_copy task's id alongside
+// the source and destination it will act on.
+type transferTaskResponse struct {
+	Success     bool   `json:"success"`
+	Message     string `json:"message"`
+	TaskID      string `json:"task_id"`
+	Source      string `json:"source"`
+	Destination string `json:"destination"`
+}
+
 // registerFilesystemExecutors wires the filesystem task operations; called
 // from New (before the queue starts).
 func (s *Server) registerFilesystemExecutors() {
@@ -85,12 +96,12 @@ func (s *Server) handleTransferItem(operation, verb string) http.HandlerFunc {
 			taskError(w, http.StatusInternalServerError, "Failed to create "+verb+" task")
 			return
 		}
-		writeJSONStatus(w, http.StatusAccepted, map[string]any{
-			"success":     true,
-			"message":     capitalize(verb) + " task created for '" + filepath.Base(body.Source) + "'",
-			"task_id":     task.ID,
-			"source":      body.Source,
-			"destination": body.Destination,
+		writeJSONStatus(w, http.StatusAccepted, transferTaskResponse{
+			Success:     true,
+			Message:     capitalize(verb) + " task created for '" + filepath.Base(body.Source) + "'",
+			TaskID:      task.ID,
+			Source:      body.Source,
+			Destination: body.Destination,
 		})
 	}
 }

@@ -302,22 +302,58 @@ func (s *Server) driveItems() []fileSystemItem {
 // browseParent answers parent_path: null at the top of the browse universe
 // (the configured root, or a filesystem top); with no root on Windows the
 // drives listing sits above drive roots.
-func browseParent(normalized, root string) any {
+func browseParent(normalized, root string) *string {
 	if root != "" && sameBrowsePath(normalized, root) {
 		return nil
 	}
 	parent := filepath.Dir(normalized)
 	if parent == normalized {
 		if root == "" && runtime.GOOS == "windows" {
-			return "/"
+			top := "/"
+			return &top
 		}
 		return nil
 	}
-	return filepath.ToSlash(parent)
+	slash := filepath.ToSlash(parent)
+	return &slash
+}
+
+// browseResponse is GET /filesystem's directory listing (the base's
+// browseDirectory answer).
+type browseResponse struct {
+	Items []fileSystemItem `json:"items"`
+	// Forward-slash absolute path on every platform ("/" itself on the drive listing)
+	CurrentPath string `json:"current_path"`
+	// null at the browse top (the configured root, the drive listing, a filesystem root); a Windows drive root answers "/" when unconfined — navigation back to the drive listing. Forward-slash
+	ParentPath          *string `json:"parent_path"`
+	TotalItems          int     `json:"total_items"`
+	HiddenItemsFiltered int     `json:"hidden_items_filtered"`
+}
+
+// browseListingError is the internal listing-failure body ({error, details} —
+// the base's failure shape; the over-the-entry-cap refusal rides it too).
+type browseListingError struct {
+	Error   string `json:"error"`
+	Details string `json:"details"`
 }
 
 // handleBrowseFilesystem serves GET /filesystem — the base's browseDirectory:
 // list, hidden filter, user sort, parent path.
+//
+//	@Summary		Browse directory contents
+//	@Description	Minimum role: operator (the file-browser capability token; the whole /filesystem surface is operator-gated by the central policy). Lists one agent-host directory — zoneweaver's browseDirectory: hidden-file filter, sortable, parent-path navigation. THE "/" REQUEST (the browse top): with file_browser.root configured, "/" maps to that directory and any path outside it answers 403 (the containment check rides every request); unconfined (root empty, the default), "/" answers the DRIVE-LETTER LISTING on Windows (one directory item per mounted drive — C:/, D:/, ... — current_path "/", parent_path null; drive roots' parent_path points back to "/") and the real filesystem root elsewhere. Security bounds from file_browser.security: traversal guard (".."/"~" rejected), forbidden path prefixes and glob patterns answer 403, directories over max_directory_entries answer 500 with details. 503 when file_browser.enabled is false (the token disappears with it).
+//	@Tags			File System
+//	@Produce		json
+//	@Param			path		query	string	false	"Directory path to browse. \"/\" is the browse top: the configured file_browser.root when set, the Windows drive listing or the real root when not"	default(/)
+//	@Param			show_hidden	query	bool	false	"Include dot-prefixed entries"	default(false)
+//	@Param			sort_by		query	string	false	"Sort field"	Enums(name,size,modified,type)	default(name)
+//	@Param			sort_order	query	string	false	"Sort direction"	Enums(asc,desc)	default(asc)
+//	@Success		200	{object}	browseResponse	"Directory contents"
+//	@Failure		403	"Path forbidden (traversal, outside the configured browse root, forbidden prefix, or pattern match)"
+//	@Failure		404	"Directory not found"
+//	@Failure		500	"Listing failure ({error, details} — includes the over-the-entry-cap refusal)"
+//	@Failure		503	"File browser is disabled"
+//	@Router			/filesystem [get]
 func (s *Server) handleBrowseFilesystem(w http.ResponseWriter, r *http.Request) {
 	query := r.URL.Query()
 	dirPath := query.Get("path")
@@ -335,7 +371,7 @@ func (s *Server) handleBrowseFilesystem(w http.ResponseWriter, r *http.Request) 
 
 	var items []fileSystemItem
 	currentPath := "/"
-	var parentPath any
+	var parentPath *string
 	if dirPath == "/" && runtime.GOOS == "windows" {
 		items = s.driveItems()
 	} else {
@@ -349,9 +385,9 @@ func (s *Server) handleBrowseFilesystem(w http.ResponseWriter, r *http.Request) 
 			default:
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusInternalServerError)
-				writeJSON(w, map[string]any{
-					"error":   "Failed to browse directory",
-					"details": err.Error(),
+				writeJSON(w, browseListingError{
+					Error:   "Failed to browse directory",
+					Details: err.Error(),
 				})
 			}
 			return
@@ -400,12 +436,12 @@ func (s *Server) handleBrowseFilesystem(w http.ResponseWriter, r *http.Request) 
 
 	// Wire paths are forward-slash on every platform (the base contract —
 	// the file manager matches parent/child on '/').
-	writeJSON(w, map[string]any{
-		"items":                 items,
-		"current_path":          currentPath,
-		"parent_path":           parentPath,
-		"total_items":           len(items),
-		"hidden_items_filtered": total - len(items),
+	writeJSON(w, browseResponse{
+		Items:               items,
+		CurrentPath:         currentPath,
+		ParentPath:          parentPath,
+		TotalItems:          len(items),
+		HiddenItemsFiltered: total - len(items),
 	})
 }
 

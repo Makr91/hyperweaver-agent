@@ -83,6 +83,16 @@ func (s *Server) machineFTPInfo(w http.ResponseWriter, r *http.Request) *ftpInfo
 }
 
 // handleMachineFTPInfo serves GET /machines/{name}/ftp.
+//
+//	@Summary		SFTP connection info
+//	@Description	Minimum role: viewer (the host-launchers capability token). The machine's SFTP target built from the stored credentials (settings.vagrant_user) and the SSH transport ladder (NAT ssh port-forward at 127.0.0.1 first, control IP fallback). A remote-mode UI hands sftp_url to the USER'S own OS handler (window.open) — the FileZilla-style flow without an agent-side launch; note a NAT-forward target (127.0.0.1) only resolves ON the agent host.
+//	@Tags			Machine Management
+//	@Produce		json
+//	@Param			machineName	path	string	true	"Machine name"
+//	@Success		200	{object}	ftpInfo	"SFTP target"
+//	@Failure		400	"Machine not running, no credentials configured, or no SSH transport"
+//	@Failure		404	"Machine not found"
+//	@Router			/machines/{machineName}/ftp [get]
 func (s *Server) handleMachineFTPInfo(w http.ResponseWriter, r *http.Request) {
 	info := s.machineFTPInfo(w, r)
 	if info == nil {
@@ -91,21 +101,39 @@ func (s *Server) handleMachineFTPInfo(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, info)
 }
 
+// openMachineFTPResponse is POST /machines/{name}/open-ftp's answer.
+type openMachineFTPResponse struct {
+	Success     bool   `json:"success"`
+	MachineName string `json:"machine_name"`
+	SFTPURL     string `json:"sftp_url"`
+	Message     string `json:"message"`
+}
+
 // handleOpenMachineFTP serves POST /machines/{name}/open-ftp: hands the sftp
 // URL to the agent host's default handler (FileZilla and friends register
 // sftp://). Fire-and-forget like the tray's browser open — a missing handler
 // surfaces on the host's own desktop, not here.
+//
+//	@Summary		Open an SFTP client on the agent host
+//	@Description	Minimum role: operator (the host-launchers capability token — SHI's Open FTP Client button). Hands the machine's sftp:// URL to the AGENT HOST'S default handler (FileZilla and friends register sftp://). The Direct-mode desktop contract: the browser and the agent share the machine. Fire-and-forget — a missing handler surfaces on the host's own desktop.
+//	@Tags			Machine Management
+//	@Produce		json
+//	@Param			machineName	path	string	true	"Machine name"
+//	@Success		200	{object}	openMachineFTPResponse	"Launch requested"
+//	@Failure		400	"Machine not running, no credentials configured, or no SSH transport"
+//	@Failure		404	"Machine not found"
+//	@Router			/machines/{machineName}/open-ftp [post]
 func (s *Server) handleOpenMachineFTP(w http.ResponseWriter, r *http.Request) {
 	info := s.machineFTPInfo(w, r)
 	if info == nil {
 		return
 	}
 	openbrowser.Open(info.SFTPURL, "")
-	writeJSON(w, map[string]any{
-		"success":      true,
-		"machine_name": info.MachineName,
-		"sftp_url":     info.SFTPURL,
-		"message":      "SFTP client launch requested on the agent host",
+	writeJSON(w, openMachineFTPResponse{
+		Success:     true,
+		MachineName: info.MachineName,
+		SFTPURL:     info.SFTPURL,
+		Message:     "SFTP client launch requested on the agent host",
 	})
 }
 
@@ -119,9 +147,23 @@ type applicationInfo struct {
 	Exists bool     `json:"exists"`
 }
 
+// applicationListResponse is GET /applications's answer: the configured
+// applications[] with their live existence check, plus the count.
+type applicationListResponse struct {
+	Applications []applicationInfo `json:"applications"`
+	Total        int               `json:"total"`
+}
+
 // handleListApplications serves GET /applications — the configured external
 // applications (config applications[]) with a live existence check, feeding
 // the UI's per-machine launch menu and its applications settings page.
+//
+//	@Summary		List external launcher applications
+//	@Description	Minimum role: viewer (the host-launchers capability token). The configured applications[] registry — user-chosen desktop tools (PuTTY, WinSCP, mstsc, ...) the agent can launch on its OWN host against a machine (SHI's per-server app buttons, generalized from its single hardcoded FileZilla entry). Each entry carries name, path (the executable), args (the argument template with {host}/{port}/{user}/{password}/{machine} placeholders), and exists — whether the executable is actually present on the agent host, so the UI greys out what cannot launch. The list lives in config applications[]; edit it through PUT /settings.
+//	@Tags			Machine Management
+//	@Produce		json
+//	@Success		200	{object}	applicationListResponse	"Configured applications"
+//	@Router			/applications [get]
 func (s *Server) handleListApplications(w http.ResponseWriter, _ *http.Request) {
 	list := make([]applicationInfo, 0, len(s.cfg.Applications))
 	for i := range s.cfg.Applications {
@@ -134,7 +176,7 @@ func (s *Server) handleListApplications(w http.ResponseWriter, _ *http.Request) 
 			Exists: err == nil && !stat.IsDir(),
 		})
 	}
-	writeJSON(w, map[string]any{"applications": list, "total": len(list)})
+	writeJSON(w, applicationListResponse{Applications: list, Total: len(list)})
 }
 
 // findApplication answers the configured application with this name (nil when
@@ -159,12 +201,34 @@ func resolveAppArgs(args []string, replacements *strings.Replacer) []string {
 	return resolved
 }
 
+// launchApplicationResponse is POST
+// /machines/{name}/applications/{appName}/launch's answer.
+type launchApplicationResponse struct {
+	Success     bool   `json:"success"`
+	MachineName string `json:"machine_name"`
+	Application string `json:"application"`
+	Host        string `json:"host"`
+	Port        int    `json:"port"`
+	Message     string `json:"message"`
+}
+
 // handleLaunchApplication serves POST
 // /machines/{machineName}/applications/{appName}/launch — SHI's openFtpClient
 // generalized (Mark's go 2026-07-12): spawn the configured tool on the AGENT
 // host with the machine's live connection details substituted into its
 // argument template. Fire-and-forget like every launcher; a missing
 // executable is refused up front rather than spawned into the void.
+//
+//	@Summary		Launch an external application against a machine
+//	@Description	Minimum role: operator (the host-launchers capability token). Spawns the named applications[] entry on the AGENT host (the Direct-mode desktop contract — the browser and agent share the machine; elsewhere it opens on the agent's own desktop) with the argument template resolved for this machine: {host}/{port} from the SSH transport ladder (NAT ssh port-forward first, guest-agent IP, control IP), {user}/{password} from the stored credentials (settings.vagrant_user family), {machine} the machine name. Substitution is per-argument (never a shell string), so spaces in a path or password stay one argv word. A missing executable is REFUSED (400), never spawned (SHI's exists rule). Fire-and-forget: the process detaches and the answer only reports the launch was requested.
+//	@Tags			Machine Management
+//	@Produce		json
+//	@Param			machineName	path	string	true	"Machine name"
+//	@Param			appName	path	string	true	"The applications[] entry name (GET /applications lists them)"
+//	@Success		200	{object}	launchApplicationResponse	"Launch requested"
+//	@Failure		400	"Machine not running, executable missing on the agent host, or no transport to the machine"
+//	@Failure		404	"Machine not found, or no application by that name is configured"
+//	@Router			/machines/{machineName}/applications/{appName}/launch [post]
 func (s *Server) handleLaunchApplication(w http.ResponseWriter, r *http.Request) {
 	application := s.findApplication(r.PathValue("appName"))
 	if application == nil {
@@ -221,19 +285,37 @@ func (s *Server) handleLaunchApplication(w http.ResponseWriter, r *http.Request)
 	slog.Info("application launched", "application", application.Name,
 		"machine", machine.Name, "by", auth.FromContext(r.Context()).Name)
 
-	writeJSON(w, map[string]any{
-		"success":      true,
-		"machine_name": machine.Name,
-		"application":  application.Name,
-		"host":         host,
-		"port":         port,
-		"message":      application.Name + " launch requested on the agent host",
+	writeJSON(w, launchApplicationResponse{
+		Success:     true,
+		MachineName: machine.Name,
+		Application: application.Name,
+		Host:        host,
+		Port:        port,
+		Message:     application.Name + " launch requested on the agent host",
 	})
+}
+
+// openMachineDirectoryResponse is POST /machines/{name}/open-directory's answer.
+type openMachineDirectoryResponse struct {
+	Success     bool   `json:"success"`
+	MachineName string `json:"machine_name"`
+	Directory   string `json:"directory"`
+	Message     string `json:"message"`
 }
 
 // handleOpenMachineDirectory serves POST /machines/{name}/open-directory:
 // opens the machine's working directory in the agent host's file manager
 // (Explorer / Finder / the xdg default).
+//
+//	@Summary		Open the machine's working directory on the agent host
+//	@Description	Minimum role: operator (the host-launchers capability token — SHI's Open Directory button). Opens the machine's working directory in the AGENT HOST'S file manager (Explorer / Finder / the xdg default). Direct-mode desktop contract; fire-and-forget.
+//	@Tags			Machine Management
+//	@Produce		json
+//	@Param			machineName	path	string	true	"Machine name"
+//	@Success		200	{object}	openMachineDirectoryResponse	"Launch requested"
+//	@Failure		400	"Machine has no working directory"
+//	@Failure		404	"Machine not found, or the directory no longer exists"
+//	@Router			/machines/{machineName}/open-directory [post]
 func (s *Server) handleOpenMachineDirectory(w http.ResponseWriter, r *http.Request) {
 	machine := s.findMachine(w, r)
 	if machine == nil {
@@ -250,10 +332,10 @@ func (s *Server) handleOpenMachineDirectory(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	openbrowser.Open(home, "")
-	writeJSON(w, map[string]any{
-		"success":      true,
-		"machine_name": machine.Name,
-		"directory":    home,
-		"message":      "File manager launch requested on the agent host",
+	writeJSON(w, openMachineDirectoryResponse{
+		Success:     true,
+		MachineName: machine.Name,
+		Directory:   home,
+		Message:     "File manager launch requested on the agent host",
 	})
 }

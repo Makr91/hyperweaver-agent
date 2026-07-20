@@ -19,7 +19,26 @@ import (
 
 // bulkRequest is the bulk body: "all" or a name array.
 type bulkRequest struct {
+	// "all" or an array of machine names
 	Machines json.RawMessage `json:"machines"`
+}
+
+// bulkSkip is one skipped machine in a bulk start/stop response.
+type bulkSkip struct {
+	Machine string `json:"machine"`
+	Reason  string `json:"reason"`
+}
+
+// bulkResponse is the 200 body of POST /machines/bulk/start and
+// /machines/bulk/stop.
+type bulkResponse struct {
+	Success bool `json:"success"`
+	// bulk_start or bulk_stop
+	Operation    string     `json:"operation"`
+	TasksCreated int        `json:"tasks_created"`
+	Skipped      []bulkSkip `json:"skipped"`
+	TaskIDs      []string   `json:"task_ids"`
+	Message      string     `json:"message"`
 }
 
 // errInvalidBulkBody reports a bulk body that is neither "all" nor a name
@@ -69,6 +88,15 @@ func (s *Server) resolveBulkTargets(ctx context.Context, raw json.RawMessage, wa
 }
 
 // handleBulkStart queues start tasks for many machines at once.
+//
+//	@Summary		Bulk start machines
+//	@Description	Minimum role: operator. machines is "all" (every stopped, non-orphaned machine) or a name array; already-running machines are skipped with a reason. Per machine, accrued pending changes apply first (start chained on the modify), same as the single start.
+//	@Tags			Machine Management
+//	@Accept			json
+//	@Produce		json
+//	@Param			request	body	bulkRequest	true	"all or an array of machine names"
+//	@Success		200	{object}	bulkResponse	"Bulk start queued"
+//	@Router			/machines/bulk/start [post]
 func (s *Server) handleBulkStart(w http.ResponseWriter, r *http.Request) {
 	s.handleBulk(w, r, "bulk_start", machines.OpStart, tasks.PriorityMedium,
 		[]string{machines.StatusStopped, machines.StatusConfigured, machines.StatusAborted, machines.StatusSuspended},
@@ -81,6 +109,15 @@ func (s *Server) handleBulkStart(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleBulkStop queues stop tasks for many machines at once.
+//
+//	@Summary		Bulk stop machines
+//	@Description	Minimum role: operator. machines is "all" (every running, non-orphaned machine) or a name array; already-stopped machines are skipped with a reason. Pending starts for targeted machines are cancelled. Per machine, accrued pending changes apply after the power-off, same as the single stop.
+//	@Tags			Machine Management
+//	@Accept			json
+//	@Produce		json
+//	@Param			request	body	bulkRequest	true	"all or an array of machine names"
+//	@Success		200	{object}	bulkResponse	"Bulk stop queued"
+//	@Router			/machines/bulk/stop [post]
 func (s *Server) handleBulkStop(w http.ResponseWriter, r *http.Request) {
 	s.handleBulk(w, r, "bulk_stop", machines.OpStop, tasks.PriorityHigh,
 		[]string{machines.StatusRunning},
@@ -118,12 +155,12 @@ func (s *Server) handleBulk(w http.ResponseWriter, r *http.Request, operationLab
 	}
 
 	createdBy := auth.FromContext(r.Context()).Name
-	skipped := []map[string]string{}
+	skipped := []bulkSkip{}
 	taskIDs := []string{}
 	for _, machine := range targets {
 		status := liveMachineStatus(r.Context(), machine)
 		if reason := skipReason(status); reason != "" {
-			skipped = append(skipped, map[string]string{"machine": machine.Name, "reason": reason})
+			skipped = append(skipped, bulkSkip{Machine: machine.Name, Reason: reason})
 			continue
 		}
 		// machines.provision_on_start applies to bulk starts too: a
@@ -160,7 +197,7 @@ func (s *Server) handleBulk(w http.ResponseWriter, r *http.Request, operationLab
 		task, cerr := s.tasks.Store().Create(r.Context(), &nt)
 		if cerr != nil {
 			slog.Error("queue bulk task", "machine", machine.Name, "error", cerr)
-			skipped = append(skipped, map[string]string{"machine": machine.Name, "reason": "queue_failed"})
+			skipped = append(skipped, bulkSkip{Machine: machine.Name, Reason: "queue_failed"})
 			continue
 		}
 		if operation == machines.OpStop {
@@ -169,13 +206,13 @@ func (s *Server) handleBulk(w http.ResponseWriter, r *http.Request, operationLab
 		taskIDs = append(taskIDs, task.ID)
 	}
 
-	writeJSON(w, map[string]any{
-		"success":       true,
-		"operation":     operationLabel,
-		"tasks_created": len(taskIDs),
-		"skipped":       skipped,
-		"task_ids":      taskIDs,
-		"message":       formatBulkMessage(operation, len(taskIDs), len(skipped)),
+	writeJSON(w, bulkResponse{
+		Success:      true,
+		Operation:    operationLabel,
+		TasksCreated: len(taskIDs),
+		Skipped:      skipped,
+		TaskIDs:      taskIDs,
+		Message:      formatBulkMessage(operation, len(taskIDs), len(skipped)),
 	})
 }
 
@@ -183,7 +220,32 @@ func formatBulkMessage(operation string, created, skipped int) string {
 	return fmt.Sprintf("%d %s tasks queued, %d skipped", created, operation, skipped)
 }
 
+// serverIDConstraints is GET /machines/ids' constraints block — the
+// server_id vocabulary (numeric, 4-8 digits).
+type serverIDConstraints struct {
+	Format    string `json:"format"`
+	MinLength int    `json:"min_length"`
+	MaxLength int    `json:"max_length"`
+	MinValue  int    `json:"min_value"`
+	MaxValue  int    `json:"max_value"`
+}
+
+// serverIDsResponse is GET /machines/ids's answer.
+type serverIDsResponse struct {
+	Used          []machines.UsedServerID `json:"used"`
+	Constraints   serverIDConstraints     `json:"constraints"`
+	NextAvailable string                  `json:"next_available"`
+	TotalUsed     int                     `json:"total_used"`
+}
+
 // handleServerIDs lists used server_ids, constraints, and the next free id.
+//
+//	@Summary		Server ID usage
+//	@Description	Minimum role: viewer. Used server_ids, constraints, and the next available id — create NEVER auto-assigns (with prefix_machine_names the caller must send settings.server_id; this endpoint and /machines/ids/next feed the field).
+//	@Tags			Machine Management
+//	@Produce		json
+//	@Success		200	{object}	serverIDsResponse	"Server ID information"
+//	@Router			/machines/ids [get]
 func (s *Server) handleServerIDs(w http.ResponseWriter, r *http.Request) {
 	used, err := s.machines.UsedServerIDs(r.Context())
 	if err != nil {
@@ -197,21 +259,33 @@ func (s *Server) handleServerIDs(w http.ResponseWriter, r *http.Request) {
 		taskError(w, http.StatusInternalServerError, "Failed to retrieve server ID information")
 		return
 	}
-	writeJSON(w, map[string]any{
-		"used": used,
-		"constraints": map[string]any{
-			"format":     "numeric",
-			"min_length": 4,
-			"max_length": 8,
-			"min_value":  1,
-			"max_value":  99999999,
+	writeJSON(w, serverIDsResponse{
+		Used: used,
+		Constraints: serverIDConstraints{
+			Format:    "numeric",
+			MinLength: 4,
+			MaxLength: 8,
+			MinValue:  1,
+			MaxValue:  99999999,
 		},
-		"next_available": next,
-		"total_used":     len(used),
+		NextAvailable: next,
+		TotalUsed:     len(used),
 	})
 }
 
+// nextServerIDResponse is GET /machines/ids/next's answer.
+type nextServerIDResponse struct {
+	ServerID string `json:"server_id"`
+}
+
 // handleNextServerID returns just the next free server_id.
+//
+//	@Summary		Next available server ID
+//	@Description	Minimum role: viewer.
+//	@Tags			Machine Management
+//	@Produce		json
+//	@Success		200	{object}	nextServerIDResponse	"Next server ID"
+//	@Router			/machines/ids/next [get]
 func (s *Server) handleNextServerID(w http.ResponseWriter, r *http.Request) {
 	next, err := s.machines.NextServerID(r.Context(), s.cfg.Machines.ServerIDStart)
 	if err != nil {
@@ -219,5 +293,5 @@ func (s *Server) handleNextServerID(w http.ResponseWriter, r *http.Request) {
 		taskError(w, http.StatusInternalServerError, "Failed to generate next server ID")
 		return
 	}
-	writeJSON(w, map[string]any{"server_id": next})
+	writeJSON(w, nextServerIDResponse{ServerID: next})
 }

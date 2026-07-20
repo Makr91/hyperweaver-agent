@@ -90,11 +90,34 @@ func persistedHostname(r *http.Request) (string, bool) {
 	}
 }
 
+// hostnameState is the bare GET /network/hostname document — no
+// success/message/timestamp envelope (this controller family's shape).
+type hostnameState struct {
+	// The live system hostname
+	Hostname string `json:"hostname"`
+	// The persisted/configured name (per-OS source above); null when no persisted source exists
+	NodenameFile *string `json:"nodename_file"`
+	// The live system hostname again (zoneweaver's shape)
+	SystemHostname string `json:"system_hostname"`
+	// persisted == live (case-insensitive on Windows; true when nothing is persisted)
+	Matches bool `json:"matches"`
+	// Mismatch narration (Windows: the pending-rename phrasing); null when consistent
+	Warning *string `json:"warning"`
+}
+
 // handleGetHostname mirrors GET /network/hostname (zoneweaver's shipped
 // wire, sync 2026-07-17): the BARE document {hostname, nodename_file,
 // system_hostname, matches, warning}. hostname is the SYSTEM hostname
 // (zoneweaver's semantics); nodename_file is null when no persisted name
 // exists; warning is null when consistent.
+//
+//	@Summary		Read the host's hostname state
+//	@Description	Minimum role: viewer (the hostname capability token). Zoneweaver's shipped network-controller wire (the converged wire, sync 2026-07-17): a BARE document — NO success/message/timestamp envelope; errors on this controller family are {error, details?}. hostname and system_hostname both carry the LIVE system hostname (zoneweaver's semantics). nodename_file is the PERSISTED/configured name — zoneweaver's /etc/nodename read, per-OS here: /etc/hostname content on Linux, the registry's pending ComputerName on Windows (a Rename-Computer awaiting reboot shows here before the live name changes), scutil --get HostName on macOS — null when no persisted source exists or it is unreadable. matches compares persisted against live (case-insensitively on Windows — computer names are case-insensitive; true when nothing persisted exists to compare) and warning narrates a mismatch (Windows gets the pending-rename phrasing) or stays null.
+//	@Tags			Host Configuration
+//	@Produce		json
+//	@Success		200	{object}	hostnameState	"Hostname state (bare document)"
+//	@Failure		500	"Failed to get hostname"
+//	@Router			/network/hostname [get]
 func (s *Server) handleGetHostname(w http.ResponseWriter, r *http.Request) {
 	system, err := os.Hostname()
 	if err != nil {
@@ -112,23 +135,24 @@ func (s *Server) handleGetHostname(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	var warning any
+	var warning *string
 	if !matches {
-		warning = "The persisted host name " + persisted + " does not match the live system hostname " + system
+		text := "The persisted host name " + persisted + " does not match the live system hostname " + system
 		if runtime.GOOS == "windows" {
-			warning = "Computer rename to " + persisted + " is pending — the live hostname stays " + system + " until the next reboot"
+			text = "Computer rename to " + persisted + " is pending — the live hostname stays " + system + " until the next reboot"
 		}
+		warning = &text
 	}
-	var nodenameFile any
+	var nodenameFile *string
 	if ok {
-		nodenameFile = persisted
+		nodenameFile = &persisted
 	}
-	writeJSON(w, map[string]any{
-		"hostname":        system,
-		"nodename_file":   nodenameFile,
-		"system_hostname": system,
-		"matches":         matches,
-		"warning":         warning,
+	writeJSON(w, hostnameState{
+		Hostname:       system,
+		NodenameFile:   nodenameFile,
+		SystemHostname: system,
+		Matches:        matches,
+		Warning:        warning,
 	})
 }
 
@@ -157,8 +181,26 @@ func validateHostnameRequest(name string) string {
 // hostnameUpdateRequest is the PUT body. Hostname is a pointer so a missing
 // key and a non-string both land on zoneweaver's "required" refusal.
 type hostnameUpdateRequest struct {
-	Hostname         *string `json:"hostname"`
-	ApplyImmediately bool    `json:"apply_immediately"`
+	// The new hostname — RFC-1123 label(s), dots allowed, 253 characters at most
+	Hostname *string `json:"hostname"`
+	// Ask for a live apply. Linux/macOS apply live inherently; Windows cannot (reboot semantics) and narrates that in the task output
+	ApplyImmediately bool `json:"apply_immediately"`
+}
+
+// hostnameChangeQueued is the 202 answer to PUT /network/hostname — the
+// converged task body.
+type hostnameChangeQueued struct {
+	Success          bool   `json:"success"`
+	Message          string `json:"message"`
+	TaskID           string `json:"task_id"`
+	Hostname         string `json:"hostname"`
+	ApplyImmediately bool   `json:"apply_immediately"`
+	// true on Windows only — the rename lands at the next reboot; false on Linux/macOS (live apply)
+	RequiresReboot bool `json:"requires_reboot"`
+	// Why a reboot is needed ("" when none is)
+	RebootReason string `json:"reboot_reason"`
+	// The platform's apply_immediately semantics, narrated
+	Note string `json:"note"`
 }
 
 // handleSetHostname mirrors PUT /network/hostname (zoneweaver's shipped
@@ -167,6 +209,17 @@ type hostnameUpdateRequest struct {
 // converged body. requires_reboot is PER-PLATFORM honest (the sync ruling:
 // "surface requires_restart honestly where the OS demands it"): Windows
 // renames land at reboot; Linux/macOS apply live.
+//
+//	@Summary		Change the host's hostname (task)
+//	@Description	Minimum role: operator. Queues the async set_hostname task (machine_name "system", HIGH priority — zoneweaver's exact op name and choice; the converged wire, sync 2026-07-17) and answers 202 with the converged body. Validation is zoneweaver's exact staged gate with its exact messages: the overall shape first (alphanumeric edges, hyphens and dots inside, 1-253 characters), then per label (1-63 characters between dots; alphanumeric start and end). The task applies through the platform's own tooling: Linux hostnamectl set-hostname (persists AND applies live; without hostnamectl the agent writes /etc/hostname and runs hostname(1) — the same end state), macOS scutil --set HostName + LocalHostName (sanitized single label — Bonjour allows one RFC-1123 label) + ComputerName (all three converge, live), Windows PowerShell Rename-Computer -Force — the rename lands at the NEXT REBOOT. requires_reboot is PER-PLATFORM honest (Mark's ruling: surface it honestly where the OS demands it): true on Windows (reboot_reason names why; apply_immediately cannot take effect there — the task output narrates that, never a silent drop), false on Linux/macOS where the apply is live. note narrates the platform's apply_immediately semantics either way.
+//	@Tags			Host Configuration
+//	@Accept			json
+//	@Produce		json
+//	@Param			request	body	hostnameUpdateRequest	true	"The new hostname and apply mode"
+//	@Success		202	{object}	hostnameChangeQueued	"Hostname change task created"
+//	@Failure		400	"Zoneweaver's exact refusals, {error} shape: "hostname is required and must be a string" (missing/non-string hostname or an unparseable body), "Invalid hostname format. Must be alphanumeric with hyphens and dots, 1-253 characters", "Invalid hostname format. Each part between dots must be 1-63 characters", or "Invalid hostname format. Each part must start and end with alphanumeric characters""
+//	@Failure		500	"Failed to create hostname change task"
+//	@Router			/network/hostname [put]
 func (s *Server) handleSetHostname(w http.ResponseWriter, r *http.Request) {
 	var body hostnameUpdateRequest
 	if err := decodeBody(r, &body); err != nil || body.Hostname == nil {
@@ -209,20 +262,16 @@ func (s *Server) handleSetHostname(w http.ResponseWriter, r *http.Request) {
 		rebootReason = "Windows applies a computer rename at the next reboot"
 		note = "apply_immediately cannot take effect on Windows — the rename lands at the next reboot"
 	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusAccepted)
-	if werr := json.NewEncoder(w).Encode(map[string]any{
-		"success":           true,
-		"message":           "Hostname change task created for: " + name,
-		"task_id":           task.ID,
-		"hostname":          name,
-		"apply_immediately": body.ApplyImmediately,
-		"requires_reboot":   requiresReboot,
-		"reboot_reason":     rebootReason,
-		"note":              note,
-	}); werr != nil {
-		slog.Error("write hostname response", "error", werr)
-	}
+	writeJSONStatus(w, http.StatusAccepted, hostnameChangeQueued{
+		Success:          true,
+		Message:          "Hostname change task created for: " + name,
+		TaskID:           task.ID,
+		Hostname:         name,
+		ApplyImmediately: body.ApplyImmediately,
+		RequiresReboot:   requiresReboot,
+		RebootReason:     rebootReason,
+		Note:             note,
+	})
 }
 
 // networkAddress is one GET /network/addresses entry — zoneweaver's shipped
@@ -237,14 +286,40 @@ type networkAddress struct {
 	Source    string `json:"source"`
 }
 
+// networkAddressList is the bare GET /network/addresses document
+// {addresses, total, source} — always the live view on this agent.
+type networkAddressList struct {
+	Addresses []networkAddress `json:"addresses"`
+	// Entries returned (after filters and limit)
+	Total int `json:"total"`
+	// "live" — this agent has no collector database
+	Source string `json:"source"`
+}
+
 // handleListNetworkAddresses mirrors GET /network/addresses (zoneweaver's
 // shipped wire, sync 2026-07-17) over Go's stdlib interface enumeration —
 // always LIVE (?live is ignored: this agent has no collector database).
 // Honest vocabulary limits of a Go host, documented on the spec too:
+//
 //   - addrobj: Go has no ipadm addrobj vocabulary — the synthetic
 //     "<ifname>/v4"|"<ifname>/v6" name is stable and round-trips.
+//
 //   - type: the stdlib cannot see DHCP-vs-static; IPv6 link-locals
 //     (fe80::/10) answer "addrconf", everything else answers "static".
+//
+//     @Summary		List the host's IP addresses
+//     @Description	Minimum role: viewer (the ip-addresses capability token). Zoneweaver's shipped listing wire (the converged wire, sync 2026-07-17), a BARE document — {addresses, total, source}; errors are {error, details?}. ALWAYS LIVE over Go's stdlib interface enumeration: this agent has no collector database, so ?live is accepted and IGNORED — every answer is the live view, source "live" top-level and per entry. Honest vocabulary limits of a Go host: addrobj is SYNTHETIC — Go has no ipadm address-object vocabulary, so entries are named <interface>/v4 or <interface>/v6 (stable, round-trips into the DELETE wildcard); type is INFERRED — the stdlib cannot see DHCP-vs-static, so IPv6 link-locals (fe80::/10) answer addrconf and everything else answers static (dhcp never appears); state is the interface's up/down flag (ok | down). total counts the entries returned (after filters and limit).
+//     @Tags			Host Configuration
+//     @Produce		json
+//     @Param			interface	query	string	false	"Substring match on the interface name (zoneweaver's partial-match semantics, not exact)"
+//     @Param			ip_version	query	string	false	"Filter by IP version (v4 | v6)"
+//     @Param			type		query	string	false	"Filter by inferred type — this agent produces static and addrconf only (no DHCP visibility)"
+//     @Param			state		query	string	false	"Filter by interface state — ok | down on this agent"
+//     @Param			limit		query	int		false	"Cap on returned entries — defaults to 100 (zoneweaver's exact semantics); a positive integer overrides, anything else keeps the default"	default(100)
+//     @Param			live		query	bool	false	"Accepted for wire parity and IGNORED — this agent is always live (no collector database)"
+//     @Success		200	{object}	networkAddressList	"IP addresses (bare document, always live)"
+//     @Failure		500	"Failed to get IP addresses"
+//     @Router			/network/addresses [get]
 func (s *Server) handleListNetworkAddresses(w http.ResponseWriter, r *http.Request) {
 	interfaces, err := net.Interfaces()
 	if err != nil {
@@ -318,10 +393,10 @@ func (s *Server) handleListNetworkAddresses(w http.ResponseWriter, r *http.Reque
 		addresses = addresses[:limit]
 	}
 
-	writeJSON(w, map[string]any{
-		"addresses": addresses,
-		"total":     len(addresses),
-		"source":    "live",
+	writeJSON(w, networkAddressList{
+		Addresses: addresses,
+		Total:     len(addresses),
+		Source:    "live",
 	})
 }
 
@@ -596,6 +671,22 @@ func (s *Server) documentAddresses(ctx context.Context) []net.IP {
 	return ips
 }
 
+// ipSuggestions is the bare GET /network/ip-suggestions document
+// {interface, subnet, gateway, used, suggestions, total_used} — advisory,
+// never a reservation.
+type ipSuggestions struct {
+	// The default-route interface
+	Interface string `json:"interface"`
+	// Its IPv4 network, CIDR
+	Subnet  string `json:"subnet"`
+	Gateway string `json:"gateway"`
+	// Known-taken addresses in the subnet (neighbors + document-pinned + gateway + the host itself), ascending
+	Used []string `json:"used"`
+	// The first ?count free host addresses — advisory, never a reservation
+	Suggestions []string `json:"suggestions"`
+	TotalUsed   int      `json:"total_used"`
+}
+
 // handleIPSuggestions serves GET /network/ip-suggestions (the converged
 // cross-agent wire, sync 2026-07-18): {interface, subnet, gateway, used,
 // suggestions, total_used}. interface = the default-route link, used =
@@ -603,6 +694,15 @@ func (s *Server) documentAddresses(ctx context.Context) []net.IP {
 // host's own IPs, suggestions = the first ?count (default 10, max 256) unused
 // host addresses in the subnet. ADVISORY only — never a reservation; the
 // picker keeps a free-text escape. IPv4 only (an ARP-anchored feed).
+//
+//	@Summary		Free-IP suggestions for static addressing
+//	@Description	Minimum role: viewer (an ordinary GET — no capability token of its own). THE STATIC-IP PICKER FEED (the converged cross-agent wire, sync 2026-07-18 — Mark's ask, one shape on both agents): when a user assigns a STATIC address, the UI offers REAL free IPs from the host's own network instead of a blind text field. Mechanics: the host's IPv4 DEFAULT ROUTE anchors everything (the platform's own routing tool — route print -4 on Windows, route -n get default on macOS, ip route show default elsewhere; Go's stdlib has no route-table view) — interface is that link, subnet its IPv4 network, gateway the route's next hop. used = the ARP/NDP neighbor table (arp -a / arp -an / ip neigh, FAILED and INCOMPLETE entries excluded) UNIONED with every address the stored machine documents pin (networks[].address — a powered-off machine's static IP never shows in ARP but IS taken), the gateway, and the host's own addresses; only addresses inside the subnet count, sorted ascending. suggestions = the first ?count unused host addresses in the subnet (network/broadcast excluded; the scan gives up after 65,536 candidates on giant subnets). ADVISORY ONLY — a suggestion is a point-in-time observation, never a reservation; the picker keeps a free-text escape. IPv4 only (an ARP-anchored feed). A failed neighbor read degrades honestly: suggestions lean on the document-pinned addresses alone (narrated in the agent log).
+//	@Tags			Host Configuration
+//	@Produce		json
+//	@Param			count	query	int	false	"How many suggestions to return (positive integer; capped at 256; junk keeps the default)"	default(10)	maximum(256)
+//	@Success		200	{object}	ipSuggestions	"The suggestion document (bare — the network-controller family's shape)"
+//	@Failure		500	"No default route on this host, the routing tool failed, or the default-route interface carries no IPv4 ({error, details?})"
+//	@Router			/network/ip-suggestions [get]
 func (s *Server) handleIPSuggestions(w http.ResponseWriter, r *http.Request) {
 	gateway, iface, err := defaultRoute(r)
 	if err != nil {
@@ -659,12 +759,12 @@ func (s *Server) handleIPSuggestions(w http.ResponseWriter, r *http.Request) {
 		usedList = append(usedList, uintToIPv4(value).String())
 	}
 
-	writeJSON(w, map[string]any{
-		"interface":   iface.Name,
-		"subnet":      subnet.String(),
-		"gateway":     gateway.String(),
-		"used":        usedList,
-		"suggestions": suggestions,
-		"total_used":  len(usedList),
+	writeJSON(w, ipSuggestions{
+		Interface:   iface.Name,
+		Subnet:      subnet.String(),
+		Gateway:     gateway.String(),
+		Used:        usedList,
+		Suggestions: suggestions,
+		TotalUsed:   len(usedList),
 	})
 }

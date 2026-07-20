@@ -43,7 +43,29 @@ func (s *Server) archiveGate(w http.ResponseWriter) bool {
 	return true
 }
 
+// archiveCreateResponse is POST /filesystem/archive/create's 202 answer.
+type archiveCreateResponse struct {
+	Success     bool     `json:"success"`
+	Message     string   `json:"message"`
+	TaskID      string   `json:"task_id"`
+	Sources     []string `json:"sources"`
+	ArchivePath string   `json:"archive_path"`
+	Format      string   `json:"format"`
+}
+
 // handleCreateArchive serves POST /filesystem/archive/create → 202 task.
+//
+//	@Summary		Create an archive (task)
+//	@Description	Minimum role: operator. {sources[], archive_path, format} → 202 file_archive_create task. format must sit in file_browser.archive.supported_formats — this agent CREATES zip, tar, and tar.gz (Go's bzip2 is decompress-only; the base's shell tar also spoke tar.bz2). Entries are rooted at each source's basename. An archive landing over max_archive_size_mb is deleted and the task fails. Gated by file_browser.archive.enabled.
+//	@Tags			File System
+//	@Accept			json
+//	@Produce		json
+//	@Param			request	body	archiveCreateMetadata	true	"Archive creation request"
+//	@Success		202	{object}	archiveCreateResponse	"Archive creation task created ({success, message, task_id, sources, archive_path, format})"
+//	@Failure		400	"Missing fields or unsupported format"
+//	@Failure		403	"Path forbidden"
+//	@Failure		503	"File browser or archive operations disabled"
+//	@Router			/filesystem/archive/create [post]
 func (s *Server) handleCreateArchive(w http.ResponseWriter, r *http.Request) {
 	if !s.archiveGate(w) {
 		return
@@ -88,17 +110,38 @@ func (s *Server) handleCreateArchive(w http.ResponseWriter, r *http.Request) {
 		taskError(w, http.StatusInternalServerError, "Failed to create archive task")
 		return
 	}
-	writeJSONStatus(w, http.StatusAccepted, map[string]any{
-		"success":      true,
-		"message":      fmt.Sprintf("Archive creation task created for %d items", len(body.Sources)),
-		"task_id":      task.ID,
-		"sources":      body.Sources,
-		"archive_path": body.ArchivePath,
-		"format":       body.Format,
+	writeJSONStatus(w, http.StatusAccepted, archiveCreateResponse{
+		Success:     true,
+		Message:     fmt.Sprintf("Archive creation task created for %d items", len(body.Sources)),
+		TaskID:      task.ID,
+		Sources:     body.Sources,
+		ArchivePath: body.ArchivePath,
+		Format:      body.Format,
 	})
 }
 
+// archiveExtractResponse is POST /filesystem/archive/extract's 202 answer.
+type archiveExtractResponse struct {
+	Success     bool   `json:"success"`
+	Message     string `json:"message"`
+	TaskID      string `json:"task_id"`
+	ArchivePath string `json:"archive_path"`
+	ExtractPath string `json:"extract_path"`
+}
+
 // handleExtractArchive serves POST /filesystem/archive/extract → 202 task.
+//
+//	@Summary		Extract an archive (task)
+//	@Description	Minimum role: operator. {archive_path, extract_path} → 202 file_archive_extract task. Format by extension: .zip, .tar, .tar.gz, .tar.bz2, bare .gz. Entries escaping the extraction directory are rejected (zip-slip guard); links and specials are skipped, never materialized. Gated by file_browser.archive.enabled.
+//	@Tags			File System
+//	@Accept			json
+//	@Produce		json
+//	@Param			request	body	archiveExtractMetadata	true	"Archive extraction request"
+//	@Success		202	{object}	archiveExtractResponse	"Extraction task created ({success, message, task_id, archive_path, extract_path})"
+//	@Failure		400	"Missing fields"
+//	@Failure		403	"Path forbidden"
+//	@Failure		503	"File browser or archive operations disabled"
+//	@Router			/filesystem/archive/extract [post]
 func (s *Server) handleExtractArchive(w http.ResponseWriter, r *http.Request) {
 	if !s.archiveGate(w) {
 		return
@@ -125,12 +168,12 @@ func (s *Server) handleExtractArchive(w http.ResponseWriter, r *http.Request) {
 		taskError(w, http.StatusInternalServerError, "Failed to create extraction task")
 		return
 	}
-	writeJSONStatus(w, http.StatusAccepted, map[string]any{
-		"success":      true,
-		"message":      "Archive extraction task created for '" + filepath.Base(body.ArchivePath) + "'",
-		"task_id":      task.ID,
-		"archive_path": body.ArchivePath,
-		"extract_path": body.ExtractPath,
+	writeJSONStatus(w, http.StatusAccepted, archiveExtractResponse{
+		Success:     true,
+		Message:     "Archive extraction task created for '" + filepath.Base(body.ArchivePath) + "'",
+		TaskID:      task.ID,
+		ArchivePath: body.ArchivePath,
+		ExtractPath: body.ExtractPath,
 	})
 }
 

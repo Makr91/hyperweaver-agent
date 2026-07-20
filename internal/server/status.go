@@ -181,6 +181,13 @@ func (s *Server) consoles(ctx context.Context) []string {
 	return list
 }
 
+// @Summary		Public identity and capabilities
+// @Description	Canonical path of the public status probe. No authentication.
+// @Tags			Status
+// @Produce		json
+// @Success		200	{object}	statusPayload	"Agent identity and capabilities"
+// @Router			/status [get]
+// @Router			/api/status [get]
 func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 	hostname, err := os.Hostname()
 	if err != nil {

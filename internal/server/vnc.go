@@ -76,8 +76,34 @@ func vrdePort(info *vbox.Info) (enabled bool, port int) {
 	return true, 0
 }
 
+// vncStateResponse is GET /machines/{name}/vnc's answer — the machine's live
+// VRDE console state the UI reads before connecting.
+type vncStateResponse struct {
+	MachineName string `json:"machine_name"`
+	VRDEEnabled bool   `json:"vrde_enabled"`
+	VRDEPort    int    `json:"vrde_port"`
+	VNCCapable  bool   `json:"vnc_capable"`
+	Running     bool   `json:"running"`
+	// Console-details facts (the UI AI's third ask, 2026-07-10): the guest
+	// display's WxHxD (empty when unknown) and the Guest Additions run level
+	// (0 none, 1 system, 2 userland, 3 desktop).
+	VideoMode         string `json:"video_mode"`
+	AdditionsRunLevel int    `json:"additions_run_level"`
+	WebSocketURL      string `json:"websocket_url"`
+}
+
 // handleVncInfo serves GET /machines/{name}/vnc: the live console state
 // (VRDE on/off, port, whether the host can actually speak VNC on it).
+//
+//	@Summary		VNC console state
+//	@Description	Minimum role: viewer. The machine's live VRDE console state — everything the UI needs before connecting: whether VRDE is on and its port, whether the host can actually speak VNC on it (vnc_capable: a usable VBoxVNC extpack module; without it the VRDE port speaks RDP, which noVNC cannot), the websockify URL, plus the console-details facts (the UI AI's third ask, 2026-07-10): video_mode (the guest display's WxHxD, e.g. 1024x768x32; empty when unknown) and additions_run_level (0 = no Guest Additions running, 1 = system, 2 = userland, 3 = desktop).
+//	@Tags			Console
+//	@Produce		json
+//	@Param			machineName	path	string	true	"Machine name"
+//	@Success		200	{object}	vncStateResponse	"Console state"
+//	@Failure		404	"Machine not found, or no VM exists behind it yet"
+//	@Failure		503	"VirtualBox is not installed"
+//	@Router			/machines/{machineName}/vnc [get]
 func (s *Server) handleVncInfo(w http.ResponseWriter, r *http.Request) {
 	machine := s.findMachine(w, r)
 	if machine == nil {
@@ -99,16 +125,16 @@ func (s *Server) handleVncInfo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	enabled, port := vrdePort(info)
-	writeJSON(w, map[string]any{
-		"machine_name": machine.Name,
-		"vrde_enabled": enabled,
-		"vrde_port":    port,
-		"vnc_capable":  vncConsoleAvailable(r.Context()),
-		"running":      machines.MapVBoxState(info.State) == machines.StatusRunning,
+	writeJSON(w, vncStateResponse{
+		MachineName: machine.Name,
+		VRDEEnabled: enabled,
+		VRDEPort:    port,
+		VNCCapable:  vncConsoleAvailable(r.Context()),
+		Running:     machines.MapVBoxState(info.State) == machines.StatusRunning,
 		// Console-details facts (the UI AI's third ask, 2026-07-10).
-		"video_mode":          videoMode(info),
-		"additions_run_level": additionsRunLevel(info),
-		"websocket_url":       "/machines/" + machine.Name + "/vnc/websockify",
+		VideoMode:         videoMode(info),
+		AdditionsRunLevel: additionsRunLevel(info),
+		WebSocketURL:      "/machines/" + machine.Name + "/vnc/websockify",
 	})
 }
 

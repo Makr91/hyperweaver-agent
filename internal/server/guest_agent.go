@@ -152,7 +152,26 @@ func (s *Server) utmGuestExec(w http.ResponseWriter, r *http.Request,
 	return output, true
 }
 
+// guestPingResponse is GET /machines/{machineName}/guest/ping's answer.
+type guestPingResponse struct {
+	Success     bool   `json:"success"`
+	MachineName string `json:"machine_name"`
+	Message     string `json:"message"`
+}
+
 // handleGuestPing serves GET /machines/{name}/guest/ping.
+//
+//	@Summary		Probe the guest agent
+//	@Description	Minimum role: viewer. guest-ping over the machine's QGA channel — the readiness probe (UI gates the guest panel on it per machine). 502 with guidance when the channel or qemu-ga is absent.
+//	@Tags			Guest Agent
+//	@Produce		json
+//	@Param			machineName	path		string				true	"Machine name"
+//	@Success		200			{object}	guestPingResponse	"Guest agent is responding"
+//	@Failure		400			{object}	taskErrorBody		"Machine is not running"
+//	@Failure		404			{object}	taskErrorBody		"Machine not found"
+//	@Failure		502			{object}	taskErrorBody		"Guest agent did not answer (no UART wired, or qemu-ga not running in the guest)"
+//	@Failure		503			{object}	taskErrorBody		"Guest agent channel is disabled (guest_agent.enabled)"
+//	@Router			/machines/{machineName}/guest/ping [get]
 func (s *Server) handleGuestPing(w http.ResponseWriter, r *http.Request) {
 	machine := s.findMachine(w, r)
 	if machine == nil {
@@ -162,10 +181,10 @@ func (s *Server) handleGuestPing(w http.ResponseWriter, r *http.Request) {
 		if _, ok := s.utmGuestExec(w, r, machine, 5*time.Second, "whoami"); !ok {
 			return
 		}
-		writeJSON(w, map[string]any{
-			"success":      true,
-			"machine_name": machine.Name,
-			"message":      "Guest agent is responding",
+		writeJSON(w, guestPingResponse{
+			Success:     true,
+			MachineName: machine.Name,
+			Message:     "Guest agent is responding",
 		})
 		return
 	}
@@ -173,15 +192,27 @@ func (s *Server) handleGuestPing(w http.ResponseWriter, r *http.Request) {
 	if machine == nil {
 		return
 	}
-	writeJSON(w, map[string]any{
-		"success":      true,
-		"machine_name": machine.Name,
-		"message":      "Guest agent is responding",
+	writeJSON(w, guestPingResponse{
+		Success:     true,
+		MachineName: machine.Name,
+		Message:     "Guest agent is responding",
 	})
 }
 
 // handleGuestOSInfo serves GET /machines/{name}/guest/osinfo — the guest's
 // own identity (guest-get-osinfo).
+//
+//	@Summary		Guest OS identity
+//	@Description	Minimum role: viewer. guest-get-osinfo verbatim: {id, name, pretty-name, version, kernel-release, machine, ...} — the guest's OWN self-report.
+//	@Tags			Guest Agent
+//	@Produce		json
+//	@Param			machineName	path		string					true	"Machine name"
+//	@Success		200			{object}	map[string]interface{}	"OS info"
+//	@Failure		400			{object}	taskErrorBody			"Machine is not running"
+//	@Failure		404			{object}	taskErrorBody			"Machine not found"
+//	@Failure		502			{object}	taskErrorBody			"Guest agent did not answer"
+//	@Failure		503			{object}	taskErrorBody			"Guest agent channel is disabled"
+//	@Router			/machines/{machineName}/guest/osinfo [get]
 func (s *Server) handleGuestOSInfo(w http.ResponseWriter, r *http.Request) {
 	machine := s.findMachine(w, r)
 	if machine == nil {
@@ -205,6 +236,18 @@ func (s *Server) handleGuestOSInfo(w http.ResponseWriter, r *http.Request) {
 // live interfaces (guest-network-get-interfaces): real addresses with no
 // Guest Additions. utm answers a flat ips[] — utmctl ip-address reports bare
 // addresses, never the QGA interface shape.
+//
+//	@Summary		Guest live network interfaces
+//	@Description	Minimum role: viewer. guest-network-get-interfaces verbatim: per-interface name, hardware-address, and live ip-addresses — REAL guest addressing with no Guest Additions (the same data feeding the RDP/SSH target ladders). utm machines answer a FLAT ips[] list instead of interfaces[] (utmctl ip-address exposes addresses only).
+//	@Tags			Guest Agent
+//	@Produce		json
+//	@Param			machineName	path		string					true	"Machine name"
+//	@Success		200			{object}	map[string]interface{}	"Interfaces"
+//	@Failure		400			{object}	taskErrorBody			"Machine is not running"
+//	@Failure		404			{object}	taskErrorBody			"Machine not found"
+//	@Failure		502			{object}	taskErrorBody			"Guest agent did not answer"
+//	@Failure		503			{object}	taskErrorBody			"Guest agent channel is disabled"
+//	@Router			/machines/{machineName}/guest/network [get]
 func (s *Server) handleGuestNetwork(w http.ResponseWriter, r *http.Request) {
 	machine := s.findMachine(w, r)
 	if machine == nil {
@@ -281,17 +324,38 @@ func decodeExecStatus(raw json.RawMessage) (map[string]any, error) {
 	return result, nil
 }
 
+// guestExecRequest is POST /machines/{machineName}/guest/exec's body.
+type guestExecRequest struct {
+	// The guest executable (absolute path; no shell)
+	Path string `json:"path"`
+	// Arguments passed to the executable
+	Args []string `json:"args"`
+	// Poll to completion (default true); false answers the pid immediately
+	Wait *bool `json:"wait"`
+	// Poll budget in seconds (default 30, max 600)
+	TimeoutSeconds int `json:"timeout_seconds"`
+}
+
 // handleGuestExec serves POST /machines/{name}/guest/exec: run a command in
 // the guest (guest-exec). wait (default true) polls guest-exec-status until
 // exit or timeout_seconds (default 30, max 600); wait:false answers the pid
 // for GET /machines/{name}/guest/exec/{pid}.
+//
+//	@Summary		Run a command in the guest
+//	@Description	Minimum role: operator. guest-exec with capture-output: path is the guest executable (absolute; no shell — wrap in /bin/sh -c or cmd.exe /c yourself for shell syntax), args[] its arguments. wait (default true) polls guest-exec-status until exit or timeout_seconds (default 30, max 600) and answers {exitcode, stdout, stderr} (base64 decoded); wait:false answers {pid} immediately for GET /machines/{name}/guest/exec/{pid}. Credential-less by design — the channel itself is the authority (operator role + the machine's own host).
+//	@Tags			Guest Agent
+//	@Accept			json
+//	@Produce		json
+//	@Param			machineName	path		string				true	"Machine name"
+//	@Param			request		body		guestExecRequest	true	"Command to run in the guest"
+//	@Success		200			{object}	map[string]interface{}	"Exit status with decoded output (wait), the pid (wait:false), or a still-running notice past the timeout"
+//	@Failure		400			{object}	taskErrorBody		"Missing path, or machine is not running"
+//	@Failure		404			{object}	taskErrorBody		"Machine not found"
+//	@Failure		502			{object}	taskErrorBody		"Guest agent did not answer"
+//	@Failure		503			{object}	taskErrorBody		"Guest agent channel is disabled"
+//	@Router			/machines/{machineName}/guest/exec [post]
 func (s *Server) handleGuestExec(w http.ResponseWriter, r *http.Request) {
-	var body struct {
-		Path           string   `json:"path"`
-		Args           []string `json:"args"`
-		Wait           *bool    `json:"wait"`
-		TimeoutSeconds int      `json:"timeout_seconds"`
-	}
+	var body guestExecRequest
 	if err := decodeBody(r, &body); err != nil || body.Path == "" {
 		taskError(w, http.StatusBadRequest, "Body needs path (the guest executable) and optional args[]")
 		return
@@ -408,6 +472,19 @@ func (s *Server) handleGuestExec(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleGuestExecStatus serves GET /machines/{name}/guest/exec/{pid}.
+//
+//	@Summary		Poll a guest command
+//	@Description	Minimum role: viewer. guest-exec-status for a pid from POST /guest/exec: {exited, exitcode?, stdout?, stderr?} — output arrives once the process exits.
+//	@Tags			Guest Agent
+//	@Produce		json
+//	@Param			machineName	path		string					true	"Machine name"
+//	@Param			pid			path		int						true	"Guest process id"
+//	@Success		200			{object}	map[string]interface{}	"Process status"
+//	@Failure		400			{object}	taskErrorBody			"Invalid pid, or machine is not running"
+//	@Failure		404			{object}	taskErrorBody			"Machine not found"
+//	@Failure		502			{object}	taskErrorBody			"Guest agent did not answer"
+//	@Failure		503			{object}	taskErrorBody			"Guest agent channel is disabled"
+//	@Router			/machines/{machineName}/guest/exec/{pid} [get]
 func (s *Server) handleGuestExecStatus(w http.ResponseWriter, r *http.Request) {
 	pid, err := strconv.Atoi(r.PathValue("pid"))
 	if err != nil || pid <= 0 {
@@ -436,15 +513,41 @@ func (s *Server) handleGuestExecStatus(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, status)
 }
 
+// guestShutdownRequest is POST /machines/{machineName}/guest/shutdown's body.
+type guestShutdownRequest struct {
+	// powerdown (default), reboot, or halt
+	Mode string `json:"mode"`
+}
+
+// guestShutdownResponse is POST /machines/{machineName}/guest/shutdown's answer.
+type guestShutdownResponse struct {
+	Success     bool   `json:"success"`
+	MachineName string `json:"machine_name"`
+	Mode        string `json:"mode"`
+	Message     string `json:"message"`
+}
+
 // handleGuestShutdown serves POST /machines/{name}/guest/shutdown — a CLEAN
 // in-guest shutdown/reboot/halt (guest-shutdown). The guest may power off
 // before replying, so silence after delivery is success.
+//
+//	@Summary		Clean in-guest shutdown
+//	@Description	Minimum role: operator. guest-shutdown {mode: powerdown (default) | reboot | halt} — the guest's OWN orderly shutdown, cleaner than ACPI guessing. The guest may power off before replying; silence after delivery counts as success. The registry catches the resulting state change on its normal refresh — this is the GUEST acting, not a queued agent task.
+//	@Tags			Guest Agent
+//	@Accept			json
+//	@Produce		json
+//	@Param			machineName	path		string					true	"Machine name"
+//	@Param			request		body		guestShutdownRequest	false	"Shutdown mode"
+//	@Success		200			{object}	guestShutdownResponse	"Shutdown requested through the guest agent"
+//	@Failure		400			{object}	taskErrorBody			"Invalid mode, or machine is not running"
+//	@Failure		404			{object}	taskErrorBody			"Machine not found"
+//	@Failure		502			{object}	taskErrorBody			"Guest agent did not answer"
+//	@Failure		503			{object}	taskErrorBody			"Guest agent channel is disabled"
+//	@Router			/machines/{machineName}/guest/shutdown [post]
 func (s *Server) handleGuestShutdown(w http.ResponseWriter, r *http.Request) {
 	mode := "powerdown"
 	if r.ContentLength > 0 {
-		var body struct {
-			Mode string `json:"mode"`
-		}
+		var body guestShutdownRequest
 		if err := decodeBody(r, &body); err != nil {
 			taskError(w, http.StatusBadRequest, "Invalid JSON body")
 			return
@@ -486,11 +589,11 @@ func (s *Server) handleGuestShutdown(w http.ResponseWriter, r *http.Request) {
 		}
 		slog.Info("guest shutdown requested", "machine", machine.Name, "mode", mode,
 			"by", auth.FromContext(r.Context()).Name)
-		writeJSON(w, map[string]any{
-			"success":      true,
-			"machine_name": machine.Name,
-			"mode":         mode,
-			"message":      "Guest powerdown requested — rides utmctl stop (graceful)",
+		writeJSON(w, guestShutdownResponse{
+			Success:     true,
+			MachineName: machine.Name,
+			Mode:        mode,
+			Message:     "Guest powerdown requested — rides utmctl stop (graceful)",
 		})
 		return
 	}
@@ -500,11 +603,11 @@ func (s *Server) handleGuestShutdown(w http.ResponseWriter, r *http.Request) {
 	}
 	slog.Info("guest shutdown requested", "machine", machine.Name, "mode", mode,
 		"by", auth.FromContext(r.Context()).Name)
-	writeJSON(w, map[string]any{
-		"success":      true,
-		"machine_name": machine.Name,
-		"mode":         mode,
-		"message":      "Guest " + mode + " requested through the guest agent",
+	writeJSON(w, guestShutdownResponse{
+		Success:     true,
+		MachineName: machine.Name,
+		Mode:        mode,
+		Message:     "Guest " + mode + " requested through the guest agent",
 	})
 }
 
@@ -513,6 +616,16 @@ func (s *Server) handleGuestShutdown(w http.ResponseWriter, r *http.Request) {
 // when the spec says zones.guest_agent: true): the COM2→pipe serial config
 // rides the ordinary modify machinery, queued against a powered-off machine,
 // accrued for the next power cycle otherwise (the vrde-tls pattern).
+//
+//	@Summary		Wire the guest-agent UART onto an existing machine
+//	@Description	Minimum role: operator. Machines created with vbox.guest_agent: true get the UART at build — this opts in everything else (existing machines, discovered VMs, creates that omitted the flag): vbox.serial port 2 (0x2F8/IRQ3, uart-mode server onto the machine's deterministic pipe) rides the ordinary modify machinery — a machine_modify task against a powered-off machine, the accrue-changes contract (pending_power_cycle) otherwise. The GUEST half must run qemu-ga on its COM2 (current box templates bake the auto-transport config in; older guests need it added). A document that claims serial port 2 itself is never overridden at create; this endpoint is the explicit override.
+//	@Tags			Guest Agent
+//	@Produce		json
+//	@Param			machineName	path		string						true	"Machine name"
+//	@Success		200			{object}	map[string]interface{}		"Setup queued (powered off) or accrued (pending_power_cycle)"
+//	@Failure		404			{object}	taskErrorBody				"Machine not found, or no VM exists behind it yet"
+//	@Failure		503			{object}	taskErrorBody				"VirtualBox is not installed, or the guest agent channel is disabled"
+//	@Router			/machines/{machineName}/guest-agent/setup [post]
 func (s *Server) handleGuestAgentSetup(w http.ResponseWriter, r *http.Request) {
 	machine := s.findMachine(w, r)
 	if machine == nil {
