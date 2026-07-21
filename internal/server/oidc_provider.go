@@ -15,6 +15,7 @@ var oidcHTTPClient = &http.Client{Timeout: 15 * time.Second}
 
 type oidcProviderEndpoints struct {
 	Issuer              string `json:"issuer"`
+	Authorization       string `json:"authorization_endpoint"`
 	DeviceAuthorization string `json:"device_authorization_endpoint"`
 	Token               string `json:"token_endpoint"`
 	JWKSURI             string `json:"jwks_uri"`
@@ -108,6 +109,17 @@ func oidcRefreshTokens(ctx context.Context, endpoints *oidcProviderEndpoints, cl
 		"grant_type":    {"refresh_token"},
 		"refresh_token": {refreshToken},
 		"client_id":     {clientID},
+	}
+	return oidcTokenCall(ctx, endpoints.Token, form)
+}
+
+func oidcExchangeCode(ctx context.Context, endpoints *oidcProviderEndpoints, clientID, code, redirectURI, verifier string) (*oidcTokenAnswer, error) {
+	form := url.Values{
+		"grant_type":    {"authorization_code"},
+		"code":          {code},
+		"redirect_uri":  {redirectURI},
+		"client_id":     {clientID},
+		"code_verifier": {verifier},
 	}
 	return oidcTokenCall(ctx, endpoints.Token, form)
 }

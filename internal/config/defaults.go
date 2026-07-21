@@ -103,15 +103,17 @@ api_keys:
   key_length: 64
 
 oidc:
-  # Direct-mode federated login via the OAuth device grant (RFC 8628): the
-  # login page shows a user code, you approve it at the identity provider,
-  # and the agent mints a local admin API key. The FIRST successful login
-  # binds this agent to that account; later logins by other accounts are
-  # refused unless listed in allowed_users. Enabling also accepts the bound
-  # account's IdP access token directly as an Authorization Bearer credential
-  # on the Agent API (the token's aud must include client_id). Endpoints come
-  # from the issuer's .well-known discovery document — never configured by
-  # hand.
+  # Direct-mode federated login. Two doors, both minting a local admin API
+  # key: the silent SSO pre-check (a live IdP session signs the first open in
+  # with zero clicks — the IdP must register this agent's loopback callback,
+  # <base url>/auth/oidc/callback) and the device grant (RFC 8628: the login
+  # page shows a user code you approve at the identity provider). The FIRST
+  # successful login binds this agent to that account; later logins by other
+  # accounts are refused unless listed in allowed_users. Enabling also
+  # accepts the bound account's IdP access token directly as an Authorization
+  # Bearer credential on the Agent API (the token's aud must include
+  # client_id). Endpoints come from the issuer's .well-known discovery
+  # document — never configured by hand.
   enabled: false
   # The identity provider's issuer URL (the base origin — discovery fetches
   # <issuer>/.well-known/openid-configuration).

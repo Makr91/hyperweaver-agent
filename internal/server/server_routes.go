@@ -25,6 +25,8 @@ func (s *Server) registerRoutes(mux *http.ServeMux) error {
 	mux.HandleFunc("POST /auth/tray-claim", s.handleTrayClaim)
 	mux.HandleFunc("POST /auth/oidc/device-start", s.handleOIDCDeviceStart)
 	mux.HandleFunc("GET /auth/oidc/device-status", s.handleOIDCDeviceStatus)
+	mux.HandleFunc("POST /auth/oidc/silent-start", s.handleOIDCSilentStart)
+	mux.HandleFunc("GET /auth/oidc/callback", s.handleOIDCCallback)
 	// hwa:// single-instance handoff: public route, authenticated by the
 	// per-boot secret file only a local same-user process can read.
 	mux.HandleFunc("POST /protocol/open", s.handleProtocolOpen)

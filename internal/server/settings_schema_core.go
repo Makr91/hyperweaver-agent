@@ -222,12 +222,12 @@ var schemaAPIKeys = map[string]any{
 }
 
 var schemaOIDC = map[string]any{
-	"description":      "Direct-mode federated login via the OAuth device grant (RFC 8628): the UI shows a user code, the user approves it at the identity provider, and the agent mints a local admin API key. The first successful login BINDS the agent to that account (TOFU); later logins by other accounts are refused unless listed in allowed_users. Enabling also makes the agent an OIDC RESOURCE SERVER: the bound account's IdP access token is accepted directly as an Authorization Bearer credential on the whole Agent API (validated against the issuer's JWKS; the token's aud must include this client_id). Endpoints resolve from the issuer's .well-known discovery document",
+	"description":      "Direct-mode federated login: the silent SSO pre-check (auth-code + PKCE with prompt=none on the loopback callback — a live IdP session signs the first open in with zero clicks) and the OAuth device grant (RFC 8628 — the UI shows a user code, the user approves at the identity provider); either way the agent mints a local admin API key. The first successful login BINDS the agent to that account (TOFU); later logins by other accounts are refused unless listed in allowed_users. Enabling also makes the agent an OIDC RESOURCE SERVER: the bound account's IdP access token is accepted directly as an Authorization Bearer credential on the whole Agent API (validated against the issuer's JWKS; the token's aud must include this client_id). Endpoints resolve from the issuer's .well-known discovery document",
 	"requires_restart": true,
 	"properties": map[string]any{
 		"enabled": map[string]any{
 			"type":        "boolean",
-			"description": "Enable the device-login endpoints (/auth/oidc/device-start, /auth/oidc/device-status), accept the bound account's IdP access token as a Bearer credential on the Agent API, and advertise oidc in auth[] on GET /api/status",
+			"description": "Enable the federated-login endpoints (/auth/oidc/silent-start + /auth/oidc/callback, /auth/oidc/device-start + /auth/oidc/device-status), accept the bound account's IdP access token as a Bearer credential on the Agent API, and advertise oidc in auth[] on GET /api/status",
 			"default":     false,
 		},
 		"issuer": map[string]any{

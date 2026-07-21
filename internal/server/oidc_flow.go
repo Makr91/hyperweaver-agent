@@ -64,16 +64,21 @@ type oidcManager struct {
 	cancel       context.CancelFunc
 	wg           sync.WaitGroup
 
-	mu           sync.Mutex
-	flows        map[string]*oidcFlow
-	boundSubject string
-	boundEmail   string
-	accessToken  string
-	refreshToken string
-	tokenExpiry  time.Time
-	refreshing   bool
-	jwks         *oidcJWKSDocument
-	jwksFetched  time.Time
+	redirectURI string
+
+	mu               sync.Mutex
+	flows            map[string]*oidcFlow
+	silent           map[string]*oidcSilentFlow
+	boundSubject     string
+	boundEmail       string
+	accessToken      string
+	refreshToken     string
+	tokenExpiry      time.Time
+	refreshing       bool
+	jwks             *oidcJWKSDocument
+	jwksFetched      time.Time
+	endpoints        *oidcProviderEndpoints
+	endpointsFetched time.Time
 }
 
 func newOIDCManager(cfg *config.Config, keyStore *keys.Store) *oidcManager {
@@ -87,10 +92,12 @@ func newOIDCManager(cfg *config.Config, keyStore *keys.Store) *oidcManager {
 		storePath:    filepath.Join(filepath.Dir(cfg.Path()), "oidc.json"),
 		hashRounds:   cfg.APIKeys.HashRounds,
 		keyLength:    cfg.APIKeys.KeyLength,
+		redirectURI:  strings.TrimRight(cfg.BaseURL(), "/") + "/auth/oidc/callback",
 		keys:         keyStore,
 		ctx:          ctx,
 		cancel:       cancel,
 		flows:        map[string]*oidcFlow{},
+		silent:       map[string]*oidcSilentFlow{},
 	}
 	if !m.enabled {
 		return m
@@ -145,6 +152,28 @@ func (m *oidcManager) bearerToken() string {
 	return m.accessToken
 }
 
+func (m *oidcManager) cachedEndpoints(ctx context.Context) (*oidcProviderEndpoints, error) {
+	m.mu.Lock()
+	endpoints := m.endpoints
+	fresh := time.Since(m.endpointsFetched) < 15*time.Minute
+	m.mu.Unlock()
+	if endpoints != nil && fresh {
+		return endpoints, nil
+	}
+	fetched, err := oidcDiscover(ctx, m.issuer)
+	if err != nil {
+		if endpoints != nil {
+			return endpoints, nil
+		}
+		return nil, err
+	}
+	m.mu.Lock()
+	m.endpoints = fetched
+	m.endpointsFetched = time.Now()
+	m.mu.Unlock()
+	return fetched, nil
+}
+
 func (m *oidcManager) cachedJWKS(force bool) (*oidcJWKSDocument, error) {
 	m.mu.Lock()
 	jwks := m.jwks
@@ -153,7 +182,7 @@ func (m *oidcManager) cachedJWKS(force bool) (*oidcJWKSDocument, error) {
 	if jwks != nil && fresh && !force {
 		return jwks, nil
 	}
-	endpoints, err := oidcDiscover(m.ctx, m.issuer)
+	endpoints, err := m.cachedEndpoints(m.ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -334,22 +363,34 @@ func (m *oidcManager) finish(handle string, endpoints *oidcProviderEndpoints, an
 		return
 	}
 
+	credential, err := m.completeLogin(claims, answer)
+	if err != nil {
+		slog.Error("oidc login completion failed", "error", err)
+		m.setStatus(handle, oidcStatusFailed)
+		return
+	}
+	m.mu.Lock()
+	if entry := m.flows[handle]; entry != nil {
+		entry.status = oidcStatusApproved
+		entry.credential = credential
+	}
+	m.mu.Unlock()
+	slog.Info("oidc device login succeeded", "entity_id", credential.entityID, "name", credential.name)
+}
+
+func (m *oidcManager) completeLogin(claims *oidcIdentityClaims, answer *oidcTokenAnswer) (*oidcCredential, error) {
 	name := claims.Email
 	if name == "" {
-		name = claims.Subject
+		name = claims.stableID()
 	}
 	apiKey, err := keys.GenerateKeyString(m.keyLength)
 	if err != nil {
-		slog.Error("oidc key generation failed", "error", err)
-		m.setStatus(handle, oidcStatusFailed)
-		return
+		return nil, err
 	}
 	entity, err := m.keys.Create(apiKey, name,
 		oidcKeyDescriptionPrefix+time.Now().Format(time.RFC3339), "admin", m.hashRounds)
 	if err != nil {
-		slog.Error("oidc key creation failed", "error", err)
-		m.setStatus(handle, oidcStatusFailed)
-		return
+		return nil, err
 	}
 	if removed, perr := m.keys.PruneByDescriptionPrefix(oidcKeyDescriptionPrefix, oidcMintedKeysKept); perr != nil {
 		slog.Warn("oidc key prune failed", "error", perr)
@@ -375,19 +416,15 @@ func (m *oidcManager) finish(handle string, endpoints *oidcProviderEndpoints, an
 		m.refreshToken = answer.RefreshToken
 	}
 	m.tokenExpiry = time.Now().Add(time.Duration(answer.ExpiresIn) * time.Second)
-	if entry := m.flows[handle]; entry != nil {
-		entry.status = oidcStatusApproved
-		entry.credential = &oidcCredential{
-			apiKey:   apiKey,
-			entityID: entity.ID,
-			name:     entity.Name,
-			role:     entity.Role,
-			message:  "OIDC device login successful",
-		}
-	}
 	m.mu.Unlock()
 	m.startRefreshLoop()
-	slog.Info("oidc device login succeeded", "entity_id", entity.ID, "name", entity.Name)
+	return &oidcCredential{
+		apiKey:   apiKey,
+		entityID: entity.ID,
+		name:     entity.Name,
+		role:     entity.Role,
+		message:  "OIDC login successful",
+	}, nil
 }
 
 func (m *oidcManager) subjectAllowed(claims *oidcIdentityClaims) bool {
@@ -404,87 +441,4 @@ func (m *oidcManager) subjectAllowed(claims *oidcIdentityClaims) bool {
 		}
 	}
 	return false
-}
-
-func (m *oidcManager) startRefreshLoop() {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if m.refreshing || m.refreshToken == "" {
-		return
-	}
-	m.refreshing = true
-	m.wg.Add(1)
-	go m.refreshLoop()
-}
-
-func (m *oidcManager) refreshLoop() {
-	defer m.wg.Done()
-	for {
-		m.mu.Lock()
-		refreshToken := m.refreshToken
-		expiresAt := m.tokenExpiry
-		m.mu.Unlock()
-		if refreshToken == "" {
-			m.mu.Lock()
-			m.refreshing = false
-			m.mu.Unlock()
-			return
-		}
-		wait := time.Until(expiresAt) - time.Minute
-		if wait < 30*time.Second {
-			wait = 30 * time.Second
-		}
-		select {
-		case <-m.ctx.Done():
-			return
-		case <-time.After(wait):
-		}
-		if !m.refreshOnce(refreshToken) {
-			return
-		}
-	}
-}
-
-func (m *oidcManager) refreshOnce(refreshToken string) bool {
-	endpoints, err := oidcDiscover(m.ctx, m.issuer)
-	if err != nil {
-		slog.Warn("oidc refresh: discovery failed — retrying in 5m", "error", err)
-		return m.refreshBackoff()
-	}
-	answer, err := oidcRefreshTokens(m.ctx, endpoints, m.clientID, refreshToken)
-	if err != nil {
-		slog.Warn("oidc refresh failed — retrying in 5m", "error", err)
-		return m.refreshBackoff()
-	}
-	if answer.Error == "invalid_grant" {
-		slog.Warn("oidc refresh token revoked — log in again to restore federated access")
-		m.mu.Lock()
-		m.accessToken = ""
-		m.refreshToken = ""
-		m.tokenExpiry = time.Time{}
-		m.refreshing = false
-		m.mu.Unlock()
-		return false
-	}
-	if answer.Error != "" || answer.AccessToken == "" {
-		slog.Warn("oidc refresh refused — retrying in 5m", "error", answer.Error)
-		return m.refreshBackoff()
-	}
-	m.mu.Lock()
-	m.accessToken = answer.AccessToken
-	if answer.RefreshToken != "" {
-		m.refreshToken = answer.RefreshToken
-	}
-	m.tokenExpiry = time.Now().Add(time.Duration(answer.ExpiresIn) * time.Second)
-	m.mu.Unlock()
-	return true
-}
-
-func (m *oidcManager) refreshBackoff() bool {
-	select {
-	case <-m.ctx.Done():
-		return false
-	case <-time.After(5 * time.Minute):
-		return true
-	}
 }

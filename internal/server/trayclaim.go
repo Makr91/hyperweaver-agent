@@ -51,12 +51,12 @@ type trayClaimResponse struct {
 // setup token (which remains the headless/remote path).
 //
 //	@Summary		Exchange a tray one-time token for an admin API key
-//	@Description	Public: the token itself is the credential — minted seconds earlier by the local user's physical tray Open click (or an hwa:// protocol invocation), carried in the URL fragment, single-use, 60-second TTL. This is how a desktop user gets a signed-in UI without ever seeing a login screen. Each claim also REAPS older tray-handoff keys beyond the newest 5 (every Open mints a key and nothing else retires them; unbounded piles make the cold-boot bcrypt scan crawl) — a browser tab holding a reaped key re-signs-in via the tray.
+//	@Description	Public: the token itself is the credential — minted seconds earlier by the local user's physical tray Open click (or an hwa:// protocol invocation, or the silent-SSO callback's handoff), carried in the URL fragment, single-use, 60-second TTL. This is how a desktop user gets a signed-in UI without ever seeing a login screen. A silent-SSO grant answers the OIDC-minted admin key (named for the federated account); plain tray grants mint a fresh key named after the local OS account. Each tray-key mint also REAPS older tray-handoff keys beyond the newest 5 (every Open mints a key and nothing else retires them; unbounded piles make the cold-boot bcrypt scan crawl) — a browser tab holding a reaped key re-signs-in via the tray.
 //	@Tags			Local Login
 //	@Accept			json
 //	@Produce		json
 //	@Param			request	body		trayClaimRequest	true	"Tray claim request"
-//	@Success		200		{object}	trayClaimResponse	"Fresh admin key, named after the local OS account"
+//	@Success		200		{object}	trayClaimResponse	"The admin key (SSO-minted when the grant carries one, else fresh and named after the local OS account)"
 //	@Failure		400		{object}	auth.ErrorMsg		"Missing token"
 //	@Failure		403		{object}	auth.ErrorMsg		"Unknown, expired, or already-used token"
 //	@Router			/auth/tray-claim [post]
@@ -67,8 +67,17 @@ func (s *Server) handleTrayClaim(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if !s.trayTokens.Claim(body.Token) {
+	boundKey, ok := s.trayTokens.Claim(body.Token)
+	if !ok {
 		auth.WriteMsg(w, http.StatusForbidden, "Invalid or expired tray token")
+		return
+	}
+	if boundKey != "" {
+		slog.Info("silent-sso handoff key claimed")
+		writeJSON(w, trayClaimResponse{
+			APIKey:  boundKey,
+			Message: "Login successful",
+		})
 		return
 	}
 

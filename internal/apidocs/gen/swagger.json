@@ -5679,6 +5679,15 @@
                 },
                 "type": "object"
             },
+            "server.silentStartResponse": {
+                "properties": {
+                    "authorize_url": {
+                        "description": "The IdP authorize URL (response_type=code, loopback redirect_uri, S256 PKCE challenge, prompt=none) — navigate the browser here; the agent holds the state and verifier",
+                        "type": "string"
+                    }
+                },
+                "type": "object"
+            },
             "server.sshSession": {
                 "properties": {
                     "created_at": {
@@ -8288,6 +8297,46 @@
                 ]
             }
         },
+        "/auth/oidc/callback": {
+            "get": {
+                "description": "Browser redirect target of the silent authorize round-trip (registered at the IdP as the loopback redirect_uri) — never called by API clients. Benign IdP answers (login_required, interaction_required, consent_required, access_denied) and EVERY hard failure (unknown/expired state, exchange or validation error, non-bound account) all 302 to /ui/login?sso=unavailable — silent must never strand the browser on an error page. On success the code is exchanged with the held PKCE verifier, the token validated (issuer JWKS, UUID-first identity, TOFU binding), the OIDC admin key minted, and the browser 302s to the existing /ui/#tray= claim path carrying a single-use grant that answers THAT key — the tray-claim exchange the UI already speaks, now with a federated identity.",
+                "parameters": [
+                    {
+                        "description": "The flow id minted at silent-start",
+                        "in": "query",
+                        "name": "state",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    {
+                        "description": "The IdP's authorization code",
+                        "in": "query",
+                        "name": "code",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    {
+                        "description": "The IdP's OAuth error (login_required and friends bounce benignly)",
+                        "in": "query",
+                        "name": "error",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "responses": {
+                    "302": {
+                        "description": "To /ui/#tray=\u003cone-time grant\u003e on success; to /ui/login?sso=unavailable otherwise"
+                    }
+                },
+                "summary": "Silent SSO callback",
+                "tags": [
+                    "Local Login"
+                ]
+            }
+        },
         "/auth/oidc/device-start": {
             "post": {
                 "description": "Public, rate-limited (6 starts per source address per minute). Direct-mode federated login via the OAuth device grant (RFC 8628, the frozen cross-agent wire — a Go-agent-only surface; auth[] advertises oidc only when oidc.enabled): the agent calls the issuer's discovered device_authorization endpoint and answers the user code + verification URI the UI shows. The device_code NEVER leaves the agent — handle is an opaque agent-side flow id, and the agent itself polls the identity provider (honoring the grant's interval/slow_down) while the UI polls GET /auth/oidc/device-status freely. On approval the agent validates the tokens against the issuer's JWKS, holds them in memory (background-refreshed), and mints a local admin API key. The FIRST successful login BINDS the agent to that account (TOFU, the bootstrap-key model; persisted in oidc.json beside the config); later logins by other accounts are refused unless listed in oidc.allowed_users.",
@@ -8391,9 +8440,60 @@
                 ]
             }
         },
+        "/auth/oidc/silent-start": {
+            "post": {
+                "description": "Public, rate-limited (shared with device-start: 6 per source address per minute). The identity-first login probe (a Go-agent-only surface): mints state + a PKCE S256 verifier held agent-side and answers the IdP authorize URL with prompt=none — the UI navigates there; a live IdP session comes straight back to GET /auth/oidc/callback with a code and signs in without any interaction, no session bounces back benignly. NEVER auto-fires anything — this endpoint only returns a URL. Fast-fails when the identity provider is unreachable (cached discovery; a cold probe is bounded to ~3s) so an offline machine loses milliseconds, never hangs.",
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/server.silentStartResponse"
+                                }
+                            }
+                        },
+                        "description": "Authorize URL minted"
+                    },
+                    "429": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/server.taskErrorBody"
+                                }
+                            }
+                        },
+                        "description": "Too many attempts from this address"
+                    },
+                    "502": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/server.taskErrorBody"
+                                }
+                            }
+                        },
+                        "description": "Identity provider unreachable or without an authorization endpoint"
+                    },
+                    "503": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/server.taskErrorBody"
+                                }
+                            }
+                        },
+                        "description": "OIDC login is disabled"
+                    }
+                },
+                "summary": "Start a silent SSO pre-check",
+                "tags": [
+                    "Local Login"
+                ]
+            }
+        },
         "/auth/tray-claim": {
             "post": {
-                "description": "Public: the token itself is the credential — minted seconds earlier by the local user's physical tray Open click (or an hwa:// protocol invocation), carried in the URL fragment, single-use, 60-second TTL. This is how a desktop user gets a signed-in UI without ever seeing a login screen. Each claim also REAPS older tray-handoff keys beyond the newest 5 (every Open mints a key and nothing else retires them; unbounded piles make the cold-boot bcrypt scan crawl) — a browser tab holding a reaped key re-signs-in via the tray.",
+                "description": "Public: the token itself is the credential — minted seconds earlier by the local user's physical tray Open click (or an hwa:// protocol invocation, or the silent-SSO callback's handoff), carried in the URL fragment, single-use, 60-second TTL. This is how a desktop user gets a signed-in UI without ever seeing a login screen. A silent-SSO grant answers the OIDC-minted admin key (named for the federated account); plain tray grants mint a fresh key named after the local OS account. Each tray-key mint also REAPS older tray-handoff keys beyond the newest 5 (every Open mints a key and nothing else retires them; unbounded piles make the cold-boot bcrypt scan crawl) — a browser tab holding a reaped key re-signs-in via the tray.",
                 "requestBody": {
                     "content": {
                         "application/json": {
@@ -8423,7 +8523,7 @@
                                 }
                             }
                         },
-                        "description": "Fresh admin key, named after the local OS account"
+                        "description": "The admin key (SSO-minted when the grant carries one, else fresh and named after the local OS account)"
                     },
                     "400": {
                         "content": {
