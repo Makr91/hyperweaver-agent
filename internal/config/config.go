@@ -23,6 +23,7 @@ type Config struct {
 	Browser         BrowserConfig         `yaml:"browser"          json:"browser"`
 	Logging         LoggingConfig         `yaml:"logging"          json:"logging"`
 	APIKeys         APIKeysConfig         `yaml:"api_keys"         json:"api_keys"`
+	OIDC            oidcConfig            `yaml:"oidc"             json:"oidc"`
 	Updates         UpdatesConfig         `yaml:"updates"          json:"updates"`
 	APIDocs         APIDocsConfig         `yaml:"api_docs"         json:"api_docs"`
 	Stats           StatsConfig           `yaml:"stats"            json:"stats"`
@@ -71,6 +72,7 @@ func Default() *Config {
 			HashRounds:                 12,
 			KeyLength:                  64,
 		},
+		OIDC: oidcConfig{ClientID: "hyperweaver-agent", AllowedUsers: []string{}},
 		Updates: UpdatesConfig{
 			VersionInfoURL: "https://github.com/Makr91/hyperweaver-agent/releases/latest/download/update-info.json",
 		},

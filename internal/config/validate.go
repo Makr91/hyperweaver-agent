@@ -1,8 +1,10 @@
 package config
 
 import (
+	"errors"
 	"fmt"
 	"net"
+	"net/url"
 	"path/filepath"
 	"strings"
 )
@@ -41,6 +43,15 @@ func (c *Config) validate() error {
 	}
 	if c.APIKeys.KeyLength < 16 || c.APIKeys.KeyLength > 256 {
 		return fmt.Errorf("api_keys.key_length %d out of range 16-256", c.APIKeys.KeyLength)
+	}
+	if c.OIDC.Enabled {
+		issuer, err := url.Parse(c.OIDC.Issuer)
+		if err != nil || issuer.Host == "" || (issuer.Scheme != "https" && issuer.Scheme != "http") {
+			return fmt.Errorf("oidc.issuer %q must be an http(s) URL", c.OIDC.Issuer)
+		}
+		if c.OIDC.ClientID == "" {
+			return errors.New("oidc.client_id is required when oidc.enabled is true")
+		}
 	}
 	if c.Tasks.PollIntervalSeconds < 1 || c.Tasks.PollIntervalSeconds > 60 {
 		return fmt.Errorf("tasks.poll_interval_seconds %d out of range 1-60", c.Tasks.PollIntervalSeconds)

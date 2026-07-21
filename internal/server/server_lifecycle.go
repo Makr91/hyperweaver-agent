@@ -194,6 +194,7 @@ func (s *Server) listen() (net.Listener, error) {
 
 // Shutdown gracefully drains connections on both listeners.
 func (s *Server) Shutdown(ctx context.Context) error {
+	s.oidcMgr.close()
 	err := s.httpSrv.Shutdown(ctx)
 	if s.httpsSrv != nil {
 		if herr := s.httpsSrv.Shutdown(ctx); herr != nil {

@@ -12,6 +12,7 @@ var settingsSchema = map[string]any{
 	"browser":          schemaBrowser,
 	"logging":          schemaLogging,
 	"api_keys":         schemaAPIKeys,
+	"oidc":             schemaOIDC,
 	"updates":          schemaUpdates,
 	"api_docs":         schemaAPIDocs,
 	"stats":            schemaStats,

@@ -23,6 +23,8 @@ func (s *Server) registerRoutes(mux *http.ServeMux) error {
 	requireKey := auth.Middleware(s.keys)
 	mux.HandleFunc("POST /api-keys/bootstrap", s.handleBootstrapKey)
 	mux.HandleFunc("POST /auth/tray-claim", s.handleTrayClaim)
+	mux.HandleFunc("POST /auth/oidc/device-start", s.handleOIDCDeviceStart)
+	mux.HandleFunc("GET /auth/oidc/device-status", s.handleOIDCDeviceStatus)
 	// hwa:// single-instance handoff: public route, authenticated by the
 	// per-boot secret file only a local same-user process can read.
 	mux.HandleFunc("POST /protocol/open", s.handleProtocolOpen)

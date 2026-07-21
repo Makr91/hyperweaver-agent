@@ -64,6 +64,13 @@ type APIKeysConfig struct {
 	KeyLength                  int  `yaml:"key_length"                    json:"key_length"`
 }
 
+type oidcConfig struct {
+	Enabled      bool     `yaml:"enabled"       json:"enabled"`
+	Issuer       string   `yaml:"issuer"        json:"issuer"`
+	ClientID     string   `yaml:"client_id"     json:"client_id"`
+	AllowedUsers []string `yaml:"allowed_users" json:"allowed_users"`
+}
+
 // UpdatesConfig controls update checking (SHI/Node-agent versioninfo model).
 type UpdatesConfig struct {
 	// VersionInfoURL points at a JSON document {version, releaseUrl,

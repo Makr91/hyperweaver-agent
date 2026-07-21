@@ -23,6 +23,8 @@ type Server struct {
 	cfg            *config.Config
 	keys           *keys.Store
 	trayTokens     *auth.TrayTokens
+	oidcMgr        *oidcManager
+	oidcStarts     *startLimiter
 	tasks          *tasks.Queue
 	machines       *machines.Store
 	provisioners   *provisioner.Registry
@@ -77,6 +79,9 @@ func New(cfg *config.Config, keyStore *keys.Store, trayTokens *auth.TrayTokens, 
 		restartArgs:    restartArgs,
 		openUI:         openUI,
 	}
+
+	s.oidcMgr = newOIDCManager(cfg, keyStore)
+	s.oidcStarts = newStartLimiter()
 
 	mux := http.NewServeMux()
 	if err := s.registerRoutes(mux); err != nil {

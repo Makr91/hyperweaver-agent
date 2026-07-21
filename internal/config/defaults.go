@@ -102,6 +102,22 @@ api_keys:
   # Random bytes of key material (base64url-encoded after the hw_ prefix).
   key_length: 64
 
+oidc:
+  # Direct-mode federated login via the OAuth device grant (RFC 8628): the
+  # login page shows a user code, you approve it at the identity provider,
+  # and the agent mints a local admin API key. The FIRST successful login
+  # binds this agent to that account; later logins by other accounts are
+  # refused unless listed in allowed_users. Endpoints come from the issuer's
+  # .well-known discovery document — never configured by hand.
+  enabled: false
+  # The identity provider's issuer URL.
+  issuer: ''
+  # The shared public OIDC client id registered for agent device login.
+  client_id: hyperweaver-agent
+  # Additional accounts (emails or OIDC subjects) allowed to log in after the
+  # first login bound the agent.
+  allowed_users: []
+
 updates:
   # Version document the update check compares against (JSON: version,
   # releaseUrl, releaseDate, changelog). Empty disables update checking.

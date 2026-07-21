@@ -201,6 +201,11 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 	bootstrapAvailable := akCfg.BootstrapEnabled &&
 		(s.keys.Count() == 0 || !akCfg.BootstrapAutoDisable)
 
+	authMethods := []string{"apikey"}
+	if s.cfg.OIDC.Enabled {
+		authMethods = append(authMethods, "oidc")
+	}
+
 	payload := statusPayload{
 		Role:        "agent",
 		Agent:       "hyperweaver-agent",
@@ -210,8 +215,10 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		Version:     version.Version,
 		Hostname:    hostname,
 		// Shared auth-token namespace {apikey, local, ldap, oidc}: this agent
-		// accepts API keys ('apikey', never 'local' — different login form).
-		Auth:               []string{"apikey"},
+		// accepts API keys ('apikey', never 'local' — different login form)
+		// and advertises 'oidc' when oidc.enabled (the RFC 8628 device login,
+		// a Go-agent-only surface).
+		Auth:               authMethods,
 		BootstrapAvailable: bootstrapAvailable,
 		// VNC-capability detection (Mark's recipe, 2026-07-06): parse
 		// `VBoxManage list extpacks` — each pack block's "VRDE Module:" line
