@@ -58,10 +58,10 @@ type oidcDeviceAuthorization struct {
 	Interval                int    `json:"interval"`
 }
 
-func oidcStartDeviceAuthorization(ctx context.Context, endpoints *oidcProviderEndpoints, clientID string) (*oidcDeviceAuthorization, error) {
+func oidcStartDeviceAuthorization(ctx context.Context, endpoints *oidcProviderEndpoints, clientID, scope string) (*oidcDeviceAuthorization, error) {
 	form := url.Values{
 		"client_id": {clientID},
-		"scope":     {"openid profile email organizations"},
+		"scope":     {scope},
 	}
 	body, status, err := oidcPostForm(ctx, endpoints.DeviceAuthorization, form)
 	if err != nil {

@@ -13,8 +13,10 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Makr91/hyperweaver-agent/internal/auth"
 	"github.com/Makr91/hyperweaver-agent/internal/config"
 	"github.com/Makr91/hyperweaver-agent/internal/keys"
+	"github.com/Makr91/hyperweaver-agent/internal/logging"
 	"github.com/Makr91/hyperweaver-agent/internal/safepath"
 )
 
@@ -51,6 +53,7 @@ type oidcManager struct {
 	enabled      bool
 	issuer       string
 	clientID     string
+	scope        string
 	allowedUsers []string
 	storePath    string
 	hashRounds   int
@@ -68,6 +71,8 @@ type oidcManager struct {
 	refreshToken string
 	tokenExpiry  time.Time
 	refreshing   bool
+	jwks         *oidcJWKSDocument
+	jwksFetched  time.Time
 }
 
 func newOIDCManager(cfg *config.Config, keyStore *keys.Store) *oidcManager {
@@ -76,6 +81,7 @@ func newOIDCManager(cfg *config.Config, keyStore *keys.Store) *oidcManager {
 		enabled:      cfg.OIDC.Enabled,
 		issuer:       cfg.OIDC.Issuer,
 		clientID:     cfg.OIDC.ClientID,
+		scope:        strings.Join(cfg.OIDC.Scopes, " "),
 		allowedUsers: cfg.OIDC.AllowedUsers,
 		storePath:    filepath.Join(filepath.Dir(cfg.Path()), "oidc.json"),
 		hashRounds:   cfg.APIKeys.HashRounds,
@@ -129,12 +135,75 @@ func (m *oidcManager) close() {
 	m.wg.Wait()
 }
 
+func (m *oidcManager) bearerToken() string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.accessToken == "" || time.Now().After(m.tokenExpiry) {
+		return ""
+	}
+	return m.accessToken
+}
+
+func (m *oidcManager) cachedJWKS(force bool) (*oidcJWKSDocument, error) {
+	m.mu.Lock()
+	jwks := m.jwks
+	fresh := time.Since(m.jwksFetched) < 15*time.Minute
+	m.mu.Unlock()
+	if jwks != nil && fresh && !force {
+		return jwks, nil
+	}
+	endpoints, err := oidcDiscover(m.ctx, m.issuer)
+	if err != nil {
+		return nil, err
+	}
+	fetched, err := oidcFetchJWKS(m.ctx, endpoints.JWKSURI)
+	if err != nil {
+		return nil, err
+	}
+	m.mu.Lock()
+	m.jwks = fetched
+	m.jwksFetched = time.Now()
+	m.mu.Unlock()
+	return fetched, nil
+}
+
+func (m *oidcManager) authenticateBearer(token string) *auth.Identity {
+	if !m.enabled {
+		return nil
+	}
+	jwks, err := m.cachedJWKS(false)
+	if err != nil {
+		slog.Warn("oidc bearer auth: jwks unavailable", "error", err)
+		return nil
+	}
+	claims, err := oidcValidateToken(token, jwks, m.issuer, m.clientID)
+	if errors.Is(err, errOIDCUnknownKey) {
+		if jwks, err = m.cachedJWKS(true); err == nil {
+			claims, err = oidcValidateToken(token, jwks, m.issuer, m.clientID)
+		}
+	}
+	if err != nil {
+		logging.Category("auth").Warn("oidc bearer token rejected", "error", err)
+		return nil
+	}
+	if !m.subjectAllowed(claims) {
+		logging.Category("auth").Warn("oidc bearer refused — not the bound account and not in oidc.allowed_users",
+			"subject", claims.Subject, "email", claims.Email)
+		return nil
+	}
+	name := claims.Email
+	if name == "" {
+		name = claims.Subject
+	}
+	return &auth.Identity{Name: name, Description: "OIDC bearer token", Role: "admin"}
+}
+
 func (m *oidcManager) start(ctx context.Context) (*deviceStartResponse, error) {
 	endpoints, err := oidcDiscover(ctx, m.issuer)
 	if err != nil {
 		return nil, err
 	}
-	authorization, err := oidcStartDeviceAuthorization(ctx, endpoints, m.clientID)
+	authorization, err := oidcStartDeviceAuthorization(ctx, endpoints, m.clientID, m.scope)
 	if err != nil {
 		return nil, err
 	}
@@ -243,7 +312,11 @@ func (m *oidcManager) finish(handle string, endpoints *oidcProviderEndpoints, an
 		m.setStatus(handle, oidcStatusDenied)
 		return
 	}
-	claims, err := oidcValidateIDToken(answer.IDToken, jwks, m.issuer, m.clientID)
+	m.mu.Lock()
+	m.jwks = jwks
+	m.jwksFetched = time.Now()
+	m.mu.Unlock()
+	claims, err := oidcValidateToken(answer.IDToken, jwks, m.issuer, m.clientID)
 	if err != nil {
 		slog.Error("oidc id_token rejected", "error", err)
 		m.setStatus(handle, oidcStatusDenied)

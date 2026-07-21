@@ -68,6 +68,7 @@ type oidcConfig struct {
 	Enabled      bool     `yaml:"enabled"       json:"enabled"`
 	Issuer       string   `yaml:"issuer"        json:"issuer"`
 	ClientID     string   `yaml:"client_id"     json:"client_id"`
+	Scopes       []string `yaml:"scopes"        json:"scopes"`
 	AllowedUsers []string `yaml:"allowed_users" json:"allowed_users"`
 }
 

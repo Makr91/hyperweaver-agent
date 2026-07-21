@@ -82,6 +82,7 @@ func New(cfg *config.Config, keyStore *keys.Store, trayTokens *auth.TrayTokens, 
 
 	s.oidcMgr = newOIDCManager(cfg, keyStore)
 	s.oidcStarts = newStartLimiter()
+	machines.SetOIDCTokenSource(s.oidcMgr.bearerToken)
 
 	mux := http.NewServeMux()
 	if err := s.registerRoutes(mux); err != nil {

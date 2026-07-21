@@ -72,7 +72,11 @@ func Default() *Config {
 			HashRounds:                 12,
 			KeyLength:                  64,
 		},
-		OIDC: oidcConfig{ClientID: "hyperweaver-agent", AllowedUsers: []string{}},
+		OIDC: oidcConfig{
+			ClientID:     "hyperweaver-agent",
+			Scopes:       []string{"openid", "profile", "email", "organizations"},
+			AllowedUsers: []string{},
+		},
 		Updates: UpdatesConfig{
 			VersionInfoURL: "https://github.com/Makr91/hyperweaver-agent/releases/latest/download/update-info.json",
 		},

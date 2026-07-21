@@ -107,13 +107,24 @@ oidc:
   # login page shows a user code, you approve it at the identity provider,
   # and the agent mints a local admin API key. The FIRST successful login
   # binds this agent to that account; later logins by other accounts are
-  # refused unless listed in allowed_users. Endpoints come from the issuer's
-  # .well-known discovery document — never configured by hand.
+  # refused unless listed in allowed_users. Enabling also accepts the bound
+  # account's IdP access token directly as an Authorization Bearer credential
+  # on the Agent API (the token's aud must include client_id). Endpoints come
+  # from the issuer's .well-known discovery document — never configured by
+  # hand.
   enabled: false
-  # The identity provider's issuer URL.
+  # The identity provider's issuer URL (the base origin — discovery fetches
+  # <issuer>/.well-known/openid-configuration).
   issuer: ''
   # The shared public OIDC client id registered for agent device login.
   client_id: hyperweaver-agent
+  # Scopes requested at login. openid is required for the identity token;
+  # organizations carries the org claim BoxVault authorizes private boxes by.
+  scopes:
+    - openid
+    - profile
+    - email
+    - organizations
   # Additional accounts (emails or OIDC subjects) allowed to log in after the
   # first login bound the agent.
   allowed_users: []

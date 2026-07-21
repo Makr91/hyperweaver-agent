@@ -20,7 +20,7 @@ func (s *Server) registerRoutes(mux *http.ServeMux) error {
 	// API-key surface (Agent API v1 local tier). Bootstrap is public (gated
 	// by config + the setup token); everything else goes through the auth
 	// middleware, whose central policy enforces the role model per path.
-	requireKey := auth.Middleware(s.keys)
+	requireKey := auth.Middleware(s.keys, s.oidcMgr.authenticateBearer)
 	mux.HandleFunc("POST /api-keys/bootstrap", s.handleBootstrapKey)
 	mux.HandleFunc("POST /auth/tray-claim", s.handleTrayClaim)
 	mux.HandleFunc("POST /auth/oidc/device-start", s.handleOIDCDeviceStart)

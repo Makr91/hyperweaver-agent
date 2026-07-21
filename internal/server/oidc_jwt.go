@@ -18,7 +18,9 @@ type oidcIdentityClaims struct {
 	Email   string
 }
 
-func oidcValidateIDToken(raw string, jwks *oidcJWKSDocument, issuer, clientID string) (*oidcIdentityClaims, error) {
+var errOIDCUnknownKey = errors.New("no matching RSA key in the issuer's JWKS")
+
+func oidcValidateToken(raw string, jwks *oidcJWKSDocument, issuer, audience string) (*oidcIdentityClaims, error) {
 	parts := strings.Split(raw, ".")
 	if len(parts) != 3 {
 		return nil, errors.New("id_token is not a three-part JWT")
@@ -35,7 +37,7 @@ func oidcValidateIDToken(raw string, jwks *oidcJWKSDocument, issuer, clientID st
 		return nil, fmt.Errorf("id_token header unreadable: %w", uerr)
 	}
 	if header.Alg != "RS256" {
-		return nil, fmt.Errorf("id_token algorithm %q is not RS256", header.Alg)
+		return nil, fmt.Errorf("token algorithm %q is not RS256", header.Alg)
 	}
 	publicKey, err := jwks.rsaKey(header.Kid)
 	if err != nil {
@@ -65,29 +67,29 @@ func oidcValidateIDToken(raw string, jwks *oidcJWKSDocument, issuer, clientID st
 		return nil, fmt.Errorf("id_token payload unreadable: %w", uerr)
 	}
 	if strings.TrimRight(payload.Issuer, "/") != strings.TrimRight(issuer, "/") {
-		return nil, fmt.Errorf("id_token issuer %q does not match the configured issuer", payload.Issuer)
+		return nil, fmt.Errorf("token issuer %q does not match the configured issuer", payload.Issuer)
 	}
-	if !oidcAudienceContains(payload.Audience, clientID) {
-		return nil, errors.New("id_token audience does not include the configured client_id")
+	if !oidcAudienceContains(payload.Audience, audience) {
+		return nil, fmt.Errorf("token audience does not include %q", audience)
 	}
 	if payload.Expiry <= time.Now().Unix() {
-		return nil, errors.New("id_token is expired")
+		return nil, errors.New("token is expired")
 	}
 	if payload.Subject == "" {
-		return nil, errors.New("id_token carries no subject")
+		return nil, errors.New("token carries no subject")
 	}
 	return &oidcIdentityClaims{Subject: payload.Subject, Email: payload.Email}, nil
 }
 
-func oidcAudienceContains(raw json.RawMessage, clientID string) bool {
+func oidcAudienceContains(raw json.RawMessage, audience string) bool {
 	var single string
 	if json.Unmarshal(raw, &single) == nil {
-		return single == clientID
+		return single == audience
 	}
 	var many []string
 	if json.Unmarshal(raw, &many) == nil {
 		for _, entry := range many {
-			if entry == clientID {
+			if entry == audience {
 				return true
 			}
 		}
@@ -121,5 +123,5 @@ func (d *oidcJWKSDocument) rsaKey(kid string) (*rsa.PublicKey, error) {
 		}
 		return &rsa.PublicKey{N: new(big.Int).SetBytes(modulus), E: exponent}, nil
 	}
-	return nil, fmt.Errorf("no RSA key with kid %q in the issuer's JWKS", kid)
+	return nil, fmt.Errorf("kid %q: %w", kid, errOIDCUnknownKey)
 }

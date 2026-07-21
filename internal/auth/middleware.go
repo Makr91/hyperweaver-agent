@@ -115,50 +115,67 @@ func WriteMsg(w http.ResponseWriter, status int, msg string) {
 	}
 }
 
-// Middleware validates the API key and enforces the role policy, mirroring
-// the Node agent's verifyApiKey: 401 missing key, 403 invalid key, 403
-// insufficient role. On success the identity is attached to the context.
-func Middleware(store *keys.Store) func(http.Handler) http.Handler {
+// BearerValidator authenticates a non-API-key bearer credential (an OIDC
+// access token); nil = rejected.
+type BearerValidator func(token string) *Identity
+
+// Middleware validates the credential and enforces the role policy, mirroring
+// the Node agent's verifyApiKey: 401 missing credential, 403 invalid, 403
+// insufficient role. API keys (hw_-prefixed) authenticate against the key
+// store; a JWT-shaped bearer credential goes to the BearerValidator instead
+// (the OIDC resource-server door — nil validator disables it). On success the
+// identity is attached to the context.
+func Middleware(store *keys.Store, bearer BearerValidator) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			apiKey := ExtractKey(r)
-			if apiKey == "" {
+			credential := ExtractKey(r)
+			if credential == "" {
 				WriteMsg(w, http.StatusUnauthorized,
 					"API key required - provide either X-API-Key header or Authorization: Bearer header")
 				return
 			}
 
-			match, err := store.Verify(apiKey)
-			if err != nil {
-				alog().Error("api key validation failed", "error", err, "path", r.URL.Path)
-				WriteMsg(w, http.StatusInternalServerError, "API key validation failed")
-				return
-			}
-			if match == nil {
-				WriteMsg(w, http.StatusForbidden, "Invalid API key")
-				return
+			var identity *Identity
+			if bearer != nil && strings.Count(credential, ".") == 2 &&
+				!strings.HasPrefix(credential, "hw_") {
+				identity = bearer(credential)
+				if identity == nil {
+					WriteMsg(w, http.StatusForbidden, "Invalid bearer token")
+					return
+				}
+			} else {
+				match, err := store.Verify(credential)
+				if err != nil {
+					alog().Error("api key validation failed", "error", err, "path", r.URL.Path)
+					WriteMsg(w, http.StatusInternalServerError, "API key validation failed")
+					return
+				}
+				if match == nil {
+					WriteMsg(w, http.StatusForbidden, "Invalid API key")
+					return
+				}
+				identity = &Identity{
+					ID:          match.ID,
+					Name:        match.Name,
+					Description: match.Description,
+					Role:        match.Role,
+				}
 			}
 
 			needed := RequiredRole(r.Method, r.URL.Path)
-			if roleLevels[match.Role] < roleLevels[needed] {
-				alog().Warn("api key role insufficient for request",
-					"entity_name", match.Name,
-					"role", match.Role,
+			if roleLevels[identity.Role] < roleLevels[needed] {
+				alog().Warn("credential role insufficient for request",
+					"entity_name", identity.Name,
+					"role", identity.Role,
 					"required_role", needed,
 					"request_path", r.URL.Path,
 					"request_method", r.Method,
 				)
 				WriteMsg(w, http.StatusForbidden,
-					"Insufficient role: this operation requires '"+needed+"' (key role: '"+match.Role+"')")
+					"Insufficient role: this operation requires '"+needed+"' (key role: '"+identity.Role+"')")
 				return
 			}
 
-			identity := &Identity{
-				ID:          match.ID,
-				Name:        match.Name,
-				Description: match.Description,
-				Role:        match.Role,
-			}
 			next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), contextKey{}, identity)))
 		})
 	}

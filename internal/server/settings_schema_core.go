@@ -222,23 +222,29 @@ var schemaAPIKeys = map[string]any{
 }
 
 var schemaOIDC = map[string]any{
-	"description":      "Direct-mode federated login via the OAuth device grant (RFC 8628): the UI shows a user code, the user approves it at the identity provider, and the agent mints a local admin API key. The first successful login BINDS the agent to that account (TOFU); later logins by other accounts are refused unless listed in allowed_users. Endpoints resolve from the issuer's .well-known discovery document",
+	"description":      "Direct-mode federated login via the OAuth device grant (RFC 8628): the UI shows a user code, the user approves it at the identity provider, and the agent mints a local admin API key. The first successful login BINDS the agent to that account (TOFU); later logins by other accounts are refused unless listed in allowed_users. Enabling also makes the agent an OIDC RESOURCE SERVER: the bound account's IdP access token is accepted directly as an Authorization Bearer credential on the whole Agent API (validated against the issuer's JWKS; the token's aud must include this client_id). Endpoints resolve from the issuer's .well-known discovery document",
 	"requires_restart": true,
 	"properties": map[string]any{
 		"enabled": map[string]any{
 			"type":        "boolean",
-			"description": "Enable the device-login endpoints (/auth/oidc/device-start, /auth/oidc/device-status) and advertise oidc in auth[] on GET /api/status",
+			"description": "Enable the device-login endpoints (/auth/oidc/device-start, /auth/oidc/device-status), accept the bound account's IdP access token as a Bearer credential on the Agent API, and advertise oidc in auth[] on GET /api/status",
 			"default":     false,
 		},
 		"issuer": map[string]any{
 			"type":        "string",
-			"description": "The identity provider's issuer URL (discovery-based — endpoints are never configured by hand)",
+			"description": "The identity provider's issuer URL (the base origin; discovery-based — endpoints are never configured by hand)",
 			"default":     "",
 		},
 		"client_id": map[string]any{
 			"type":        "string",
 			"description": "The shared public OIDC client id registered for agent device login",
 			"default":     "hyperweaver-agent",
+		},
+		"scopes": map[string]any{
+			"type":        "array",
+			"items":       "string",
+			"description": "Scopes requested at login (openid is required for the identity token; organizations carries the org claim BoxVault authorizes private boxes by)",
+			"default":     []string{"openid", "profile", "email", "organizations"},
 		},
 		"allowed_users": map[string]any{
 			"type":        "array",
