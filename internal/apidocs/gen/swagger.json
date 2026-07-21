@@ -3878,10 +3878,22 @@
             },
             "server.keyInfoResponse": {
                 "properties": {
+                    "auth_provider": {
+                        "description": "\"oidc\" on SSO-minted keys; absent on plain keys",
+                        "type": "string"
+                    },
                     "created_at": {
                         "type": "string"
                     },
+                    "customer_id": {
+                        "description": "The federated account's customer id, from the access token's customer_id claim (SSO-minted keys only)",
+                        "type": "string"
+                    },
                     "description": {
+                        "type": "string"
+                    },
+                    "email": {
+                        "description": "The federated account's email (SSO-minted keys only)",
                         "type": "string"
                     },
                     "id": {
@@ -7058,7 +7070,7 @@
         },
         "/api-keys/info": {
             "get": {
-                "description": "Minimum role: viewer (every valid key may inspect itself).",
+                "description": "Minimum role: viewer (every valid key may inspect itself). Keys minted by a federated login (device or silent SSO) additionally answer auth_provider (\"oidc\"), email, and customer_id — the identity read off the validated token at login; plain keys omit all three (the UI consumes fail-open).",
                 "responses": {
                     "200": {
                         "content": {

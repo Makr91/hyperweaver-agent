@@ -4,10 +4,8 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"log/slog"
-	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -17,7 +15,6 @@ import (
 	"github.com/Makr91/hyperweaver-agent/internal/config"
 	"github.com/Makr91/hyperweaver-agent/internal/keys"
 	"github.com/Makr91/hyperweaver-agent/internal/logging"
-	"github.com/Makr91/hyperweaver-agent/internal/safepath"
 )
 
 const (
@@ -45,11 +42,6 @@ type oidcFlow struct {
 	expiresAt  time.Time
 }
 
-type oidcBindingFile struct {
-	BoundSubject string `json:"bound_subject"`
-	BoundEmail   string `json:"bound_email"`
-}
-
 type oidcManager struct {
 	enabled      bool
 	issuer       string
@@ -71,6 +63,8 @@ type oidcManager struct {
 	silent           map[string]*oidcSilentFlow
 	boundSubject     string
 	boundEmail       string
+	boundCustomerID  string
+	mintedKeys       map[int64]oidcKeyIdentity
 	accessToken      string
 	refreshToken     string
 	tokenExpiry      time.Time
@@ -98,44 +92,21 @@ func newOIDCManager(cfg *config.Config, keyStore *keys.Store) *oidcManager {
 		cancel:       cancel,
 		flows:        map[string]*oidcFlow{},
 		silent:       map[string]*oidcSilentFlow{},
+		mintedKeys:   map[int64]oidcKeyIdentity{},
 	}
 	if !m.enabled {
 		return m
 	}
-	binding, err := oidcLoadBinding(m.storePath)
+	state, err := oidcLoadState(m.storePath)
 	if err != nil {
-		slog.Warn("oidc binding unreadable — starting unbound", "path", m.storePath, "error", err)
-		binding = &oidcBindingFile{}
+		slog.Warn("oidc state unreadable — starting unbound", "path", m.storePath, "error", err)
+		state = &oidcStateFile{MintedKeys: map[int64]oidcKeyIdentity{}}
 	}
-	m.boundSubject = binding.BoundSubject
-	m.boundEmail = binding.BoundEmail
+	m.boundSubject = state.BoundSubject
+	m.boundEmail = state.BoundEmail
+	m.boundCustomerID = state.BoundCustomerID
+	m.mintedKeys = state.MintedKeys
 	return m
-}
-
-func oidcLoadBinding(path string) (*oidcBindingFile, error) {
-	raw, err := os.ReadFile(filepath.Clean(path))
-	if errors.Is(err, os.ErrNotExist) {
-		return &oidcBindingFile{}, nil
-	}
-	if err != nil {
-		return nil, err
-	}
-	binding := &oidcBindingFile{}
-	if uerr := json.Unmarshal(raw, binding); uerr != nil {
-		return nil, uerr
-	}
-	return binding, nil
-}
-
-func oidcSaveBinding(path string, binding *oidcBindingFile) error {
-	raw, err := json.MarshalIndent(binding, "", "  ")
-	if err != nil {
-		return err
-	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return err
-	}
-	return safepath.WriteFile(path, raw, 0o600)
 }
 
 func (m *oidcManager) close() {
@@ -402,20 +373,28 @@ func (m *oidcManager) completeLogin(claims *oidcIdentityClaims, answer *oidcToke
 	if m.boundSubject == "" {
 		m.boundSubject = claims.stableID()
 		m.boundEmail = claims.Email
-		if serr := oidcSaveBinding(m.storePath, &oidcBindingFile{
-			BoundSubject: m.boundSubject,
-			BoundEmail:   m.boundEmail,
-		}); serr != nil {
-			slog.Error("oidc binding save failed", "error", serr)
-		}
+		m.boundCustomerID = claims.CustomerID
 		slog.Info("oidc login bound this agent to its first account",
 			"id", claims.stableID(), "email", claims.Email)
+	} else if claims.stableID() == m.boundSubject {
+		m.boundEmail = claims.Email
+		m.boundCustomerID = claims.CustomerID
+	}
+	m.mintedKeys[entity.ID] = oidcKeyIdentity{Email: claims.Email, CustomerID: claims.CustomerID}
+	for id := range m.mintedKeys {
+		if id == entity.ID {
+			continue
+		}
+		if _, kerr := m.keys.Get(id); kerr != nil {
+			delete(m.mintedKeys, id)
+		}
 	}
 	m.accessToken = answer.AccessToken
 	if answer.RefreshToken != "" {
 		m.refreshToken = answer.RefreshToken
 	}
 	m.tokenExpiry = time.Now().Add(time.Duration(answer.ExpiresIn) * time.Second)
+	m.saveStateLocked()
 	m.mu.Unlock()
 	m.startRefreshLoop()
 	return &oidcCredential{

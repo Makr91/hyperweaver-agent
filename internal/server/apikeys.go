@@ -245,10 +245,16 @@ type keyInfoResponse struct {
 	Role        string    `json:"role"`
 	CreatedAt   time.Time `json:"created_at"`
 	LastUsed    time.Time `json:"last_used"`
+	// "oidc" on SSO-minted keys; absent on plain keys
+	AuthProvider string `json:"auth_provider,omitempty"`
+	// The federated account's email (SSO-minted keys only)
+	Email string `json:"email,omitempty"`
+	// The federated account's customer id, from the access token's customer_id claim (SSO-minted keys only)
+	CustomerID string `json:"customer_id,omitempty"`
 }
 
 // @Summary		Describe the calling key
-// @Description	Minimum role: viewer (every valid key may inspect itself).
+// @Description	Minimum role: viewer (every valid key may inspect itself). Keys minted by a federated login (device or silent SSO) additionally answer auth_provider ("oidc"), email, and customer_id — the identity read off the validated token at login; plain keys omit all three (the UI consumes fail-open).
 // @Tags			API Keys
 // @Produce		json
 // @Success		200	{object}	keyInfoResponse	"The calling key's attributes"
@@ -267,14 +273,20 @@ func (s *Server) handleKeyInfo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Same attribute set the Node agent selects for /api-keys/info.
-	writeJSON(w, keyInfoResponse{
+	response := keyInfoResponse{
 		ID:          k.ID,
 		Name:        k.Name,
 		Description: k.Description,
 		Role:        k.Role,
 		CreatedAt:   k.CreatedAt,
 		LastUsed:    k.LastUsed,
-	})
+	}
+	if ssoIdentity, ok := s.oidcMgr.identityForKey(k.ID); ok {
+		response.AuthProvider = "oidc"
+		response.Email = ssoIdentity.Email
+		response.CustomerID = ssoIdentity.CustomerID
+	}
+	writeJSON(w, response)
 }
 
 type deleteKeyResponse struct {

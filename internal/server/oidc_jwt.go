@@ -14,9 +14,10 @@ import (
 )
 
 type oidcIdentityClaims struct {
-	Subject string
-	UUID    string
-	Email   string
+	Subject    string
+	UUID       string
+	Email      string
+	CustomerID string
 }
 
 func (c *oidcIdentityClaims) stableID() string {
@@ -65,12 +66,13 @@ func oidcValidateToken(raw string, jwks *oidcJWKSDocument, issuer, audience stri
 		return nil, fmt.Errorf("id_token payload undecodable: %w", err)
 	}
 	payload := struct {
-		Issuer   string          `json:"iss"`
-		Subject  string          `json:"sub"`
-		UUID     string          `json:"UUID"`
-		Audience json.RawMessage `json:"aud"`
-		Expiry   int64           `json:"exp"`
-		Email    string          `json:"email"`
+		Issuer     string          `json:"iss"`
+		Subject    string          `json:"sub"`
+		UUID       string          `json:"UUID"`
+		Audience   json.RawMessage `json:"aud"`
+		Expiry     int64           `json:"exp"`
+		Email      string          `json:"email"`
+		CustomerID string          `json:"customer_id"`
 	}{}
 	if uerr := json.Unmarshal(payloadRaw, &payload); uerr != nil {
 		return nil, fmt.Errorf("id_token payload unreadable: %w", uerr)
@@ -87,7 +89,12 @@ func oidcValidateToken(raw string, jwks *oidcJWKSDocument, issuer, audience stri
 	if payload.Subject == "" {
 		return nil, errors.New("token carries no subject")
 	}
-	return &oidcIdentityClaims{Subject: payload.Subject, UUID: payload.UUID, Email: payload.Email}, nil
+	return &oidcIdentityClaims{
+		Subject:    payload.Subject,
+		UUID:       payload.UUID,
+		Email:      payload.Email,
+		CustomerID: payload.CustomerID,
+	}, nil
 }
 
 func oidcAudienceContains(raw json.RawMessage, audience string) bool {
