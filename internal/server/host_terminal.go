@@ -194,16 +194,20 @@ func parseResizeFrame(data []byte) (cols, rows int, ok bool) {
 // shell and pipes it — the SSH socket's exact wire.
 //
 //	@Summary		Host terminal (WebSocket)
-//	@Description	WEBSOCKET upgrade — authenticate with ?ticket= (GET /ws-ticket); the session id itself is mintable only by an admin at POST /term/start. Opens the host shell for the session. Wire = the SSH terminal's exactly: raw text frames both ways, {"type": "resize", "cols": N, "rows": N} JSON frames resize the PTY, "Terminal session closed." marks shell exit — one xterm.js component serves both terminals.
+//	@Description	WEBSOCKET upgrade — authenticate with an UNSCOPED ?ticket= (GET /ws-ticket without ?machine= — the frozen cross-agent shape: host-level streams take ONLY an unscoped ticket; a machine-scoped ticket answers the same 401 as an invalid one); the session id itself is mintable only by an admin at POST /term/start. Opens the host shell for the session. Wire = the SSH terminal's exactly: raw text frames both ways, {"type": "resize", "cols": N, "rows": N} JSON frames resize the PTY, "Terminal session closed." marks shell exit — one xterm.js component serves both terminals.
 //	@Tags			Console
 //	@Param			sessionId	path	string	true	"Terminal session ID"
-//	@Param			ticket	query	string	true	"WebSocket upgrade ticket (GET /ws-ticket)"
+//	@Param			ticket	query	string	true	"WebSocket upgrade ticket (GET /ws-ticket, UNSCOPED — no ?machine=)"
 //	@Success		101	"Switching Protocols — the terminal begins"
-//	@Failure		401	"Missing or invalid ticket"
+//	@Failure		401	"Missing, invalid, or machine-scoped ticket"
 //	@Failure		404	"Terminal session not found"
 //	@Router			/term/{sessionId} [get]
 func (s *Server) handleTermSocket(w http.ResponseWriter, r *http.Request) {
-	if !s.requireTicket(w, r) {
+	scope, ok := s.ticketScope(w, r)
+	if !ok {
+		return
+	}
+	if !requireScope(w, scope, "") {
 		return
 	}
 	sessionID := r.PathValue("sessionId")

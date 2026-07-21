@@ -15,30 +15,27 @@ import (
 	"github.com/Makr91/hyperweaver-agent/internal/tasks"
 )
 
-// The WebSocket plane — the base's WsTicket + WebSocketHandler ported:
-// GET /ws-ticket (authenticated) mints a short-lived unbound ticket, and
-// every WebSocket upgrade requires it as ?ticket= (the auth middleware's
-// header contract doesn't fit browser WebSocket clients). First consumer:
-// GET /tasks/{taskId}/stream — replay + live task output + a final status
-// frame, the UI's live task view.
-
 // ticketTTL matches the base's 60-second window (connect + quick
 // auto-reconnects; tickets are reusable within it, never consumed).
 const ticketTTL = 60 * time.Second
+
+type wsTicket struct {
+	expires time.Time
+	machine string
+}
 
 // wsTickets is the in-memory ticket store (a restart just means the client
 // fetches a fresh ticket — the base's model).
 type wsTickets struct {
 	mu      sync.Mutex
-	tickets map[string]time.Time
+	tickets map[string]wsTicket
 }
 
 func newWsTickets() *wsTickets {
-	return &wsTickets{tickets: map[string]time.Time{}}
+	return &wsTickets{tickets: map[string]wsTicket{}}
 }
 
-// Mint creates a ticket and sweeps expired ones (lazy — no background timer).
-func (t *wsTickets) Mint() (string, error) {
+func (t *wsTickets) Mint(machine string) (string, error) {
 	raw := make([]byte, 32)
 	if _, err := rand.Read(raw); err != nil {
 		return "", err
@@ -48,32 +45,30 @@ func (t *wsTickets) Mint() (string, error) {
 
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	for existing, expires := range t.tickets {
-		if now.After(expires) {
+	for existing, entry := range t.tickets {
+		if now.After(entry.expires) {
 			delete(t.tickets, existing)
 		}
 	}
-	t.tickets[ticket] = now.Add(ticketTTL)
+	t.tickets[ticket] = wsTicket{expires: now.Add(ticketTTL), machine: machine}
 	return ticket, nil
 }
 
-// Verify reports whether a ticket is present and unexpired (expired entries
-// delete lazily; valid tickets stay reusable).
-func (t *wsTickets) Verify(ticket string) bool {
+func (t *wsTickets) Lookup(ticket string) (machine string, ok bool) {
 	if ticket == "" {
-		return false
+		return "", false
 	}
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	expires, ok := t.tickets[ticket]
+	entry, ok := t.tickets[ticket]
 	if !ok {
-		return false
+		return "", false
 	}
-	if time.Now().After(expires) {
+	if time.Now().After(entry.expires) {
 		delete(t.tickets, ticket)
-		return false
+		return "", false
 	}
-	return true
+	return entry.machine, true
 }
 
 // wsTicketResponse is GET /ws-ticket's answer.
@@ -86,13 +81,14 @@ type wsTicketResponse struct {
 // — operator role via the central policy's explicit /ws-ticket rule).
 //
 //	@Summary		Mint a WebSocket upgrade ticket
-//	@Description	Minimum role: operator. A short-lived (60s) UNBOUND ticket appended as ?ticket= to every WebSocket upgrade URL (task stream, SSH terminal, VNC websockify). Reusable within its lifetime; fetch a fresh one before each connect or reconnect.
+//	@Description	Minimum role: operator. A short-lived (60s) ticket appended as ?ticket= to every WebSocket upgrade URL. Reusable within its lifetime; fetch a fresh one before each connect or reconnect. MACHINE SCOPE (the frozen cross-agent shape): ?machine={name} binds the ticket to that machine name (verbatim string, no existence check — the upgrade validates). Machine streams (VNC websockify, RDP bridge, machine SSH terminals, machine-task streams) accept ONLY a scoped ticket whose machine matches the target; host-level streams (the /term host shell, task streams of system/artifact/filesystem tasks) accept ONLY an unscoped ticket; any mismatch answers the same 401 as an invalid ticket.
 //	@Tags			Console
 //	@Produce		json
+//	@Param			machine	query	string	false	"Bind the ticket to this machine name — required for machine console/stream upgrades; omit for host-level streams"
 //	@Success		200	{object}	wsTicketResponse	"Ticket minted"
 //	@Router			/ws-ticket [get]
-func (s *Server) handleWsTicket(w http.ResponseWriter, _ *http.Request) {
-	ticket, err := s.wsTickets.Mint()
+func (s *Server) handleWsTicket(w http.ResponseWriter, r *http.Request) {
+	ticket, err := s.wsTickets.Mint(r.URL.Query().Get("machine"))
 	if err != nil {
 		slog.Error("mint ws ticket", "error", err)
 		taskError(w, http.StatusInternalServerError, "Failed to mint ticket")
@@ -101,15 +97,31 @@ func (s *Server) handleWsTicket(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, wsTicketResponse{Ticket: ticket})
 }
 
-// requireTicket gates a WebSocket upgrade on ?ticket= (the base's rule: the
-// API-key middleware never sees upgrade requests from browsers). False =
-// response already written.
-func (s *Server) requireTicket(w http.ResponseWriter, r *http.Request) bool {
-	if !s.wsTickets.Verify(r.URL.Query().Get("ticket")) {
-		taskError(w, http.StatusUnauthorized, "Missing or invalid ticket — mint one via GET /ws-ticket")
+const ticketRefusal = "Missing or invalid ticket — mint one via GET /ws-ticket"
+
+func (s *Server) ticketScope(w http.ResponseWriter, r *http.Request) (string, bool) {
+	scope, ok := s.wsTickets.Lookup(r.URL.Query().Get("ticket"))
+	if !ok {
+		taskError(w, http.StatusUnauthorized, ticketRefusal)
+		return "", false
+	}
+	return scope, true
+}
+
+func requireScope(w http.ResponseWriter, scope, want string) bool {
+	if scope != want {
+		taskError(w, http.StatusUnauthorized, ticketRefusal)
 		return false
 	}
 	return true
+}
+
+func hostLevelTaskMachine(name string) bool {
+	switch name {
+	case "system", "artifact", "filesystem":
+		return true
+	}
+	return false
 }
 
 // taskFinished reports a terminal task status (completed_with_errors is a
@@ -149,22 +161,30 @@ func writeFrame(ctx context.Context, conn *websocket.Conn, frame *outputFrame) e
 // the base's handleTaskStreamConnection.
 //
 //	@Summary		Live task output stream (WebSocket)
-//	@Description	WEBSOCKET upgrade — authenticate with ?ticket= (GET /ws-ticket), not API-key headers. Replays the task's buffered (or persisted) output as {type: "output", task_id, stream, data, timestamp} frames, streams live entries while the task runs, then sends {type: "status", task_id, status} and closes. Already-finished tasks get the full replay plus the status frame immediately.
+//	@Description	WEBSOCKET upgrade — authenticate with ?ticket= (GET /ws-ticket), not API-key headers. Ticket scope (the frozen cross-agent shape): a machine task's stream requires a ticket minted with ?machine= matching the task's machine_name; a host-level task's stream (machine_name "system", "artifact", or "filesystem") requires an UNSCOPED ticket — any mismatch answers the same 401 as an invalid ticket. Replays the task's buffered (or persisted) output as {type: "output", task_id, stream, data, timestamp} frames, streams live entries while the task runs, then sends {type: "status", task_id, status} and closes. Already-finished tasks get the full replay plus the status frame immediately.
 //	@Tags			Console
 //	@Param			taskId	path	string	true	"Task id"	format(uuid)
-//	@Param			ticket	query	string	true	"WebSocket upgrade ticket (GET /ws-ticket)"
+//	@Param			ticket	query	string	true	"WebSocket upgrade ticket (GET /ws-ticket) — scope must match the task (machine-scoped for machine tasks, unscoped for host-level tasks)"
 //	@Success		101	"Switching Protocols — the stream begins"
-//	@Failure		401	"Missing or invalid ticket"
+//	@Failure		401	"Missing, invalid, or wrong-scope ticket"
 //	@Failure		404	"Task not found"
 //	@Router			/tasks/{taskId}/stream [get]
 func (s *Server) handleTaskStream(w http.ResponseWriter, r *http.Request) {
-	if !s.requireTicket(w, r) {
+	scope, ok := s.ticketScope(w, r)
+	if !ok {
 		return
 	}
 	taskID := r.PathValue("taskId")
 	task, err := s.tasks.Store().Get(r.Context(), taskID)
 	if err != nil {
 		taskError(w, http.StatusNotFound, "Task not found")
+		return
+	}
+	want := task.MachineName
+	if hostLevelTaskMachine(task.MachineName) {
+		want = ""
+	}
+	if !requireScope(w, scope, want) {
 		return
 	}
 	replay, err := s.tasks.Output().GetOutput(r.Context(), taskID)

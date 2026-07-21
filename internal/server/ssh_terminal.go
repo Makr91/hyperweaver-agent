@@ -249,22 +249,26 @@ type terminalControl struct {
 // handleSSHConnection + setupSSHPiping.
 //
 //	@Summary		SSH terminal (WebSocket)
-//	@Description	WEBSOCKET upgrade — authenticate with ?ticket= (GET /ws-ticket). Opens the interactive shell (xterm-256color PTY) for a session minted at POST /machines/{name}/ssh/start. Wire: remote output arrives as raw text frames; send raw text as terminal input; send {"type": "resize", "cols": N, "rows": N} JSON frames to resize the PTY. "Connecting to SSH..." opens the stream; "SSH connection closed." marks remote exit.
+//	@Description	WEBSOCKET upgrade — authenticate with ?ticket= (GET /ws-ticket) minted with ?machine= matching the session's machine (the frozen cross-agent shape: machine streams take ONLY a matching scoped ticket; a mismatch answers the same 401 as an invalid ticket). Opens the interactive shell (xterm-256color PTY) for a session minted at POST /machines/{name}/ssh/start. Wire: remote output arrives as raw text frames; send raw text as terminal input; send {"type": "resize", "cols": N, "rows": N} JSON frames to resize the PTY. "Connecting to SSH..." opens the stream; "SSH connection closed." marks remote exit.
 //	@Tags			Console
 //	@Param			sessionId	path	string	true	"SSH session id"
-//	@Param			ticket	query	string	true	"WebSocket upgrade ticket (GET /ws-ticket)"
+//	@Param			ticket	query	string	true	"WebSocket upgrade ticket (GET /ws-ticket?machine={name} — must be scoped to the session's machine)"
 //	@Success		101	"Switching Protocols — the terminal begins"
-//	@Failure		401	"Missing or invalid ticket"
+//	@Failure		401	"Missing, invalid, or wrong-scope ticket"
 //	@Failure		404	"SSH session or machine not found"
 //	@Router			/ssh/{sessionId} [get]
 func (s *Server) handleSSHSocket(w http.ResponseWriter, r *http.Request) {
-	if !s.requireTicket(w, r) {
+	scope, ok := s.ticketScope(w, r)
+	if !ok {
 		return
 	}
 	sessionID := r.PathValue("sessionId")
 	session := s.sshSessions.get(sessionID)
 	if session == nil {
 		taskError(w, http.StatusNotFound, "SSH session not found")
+		return
+	}
+	if !requireScope(w, scope, session.MachineName) {
 		return
 	}
 	machine, err := s.machines.Get(r.Context(), session.MachineName)

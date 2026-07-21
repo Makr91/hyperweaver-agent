@@ -11647,7 +11647,7 @@
         },
         "/machines/{machineName}/rdp-bridge": {
             "get": {
-                "description": "WEBSOCKET upgrade — authenticate with ?ticket= (GET /ws-ticket). The IronRDP web client's transport (iron-remote-desktop-rdp, proxyAddress = this URL): the client cannot open TCP or TLS from a browser, so its wire is the RDCleanPath contract — the bridge reads the client's DER-encoded RDCleanPath request (first binary frames), relays the embedded X.224 connection request to the chosen RDP server, performs the TLS handshake toward that server ITSELF, answers the RDCleanPath response (X.224 confirm + the server certificate chain the client pins), and then pipes raw bytes both ways. TWO targets via ?target= (GET /machines/{name}/rdp's same vocabulary): console (default) = the machine's VRDE port at 127.0.0.1, TLS VERIFIED against the AGENT CA; guest = a Windows guest's OWN RDP service at its host-reachable IP:3389 (resolved like the rdp launcher: guest agent → Guest Additions → control IP) — the guest presents its OWN certificate (self-signed or domain-issued), so the bridge forwards the chain UNVERIFIED and the client's pin of it is the trust anchor (Devolutions Gateway's model; Mark's ruling 2026-07-11). The PDU's destination field is advisory: both targets resolve server-side, never from the client. SELF-HEALING (console target, Mark's zero-click ruling 2026-07-11): a VRDE server answering without TLS gets the whole VRDE TLS setup applied LIVE — certificate minted from the agent CA, Security properties set via controlvm vrdeproperty (the VRDP server reads them per connection; no power cycle) — and the relay retries once, so the first browser connect to an unconfigured machine (vagrant-up, GUI-created, anything) just works. Persistent negotiation failures ride through as RDCleanPath errors (guest target on Standard security = the guest's own RDP settings disable TLS — unhealable from the host).",
+                "description": "WEBSOCKET upgrade — authenticate with ?ticket= (GET /ws-ticket) minted with ?machine= matching this machine (the frozen cross-agent shape: machine streams take ONLY a matching scoped ticket; a mismatch answers the same 401 as an invalid ticket). The IronRDP web client's transport (iron-remote-desktop-rdp, proxyAddress = this URL): the client cannot open TCP or TLS from a browser, so its wire is the RDCleanPath contract — the bridge reads the client's DER-encoded RDCleanPath request (first binary frames), relays the embedded X.224 connection request to the chosen RDP server, performs the TLS handshake toward that server ITSELF, answers the RDCleanPath response (X.224 confirm + the server certificate chain the client pins), and then pipes raw bytes both ways. TWO targets via ?target= (GET /machines/{name}/rdp's same vocabulary): console (default) = the machine's VRDE port at 127.0.0.1, TLS VERIFIED against the AGENT CA; guest = a Windows guest's OWN RDP service at its host-reachable IP:3389 (resolved like the rdp launcher: guest agent → Guest Additions → control IP) — the guest presents its OWN certificate (self-signed or domain-issued), so the bridge forwards the chain UNVERIFIED and the client's pin of it is the trust anchor (Devolutions Gateway's model; Mark's ruling 2026-07-11). The PDU's destination field is advisory: both targets resolve server-side, never from the client. SELF-HEALING (console target, Mark's zero-click ruling 2026-07-11): a VRDE server answering without TLS gets the whole VRDE TLS setup applied LIVE — certificate minted from the agent CA, Security properties set via controlvm vrdeproperty (the VRDP server reads them per connection; no power cycle) — and the relay retries once, so the first browser connect to an unconfigured machine (vagrant-up, GUI-created, anything) just works. Persistent negotiation failures ride through as RDCleanPath errors (guest target on Standard security = the guest's own RDP settings disable TLS — unhealable from the host).",
                 "parameters": [
                     {
                         "description": "Machine name",
@@ -11659,7 +11659,7 @@
                         }
                     },
                     {
-                        "description": "WebSocket upgrade ticket (GET /ws-ticket)",
+                        "description": "WebSocket upgrade ticket (GET /ws-ticket?machine={name} — must be scoped to this machine)",
                         "in": "query",
                         "name": "ticket",
                         "required": true,
@@ -11689,7 +11689,7 @@
                         "description": "Machine not running, unknown target, no active VRDE console (console target), or no host-reachable guest IP (guest target)"
                     },
                     "401": {
-                        "description": "Missing or invalid ticket"
+                        "description": "Missing, invalid, or wrong-scope ticket"
                     },
                     "404": {
                         "description": "Machine not found, or no VM exists behind it yet"
@@ -12886,7 +12886,7 @@
         },
         "/machines/{machineName}/vnc/websockify": {
             "get": {
-                "description": "WEBSOCKET upgrade — authenticate with ?ticket= (GET /ws-ticket). Bridges binary WebSocket frames onto the running machine's VRDE port (subprotocol \"binary\" — noVNC's wire). Requires an active VRDE console (settings.consoleport at create, or vnc: on via modify) AND a VNC-speaking VRDE module (the console list advertises vnc only then).",
+                "description": "WEBSOCKET upgrade — authenticate with ?ticket= (GET /ws-ticket) minted with ?machine= matching this machine (the frozen cross-agent shape: machine streams take ONLY a matching scoped ticket; a mismatch answers the same 401 as an invalid ticket). Bridges binary WebSocket frames onto the running machine's VRDE port (subprotocol \"binary\" — noVNC's wire). Requires an active VRDE console (settings.consoleport at create, or vnc: on via modify) AND a VNC-speaking VRDE module (the console list advertises vnc only then).",
                 "parameters": [
                     {
                         "description": "Machine name",
@@ -12898,7 +12898,7 @@
                         }
                     },
                     {
-                        "description": "WebSocket upgrade ticket (GET /ws-ticket)",
+                        "description": "WebSocket upgrade ticket (GET /ws-ticket?machine={name} — must be scoped to this machine)",
                         "in": "query",
                         "name": "ticket",
                         "required": true,
@@ -12915,7 +12915,7 @@
                         "description": "Machine not running, or no active VRDE console"
                     },
                     "401": {
-                        "description": "Missing or invalid ticket"
+                        "description": "Missing, invalid, or wrong-scope ticket"
                     },
                     "404": {
                         "description": "Machine not found"
@@ -15560,7 +15560,7 @@
         },
         "/ssh/{sessionId}": {
             "get": {
-                "description": "WEBSOCKET upgrade — authenticate with ?ticket= (GET /ws-ticket). Opens the interactive shell (xterm-256color PTY) for a session minted at POST /machines/{name}/ssh/start. Wire: remote output arrives as raw text frames; send raw text as terminal input; send {\"type\": \"resize\", \"cols\": N, \"rows\": N} JSON frames to resize the PTY. \"Connecting to SSH...\" opens the stream; \"SSH connection closed.\" marks remote exit.",
+                "description": "WEBSOCKET upgrade — authenticate with ?ticket= (GET /ws-ticket) minted with ?machine= matching the session's machine (the frozen cross-agent shape: machine streams take ONLY a matching scoped ticket; a mismatch answers the same 401 as an invalid ticket). Opens the interactive shell (xterm-256color PTY) for a session minted at POST /machines/{name}/ssh/start. Wire: remote output arrives as raw text frames; send raw text as terminal input; send {\"type\": \"resize\", \"cols\": N, \"rows\": N} JSON frames to resize the PTY. \"Connecting to SSH...\" opens the stream; \"SSH connection closed.\" marks remote exit.",
                 "parameters": [
                     {
                         "description": "SSH session id",
@@ -15572,7 +15572,7 @@
                         }
                     },
                     {
-                        "description": "WebSocket upgrade ticket (GET /ws-ticket)",
+                        "description": "WebSocket upgrade ticket (GET /ws-ticket?machine={name} — must be scoped to the session's machine)",
                         "in": "query",
                         "name": "ticket",
                         "required": true,
@@ -15586,7 +15586,7 @@
                         "description": "Switching Protocols — the terminal begins"
                     },
                     "401": {
-                        "description": "Missing or invalid ticket"
+                        "description": "Missing, invalid, or wrong-scope ticket"
                     },
                     "404": {
                         "description": "SSH session or machine not found"
@@ -16920,7 +16920,7 @@
         },
         "/tasks/{taskId}/stream": {
             "get": {
-                "description": "WEBSOCKET upgrade — authenticate with ?ticket= (GET /ws-ticket), not API-key headers. Replays the task's buffered (or persisted) output as {type: \"output\", task_id, stream, data, timestamp} frames, streams live entries while the task runs, then sends {type: \"status\", task_id, status} and closes. Already-finished tasks get the full replay plus the status frame immediately.",
+                "description": "WEBSOCKET upgrade — authenticate with ?ticket= (GET /ws-ticket), not API-key headers. Ticket scope (the frozen cross-agent shape): a machine task's stream requires a ticket minted with ?machine= matching the task's machine_name; a host-level task's stream (machine_name \"system\", \"artifact\", or \"filesystem\") requires an UNSCOPED ticket — any mismatch answers the same 401 as an invalid ticket. Replays the task's buffered (or persisted) output as {type: \"output\", task_id, stream, data, timestamp} frames, streams live entries while the task runs, then sends {type: \"status\", task_id, status} and closes. Already-finished tasks get the full replay plus the status frame immediately.",
                 "parameters": [
                     {
                         "description": "Task id",
@@ -16933,7 +16933,7 @@
                         }
                     },
                     {
-                        "description": "WebSocket upgrade ticket (GET /ws-ticket)",
+                        "description": "WebSocket upgrade ticket (GET /ws-ticket) — scope must match the task (machine-scoped for machine tasks, unscoped for host-level tasks)",
                         "in": "query",
                         "name": "ticket",
                         "required": true,
@@ -16947,7 +16947,7 @@
                         "description": "Switching Protocols — the stream begins"
                     },
                     "401": {
-                        "description": "Missing or invalid ticket"
+                        "description": "Missing, invalid, or wrong-scope ticket"
                     },
                     "404": {
                         "description": "Task not found"
@@ -17491,7 +17491,7 @@
         },
         "/term/{sessionId}": {
             "get": {
-                "description": "WEBSOCKET upgrade — authenticate with ?ticket= (GET /ws-ticket); the session id itself is mintable only by an admin at POST /term/start. Opens the host shell for the session. Wire = the SSH terminal's exactly: raw text frames both ways, {\"type\": \"resize\", \"cols\": N, \"rows\": N} JSON frames resize the PTY, \"Terminal session closed.\" marks shell exit — one xterm.js component serves both terminals.",
+                "description": "WEBSOCKET upgrade — authenticate with an UNSCOPED ?ticket= (GET /ws-ticket without ?machine= — the frozen cross-agent shape: host-level streams take ONLY an unscoped ticket; a machine-scoped ticket answers the same 401 as an invalid one); the session id itself is mintable only by an admin at POST /term/start. Opens the host shell for the session. Wire = the SSH terminal's exactly: raw text frames both ways, {\"type\": \"resize\", \"cols\": N, \"rows\": N} JSON frames resize the PTY, \"Terminal session closed.\" marks shell exit — one xterm.js component serves both terminals.",
                 "parameters": [
                     {
                         "description": "Terminal session ID",
@@ -17503,7 +17503,7 @@
                         }
                     },
                     {
-                        "description": "WebSocket upgrade ticket (GET /ws-ticket)",
+                        "description": "WebSocket upgrade ticket (GET /ws-ticket, UNSCOPED — no ?machine=)",
                         "in": "query",
                         "name": "ticket",
                         "required": true,
@@ -17517,7 +17517,7 @@
                         "description": "Switching Protocols — the terminal begins"
                     },
                     "401": {
-                        "description": "Missing or invalid ticket"
+                        "description": "Missing, invalid, or machine-scoped ticket"
                     },
                     "404": {
                         "description": "Terminal session not found"
@@ -17552,7 +17552,17 @@
         },
         "/ws-ticket": {
             "get": {
-                "description": "Minimum role: operator. A short-lived (60s) UNBOUND ticket appended as ?ticket= to every WebSocket upgrade URL (task stream, SSH terminal, VNC websockify). Reusable within its lifetime; fetch a fresh one before each connect or reconnect.",
+                "description": "Minimum role: operator. A short-lived (60s) ticket appended as ?ticket= to every WebSocket upgrade URL. Reusable within its lifetime; fetch a fresh one before each connect or reconnect. MACHINE SCOPE (the frozen cross-agent shape): ?machine={name} binds the ticket to that machine name (verbatim string, no existence check — the upgrade validates). Machine streams (VNC websockify, RDP bridge, machine SSH terminals, machine-task streams) accept ONLY a scoped ticket whose machine matches the target; host-level streams (the /term host shell, task streams of system/artifact/filesystem tasks) accept ONLY an unscoped ticket; any mismatch answers the same 401 as an invalid ticket.",
+                "parameters": [
+                    {
+                        "description": "Bind the ticket to this machine name — required for machine console/stream upgrades; omit for host-level streams",
+                        "in": "query",
+                        "name": "machine",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
                 "responses": {
                     "200": {
                         "content": {
