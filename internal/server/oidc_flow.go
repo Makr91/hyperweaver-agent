@@ -25,6 +25,7 @@ const (
 	oidcStatusApproved = "approved"
 	oidcStatusDenied   = "denied"
 	oidcStatusExpired  = "expired"
+	oidcStatusFailed   = "failed"
 
 	oidcKeyDescriptionPrefix = "Created by OIDC device login "
 	oidcMintedKeysKept       = 5
@@ -299,7 +300,7 @@ func (m *oidcManager) watch(handle string, endpoints *oidcProviderEndpoints, aut
 			return
 		default:
 			slog.Warn("oidc token endpoint refused the device grant", "error", answer.Error)
-			m.setStatus(handle, oidcStatusDenied)
+			m.setStatus(handle, oidcStatusFailed)
 			return
 		}
 	}
@@ -309,17 +310,21 @@ func (m *oidcManager) finish(handle string, endpoints *oidcProviderEndpoints, an
 	jwks, err := oidcFetchJWKS(m.ctx, endpoints.JWKSURI)
 	if err != nil {
 		slog.Error("oidc jwks fetch failed", "error", err)
-		m.setStatus(handle, oidcStatusDenied)
+		m.setStatus(handle, oidcStatusFailed)
 		return
 	}
 	m.mu.Lock()
 	m.jwks = jwks
 	m.jwksFetched = time.Now()
 	m.mu.Unlock()
-	claims, err := oidcValidateToken(answer.IDToken, jwks, m.issuer, m.clientID)
+	identityToken := answer.IDToken
+	if identityToken == "" {
+		identityToken = answer.AccessToken
+	}
+	claims, err := oidcValidateToken(identityToken, jwks, m.issuer, m.clientID)
 	if err != nil {
-		slog.Error("oidc id_token rejected", "error", err)
-		m.setStatus(handle, oidcStatusDenied)
+		slog.Error("oidc identity token rejected", "error", err)
+		m.setStatus(handle, oidcStatusFailed)
 		return
 	}
 	if !m.subjectAllowed(claims) {
@@ -336,14 +341,14 @@ func (m *oidcManager) finish(handle string, endpoints *oidcProviderEndpoints, an
 	apiKey, err := keys.GenerateKeyString(m.keyLength)
 	if err != nil {
 		slog.Error("oidc key generation failed", "error", err)
-		m.setStatus(handle, oidcStatusDenied)
+		m.setStatus(handle, oidcStatusFailed)
 		return
 	}
 	entity, err := m.keys.Create(apiKey, name,
 		oidcKeyDescriptionPrefix+time.Now().Format(time.RFC3339), "admin", m.hashRounds)
 	if err != nil {
 		slog.Error("oidc key creation failed", "error", err)
-		m.setStatus(handle, oidcStatusDenied)
+		m.setStatus(handle, oidcStatusFailed)
 		return
 	}
 	if removed, perr := m.keys.PruneByDescriptionPrefix(oidcKeyDescriptionPrefix, oidcMintedKeysKept); perr != nil {
@@ -354,7 +359,7 @@ func (m *oidcManager) finish(handle string, endpoints *oidcProviderEndpoints, an
 
 	m.mu.Lock()
 	if m.boundSubject == "" {
-		m.boundSubject = claims.Subject
+		m.boundSubject = claims.stableID()
 		m.boundEmail = claims.Email
 		if serr := oidcSaveBinding(m.storePath, &oidcBindingFile{
 			BoundSubject: m.boundSubject,
@@ -363,7 +368,7 @@ func (m *oidcManager) finish(handle string, endpoints *oidcProviderEndpoints, an
 			slog.Error("oidc binding save failed", "error", serr)
 		}
 		slog.Info("oidc login bound this agent to its first account",
-			"subject", claims.Subject, "email", claims.Email)
+			"id", claims.stableID(), "email", claims.Email)
 	}
 	m.accessToken = answer.AccessToken
 	if answer.RefreshToken != "" {
@@ -389,11 +394,12 @@ func (m *oidcManager) subjectAllowed(claims *oidcIdentityClaims) bool {
 	m.mu.Lock()
 	bound := m.boundSubject
 	m.mu.Unlock()
-	if bound == "" || claims.Subject == bound {
+	if bound == "" || claims.stableID() == bound {
 		return true
 	}
 	for _, allowed := range m.allowedUsers {
-		if allowed == claims.Subject || (claims.Email != "" && strings.EqualFold(allowed, claims.Email)) {
+		if allowed == claims.UUID || allowed == claims.Subject ||
+			(claims.Email != "" && strings.EqualFold(allowed, claims.Email)) {
 			return true
 		}
 	}

@@ -15,7 +15,15 @@ import (
 
 type oidcIdentityClaims struct {
 	Subject string
+	UUID    string
 	Email   string
+}
+
+func (c *oidcIdentityClaims) stableID() string {
+	if c.UUID != "" {
+		return c.UUID
+	}
+	return c.Subject
 }
 
 var errOIDCUnknownKey = errors.New("no matching RSA key in the issuer's JWKS")
@@ -59,6 +67,7 @@ func oidcValidateToken(raw string, jwks *oidcJWKSDocument, issuer, audience stri
 	payload := struct {
 		Issuer   string          `json:"iss"`
 		Subject  string          `json:"sub"`
+		UUID     string          `json:"UUID"`
 		Audience json.RawMessage `json:"aud"`
 		Expiry   int64           `json:"exp"`
 		Email    string          `json:"email"`
@@ -78,7 +87,7 @@ func oidcValidateToken(raw string, jwks *oidcJWKSDocument, issuer, audience stri
 	if payload.Subject == "" {
 		return nil, errors.New("token carries no subject")
 	}
-	return &oidcIdentityClaims{Subject: payload.Subject, Email: payload.Email}, nil
+	return &oidcIdentityClaims{Subject: payload.Subject, UUID: payload.UUID, Email: payload.Email}, nil
 }
 
 func oidcAudienceContains(raw json.RawMessage, audience string) bool {

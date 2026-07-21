@@ -67,7 +67,7 @@ type deviceStartResponse struct {
 }
 
 type deviceStatusResponse struct {
-	// pending | approved | denied | expired
+	// pending | approved | denied | expired | failed
 	Status string `json:"status"`
 	// approved only, delivered exactly once: the minted local admin API key
 	APIKey string `json:"api_key,omitempty"`
@@ -109,7 +109,7 @@ func (s *Server) handleOIDCDeviceStart(w http.ResponseWriter, r *http.Request) {
 }
 
 // @Summary		Poll a federated device login
-// @Description	Public. Answers {status} (pending | denied | expired) while the flow runs; on approval, EXACTLY ONCE, the full credential body {status: "approved", api_key, entity_id, name, role, message} — the minted local admin API key the UI stores in its normal auth slot. After that one delivery (and after the first expired answer) the handle is forgotten and further polls answer 404. Poll freely — the agent itself talks to the identity provider at the grant's own pace.
+// @Description	Public. Answers {status} while the flow runs: pending; denied = the ACCOUNT was refused (the human clicked Deny at the identity provider, or the account is not the bound one and not in oidc.allowed_users); expired; failed = the agent could not complete the exchange or validation (identity-provider outage, token rejected — the agent log names the cause; trying again is reasonable). On approval, EXACTLY ONCE, the full credential body {status: "approved", api_key, entity_id, name, role, message} — the minted local admin API key the UI stores in its normal auth slot. After that one delivery (and after the first expired answer) the handle is forgotten and further polls answer 404. Poll freely — the agent itself talks to the identity provider at the grant's own pace. Identity comes from the id_token when the provider mints one, else the ACCESS token's claims (Spring Authorization Server's device grant issues no id_token) — validated against the issuer's JWKS either way, account id = UUID claim with sub fallback.
 // @Tags			Local Login
 // @Produce		json
 // @Param			handle	query	string	true	"The device-start answer's opaque flow id"

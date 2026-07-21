@@ -72,7 +72,7 @@ func oidcStartDeviceAuthorization(ctx context.Context, endpoints *oidcProviderEn
 	}
 	authorization := &oidcDeviceAuthorization{}
 	if uerr := json.Unmarshal(body, authorization); uerr != nil {
-		return nil, fmt.Errorf("device authorization answer unreadable: %w", uerr)
+		return nil, fmt.Errorf("device authorization endpoint %s answered a non-JSON body: %w", endpoints.DeviceAuthorization, uerr)
 	}
 	if authorization.DeviceCode == "" || authorization.UserCode == "" {
 		return nil, fmt.Errorf("device authorization answer carries no device_code")

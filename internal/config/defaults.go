@@ -125,8 +125,8 @@ oidc:
     - profile
     - email
     - organizations
-  # Additional accounts (emails or OIDC subjects) allowed to log in after the
-  # first login bound the agent.
+  # Additional accounts (emails, OIDC subjects, or account UUIDs) allowed to
+  # log in after the first login bound the agent.
   allowed_users: []
 
 updates:

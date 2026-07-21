@@ -249,7 +249,7 @@ var schemaOIDC = map[string]any{
 		"allowed_users": map[string]any{
 			"type":        "array",
 			"items":       "string",
-			"description": "Additional accounts (emails or OIDC subjects) allowed to log in after the first login bound the agent",
+			"description": "Additional accounts (emails, OIDC subjects, or account UUIDs) allowed to log in after the first login bound the agent",
 			"default":     []string{},
 		},
 	},
