@@ -1,5 +1,40 @@
 # Changelog
 
+## [0.2.0](https://github.com/Makr91/hyperweaver-agent/compare/v0.1.4...v0.2.0) (2026-07-21)
+
+
+### Features
+
+* utm support ([f564106](https://github.com/Makr91/hyperweaver-agent/commit/f564106e96277ffce9f5a1a7face4dd4c6593139))
+
+
+### Bug Fixes
+
+* adding metrics ([4f01a3b](https://github.com/Makr91/hyperweaver-agent/commit/4f01a3b8d728379f9f66fbf5e85d68db9198d45c))
+* dependency bumps, setup-go v7, zip-slip IsLocal barrier, provably-literal ORDER BY whitelist ([775fc84](https://github.com/Makr91/hyperweaver-agent/commit/775fc84683e0acc651efe80d6c71a868a4f3a83a))
+* final 500-line splits — settings schema literal extracted to section vars, server route table extracted to registerRoutes ([b82283d](https://github.com/Makr91/hyperweaver-agent/commit/b82283d678322c9ef6dff65cfb4fc932503568f3))
+* Hosts.yml Editor ([9b7fcc5](https://github.com/Makr91/hyperweaver-agent/commit/9b7fcc5c8794d162c53bbdde8fbc3b542116e4b7))
+* machine-scoped WebSocket tickets — frozen cross-agent shape enforced on all five upgrade endpoints ([be2a4f7](https://github.com/Makr91/hyperweaver-agent/commit/be2a4f748aae4086525e36b96ecfe37929fe1fad))
+* network-spaces surface, per-adapter VM traffic, NIC re-attachment, host address mutations, io_delay_pct, tray-key pruning, darwin-only utm prereq ([4a372d7](https://github.com/Makr91/hyperweaver-agent/commit/4a372d7cf3217198f54c70c4d8e686553702ee3f))
+* OIDC device-flow login — RFC 8628 device grant, JWKS validation, TOFU account binding, admin-key mint, in-memory token refresh ([acf7b4c](https://github.com/Makr91/hyperweaver-agent/commit/acf7b4ca8d7725013a56b042a6399bdccc7dd373))
+* OIDC resource server — bearer access-token auth on the Agent API, JWKS cache with rotation retry, TOFU subject gate ([67b2d83](https://github.com/Makr91/hyperweaver-agent/commit/67b2d838da7e696f054659a6303959b93e5b431e))
+* OIDC UUID-first account binding with sub fallback, allowed_users matches UUIDs, device-start errors name the endpoint ([a66de3b](https://github.com/Makr91/hyperweaver-agent/commit/a66de3ba5fb0c3789f2508647e7a39c12ec272dd))
+* RDP, API Shaping, General Improvments ([d6c1101](https://github.com/Makr91/hyperweaver-agent/commit/d6c1101156d305728a67dd1e91069bf7dbcd9146))
+* RDP, API Shaping, General Improvments ([6a0f180](https://github.com/Makr91/hyperweaver-agent/commit/6a0f180a710050b8b8062c352654ef245f68659a))
+* RDP, API Shaping, General Improvments ([fbb4213](https://github.com/Makr91/hyperweaver-agent/commit/fbb4213e4c50e85d24e7de7f465211159eb025cd))
+* round-4 swaggo migration — machines, artifacts, provisioners, monitoring, terminals migrate to inline annotations; fragment keys deleted ([6137b15](https://github.com/Makr91/hyperweaver-agent/commit/6137b15c1eec49df40121db3dc19914920b3a13e))
+* silent SSO pre-check — loopback auth-code PKCE with prompt=none, tray-grant handoff carrying the OIDC key, refresh family split ([b231bac](https://github.com/Makr91/hyperweaver-agent/commit/b231bacdb1a8146f038b9e6e0fb43cf551cf8dc3))
+* silent SSO pre-check with PKCE loopback callback, tray-grant handoff, SSO key identity on key-info via the customer_id claim ([461d10b](https://github.com/Makr91/hyperweaver-agent/commit/461d10b2af2d05cb6014b505644196d29f765ef3))
+* split 14 oversized Go files into ≤500-line siblings (config, assets, monitoring, provisioners, provision/modify/hostdoc/knob/executors execs, fielddsl, netconfig, filesystem_mutate, server, main) — pure mechanical moves ([3566708](https://github.com/Makr91/hyperweaver-agent/commit/3566708c246d9970f22463a225d44d12b47bbcd4))
+* split final 14 oversized Go files into ≤500-line siblings (assets ops, snapshot/reconcile/templates/store execs, tasks store, guest_agent, rdp_bridge, provisioner import, network_spaces, dnsfile, processes, machines_modify, filesystem_archive) — pure mechanical moves ([7d4f5c7](https://github.com/Makr91/hyperweaver-agent/commit/7d4f5c77c5771b5874f7fd9265f9e6436aa2d446))
+* structured-JSON convergence — task metadata real JSON with output nulled to its channels, byte/second/ms/day numerics on converged field names, open_files_sample array, nat_forwards derived view, os_languages array ([179c4ac](https://github.com/Makr91/hyperweaver-agent/commit/179c4acdf9fccdc61aa0acd54e8bb8cf72a22cf6))
+* supporting more vbox networking features ([3f256fe](https://github.com/Makr91/hyperweaver-agent/commit/3f256fe5529f3b677f32df3385d07fd1de2fae41))
+* swagger doc fully code-generated (hand spec removed) + structured-JSON conversions — loopback mappings and video mode structured, schema contracts on structs ([6acbee3](https://github.com/Makr91/hyperweaver-agent/commit/6acbee3d35fd31a790ecaa38e28c8bfd765ad043))
+* swaggo round 2 — 33 paths moved inline (api-keys, tray/protocol, swap, orchestration, host-power, database + explorer, secrets, hosts, dns, media, notes/tags), responses typed on the real wire ([32db3ca](https://github.com/Makr91/hyperweaver-agent/commit/32db3ca84e5663cb974995dbc394499094448eec))
+* swaggo round 3 — 76 paths moved inline (tasks, processes, machine ops/bulk/usb/nvram/ids/defaults/hosts-yml, guest agent, launchers, rdp, vnc state, remote templates, settings, hostname/addresses/nat, filesystem+archives, machine metrics, status), taskError failures typed, queuedOperation wired ([8a43acd](https://github.com/Makr91/hyperweaver-agent/commit/8a43acdf99f1426128de1e10ac85153b6dd998c7))
+* swaggo round 5 — WS upgrades, network spaces list, filesystem move/copy migrate inline; fragment paths emptied ([6e38cdf](https://github.com/Makr91/hyperweaver-agent/commit/6e38cdfaea4b9101ccd1b68137b6522c03116497))
+* WSL control-node reachability, swaggo merge scaffold + pilot endpoints, macOS hostonlynet platform split, answer-migrations Go half, bridged-ifs picker fields ([9a7cedb](https://github.com/Makr91/hyperweaver-agent/commit/9a7cedb38c6d8a05a1d67a0dfeb78f3b69468202))
+
 ## [0.1.4](https://github.com/Makr91/hyperweaver-agent/compare/v0.1.3...v0.1.4) (2026-07-17)
 
 
