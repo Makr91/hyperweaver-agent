@@ -174,10 +174,13 @@ type ListFilter struct {
 	Limit        int        // default 50
 }
 
-// sortColumns whitelists user-supplied sort columns.
-var sortColumns = map[string]bool{
-	"created_at": true, "priority": true, "status": true, "machine_name": true,
-	"operation": true, "started_at": true, "completed_at": true,
+// sortColumns whitelists user-supplied sort columns: the VALUE (a
+// compile-time literal) enters the query, never the user's string — the
+// lookup key is only ever compared.
+var sortColumns = map[string]string{
+	"created_at": "created_at", "priority": "priority", "status": "status",
+	"machine_name": "machine_name", "operation": "operation",
+	"started_at": "started_at", "completed_at": "completed_at",
 }
 
 // where appends the filter's WHERE clause to query and returns the bind
@@ -227,8 +230,8 @@ func (f *ListFilter) where(query *strings.Builder) []any {
 // are whitelist lookups, never raw input.
 func (s *Store) List(ctx context.Context, f *ListFilter) ([]*Task, error) {
 	sortColumn := "created_at"
-	if sortColumns[f.Sort] {
-		sortColumn = f.Sort
+	if column, ok := sortColumns[f.Sort]; ok {
+		sortColumn = column
 	}
 	direction := "DESC"
 	if strings.EqualFold(f.Order, "ASC") {

@@ -129,9 +129,19 @@ func (s *Server) archiveExtractTask(ctx context.Context, task *tasks.Task, out *
 }
 
 // extractTarget contains an entry name inside the extraction root (the
-// zip-slip guard: rejected instead of written outside).
+// zip-slip guard: rejected instead of written outside). filepath.IsLocal
+// refuses absolute, drive-lettered, reserved, and ..-escaping names
+// lexically; the pathWithin check then confirms containment of the joined
+// result.
 func extractTarget(extractPath, name string) (string, error) {
-	target := filepath.Join(extractPath, filepath.FromSlash(name))
+	clean := filepath.Clean(filepath.FromSlash(name))
+	if clean == "." {
+		return extractPath, nil
+	}
+	if !filepath.IsLocal(clean) {
+		return "", fmt.Errorf("archive entry %q escapes the extraction directory", name)
+	}
+	target := filepath.Join(extractPath, clean)
 	if !pathWithin(extractPath, target) && !sameBrowsePath(target, extractPath) {
 		return "", fmt.Errorf("archive entry %q escapes the extraction directory", name)
 	}
