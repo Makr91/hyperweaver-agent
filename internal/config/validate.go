@@ -46,8 +46,8 @@ func (c *Config) validate() error {
 	}
 	if c.OIDC.Enabled {
 		issuer, err := url.Parse(c.OIDC.Issuer)
-		if err != nil || issuer.Host == "" || (issuer.Scheme != "https" && issuer.Scheme != "http") {
-			return fmt.Errorf("oidc.issuer %q must be an http(s) URL", c.OIDC.Issuer)
+		if err != nil || issuer.Host == "" || issuer.Scheme != "https" {
+			return fmt.Errorf("oidc.issuer %q must be an https URL", c.OIDC.Issuer)
 		}
 		if c.OIDC.ClientID == "" {
 			return errors.New("oidc.client_id is required when oidc.enabled is true")

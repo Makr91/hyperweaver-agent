@@ -269,10 +269,14 @@ func (m *oidcManager) watch(handle string, endpoints *oidcProviderEndpoints, aut
 	defer m.wg.Done()
 	interval := time.Duration(authorization.Interval) * time.Second
 	for {
+		wait := interval
+		if remaining := time.Until(deadline); remaining < wait {
+			wait = remaining
+		}
 		select {
 		case <-m.ctx.Done():
 			return
-		case <-time.After(interval):
+		case <-time.After(wait):
 		}
 		if time.Now().After(deadline) {
 			m.setStatus(handle, oidcStatusExpired)
@@ -280,7 +284,8 @@ func (m *oidcManager) watch(handle string, endpoints *oidcProviderEndpoints, aut
 		}
 		answer, err := oidcPollToken(m.ctx, endpoints, m.clientID, authorization.DeviceCode)
 		if err != nil {
-			slog.Warn("oidc token poll failed — retrying", "error", err)
+			interval *= 2
+			slog.Warn("oidc token poll failed — retrying", "error", err, "next_poll", interval.String())
 			continue
 		}
 		switch answer.Error {
