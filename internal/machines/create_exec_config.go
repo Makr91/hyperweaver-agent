@@ -99,13 +99,13 @@ func (e *executors) createConfig(ctx context.Context, task *tasks.Task, out *tas
 			if provNet, ferr := FindProvisioningNet(ctx, vboxExe); ferr == nil && provNet != nil {
 				hostAdapter = provNet.Name
 			} else {
-				out.Write("stderr", "Provisioning network is not set up — host-type NICs attach without a network (run POST /provisioning/network/setup first)\n")
+				out.Write("stderr", "Provisioning network is not set up — host-type NICs attach without a network (run POST /api/provisioning/network/setup first)\n")
 			}
 		default:
 			if iface, ferr := FindProvisioningIf(ctx, vboxExe, e.env.Network.HostIP); ferr == nil && iface != nil {
 				hostAdapter = iface.Name
 			} else {
-				out.Write("stderr", "Provisioning network is not set up — host-type NICs attach without an adapter (run POST /provisioning/network/setup first)\n")
+				out.Write("stderr", "Provisioning network is not set up — host-type NICs attach without an adapter (run POST /api/provisioning/network/setup first)\n")
 			}
 		}
 	}

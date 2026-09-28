@@ -100,11 +100,11 @@ func (s *termSessions) close(id string) bool {
 // the shell itself opens when the WebSocket connects.
 //
 //	@Summary		Start a host terminal session
-//	@Description	Minimum role: ADMIN (the host-terminal capability token — every /term REST verb is admin-only: a shell on the agent host as the agent's own user is full host access). Mints a session; connect the terminal at the /term/{sessionId} WebSocket, where the shell actually opens (PowerShell/cmd via ConPTY on Windows, $SHELL login shell via a real PTY elsewhere). Sessions are in-memory — an agent restart closes them all.
+//	@Description	Minimum role: ADMIN (the host-terminal capability token — every /api/term REST verb is admin-only: a shell on the agent host as the agent's own user is full host access). Mints a session; connect the terminal at the /api/term/{sessionId} WebSocket, where the shell actually opens (PowerShell/cmd via ConPTY on Windows, $SHELL login shell via a real PTY elsewhere). Sessions are in-memory — an agent restart closes them all.
 //	@Tags			Console
 //	@Produce		json
 //	@Success		200	{object}	termSession	"Session created"
-//	@Router			/term/start [post]
+//	@Router			/api/term/start [post]
 func (s *Server) handleStartTermSession(w http.ResponseWriter, _ *http.Request) {
 	id, err := randomID()
 	if err != nil {
@@ -129,7 +129,7 @@ func (s *Server) handleStartTermSession(w http.ResponseWriter, _ *http.Request) 
 //	@Tags			Console
 //	@Produce		json
 //	@Success		200	{array}	termSession	"Sessions"
-//	@Router			/term/sessions [get]
+//	@Router			/api/term/sessions [get]
 func (s *Server) handleListTermSessions(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, s.termSessions.snapshot())
 }
@@ -143,7 +143,7 @@ func (s *Server) handleListTermSessions(w http.ResponseWriter, _ *http.Request) 
 //	@Param			sessionId	path	string	true	"Terminal session ID"
 //	@Success		200	{object}	termSession	"The session"
 //	@Failure		404	"Terminal session not found"
-//	@Router			/term/sessions/{sessionId} [get]
+//	@Router			/api/term/sessions/{sessionId} [get]
 func (s *Server) handleTermSessionInfo(w http.ResponseWriter, r *http.Request) {
 	session := s.termSessions.get(r.PathValue("sessionId"))
 	if session == nil {
@@ -162,7 +162,7 @@ func (s *Server) handleTermSessionInfo(w http.ResponseWriter, r *http.Request) {
 //	@Param			sessionId	path	string	true	"Terminal session ID"
 //	@Success		200	{object}	map[string]interface{}	"Session stopped"
 //	@Failure		404	"Terminal session not found"
-//	@Router			/term/sessions/{sessionId}/stop [delete]
+//	@Router			/api/term/sessions/{sessionId}/stop [delete]
 func (s *Server) handleStopTermSession(w http.ResponseWriter, r *http.Request) {
 	if !s.termSessions.close(r.PathValue("sessionId")) {
 		taskError(w, http.StatusNotFound, "Terminal session not found")
@@ -194,14 +194,14 @@ func parseResizeFrame(data []byte) (cols, rows int, ok bool) {
 // shell and pipes it — the SSH socket's exact wire.
 //
 //	@Summary		Host terminal (WebSocket)
-//	@Description	WEBSOCKET upgrade — authenticate with an UNSCOPED ?ticket= (GET /ws-ticket without ?machine= — the frozen cross-agent shape: host-level streams take ONLY an unscoped ticket; a machine-scoped ticket answers the same 401 as an invalid one); the session id itself is mintable only by an admin at POST /term/start. Opens the host shell for the session. Wire = the SSH terminal's exactly: raw text frames both ways, {"type": "resize", "cols": N, "rows": N} JSON frames resize the PTY, "Terminal session closed." marks shell exit — one xterm.js component serves both terminals.
+//	@Description	WEBSOCKET upgrade — authenticate with an UNSCOPED ?ticket= (GET /api/ws-ticket without ?machine= — the frozen cross-agent shape: host-level streams take ONLY an unscoped ticket; a machine-scoped ticket answers the same 401 as an invalid one); the session id itself is mintable only by an admin at POST /api/term/start. Opens the host shell for the session. Wire = the SSH terminal's exactly: raw text frames both ways, {"type": "resize", "cols": N, "rows": N} JSON frames resize the PTY, "Terminal session closed." marks shell exit — one xterm.js component serves both terminals.
 //	@Tags			Console
 //	@Param			sessionId	path	string	true	"Terminal session ID"
-//	@Param			ticket	query	string	true	"WebSocket upgrade ticket (GET /ws-ticket, UNSCOPED — no ?machine=)"
+//	@Param			ticket	query	string	true	"WebSocket upgrade ticket (GET /api/ws-ticket, UNSCOPED — no ?machine=)"
 //	@Success		101	"Switching Protocols — the terminal begins"
 //	@Failure		401	"Missing, invalid, or machine-scoped ticket"
 //	@Failure		404	"Terminal session not found"
-//	@Router			/term/{sessionId} [get]
+//	@Router			/api/term/{sessionId} [get]
 func (s *Server) handleTermSocket(w http.ResponseWriter, r *http.Request) {
 	scope, ok := s.ticketScope(w, r)
 	if !ok {

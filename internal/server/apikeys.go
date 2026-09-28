@@ -55,7 +55,7 @@ type bootstrapKeyResponse struct {
 // @Success		200	{object}	bootstrapKeyResponse	"Key created — shown once, only a hash is stored"
 // @Failure		400	{object}	auth.ErrorMsg	"Invalid JSON body"
 // @Failure		403	{object}	auth.ErrorMsg	"Bootstrap disabled, auto-disabled, or setup token invalid"
-// @Router			/api-keys/bootstrap [post]
+// @Router			/api/api-keys/bootstrap [post]
 func (s *Server) handleBootstrapKey(w http.ResponseWriter, r *http.Request) {
 	akCfg := s.cfg.APIKeys
 
@@ -146,7 +146,7 @@ type generateKeyResponse struct {
 // @Failure		400	{object}	auth.ErrorMsg	"Missing name or invalid role"
 // @Failure		401	{object}	auth.ErrorMsg	"Missing API key"
 // @Failure		403	{object}	auth.ErrorMsg	"Invalid key or insufficient role"
-// @Router			/api-keys/generate [post]
+// @Router			/api/api-keys/generate [post]
 func (s *Server) handleGenerateKey(w http.ResponseWriter, r *http.Request) {
 	var body generateRequest
 	if err := decodeBody(r, &body); err != nil {
@@ -217,7 +217,7 @@ type listKeysResponse struct {
 // @Success		200	{object}	listKeysResponse	"All keys, newest first"
 // @Failure		401	{object}	auth.ErrorMsg	"Missing API key"
 // @Failure		403	{object}	auth.ErrorMsg	"Invalid key or insufficient role"
-// @Router			/api-keys [get]
+// @Router			/api/api-keys [get]
 func (s *Server) handleListKeys(w http.ResponseWriter, _ *http.Request) {
 	list := s.keys.List()
 	entities := make([]entityJSON, 0, len(list))
@@ -260,7 +260,7 @@ type keyInfoResponse struct {
 // @Success		200	{object}	keyInfoResponse	"The calling key's attributes"
 // @Failure		401	{object}	auth.ErrorMsg	"Missing API key"
 // @Failure		403	{object}	auth.ErrorMsg	"Invalid API key"
-// @Router			/api-keys/info [get]
+// @Router			/api/api-keys/info [get]
 func (s *Server) handleKeyInfo(w http.ResponseWriter, r *http.Request) {
 	identity := auth.FromContext(r.Context())
 	if identity == nil {
@@ -303,7 +303,7 @@ type deleteKeyResponse struct {
 // @Success		200	{object}	deleteKeyResponse	"Key deleted"
 // @Failure		404	{object}	auth.ErrorMsg	"No key with that id"
 // @Failure		409	{object}	auth.ErrorMsg	"Would remove the last active admin key"
-// @Router			/api-keys/{id} [delete]
+// @Router			/api/api-keys/{id} [delete]
 func (s *Server) handleDeleteKey(w http.ResponseWriter, r *http.Request) {
 	idStr := r.PathValue("id")
 	id, err := strconv.ParseInt(idStr, 10, 64)
@@ -350,7 +350,7 @@ type revokeKeyResponse struct {
 // @Success		200	{object}	revokeKeyResponse	"Key deactivated"
 // @Failure		404	{object}	auth.ErrorMsg	"No key with that id"
 // @Failure		409	{object}	auth.ErrorMsg	"Would deactivate the last active admin key"
-// @Router			/api-keys/{id}/revoke [put]
+// @Router			/api/api-keys/{id}/revoke [put]
 func (s *Server) handleRevokeKey(w http.ResponseWriter, r *http.Request) {
 	idStr := r.PathValue("id")
 	id, err := strconv.ParseInt(idStr, 10, 64)

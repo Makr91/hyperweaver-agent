@@ -17,7 +17,7 @@ func requireHostOnlyNetPlatform(w http.ResponseWriter) bool {
 		return true
 	}
 	taskError(w, http.StatusBadRequest,
-		"hostonlynet is VirtualBox's macOS-only family — this host manages host-only interfaces instead (/network/spaces/hostonly)")
+		"hostonlynet is VirtualBox's macOS-only family — this host manages host-only interfaces instead (/api/network/spaces/hostonly)")
 	return false
 }
 
@@ -35,7 +35,7 @@ type hostOnlyNetCreateRequest struct {
 // it, unlike interfaces).
 //
 //	@Summary		Create a host-only network
-//	@Description	Minimum role: operator. VBoxManage hostonlynet add — VirtualBox's macOS-ONLY vmnet-backed host-only NETWORK family (the caller names it, unlike interfaces): name, netmask, lower_ip, upper_ip required; enabled defaults true. Non-macOS hosts answer 400 (Oracle's platform split — every other host OS lacks the verb; manage /network/spaces/hostonly there).
+//	@Description	Minimum role: operator. VBoxManage hostonlynet add — VirtualBox's macOS-ONLY vmnet-backed host-only NETWORK family (the caller names it, unlike interfaces): name, netmask, lower_ip, upper_ip required; enabled defaults true. Non-macOS hosts answer 400 (Oracle's platform split — every other host OS lacks the verb; manage /api/network/spaces/hostonly there).
 //	@Tags			Host Configuration
 //	@Accept			json
 //	@Produce		json
@@ -43,7 +43,7 @@ type hostOnlyNetCreateRequest struct {
 //	@Success		201	{object}	hostOnlySpaceResponse	"Host-only network created ({success, name, message})"
 //	@Failure		400	"Missing name/netmask/lower_ip/upper_ip"
 //	@Failure		503	"VirtualBox is not installed"
-//	@Router			/network/spaces/hostonlynet [post]
+//	@Router			/api/network/spaces/hostonlynet [post]
 func (s *Server) handleCreateHostOnlyNet(w http.ResponseWriter, r *http.Request) {
 	exe := s.requireVBox(w, r)
 	if exe == "" {
@@ -123,7 +123,7 @@ type hostOnlyNetModifyRequest struct {
 //	@Failure		400	"Nothing to change, or a non-macOS host (hostonlynet is VirtualBox's macOS-only family)"
 //	@Failure		404	"No host-only network by that name"
 //	@Failure		503	"VirtualBox is not installed"
-//	@Router			/network/spaces/hostonlynet/{name} [put]
+//	@Router			/api/network/spaces/hostonlynet/{name} [put]
 func (s *Server) handleModifyHostOnlyNet(w http.ResponseWriter, r *http.Request) {
 	exe := s.requireVBox(w, r)
 	if exe == "" {
@@ -174,7 +174,7 @@ func (s *Server) handleModifyHostOnlyNet(w http.ResponseWriter, r *http.Request)
 //	@Failure		400	"A non-macOS host (hostonlynet is VirtualBox's macOS-only family)"
 //	@Failure		404	"No host-only network by that name"
 //	@Failure		503	"VirtualBox is not installed"
-//	@Router			/network/spaces/hostonlynet/{name} [delete]
+//	@Router			/api/network/spaces/hostonlynet/{name} [delete]
 func (s *Server) handleDeleteHostOnlyNet(w http.ResponseWriter, r *http.Request) {
 	exe := s.requireVBox(w, r)
 	if exe == "" {

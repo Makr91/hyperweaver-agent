@@ -33,7 +33,7 @@ type readFileContentResponse struct {
 //	@Failure		403	"Path forbidden"
 //	@Failure		404	"File not found"
 //	@Failure		503	"File browser is disabled"
-//	@Router			/filesystem/content [get]
+//	@Router			/api/filesystem/content [get]
 func (s *Server) handleReadFileContent(w http.ResponseWriter, r *http.Request) {
 	path := r.URL.Query().Get("path")
 	if path == "" {
@@ -112,7 +112,7 @@ type writeFileContentResponse struct {
 //	@Failure		400	"Missing fields, bad mode, or content over the edit limit"
 //	@Failure		403	"Path forbidden"
 //	@Failure		503	"File browser is disabled"
-//	@Router			/filesystem/content [put]
+//	@Router			/api/filesystem/content [put]
 func (s *Server) handleWriteFileContent(w http.ResponseWriter, r *http.Request) {
 	var body writeFileContentRequest
 	if err := decodeBody(r, &body); err != nil {

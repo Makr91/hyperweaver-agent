@@ -26,7 +26,7 @@ import (
 // @Tags			Settings
 // @Produce		json
 // @Success		200	{object}	config.Config	"The configuration document"
-// @Router			/settings [get]
+// @Router			/api/settings [get]
 func (s *Server) handleGetSettings(w http.ResponseWriter, _ *http.Request) {
 	// The live configuration, JSON-tagged with the same names as the YAML.
 	// Nothing secret lives in it today; sanitize here when that changes.
@@ -38,7 +38,7 @@ func (s *Server) handleGetSettings(w http.ResponseWriter, _ *http.Request) {
 // @Tags			Settings
 // @Produce		json
 // @Success		200	{object}	map[string]interface{}	"The schema document"
-// @Router			/settings/schema [get]
+// @Router			/api/settings/schema [get]
 func (s *Server) handleSettingsSchema(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, settingsSchema)
 }
@@ -57,7 +57,7 @@ type updateSettingsResponse struct {
 // @Success		200		{object}	updateSettingsResponse	"Settings persisted"
 // @Failure		400		{object}	wrappedError			"Invalid JSON body"
 // @Failure		500		{object}	wrappedError			"Merged configuration invalid or write failure"
-// @Router			/settings [put]
+// @Router			/api/settings [put]
 func (s *Server) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 	var updates map[string]any
 	if err := decodeBody(r, &updates); err != nil || updates == nil {
@@ -89,7 +89,7 @@ type createBackupResponse struct {
 // @Tags			Settings
 // @Produce		json
 // @Success		200	{object}	createBackupResponse	"Backup created"
-// @Router			/settings/backup [post]
+// @Router			/api/settings/backup [post]
 func (s *Server) handleCreateBackup(w http.ResponseWriter, _ *http.Request) {
 	backup, err := s.cfg.CreateBackup()
 	if err != nil {
@@ -109,7 +109,7 @@ func (s *Server) handleCreateBackup(w http.ResponseWriter, _ *http.Request) {
 // @Tags			Settings
 // @Produce		json
 // @Success		200	{array}	config.Backup	"All backups"
-// @Router			/settings/backups [get]
+// @Router			/api/settings/backups [get]
 func (s *Server) handleListBackups(w http.ResponseWriter, _ *http.Request) {
 	backups, err := s.cfg.ListBackups()
 	if err != nil {
@@ -132,7 +132,7 @@ type deleteBackupResponse struct {
 // @Param			filename	path		string					true	"Backup filename"
 // @Success		200			{object}	deleteBackupResponse	"Backup deleted"
 // @Failure		404			{object}	wrappedError			"Backup not found"
-// @Router			/settings/backups/{filename} [delete]
+// @Router			/api/settings/backups/{filename} [delete]
 func (s *Server) handleDeleteBackup(w http.ResponseWriter, r *http.Request) {
 	filename := r.PathValue("filename")
 	if err := s.cfg.DeleteBackup(filename); err != nil {
@@ -162,7 +162,7 @@ type restoreBackupResponse struct {
 // @Param			filename	path		string					true	"Backup filename"
 // @Success		200			{object}	restoreBackupResponse	"Configuration restored"
 // @Failure		404			{object}	wrappedError			"Backup not found"
-// @Router			/settings/restore/{filename} [post]
+// @Router			/api/settings/restore/{filename} [post]
 func (s *Server) handleRestoreBackup(w http.ResponseWriter, r *http.Request) {
 	filename := r.PathValue("filename")
 	if err := s.cfg.RestoreBackup(filename); err != nil {
@@ -193,7 +193,7 @@ type serverRestartResponse struct {
 // @Tags			Settings
 // @Produce		json
 // @Success		200	{object}	serverRestartResponse	"Restart initiated"
-// @Router			/server/restart [post]
+// @Router			/api/server/restart [post]
 func (s *Server) handleServerRestart(w http.ResponseWriter, r *http.Request) {
 	slog.Warn("server restart requested", "by", auth.FromContext(r.Context()).Name)
 	writeJSON(w, serverRestartResponse{

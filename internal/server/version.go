@@ -88,7 +88,7 @@ type versionResponse struct {
 //	@Tags			System
 //	@Produce		json
 //	@Success		200	{object}	versionResponse	"Version information"
-//	@Router			/version [get]
+//	@Router			/api/version [get]
 func (s *Server) handleVersion(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, versionResponse{
 		Success:       true,
@@ -127,7 +127,7 @@ type updateCheckResponse struct {
 //	@Success		200	{object}	updateCheckResponse	"Update check result"
 //	@Failure		400	{object}	wrappedError	"Update checking not configured"
 //	@Failure		500	{object}	wrappedError	"Versioninfo fetch or parse failure"
-//	@Router			/app/updates/check [get]
+//	@Router			/api/app/updates/check [get]
 func (s *Server) handleUpdateCheck(w http.ResponseWriter, r *http.Request) {
 	url := s.cfg.Updates.VersionInfoURL
 	if url == "" {
@@ -176,7 +176,7 @@ type updateApplyResponse struct {
 //	@Success		202	{object}	updateApplyResponse	"Update task queued"
 //	@Failure		400	{object}	wrappedError	"Update checking not configured, or already up to date"
 //	@Failure		500	{object}	wrappedError	"Versioninfo fetch failure"
-//	@Router			/app/updates/apply [post]
+//	@Router			/api/app/updates/apply [post]
 func (s *Server) handleUpdateApply(w http.ResponseWriter, r *http.Request) {
 	url := s.cfg.Updates.VersionInfoURL
 	if url == "" {
@@ -233,7 +233,7 @@ func (s *Server) handleUpdateApply(w http.ResponseWriter, r *http.Request) {
 //	@Tags			System
 //	@Produce		json
 //	@Success		200	{object}	map[string]bool	"Tool availability map"
-//	@Router			/provisioning/status [get]
+//	@Router			/api/provisioning/status [get]
 func (s *Server) handleProvisioningStatus(w http.ResponseWriter, r *http.Request) {
 	status := map[string]bool{}
 	for _, tool := range prereqs.Detect(r.Context()) {

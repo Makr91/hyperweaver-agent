@@ -41,7 +41,7 @@ type mediaListResponse struct {
 //	@Success		200	{object}	mediaListResponse	"The media inventory"
 //	@Failure		500	"VBoxManage list hdds failed"
 //	@Failure		503	"VirtualBox is not installed"
-//	@Router			/media [get]
+//	@Router			/api/media [get]
 func (s *Server) handleListMedia(w http.ResponseWriter, r *http.Request) {
 	exe := machines.VBoxManagePath(r.Context())
 	if exe == "" {

@@ -335,5 +335,5 @@ func (c *Config) BaseURL() string {
 
 // LocalURL returns the URL the tray "Open" action launches.
 func (c *Config) LocalURL() string {
-	return c.BaseURL() + "/ui/"
+	return c.BaseURL() + "/"
 }

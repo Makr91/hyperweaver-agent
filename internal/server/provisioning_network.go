@@ -28,7 +28,7 @@ import (
 //	@Produce		json
 //	@Success		200	{object}	map[string]interface{}	"Provisioning network status"
 //	@Failure		503	"VirtualBox is not installed"
-//	@Router			/provisioning/network/status [get]
+//	@Router			/api/provisioning/network/status [get]
 func (s *Server) handleProvisioningNetworkStatus(w http.ResponseWriter, r *http.Request) {
 	network := s.cfg.Provisioning.Network
 	if !network.Enabled {
@@ -161,7 +161,7 @@ func (s *Server) queueNetworkTask(w http.ResponseWriter, r *http.Request, operat
 //	@Produce		json
 //	@Success		202	{object}	networkTaskResponse	"Setup task queued"
 //	@Failure		400	"Provisioning network is disabled in configuration"
-//	@Router			/provisioning/network/setup [post]
+//	@Router			/api/provisioning/network/setup [post]
 func (s *Server) handleProvisioningNetworkSetup(w http.ResponseWriter, r *http.Request) {
 	s.queueNetworkTask(w, r, machines.OpNetworkSetup,
 		"Provisioning network setup task queued")
@@ -176,7 +176,7 @@ func (s *Server) handleProvisioningNetworkSetup(w http.ResponseWriter, r *http.R
 //	@Produce		json
 //	@Success		202	{object}	networkTaskResponse	"Teardown task queued"
 //	@Failure		400	"Provisioning network is disabled in configuration"
-//	@Router			/provisioning/network/teardown [delete]
+//	@Router			/api/provisioning/network/teardown [delete]
 func (s *Server) handleProvisioningNetworkTeardown(w http.ResponseWriter, r *http.Request) {
 	s.queueNetworkTask(w, r, machines.OpNetworkTeardown,
 		"Provisioning network teardown task queued")

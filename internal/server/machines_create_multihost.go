@@ -203,7 +203,7 @@ func (s *Server) createMultiHostMachines(w http.ResponseWriter, r *http.Request,
 				machines.DocString(settings["box_arch"], "amd64"))
 			if errors.Is(ferr, machines.ErrTemplateNotFound) {
 				entryError(k, http.StatusBadRequest,
-					"box "+box+" is not local — multi-host creates never auto-download; pull it first (POST /templates/pull)")
+					"box "+box+" is not local — multi-host creates never auto-download; pull it first (POST /api/templates/pull)")
 				return
 			}
 			if ferr != nil {

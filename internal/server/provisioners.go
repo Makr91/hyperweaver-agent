@@ -31,7 +31,7 @@ type listProvisionersResponse struct {
 //	@Tags			Provisioning
 //	@Produce		json
 //	@Success		200	{object}	listProvisionersResponse	"Provisioner families"
-//	@Router			/provisioning/provisioners [get]
+//	@Router			/api/provisioning/provisioners [get]
 func (s *Server) handleListProvisioners(w http.ResponseWriter, _ *http.Request) {
 	list, err := s.provisioners.List()
 	if err != nil {
@@ -54,7 +54,7 @@ func (s *Server) handleListProvisioners(w http.ResponseWriter, _ *http.Request) 
 //	@Param			name	path	string	true	"Provisioner family name"
 //	@Success		200	{object}	provisioner.Collection	"The family"
 //	@Failure		404	"Provisioner not found"
-//	@Router			/provisioning/provisioners/{name} [get]
+//	@Router			/api/provisioning/provisioners/{name} [get]
 func (s *Server) handleProvisionerDetails(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
 	collection, err := s.provisioners.Get(name)
@@ -82,7 +82,7 @@ func (s *Server) handleProvisionerDetails(w http.ResponseWriter, r *http.Request
 //	@Param			version	path	string	true	"Version string or directory name"
 //	@Success		200	{object}	provisioner.Version	"The version"
 //	@Failure		404	"Provisioner or version not found"
-//	@Router			/provisioning/provisioners/{name}/versions/{version} [get]
+//	@Router			/api/provisioning/provisioners/{name}/versions/{version} [get]
 func (s *Server) handleProvisionerVersion(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
 	version, err := s.provisioners.GetVersion(name, r.PathValue("version"))
@@ -119,7 +119,7 @@ type refreshSpecsResponse struct {
 //	@Produce		json
 //	@Success		200	{object}	refreshSpecsResponse	"Per-version refresh summary"
 //	@Failure		500	"Registry scan failed"
-//	@Router			/provisioning/provisioners/refresh-specs [post]
+//	@Router			/api/provisioning/provisioners/refresh-specs [post]
 func (s *Server) handleRefreshProvisionerSpecs(w http.ResponseWriter, r *http.Request) {
 	refreshed, err := s.provisioners.RefreshAllRoleSpecs()
 	if err != nil {
@@ -157,7 +157,7 @@ type importProvisionerResponse struct {
 //	@Param			request	body	provisioner.ImportMetadata	true	"Import request: source_type (folder|archive|git) plus the source-specific fields"
 //	@Success		202	{object}	importProvisionerResponse	"Import task queued"
 //	@Failure		400	"Invalid body, source_type, path, url, branch, or checksum ("checksum must be a 64-character sha256 hex digest")"
-//	@Router			/provisioning/provisioners/import [post]
+//	@Router			/api/provisioning/provisioners/import [post]
 func (s *Server) handleImportProvisioner(w http.ResponseWriter, r *http.Request) {
 	var meta provisioner.ImportMetadata
 	if err := decodeBody(r, &meta); err != nil {
@@ -229,7 +229,7 @@ type refreshFromSourceResponse struct {
 //	@Success		202	{object}	refreshFromSourceResponse	"Refresh import task queued"
 //	@Failure		400	"Family carries no git provenance (catalog families update through the catalog)"
 //	@Failure		404	"Provisioner not found"
-//	@Router			/provisioning/provisioners/{name}/refresh-from-source [post]
+//	@Router			/api/provisioning/provisioners/{name}/refresh-from-source [post]
 func (s *Server) handleRefreshProvisionerFromSource(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
 	collection, err := s.provisioners.Get(name)
@@ -302,7 +302,7 @@ func (s *Server) handleRefreshProvisionerFromSource(w http.ResponseWriter, r *ht
 //	@Success		200	"Family deleted"
 //	@Failure		404	"Provisioner not found"
 //	@Failure		409	{object}	provisionerConflictResponse	"Referenced by existing machines"
-//	@Router			/provisioning/provisioners/{name} [delete]
+//	@Router			/api/provisioning/provisioners/{name} [delete]
 func (s *Server) handleDeleteProvisioner(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
 	if _, err := s.provisioners.Get(name); errors.Is(err, provisioner.ErrNotFound) {
@@ -341,7 +341,7 @@ func (s *Server) handleDeleteProvisioner(w http.ResponseWriter, r *http.Request)
 //	@Success		200	"Version deleted"
 //	@Failure		404	"Provisioner or version not found"
 //	@Failure		409	{object}	provisionerConflictResponse	"Referenced by existing machines"
-//	@Router			/provisioning/provisioners/{name}/versions/{version} [delete]
+//	@Router			/api/provisioning/provisioners/{name}/versions/{version} [delete]
 func (s *Server) handleDeleteProvisionerVersion(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
 	versionKey := r.PathValue("version")

@@ -29,7 +29,7 @@ type monitoringHostResponse struct {
 // @Tags			Host Monitoring
 // @Produce		json
 // @Success		200	{object}	monitoringHostResponse	"Host information"
-// @Router			/monitoring/host [get]
+// @Router			/api/monitoring/host [get]
 func (s *Server) handleMonitoringHost(w http.ResponseWriter, _ *http.Request) {
 	info := hostinfo.Get()
 	response := monitoringHostResponse{
@@ -77,7 +77,7 @@ type monitoringSummaryResponse struct {
 // @Produce		json
 // @Success		200	{object}	monitoringSummaryResponse	"Monitoring summary"
 // @Failure		500	{object}	wrappedError				"Failed to get monitoring summary"
-// @Router			/monitoring/summary [get]
+// @Router			/api/monitoring/summary [get]
 func (s *Server) handleMonitoringSummary(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
 	response := monitoringSummaryResponse{
@@ -126,7 +126,7 @@ type monitoringStatusResponse struct {
 // @Tags			Host Monitoring
 // @Produce		json
 // @Success		200	{object}	monitoringStatusResponse	"Service status"
-// @Router			/monitoring/status [get]
+// @Router			/api/monitoring/status [get]
 func (s *Server) handleMonitoringStatus(w http.ResponseWriter, _ *http.Request) {
 	note := "Realtime mode: every request samples the OS live; enable monitoring.storage_enabled for stored history."
 	if s.monitor.StorageEnabled() {
@@ -168,7 +168,7 @@ type monitoringHealthResponse struct {
 // @Tags			Host Monitoring
 // @Produce		json
 // @Success		200	{object}	monitoringHealthResponse	"Health information"
-// @Router			/monitoring/health [get]
+// @Router			/api/monitoring/health [get]
 func (s *Server) handleMonitoringHealth(w http.ResponseWriter, _ *http.Request) {
 	status := "healthy"
 	if s.monitor.StorageEnabled() && !s.monitor.Running() {

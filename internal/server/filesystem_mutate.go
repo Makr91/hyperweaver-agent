@@ -167,7 +167,7 @@ type createFolderResponse struct {
 //	@Failure		400	"Missing fields, bad mode, or directory already exists"
 //	@Failure		403	"Path forbidden"
 //	@Failure		503	"File browser is disabled"
-//	@Router			/filesystem/folder [post]
+//	@Router			/api/filesystem/folder [post]
 func (s *Server) handleCreateFolder(w http.ResponseWriter, r *http.Request) {
 	var body createFolderRequest
 	if err := decodeBody(r, &body); err != nil {

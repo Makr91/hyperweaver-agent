@@ -140,14 +140,14 @@ type databaseTablesResponse struct {
 // handleListDatabaseTables serves GET /database/{db}/tables.
 //
 //	@Summary		List a database's tables
-//	@Description	Minimum role: viewer. The read-only explorer drill-down (zoneweaver's contract, same wire on both agents): one open database's tables with row counts and index names. {db} is a GET /database/stats databases[].name value. SQLite internals (sqlite_*) and auto-indexes are excluded.
+//	@Description	Minimum role: viewer. The read-only explorer drill-down (zoneweaver's contract, same wire on both agents): one open database's tables with row counts and index names. {db} is a GET /api/database/stats databases[].name value. SQLite internals (sqlite_*) and auto-indexes are excluded.
 //	@Tags			Database Management
 //	@Produce		json
-//	@Param			db	path	string	true	"Database name from GET /database/stats databases[].name"
+//	@Param			db	path	string	true	"Database name from GET /api/database/stats databases[].name"
 //	@Success		200	{object}	databaseTablesResponse	"Tables retrieved"
 //	@Failure		404	{object}	wrappedError	"Unknown database (the message names the legal values)"
 //	@Failure		500	{object}	wrappedError	"Failed to list database tables"
-//	@Router			/database/{db}/tables [get]
+//	@Router			/api/database/{db}/tables [get]
 func (s *Server) handleListDatabaseTables(w http.ResponseWriter, r *http.Request) {
 	handle := s.findDatabase(w, r)
 	if handle == nil {
@@ -281,7 +281,7 @@ type databaseRowsResponse struct {
 //	@Description	Minimum role: viewer. The explorer's row browser — NO arbitrary SQL. The table must exist in the named database and order_by must name one of ITS columns; both are looked up in the database's own catalog and quoted as identifiers, never interpolated raw, and limit/offset ride as bind parameters. order_by takes a column name optionally suffixed :desc (e.g. created_at:desc); without it rows come in the table's natural rowid order. rows[] are VALUE ARRAYS in columns[] order.
 //	@Tags			Database Management
 //	@Produce		json
-//	@Param			db	path	string	true	"Database name from GET /database/stats databases[].name"
+//	@Param			db	path	string	true	"Database name from GET /api/database/stats databases[].name"
 //	@Param			table	path	string	true	"Table name"
 //	@Param			limit	query	integer	false	"Page size"	default(50)
 //	@Param			offset	query	integer	false	"Page offset"	default(0)
@@ -290,7 +290,7 @@ type databaseRowsResponse struct {
 //	@Failure		400	{object}	wrappedError	"order_by does not name a column of the table"
 //	@Failure		404	{object}	wrappedError	"Unknown database or unknown table"
 //	@Failure		500	{object}	wrappedError	"Failed to browse database table"
-//	@Router			/database/{db}/tables/{table}/rows [get]
+//	@Router			/api/database/{db}/tables/{table}/rows [get]
 func (s *Server) handleBrowseDatabaseTable(w http.ResponseWriter, r *http.Request) {
 	handle := s.findDatabase(w, r)
 	if handle == nil {

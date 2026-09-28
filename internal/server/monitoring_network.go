@@ -32,7 +32,7 @@ type monitoringInterfacesResponse struct {
 // @Param			link	query	string	false	"Filter by interface name"
 // @Success		200	{object}	monitoringInterfacesResponse	"Network interfaces"
 // @Failure		500	{object}	wrappedError					"Failed to get network interfaces"
-// @Router			/monitoring/network/interfaces [get]
+// @Router			/api/monitoring/network/interfaces [get]
 func (s *Server) handleMonitoringInterfaces(w http.ResponseWriter, r *http.Request) {
 	q := parseMonitoringQuery(r)
 	interfaces, err := s.monitor.Sampler().Interfaces(r.Context())
@@ -112,7 +112,7 @@ type networkUsageResponse struct {
 // @Param			link	query	string	false	"Filter by interface name"
 // @Success		200	{object}	networkUsageResponse	"Network usage"
 // @Failure		500	{object}	wrappedError			"Failed to get network usage"
-// @Router			/monitoring/network/usage [get]
+// @Router			/api/monitoring/network/usage [get]
 func (s *Server) handleMonitoringNetworkUsage(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
 	q := parseMonitoringQuery(r)

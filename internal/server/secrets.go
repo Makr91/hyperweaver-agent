@@ -21,7 +21,7 @@ import (
 // @Tags			Secrets
 // @Produce		json
 // @Success		200	{object}	secrets.Document	"The secrets document"
-// @Router			/secrets [get]
+// @Router			/api/secrets [get]
 func (s *Server) handleGetSecrets(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, s.secrets.Get())
 }
@@ -35,14 +35,14 @@ type secretsUpdateResponse struct {
 }
 
 // @Summary		Update the global secrets
-// @Description	Minimum role: admin. Replaces the submitted categories whole (the same top-level shallow-merge shape as PUT /settings); omitted categories are untouched. Rejected whole on an unknown category or an invalid entry name — the store never half-applies. Persisted atomically to secrets.yaml (0600) beside the config.
+// @Description	Minimum role: admin. Replaces the submitted categories whole (the same top-level shallow-merge shape as PUT /api/settings); omitted categories are untouched. Rejected whole on an unknown category or an invalid entry name — the store never half-applies. Persisted atomically to secrets.yaml (0600) beside the config.
 // @Tags			Secrets
 // @Accept			json
 // @Produce		json
 // @Param			body	body	secrets.Document	true	"Secrets categories to replace"
 // @Success		200	{object}	secretsUpdateResponse	"Secrets persisted"
 // @Failure		400	{object}	wrappedError	"Unknown category or invalid entry name"
-// @Router			/secrets [put]
+// @Router			/api/secrets [put]
 func (s *Server) handleUpdateSecrets(w http.ResponseWriter, r *http.Request) {
 	var categories map[string]json.RawMessage
 	if err := decodeBody(r, &categories); err != nil || categories == nil {

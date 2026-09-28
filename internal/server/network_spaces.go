@@ -35,7 +35,7 @@ var hostOnlyNetsNarrated sync.Once
 //	@Success		200	{object}	map[string]interface{}	"The network spaces"
 //	@Failure		500	"A VBoxManage listing failed"
 //	@Failure		503	"VirtualBox is not installed"
-//	@Router			/network/spaces [get]
+//	@Router			/api/network/spaces [get]
 func (s *Server) handleListNetworkSpaces(w http.ResponseWriter, r *http.Request) {
 	exe := machines.VBoxManagePath(r.Context())
 	if exe == "" {
@@ -216,7 +216,7 @@ func requireHostOnlyIfPlatform(w http.ResponseWriter) bool {
 		return true
 	}
 	taskError(w, http.StatusBadRequest,
-		"host-only interfaces died with VirtualBox 7 on macOS — this host manages host-only networks instead (/network/spaces/hostonlynet)")
+		"host-only interfaces died with VirtualBox 7 on macOS — this host manages host-only networks instead (/api/network/spaces/hostonlynet)")
 	return false
 }
 
@@ -242,7 +242,7 @@ type hostOnlySpaceCreateRequest struct {
 // names the already-created interface — it is NOT rolled back.
 //
 //	@Summary		Create a host-only interface
-//	@Description	Minimum role: operator. VBoxManage hostonlyif create — VirtualBox assigns the interface name (the answer carries it); the request may configure the static IPv4 (ip + netmask, netmask defaulting to 255.255.255.0) and add the interface's DHCP server (dhcp {server_ip, lower_ip, upper_ip, netmask?}) in the same call. A failed follow-up step answers 500 NAMING the already-created interface — it is not rolled back (delete it explicitly if unwanted). Windows hosts may need driver-install privileges — VirtualBox's own error rides through. macOS hosts REFUSE the whole hostonly-interface family with a 400 (VirtualBox 7 removed host-only adapters there — manage /network/spaces/hostonlynet instead).
+//	@Description	Minimum role: operator. VBoxManage hostonlyif create — VirtualBox assigns the interface name (the answer carries it); the request may configure the static IPv4 (ip + netmask, netmask defaulting to 255.255.255.0) and add the interface's DHCP server (dhcp {server_ip, lower_ip, upper_ip, netmask?}) in the same call. A failed follow-up step answers 500 NAMING the already-created interface — it is not rolled back (delete it explicitly if unwanted). Windows hosts may need driver-install privileges — VirtualBox's own error rides through. macOS hosts REFUSE the whole hostonly-interface family with a 400 (VirtualBox 7 removed host-only adapters there — manage /api/network/spaces/hostonlynet instead).
 //	@Tags			Host Configuration
 //	@Accept			json
 //	@Produce		json
@@ -251,7 +251,7 @@ type hostOnlySpaceCreateRequest struct {
 //	@Failure		400	"Invalid body, dhcp missing server_ip/lower_ip/upper_ip, or a macOS host (host-only interfaces died with VirtualBox 7 there — use hostonlynet)"
 //	@Failure		500	"Creation or a follow-up step failed (the message names the created interface when one exists)"
 //	@Failure		503	"VirtualBox is not installed"
-//	@Router			/network/spaces/hostonly [post]
+//	@Router			/api/network/spaces/hostonly [post]
 func (s *Server) handleCreateHostOnlySpace(w http.ResponseWriter, r *http.Request) {
 	exe := s.requireVBox(w, r)
 	if exe == "" {
@@ -323,13 +323,13 @@ type hostOnlySpaceModifyRequest struct {
 //	@Tags			Host Configuration
 //	@Accept			json
 //	@Produce		json
-//	@Param			name	path	string	true	"The interface name from GET /network/spaces (URL-encode spaces)"
+//	@Param			name	path	string	true	"The interface name from GET /api/network/spaces (URL-encode spaces)"
 //	@Param			request	body	hostOnlySpaceModifyRequest	true	"IP and/or DHCP changes"
 //	@Success		200	{object}	hostOnlySpaceResponse	"Interface updated"
 //	@Failure		400	"Nothing to change, an invalid dhcp document, or a macOS host (use hostonlynet)"
 //	@Failure		404	"No host-only interface by that name"
 //	@Failure		503	"VirtualBox is not installed"
-//	@Router			/network/spaces/hostonly/{name} [put]
+//	@Router			/api/network/spaces/hostonly/{name} [put]
 func (s *Server) handleModifyHostOnlySpace(w http.ResponseWriter, r *http.Request) {
 	exe := s.requireVBox(w, r)
 	if exe == "" {
@@ -419,15 +419,15 @@ func (s *Server) handleModifyHostOnlySpace(w http.ResponseWriter, r *http.Reques
 // DHCP server first (tolerantly), then the interface (the teardown order).
 //
 //	@Summary		Remove a host-only interface
-//	@Description	Minimum role: operator. The teardown order: the interface's DHCP server first (tolerantly — absence is fine), then hostonlyif remove. Machines still attached to the interface lose their uplink — VirtualBox does not refuse; check GET /network/spaces consumers first.
+//	@Description	Minimum role: operator. The teardown order: the interface's DHCP server first (tolerantly — absence is fine), then hostonlyif remove. Machines still attached to the interface lose their uplink — VirtualBox does not refuse; check GET /api/network/spaces consumers first.
 //	@Tags			Host Configuration
 //	@Produce		json
-//	@Param			name	path	string	true	"The interface name from GET /network/spaces (URL-encode spaces)"
+//	@Param			name	path	string	true	"The interface name from GET /api/network/spaces (URL-encode spaces)"
 //	@Success		200	{object}	hostOnlySpaceResponse	"Interface removed"
 //	@Failure		400	"A macOS host (use hostonlynet)"
 //	@Failure		404	"No host-only interface by that name"
 //	@Failure		503	"VirtualBox is not installed"
-//	@Router			/network/spaces/hostonly/{name} [delete]
+//	@Router			/api/network/spaces/hostonly/{name} [delete]
 func (s *Server) handleDeleteHostOnlySpace(w http.ResponseWriter, r *http.Request) {
 	exe := s.requireVBox(w, r)
 	if exe == "" {

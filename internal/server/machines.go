@@ -96,7 +96,7 @@ type machineListResponse struct {
 //	@Produce		json
 //	@Param			tag	query	string	false	"Only machines carrying this tag"
 //	@Success		200	{object}	machineListResponse	"Machines retrieved"
-//	@Router			/machines [get]
+//	@Router			/api/machines [get]
 func (s *Server) handleListMachines(w http.ResponseWriter, r *http.Request) {
 	query := r.URL.Query()
 	filter := machines.ListFilter{Status: query.Get("status")}
@@ -145,7 +145,7 @@ func (s *Server) handleListMachines(w http.ResponseWriter, r *http.Request) {
 //	@Param			machineName	path	string	true	"Machine name"
 //	@Success		200	{object}	map[string]interface{}	"Machine details"
 //	@Failure		404	"Machine not found"
-//	@Router			/machines/{machineName} [get]
+//	@Router			/api/machines/{machineName} [get]
 func (s *Server) handleMachineDetails(w http.ResponseWriter, r *http.Request) {
 	machine := s.findMachine(w, r)
 	if machine == nil {

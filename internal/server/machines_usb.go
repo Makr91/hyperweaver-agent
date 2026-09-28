@@ -33,7 +33,7 @@ type hostUSBResponse struct {
 //	@Produce		json
 //	@Success		200	{object}	hostUSBResponse	"Host USB devices"
 //	@Failure		503	{object}	taskErrorBody	"VirtualBox is not installed"
-//	@Router			/system/usb [get]
+//	@Router			/api/system/usb [get]
 func (s *Server) handleListHostUSB(w http.ResponseWriter, r *http.Request) {
 	exe := machines.VBoxManagePath(r.Context())
 	if exe == "" {
@@ -68,7 +68,7 @@ type usbActionResponse struct {
 // needs a USB controller (hardware.usb at create/modify).
 //
 //	@Summary		Attach a host USB device
-//	@Description	Minimum role: operator. Synchronous controlvm usbattach — hot-plug a host device (by UUID or address from GET /system/usb) into the RUNNING machine. The machine needs a USB controller (hardware.usb.ohci/ehci/xhci at create or modify); VirtualBox's own error answers when it lacks one.
+//	@Description	Minimum role: operator. Synchronous controlvm usbattach — hot-plug a host device (by UUID or address from GET /api/system/usb) into the RUNNING machine. The machine needs a USB controller (hardware.usb.ohci/ehci/xhci at create or modify); VirtualBox's own error answers when it lacks one.
 //	@Tags			Machine Management
 //	@Accept			json
 //	@Produce		json
@@ -78,7 +78,7 @@ type usbActionResponse struct {
 //	@Failure		400	{object}	taskErrorBody	"Missing device, or machine not running"
 //	@Failure		404	{object}	taskErrorBody	"Machine not found"
 //	@Failure		503	{object}	taskErrorBody	"VirtualBox is not installed"
-//	@Router			/machines/{machineName}/usb/attach [post]
+//	@Router			/api/machines/{machineName}/usb/attach [post]
 func (s *Server) handleUSBAttach(w http.ResponseWriter, r *http.Request) {
 	s.runUSBVerb(w, r, vbox.USBAttach, "attach")
 }
@@ -96,7 +96,7 @@ func (s *Server) handleUSBAttach(w http.ResponseWriter, r *http.Request) {
 //	@Failure		400	{object}	taskErrorBody	"Missing device, or machine not running"
 //	@Failure		404	{object}	taskErrorBody	"Machine not found"
 //	@Failure		503	{object}	taskErrorBody	"VirtualBox is not installed"
-//	@Router			/machines/{machineName}/usb/detach [post]
+//	@Router			/api/machines/{machineName}/usb/detach [post]
 func (s *Server) handleUSBDetach(w http.ResponseWriter, r *http.Request) {
 	s.runUSBVerb(w, r, vbox.USBDetach, "detach")
 }
@@ -116,7 +116,7 @@ func (s *Server) runUSBVerb(w http.ResponseWriter, r *http.Request,
 		return
 	}
 	if body.Device == "" {
-		taskError(w, http.StatusBadRequest, "device is required (a UUID or address from GET /system/usb)")
+		taskError(w, http.StatusBadRequest, "device is required (a UUID or address from GET /api/system/usb)")
 		return
 	}
 	exe := machines.VBoxManagePath(r.Context())
@@ -223,7 +223,7 @@ type usbFiltersResponse struct {
 //	@Success		200	{object}	usbFiltersResponse	"Filters"
 //	@Failure		404	{object}	taskErrorBody	"Machine not found, or no VM exists behind it yet"
 //	@Failure		503	{object}	taskErrorBody	"VirtualBox is not installed"
-//	@Router			/machines/{machineName}/usb/filters [get]
+//	@Router			/api/machines/{machineName}/usb/filters [get]
 func (s *Server) handleListUSBFilters(w http.ResponseWriter, r *http.Request) {
 	machine := s.findMachine(w, r)
 	if machine == nil {
@@ -274,7 +274,7 @@ type usbFilterAddResponse struct {
 //	@Failure		400	{object}	taskErrorBody	"Missing name"
 //	@Failure		404	{object}	taskErrorBody	"Machine not found, or no VM exists behind it yet"
 //	@Failure		503	{object}	taskErrorBody	"VirtualBox is not installed"
-//	@Router			/machines/{machineName}/usb/filters [post]
+//	@Router			/api/machines/{machineName}/usb/filters [post]
 func (s *Server) handleAddUSBFilter(w http.ResponseWriter, r *http.Request) {
 	machine := s.findMachine(w, r)
 	if machine == nil {
@@ -342,7 +342,7 @@ type usbFilterRemoveResponse struct {
 //	@Failure		400	{object}	taskErrorBody	"Invalid index"
 //	@Failure		404	{object}	taskErrorBody	"Machine not found"
 //	@Failure		503	{object}	taskErrorBody	"VirtualBox is not installed"
-//	@Router			/machines/{machineName}/usb/filters/{filterIndex} [delete]
+//	@Router			/api/machines/{machineName}/usb/filters/{filterIndex} [delete]
 func (s *Server) handleRemoveUSBFilter(w http.ResponseWriter, r *http.Request) {
 	machine := s.findMachine(w, r)
 	if machine == nil {

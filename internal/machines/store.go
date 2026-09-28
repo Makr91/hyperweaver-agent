@@ -69,7 +69,14 @@ func formatTime(t time.Time) string {
 
 // Store persists machines in agent.sqlite.
 type Store struct {
-	db *sql.DB
+	db     *sql.DB
+	Notify func()
+}
+
+func (s *Store) changed() {
+	if s.Notify != nil {
+		s.Notify()
+	}
 }
 
 // NewStore wraps the opened agent database.
@@ -242,6 +249,9 @@ func (s *Store) UpsertDiscovered(ctx context.Context, d *Discovered) (bool, erro
 		if err != nil {
 			return false, err
 		}
+		if existing.Status != d.Status {
+			s.changed()
+		}
 		return false, nil
 	}
 
@@ -258,6 +268,7 @@ func (s *Store) UpsertDiscovered(ctx context.Context, d *Discovered) (bool, erro
 	if err != nil {
 		return false, err
 	}
+	s.changed()
 	return true, nil
 }
 
@@ -301,6 +312,7 @@ func (s *Store) Create(ctx context.Context, nm *NewMachine) (*Machine, error) {
 	if err != nil {
 		return nil, err
 	}
+	s.changed()
 	return s.Get(ctx, nm.Name)
 }
 
@@ -390,15 +402,29 @@ func (s *Store) DeleteOrphanedMissing(ctx context.Context, seenNames []string) (
 		}
 		deleted = append(deleted, name)
 	}
-	return deleted, rows.Err()
+	if rerr := rows.Err(); rerr != nil {
+		return nil, rerr
+	}
+	if len(deleted) > 0 {
+		s.changed()
+	}
+	return deleted, nil
 }
 
 // SetStatus records a machine's live status (targeted refresh after a
 // lifecycle operation, SHI parity).
 func (s *Store) SetStatus(ctx context.Context, name, status string) error {
+	var previous sql.NullString
+	serr := s.db.QueryRowContext(ctx, `SELECT status FROM machines WHERE name = ?`, name).Scan(&previous)
+	if serr != nil && !errors.Is(serr, sql.ErrNoRows) {
+		return serr
+	}
 	_, err := s.db.ExecContext(ctx, `UPDATE machines
 		SET status = ?, last_seen = ?, updated_at = ? WHERE name = ?`,
 		status, formatTime(time.Now()), formatTime(time.Now()), name)
+	if err == nil && previous.Valid && previous.String != status {
+		s.changed()
+	}
 	return err
 }
 
@@ -442,7 +468,11 @@ func (s *Store) Delete(ctx context.Context, name string) error {
 	if err != nil {
 		return err
 	}
-	return requireRow(res)
+	if rerr := requireRow(res); rerr != nil {
+		return rerr
+	}
+	s.changed()
+	return nil
 }
 
 func requireRow(res sql.Result) error {

@@ -25,7 +25,7 @@ import (
 //	@Success		200	{object}	map[string]interface{}	"The snapshot tree (empty array when none)"
 //	@Failure		404	"Machine not found, or no VM exists behind it yet"
 //	@Failure		503	"VirtualBox is not installed"
-//	@Router			/machines/{machineName}/snapshots [get]
+//	@Router			/api/machines/{machineName}/snapshots [get]
 func (s *Server) handleListSnapshots(w http.ResponseWriter, r *http.Request) {
 	machine := s.findMachine(w, r)
 	if machine == nil {
@@ -121,7 +121,7 @@ var snapshotNamePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.:-]{0,255}
 //	@Success		200	{object}	queuedOperation	"Snapshot task queued"
 //	@Failure		400	"Missing name/prefix, or unsupported characters"
 //	@Failure		404	"Machine not found"
-//	@Router			/machines/{machineName}/snapshots [post]
+//	@Router			/api/machines/{machineName}/snapshots [post]
 func (s *Server) handleTakeSnapshot(w http.ResponseWriter, r *http.Request) {
 	machine := s.findMachine(w, r)
 	if machine == nil {
@@ -192,7 +192,7 @@ func snapshotNameFromPath(w http.ResponseWriter, r *http.Request) string {
 //	@Param			snapshotName	path	string	true	"Snapshot name"
 //	@Success		200	{object}	queuedOperation	"Restore task queued"
 //	@Failure		404	"Machine not found"
-//	@Router			/machines/{machineName}/snapshots/{snapshotName}/restore [post]
+//	@Router			/api/machines/{machineName}/snapshots/{snapshotName}/restore [post]
 func (s *Server) handleRestoreSnapshot(w http.ResponseWriter, r *http.Request) {
 	machine := s.findMachine(w, r)
 	if machine == nil {
@@ -221,7 +221,7 @@ func (s *Server) handleRestoreSnapshot(w http.ResponseWriter, r *http.Request) {
 //	@Param			snapshotName	path	string	true	"Snapshot name"
 //	@Success		200	{object}	queuedOperation	"Snapshot delete task queued"
 //	@Failure		404	"Machine not found"
-//	@Router			/machines/{machineName}/snapshots/{snapshotName} [delete]
+//	@Router			/api/machines/{machineName}/snapshots/{snapshotName} [delete]
 func (s *Server) handleDeleteSnapshot(w http.ResponseWriter, r *http.Request) {
 	machine := s.findMachine(w, r)
 	if machine == nil {
@@ -255,7 +255,7 @@ func (s *Server) handleDeleteSnapshot(w http.ResponseWriter, r *http.Request) {
 //	@Success		200	{object}	queuedOperation	"Snapshot modify task queued"
 //	@Failure		400	"Neither new_name nor description supplied"
 //	@Failure		404	"Machine not found"
-//	@Router			/machines/{machineName}/snapshots/{snapshotName} [put]
+//	@Router			/api/machines/{machineName}/snapshots/{snapshotName} [put]
 func (s *Server) handleModifySnapshot(w http.ResponseWriter, r *http.Request) {
 	machine := s.findMachine(w, r)
 	if machine == nil {

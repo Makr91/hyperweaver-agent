@@ -21,7 +21,7 @@ import (
 //	@Failure		400	"Invalid type"
 //	@Failure		404	"Storage location not found"
 //	@Failure		503	"Artifact storage is disabled"
-//	@Router			/artifacts/scan [post]
+//	@Router			/api/artifacts/scan [post]
 func (s *Server) handleScanArtifacts(w http.ResponseWriter, r *http.Request) {
 	var meta assets.ScanTaskMetadata
 	if r.ContentLength > 0 {
@@ -72,7 +72,7 @@ type deleteArtifactFilesRequest struct {
 //	@Success		202	"Deletion task queued"
 //	@Failure		400	"Empty artifact_ids"
 //	@Failure		503	"Artifact storage is disabled"
-//	@Router			/artifacts/files [delete]
+//	@Router			/api/artifacts/files [delete]
 func (s *Server) handleDeleteArtifactFiles(w http.ResponseWriter, r *http.Request) {
 	var body deleteArtifactFilesRequest
 	if err := decodeBody(r, &body); err != nil {

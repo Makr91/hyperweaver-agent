@@ -153,14 +153,18 @@ func vboxManagePath(ctx context.Context) string {
 // it feeds the UI's System Information panel.
 //
 //	@Summary		Host statistics and machine lists
-//	@Description	Minimum role: viewer — unless the agent is configured with `stats.public_access: true`, which serves this endpoint without an API key (the Node agent's conditional /stats registration). OS-level host statistics plus the registered and running VirtualBox machine name lists. Machine-list failures degrade to empty arrays — a broken VBoxManage never fails the host stats.
+//	@Description	Minimum role: viewer — unless the agent is configured with `stats.public_access: true`, which serves this endpoint without an API key (the Node agent's conditional /api/stats registration). OS-level host statistics plus the registered and running VirtualBox machine name lists. Machine-list failures degrade to empty arrays — a broken VBoxManage never fails the host stats.
 //	@Tags			System
 //	@Produce		json
 //	@Success		200	{object}	statsPayload		"Host statistics"
 //	@Failure		401	{object}	map[string]string	"Missing API key"
 //	@Failure		403	{object}	map[string]string	"Invalid API key"
-//	@Router			/stats [get]
+//	@Router			/api/stats [get]
 func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, s.statsDocument(r.Context()))
+}
+
+func (s *Server) statsDocument(ctx context.Context) statsPayload {
 	hostname, err := os.Hostname()
 	if err != nil {
 		hostname = "unknown"
@@ -171,7 +175,7 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 		Hostname:        hostname,
 		EOL:             eolString(),
 		Arch:            nodeArch(),
-		Cpus:            cpuEntries(r.Context()),
+		Cpus:            cpuEntries(ctx),
 		Endianness:      "LE",
 		Freemem:         free,
 		Loadavg:         hostinfo.LoadAvg(),
@@ -185,8 +189,8 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 		RunningMachines: []string{},
 	}
 
-	if exe := vboxManagePath(r.Context()); exe != "" {
-		listCtx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
+	if exe := vboxManagePath(ctx); exe != "" {
+		listCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 		defer cancel()
 		if names, lerr := vbox.ListVMs(listCtx, exe); lerr == nil {
 			payload.AllMachines = names
@@ -200,5 +204,5 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	writeJSON(w, payload)
+	return payload
 }

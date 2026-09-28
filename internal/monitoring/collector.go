@@ -57,7 +57,7 @@ func (s *Service) Store() *Store {
 // Start launches the collector loop. No-op in realtime-only mode.
 func (s *Service) Start() {
 	if s.store == nil {
-		monlog().Info("monitoring storage disabled; /monitoring serves realtime samples only")
+		monlog().Info("monitoring storage disabled; /api/monitoring serves realtime samples only")
 		return
 	}
 

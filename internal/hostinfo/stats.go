@@ -24,7 +24,7 @@ func host() types.Host {
 	hostOnce.Do(func() {
 		h, err := sysinfo.Host()
 		if err != nil {
-			slog.Error("host introspection unavailable; /stats serves zero values", "error", err)
+			slog.Error("host introspection unavailable; /api/stats serves zero values", "error", err)
 			return
 		}
 		hostHandle = h

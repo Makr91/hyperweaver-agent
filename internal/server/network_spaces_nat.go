@@ -72,7 +72,7 @@ type natNetworkCreateRequest struct {
 //	@Success		201	{object}	natNetworkResponse	"NAT network created ({success, name, message})"
 //	@Failure		400	"Missing name or cidr"
 //	@Failure		503	"VirtualBox is not installed"
-//	@Router			/network/spaces/natnetwork [post]
+//	@Router			/api/network/spaces/natnetwork [post]
 func (s *Server) handleCreateNATNetwork(w http.ResponseWriter, r *http.Request) {
 	exe := s.requireVBox(w, r)
 	if exe == "" {
@@ -156,7 +156,7 @@ type natNetworkModifyRequest struct {
 //	@Failure		400	"Nothing to change, or an invalid rule entry"
 //	@Failure		404	"No NAT network by that name"
 //	@Failure		503	"VirtualBox is not installed"
-//	@Router			/network/spaces/natnetwork/{name} [put]
+//	@Router			/api/network/spaces/natnetwork/{name} [put]
 func (s *Server) handleModifyNATNetwork(w http.ResponseWriter, r *http.Request) {
 	exe := s.requireVBox(w, r)
 	if exe == "" {
@@ -273,7 +273,7 @@ func (s *Server) handleModifyNATNetwork(w http.ResponseWriter, r *http.Request) 
 //	@Success		200	{object}	natNetworkResponse	"NAT network removed"
 //	@Failure		404	"No NAT network by that name"
 //	@Failure		503	"VirtualBox is not installed"
-//	@Router			/network/spaces/natnetwork/{name} [delete]
+//	@Router			/api/network/spaces/natnetwork/{name} [delete]
 func (s *Server) handleDeleteNATNetwork(w http.ResponseWriter, r *http.Request) {
 	exe := s.requireVBox(w, r)
 	if exe == "" {
@@ -307,7 +307,7 @@ func (s *Server) handleDeleteNATNetwork(w http.ResponseWriter, r *http.Request) 
 //	@Success		200	{object}	natNetworkResponse	"Service started"
 //	@Failure		404	"No NAT network by that name"
 //	@Failure		503	"VirtualBox is not installed"
-//	@Router			/network/spaces/natnetwork/{name}/start [post]
+//	@Router			/api/network/spaces/natnetwork/{name}/start [post]
 func (s *Server) handleStartNATNetwork(w http.ResponseWriter, r *http.Request) {
 	s.natNetworkService(w, r, vbox.StartNATNetwork, "started")
 }
@@ -320,7 +320,7 @@ func (s *Server) handleStartNATNetwork(w http.ResponseWriter, r *http.Request) {
 // @Success		200	{object}	natNetworkResponse	"Service stopped"
 // @Failure		404	"No NAT network by that name"
 // @Failure		503	"VirtualBox is not installed"
-// @Router			/network/spaces/natnetwork/{name}/stop [post]
+// @Router			/api/network/spaces/natnetwork/{name}/stop [post]
 func (s *Server) handleStopNATNetwork(w http.ResponseWriter, r *http.Request) {
 	s.natNetworkService(w, r, vbox.StopNATNetwork, "stopped")
 }

@@ -116,7 +116,7 @@ func (s *Server) guestCommand(w http.ResponseWriter, r *http.Request,
 		slog.Warn("guest agent command failed", "machine", machine.Name,
 			"command", execute, "error", err)
 		taskError(w, http.StatusBadGateway,
-			"Guest agent did not answer ("+err.Error()+") — the machine needs the guest-agent UART (POST /machines/{name}/guest-agent/setup) and qemu-ga running in the guest")
+			"Guest agent did not answer ("+err.Error()+") — the machine needs the guest-agent UART (POST /api/machines/{name}/guest-agent/setup) and qemu-ga running in the guest")
 		return nil, nil
 	}
 	return result, machine
@@ -167,7 +167,7 @@ type guestPingResponse struct {
 //	@Failure		404			{object}	taskErrorBody		"Machine not found"
 //	@Failure		502			{object}	taskErrorBody		"Guest agent did not answer (no UART wired, or qemu-ga not running in the guest)"
 //	@Failure		503			{object}	taskErrorBody		"Guest agent channel is disabled (guest_agent.enabled)"
-//	@Router			/machines/{machineName}/guest/ping [get]
+//	@Router			/api/machines/{machineName}/guest/ping [get]
 func (s *Server) handleGuestPing(w http.ResponseWriter, r *http.Request) {
 	machine := s.findMachine(w, r)
 	if machine == nil {
@@ -208,7 +208,7 @@ func (s *Server) handleGuestPing(w http.ResponseWriter, r *http.Request) {
 //	@Failure		404			{object}	taskErrorBody			"Machine not found"
 //	@Failure		502			{object}	taskErrorBody			"Guest agent did not answer"
 //	@Failure		503			{object}	taskErrorBody			"Guest agent channel is disabled"
-//	@Router			/machines/{machineName}/guest/osinfo [get]
+//	@Router			/api/machines/{machineName}/guest/osinfo [get]
 func (s *Server) handleGuestOSInfo(w http.ResponseWriter, r *http.Request) {
 	machine := s.findMachine(w, r)
 	if machine == nil {
@@ -243,7 +243,7 @@ func (s *Server) handleGuestOSInfo(w http.ResponseWriter, r *http.Request) {
 //	@Failure		404			{object}	taskErrorBody			"Machine not found"
 //	@Failure		502			{object}	taskErrorBody			"Guest agent did not answer"
 //	@Failure		503			{object}	taskErrorBody			"Guest agent channel is disabled"
-//	@Router			/machines/{machineName}/guest/network [get]
+//	@Router			/api/machines/{machineName}/guest/network [get]
 func (s *Server) handleGuestNetwork(w http.ResponseWriter, r *http.Request) {
 	machine := s.findMachine(w, r)
 	if machine == nil {
@@ -314,7 +314,7 @@ type guestShutdownResponse struct {
 //	@Failure		404			{object}	taskErrorBody			"Machine not found"
 //	@Failure		502			{object}	taskErrorBody			"Guest agent did not answer"
 //	@Failure		503			{object}	taskErrorBody			"Guest agent channel is disabled"
-//	@Router			/machines/{machineName}/guest/shutdown [post]
+//	@Router			/api/machines/{machineName}/guest/shutdown [post]
 func (s *Server) handleGuestShutdown(w http.ResponseWriter, r *http.Request) {
 	mode := "powerdown"
 	if r.ContentLength > 0 {

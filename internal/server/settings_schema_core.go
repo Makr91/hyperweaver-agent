@@ -92,7 +92,7 @@ var schemaUI = map[string]any{
 	"properties": map[string]any{
 		"enabled": map[string]any{
 			"type":        "boolean",
-			"description": "Serve the Hyperweaver UI at /ui/",
+			"description": "Serve the UI at /",
 			"default":     true,
 		},
 		"path": map[string]any{
@@ -227,7 +227,7 @@ var schemaOIDC = map[string]any{
 	"properties": map[string]any{
 		"enabled": map[string]any{
 			"type":        "boolean",
-			"description": "Enable the federated-login endpoints (/auth/oidc/silent-start + /auth/oidc/callback, /auth/oidc/device-start + /auth/oidc/device-status), accept the bound account's IdP access token as a Bearer credential on the Agent API, and advertise oidc in auth[] on GET /api/status",
+			"description": "Enable the federated-login endpoints (/api/auth/oidc/silent-start + /api/auth/oidc/callback, /api/auth/oidc/device-start + /api/auth/oidc/device-status), accept the bound account's IdP access token as a Bearer credential on the Agent API, and advertise oidc in auth[] on GET /api/status",
 			"default":     false,
 		},
 		"issuer": map[string]any{
@@ -285,7 +285,7 @@ var schemaStats = map[string]any{
 	"properties": map[string]any{
 		"public_access": map[string]any{
 			"type":        "boolean",
-			"description": "Allow unauthenticated access to the /stats endpoint",
+			"description": "Allow unauthenticated access to the /api/stats endpoint",
 			"default":     false,
 		},
 	},

@@ -47,7 +47,7 @@ type listCatalogSourcesResponse struct {
 //	@Tags			Provisioning
 //	@Produce		json
 //	@Success		200	{object}	listCatalogSourcesResponse	"Enabled catalogs"
-//	@Router			/provisioning/catalog/sources [get]
+//	@Router			/api/provisioning/catalog/sources [get]
 func (s *Server) handleListCatalogSources(w http.ResponseWriter, _ *http.Request) {
 	sources := []catalogSourceRow{}
 	for _, source := range s.catalogSourceList() {
@@ -75,10 +75,10 @@ func (s *Server) handleListCatalogSources(w http.ResponseWriter, _ *http.Request
 //	@Tags			Provisioning
 //	@Produce		json
 //	@Param			source	query	string	false	"A configured catalog source; empty = the default"
-//	@Success		200	{object}	provisioner.CatalogDocument	"The catalog document — the parsed catalog.json IS the response (no envelope; the resolved source rides /provisioning/catalog/sources)"
+//	@Success		200	{object}	provisioner.CatalogDocument	"The catalog document — the parsed catalog.json IS the response (no envelope; the resolved source rides /api/provisioning/catalog/sources)"
 //	@Failure		404	"No such (or no default) enabled catalog source"
 //	@Failure		502	"Catalog unreachable, unparseable, or wrong format_version"
-//	@Router			/provisioning/catalog [get]
+//	@Router			/api/provisioning/catalog [get]
 func (s *Server) handleGetCatalog(w http.ResponseWriter, r *http.Request) {
 	source, err := provisioner.FindCatalogSource(s.catalogSourceList(), r.URL.Query().Get("source"))
 	if err != nil {
@@ -109,7 +109,7 @@ func (s *Server) handleGetCatalog(w http.ResponseWriter, r *http.Request) {
 //	@Success		202	"Catalog install task queued"
 //	@Failure		400	"Missing/unusable name or version"
 //	@Failure		404	"No such (or no default) enabled catalog source"
-//	@Router			/provisioning/catalog/install [post]
+//	@Router			/api/provisioning/catalog/install [post]
 func (s *Server) handleCatalogInstall(w http.ResponseWriter, r *http.Request) {
 	var body provisioner.CatalogInstallMetadata
 	if err := decodeBody(r, &body); err != nil {

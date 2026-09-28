@@ -45,7 +45,7 @@ func validateProvisionRequest(machine *machines.Machine) (validation *provisionV
 	config := machines.ParseConfiguration(machine)
 	provisionerDoc := config.Provisioner()
 	if len(provisionerDoc) == 0 {
-		return nil, "No provisioner configuration found. Set provisioner config via PUT /machines/{name} first."
+		return nil, "No provisioner configuration found. Set provisioner config via PUT /api/machines/{name} first."
 	}
 	settings := config.Section("settings")
 	if len(settings) == 0 {

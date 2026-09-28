@@ -32,12 +32,12 @@ var schemaCatalogSources = map[string]any{
 }
 
 var schemaArtifactStorage = map[string]any{
-	"description":      "Merged artifact system (the artifacts capability token): typed storage locations — iso, image, installer, fixpack, hotfix — with one scan, one SHA-256 checksum store, one /artifacts surface",
+	"description":      "Merged artifact system (the artifacts capability token): typed storage locations — iso, image, installer, fixpack, hotfix — with one scan, one SHA-256 checksum store, one /api/artifacts surface",
 	"requires_restart": true,
 	"properties": map[string]any{
 		"enabled": map[string]any{
 			"type":        "boolean",
-			"description": "Serve the /artifacts surface and enforce hash verification at machine prepare; disabled skips mounting and verification with a loud warning",
+			"description": "Serve the /api/artifacts surface and enforce hash verification at machine prepare; disabled skips mounting and verification with a loud warning",
 			"default":     true,
 		},
 		"dir": map[string]any{
@@ -93,12 +93,12 @@ var schemaArtifactStorage = map[string]any{
 }
 
 var schemaFileBrowser = map[string]any{
-	"description":      "Host file browser (/filesystem, the file-browser capability token): directory listing plus the mutate family — create/rename/move/copy/delete, text content read/write, upload/download, archives, permissions (the UI's path pickers and file manager)",
+	"description":      "Host file browser (/api/filesystem, the file-browser capability token): directory listing plus the mutate family — create/rename/move/copy/delete, text content read/write, upload/download, archives, permissions (the UI's path pickers and file manager)",
 	"requires_restart": true,
 	"properties": map[string]any{
 		"enabled": map[string]any{
 			"type":        "boolean",
-			"description": "Serve the /filesystem surface and advertise the file-browser token; false removes the surface entirely",
+			"description": "Serve the /api/filesystem surface and advertise the file-browser token; false removes the surface entirely",
 			"default":     true,
 		},
 		"root": map[string]any{
@@ -108,14 +108,14 @@ var schemaFileBrowser = map[string]any{
 		},
 		"upload_size_limit_gb": map[string]any{
 			"type":        "integer",
-			"description": "Size cap for one POST /filesystem/upload body, in GiB",
+			"description": "Size cap for one POST /api/filesystem/upload body, in GiB",
 			"default":     50,
 			"min":         1,
 			"max":         1024,
 		},
 		"security": map[string]any{
 			"type":        "object",
-			"description": "Path bounds applied to every /filesystem operation",
+			"description": "Path bounds applied to every /api/filesystem operation",
 			"properties": map[string]any{
 				"prevent_traversal": map[string]any{
 					"type":        "boolean",
@@ -156,7 +156,7 @@ var schemaFileBrowser = map[string]any{
 			"properties": map[string]any{
 				"enabled": map[string]any{
 					"type":        "boolean",
-					"description": "Serve the /filesystem/archive endpoints",
+					"description": "Serve the /api/filesystem/archive endpoints",
 					"default":     true,
 				},
 				"max_archive_size_mb": map[string]any{
@@ -177,12 +177,12 @@ var schemaFileBrowser = map[string]any{
 }
 
 var schemaGuestAgent = map[string]any{
-	"description":      "QEMU guest-agent channel (/machines/{name}/guest/*, the guest-agent capability token): guests run qemu-ga on a COM2 UART → host pipe — credential-less live IPs, exec, and clean shutdown without SSH or Guest Additions. The UART is a per-machine option: vbox.guest_agent at create (default false — the Proxmox model) or POST /machines/{name}/guest-agent/setup",
+	"description":      "QEMU guest-agent channel (/api/machines/{name}/guest/*, the guest-agent capability token): guests run qemu-ga on a COM2 UART → host pipe — credential-less live IPs, exec, and clean shutdown without SSH or Guest Additions. The UART is a per-machine option: vbox.guest_agent at create (default false — the Proxmox model) or POST /api/machines/{name}/guest-agent/setup",
 	"requires_restart": true,
 	"properties": map[string]any{
 		"enabled": map[string]any{
 			"type":        "boolean",
-			"description": "MASTER gate: allow per-machine UART wiring (vbox.guest_agent / the setup endpoint), serve /machines/{name}/guest/*, and advertise the guest-agent token; false disables wiring and removes the surface entirely",
+			"description": "MASTER gate: allow per-machine UART wiring (vbox.guest_agent / the setup endpoint), serve /api/machines/{name}/guest/*, and advertise the guest-agent token; false disables wiring and removes the surface entirely",
 			"default":     true,
 		},
 	},
@@ -206,7 +206,7 @@ var schemaSnapshots = map[string]any{
 		},
 		"default_policy": map[string]any{
 			"type":        "object",
-			"description": "Retention policy applied to EVERY machine unless the machine overrides it (the PUT /machines/{name} `snapshots` field — configuration.snapshots; type none disables per machine, null clears back to this default). Types: none | simple (keep newest N) | age (delete older than max_age_days) | rotation (hourly/daily/weekly tiers, Snapshoter.sh schedule: hourly :00 hours 1-23, daily 00:00 Sun-Fri, weekly 00:00 Sat). quiesce runs qga fsfreeze around each snapshot when the guest agent answers",
+			"description": "Retention policy applied to EVERY machine unless the machine overrides it (the PUT /api/machines/{name} `snapshots` field — configuration.snapshots; type none disables per machine, null clears back to this default). Types: none | simple (keep newest N) | age (delete older than max_age_days) | rotation (hourly/daily/weekly tiers, Snapshoter.sh schedule: hourly :00 hours 1-23, daily 00:00 Sun-Fri, weekly 00:00 Sat). quiesce runs qga fsfreeze around each snapshot when the guest agent answers",
 			"properties": map[string]any{
 				"type": map[string]any{
 					"type":        "string",

@@ -29,7 +29,7 @@ type clearPendingChangesResponse struct {
 //	@Param			machineName	path	string	true	"Machine name"
 //	@Success		200	{object}	clearPendingChangesResponse	"Pending changes cleared"
 //	@Failure		404	"Machine not found"
-//	@Router			/machines/{machineName}/pending-changes [delete]
+//	@Router			/api/machines/{machineName}/pending-changes [delete]
 func (s *Server) handleClearPendingChanges(w http.ResponseWriter, r *http.Request) {
 	machine := s.findMachine(w, r)
 	if machine == nil {
@@ -68,7 +68,7 @@ func (s *Server) handleClearPendingChanges(w http.ResponseWriter, r *http.Reques
 //	@Success		200	{object}	queuedOperation	"Apply task queued"
 //	@Failure		400	"No pending changes, or machine is not powered off"
 //	@Failure		404	"Machine not found"
-//	@Router			/machines/{machineName}/pending-changes/apply [post]
+//	@Router			/api/machines/{machineName}/pending-changes/apply [post]
 func (s *Server) handleApplyPendingChanges(w http.ResponseWriter, r *http.Request) {
 	machine := s.findMachine(w, r)
 	if machine == nil {

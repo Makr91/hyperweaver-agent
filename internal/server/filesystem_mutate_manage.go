@@ -41,7 +41,7 @@ type renameItemResponse struct {
 //	@Failure		404	"Item not found"
 //	@Failure		409	"Target name already exists"
 //	@Failure		503	"File browser is disabled"
-//	@Router			/filesystem/rename [patch]
+//	@Router			/api/filesystem/rename [patch]
 func (s *Server) handleRenameItem(w http.ResponseWriter, r *http.Request) {
 	var body renameItemRequest
 	if err := decodeBody(r, &body); err != nil {
@@ -124,7 +124,7 @@ type deleteFileItemResponse struct {
 //	@Failure		403	"Path forbidden"
 //	@Failure		404	"Item not found"
 //	@Failure		503	"File browser is disabled"
-//	@Router			/filesystem [delete]
+//	@Router			/api/filesystem [delete]
 func (s *Server) handleDeleteFileItem(w http.ResponseWriter, r *http.Request) {
 	var body deleteFileItemRequest
 	if err := decodeBody(r, &body); err != nil {
@@ -228,7 +228,7 @@ type changePermissionsResponse struct {
 //	@Failure		403	"Path forbidden"
 //	@Failure		404	"Item not found"
 //	@Failure		503	"File browser is disabled"
-//	@Router			/filesystem/permissions [patch]
+//	@Router			/api/filesystem/permissions [patch]
 func (s *Server) handleChangePermissions(w http.ResponseWriter, r *http.Request) {
 	var body changePermissionsRequest
 	if err := decodeBody(r, &body); err != nil {

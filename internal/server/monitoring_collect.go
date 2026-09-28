@@ -23,7 +23,7 @@ type monitoringCollectResponse struct {
 // @Produce		json
 // @Param			request	body		monitoringCollectRequest	false	"Collection type (contract parity)"
 // @Success		200		{object}	monitoringCollectResponse	"Collection triggered"
-// @Router			/monitoring/collect [post]
+// @Router			/api/monitoring/collect [post]
 func (s *Server) handleMonitoringCollect(w http.ResponseWriter, r *http.Request) {
 	var body monitoringCollectRequest
 	if err := decodeBody(r, &body); err != nil {

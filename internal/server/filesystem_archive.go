@@ -58,7 +58,7 @@ type archiveCreateResponse struct {
 //	@Failure		400	"Missing fields or unsupported format"
 //	@Failure		403	"Path forbidden"
 //	@Failure		503	"File browser or archive operations disabled"
-//	@Router			/filesystem/archive/create [post]
+//	@Router			/api/filesystem/archive/create [post]
 func (s *Server) handleCreateArchive(w http.ResponseWriter, r *http.Request) {
 	if !s.archiveGate(w) {
 		return

@@ -16,6 +16,9 @@ func (s *Store) MarkRunning(ctx context.Context, id string) error {
 	_, err := s.db.ExecContext(ctx, `UPDATE tasks
 		SET status = 'running', started_at = ?, updated_at = ? WHERE id = ?`,
 		now, now, id)
+	if err == nil {
+		s.changed(ctx, id)
+	}
 	return err
 }
 
@@ -37,6 +40,9 @@ func (s *Store) Finish(ctx context.Context, id, status string, errorMessage *str
 	query.WriteString(" WHERE id = ?")
 	args = append(args, id)
 	_, err := s.db.ExecContext(ctx, query.String(), args...)
+	if err == nil {
+		s.changed(ctx, id)
+	}
 	return err
 }
 
@@ -49,6 +55,9 @@ func (s *Store) UpdateProgress(ctx context.Context, id string, percent float64, 
 	_, err := s.db.ExecContext(ctx, `UPDATE tasks
 		SET progress_percent = ?, progress_info = ?, updated_at = ? WHERE id = ?`,
 		percent, infoValue, formatTime(time.Now()), id)
+	if err == nil {
+		s.changed(ctx, id)
+	}
 	return err
 }
 
@@ -218,6 +227,9 @@ func (s *Store) Requeue(ctx context.Context, id string) (bool, error) {
 		return false, err
 	}
 	n, err := res.RowsAffected()
+	if err == nil && n > 0 {
+		s.changed(ctx, id)
+	}
 	return n > 0, err
 }
 

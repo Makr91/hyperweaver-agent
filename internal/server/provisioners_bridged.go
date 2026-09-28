@@ -42,7 +42,7 @@ type bridgedInterfacesResponse struct {
 //	@Produce		json
 //	@Success		200	{object}	bridgedInterfacesResponse	"Interface rows"
 //	@Failure		503	"VirtualBox is not installed"
-//	@Router			/provisioning/bridged-interfaces [get]
+//	@Router			/api/provisioning/bridged-interfaces [get]
 func (s *Server) handleBridgedInterfaces(w http.ResponseWriter, r *http.Request) {
 	exe := machines.VBoxManagePath(r.Context())
 	if exe == "" {

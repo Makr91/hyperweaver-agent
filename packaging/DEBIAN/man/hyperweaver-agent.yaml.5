@@ -96,7 +96,7 @@ is false (default: empty)
 Web UI serving.
 .Bl -tag -width "enabled"
 .It Cm enabled
-Boolean enabling the Hyperweaver UI at /ui/ (default: true). When disabled
+Boolean enabling the UI at / (default: true). When disabled
 the agent is API-only and the root path serves a small JSON info document.
 .It Cm path
 Optional directory to serve the UI from instead of the copy embedded in the
@@ -144,7 +144,7 @@ provisioning, assets (default: empty — all categories follow
 API-key authentication (the Agent API v1 local tier).
 .Bl -tag -width "bootstrap_require_claim_token"
 .It Cm bootstrap_enabled
-Boolean enabling POST /api-keys/bootstrap to create the first API key
+Boolean enabling POST /api/api-keys/bootstrap to create the first API key
 (default: true)
 .It Cm bootstrap_auto_disable
 Boolean locking the bootstrap endpoint once any key exists (default: true)
@@ -178,7 +178,7 @@ Boolean serving the Agent API documentation (Swagger UI) at /api-docs
 Server statistics endpoint.
 .Bl -tag -width "public_access"
 .It Cm public_access
-Boolean serving GET /stats without an API key (default: false)
+Boolean serving GET /api/stats without an API key (default: false)
 .El
 .Ss data
 Data storage locations.
@@ -231,7 +231,7 @@ Seconds between task-queue polls, 1-60 (default: 2)
 .It Cm max_concurrent
 Maximum number of tasks running at once, 1-64 (default: 5)
 .It Cm default_pagination_limit
-Default limit for GET /tasks when the request does not send one, 1-1000
+Default limit for GET /api/tasks when the request does not send one, 1-1000
 (default: 50)
 .It Cm retention_days
 Completed, failed, and cancelled tasks older than this many days are deleted
@@ -274,7 +274,7 @@ Boolean deriving created machines' names as
 <server_id>--<hostname>.<domain> when the create/clone request carries no
 explicit name (the partition-id convention). An explicit name always wins —
 machine names stay free-form. When on, settings.server_id is required at
-create; GET /machines/ids/next feeds it (default: true).
+create; GET /api/machines/ids/next feeds it (default: true).
 .It Cm shutdown_timeout
 Seconds a graceful stop waits for the guest to power off after the graceful
 signal — the QEMU guest-agent's own shutdown when the channel answers, the
@@ -320,7 +320,7 @@ rsync; vagrant's embedded rsync is used when none is on PATH)
 (default: "rsync").
 .It Cm default_network_interface
 Host bridge interface injected into templates as DEFAULT_NETWORK_INTERFACE
-when the spec sets none; values come from GET /provisioning/bridged-interfaces
+when the spec sets none; values come from GET /api/provisioning/bridged-interfaces
 (default: empty).
 .It Cm playbook_timeout_seconds
 Timeout for one in-guest ansible-playbook run, minimum 60 (default: 21600).
@@ -333,7 +333,7 @@ Boolean allowing sequence hooks — the
 entries of a machine's document — with target: host to run scripts ON THIS
 HOST. Guest-target hooks are always allowed. Machines rendered from packages
 the installer did NOT ship additionally require a one-time per-machine
-confirmation (POST /machines/{name}/provision answers needs_confirmation;
+confirmation (POST /api/machines/{name}/provision answers needs_confirmation;
 re-POST with confirm_host_hooks: true) before host hooks run
 (default: true).
 .It Cm ssh.key_path
@@ -352,8 +352,8 @@ Boolean enabling the dedicated provisioning network: ONE VirtualBox
 host-only interface — identified by
 .Cm network.host_ip ,
 since VirtualBox assigns interface names itself — plus its DHCP server.
-Set up and torn down via POST /provisioning/network/setup and
-DELETE /provisioning/network/teardown; host-type networks[] entries in
+Set up and torn down via POST /api/provisioning/network/setup and
+DELETE /api/provisioning/network/teardown; host-type networks[] entries in
 machine documents attach to the interface at create and their addresses pin
 as per-VM fixed DHCP leases, so guests receive their document's control IP
 from an ordinary DHCP request (default: true).
@@ -400,7 +400,7 @@ Provisioner catalogs (the HACS model): the agent fetches
 .Pa catalog.json ,
 lists families and versions, downloads the immutable versioned release
 asset, verifies its sha256, and imports it into the local registry
-(POST /provisioning/catalog/install). Fork the catalog repository as a
+(POST /api/provisioning/catalog/install). Fork the catalog repository as a
 template to run your own and add it as another source.
 .Bl -tag -width "sources"
 .It Cm sources
@@ -412,7 +412,7 @@ on (default: the STARTcloud Provisioner Catalog).
 .Ss artifact_storage
 The merged artifact system (the artifacts capability token): typed storage
 locations — iso, image, installer, fixpack, hotfix — with one scan, one
-SHA-256 checksum store, one /artifacts surface. Installer-family files are
+SHA-256 checksum store, one /api/artifacts surface. Installer-family files are
 hash-verified; a file that is absent, unhashed, or failing verification
 never reaches a machine. Five built-in locations always exist under
 .Cm dir
@@ -422,7 +422,7 @@ store files per role
 iso/image locations are flat and extension-filtered.
 .Bl -tag -width "max_upload_gb"
 .It Cm enabled
-Boolean serving the /artifacts surface and enforcing hash verification at
+Boolean serving the /api/artifacts surface and enforcing hash verification at
 machine prepare time; disabled skips mounting and verification entirely,
 with a loud warning in the task output (default: true).
 .It Cm dir
@@ -443,11 +443,11 @@ the defaults: iso .iso; image .vmdk .raw .vdi .qcow2 .img .ova .ovf.
 .It Cm paths
 List of additional storage locations beyond the built-ins: name, path, type
 (iso | image | installer | fixpack | hotfix), enabled. The storage-path API
-(POST /artifacts/storage/paths) persists its entries here too
+(POST /api/artifacts/storage/paths) persists its entries here too
 (default: empty).
 .El
 .Ss file_browser
-Host file browser (the /filesystem surface and the file-browser capability
+Host file browser (the /api/filesystem surface and the file-browser capability
 token): directory listing plus the mutate family — create/rename/move/copy/
 delete, text content read/write, upload/download, archives, permissions —
 for the UI's path pickers and file manager. Every operation passes the same
@@ -455,14 +455,14 @@ security bounds; move/copy and archive operations run as file_move,
 file_copy, file_archive_create, and file_archive_extract task rows.
 .Bl -tag -width "security.max_directory_entries"
 .It Cm enabled
-Boolean serving the /filesystem surface. When false every endpoint answers
+Boolean serving the /api/filesystem surface. When false every endpoint answers
 503 and the token disappears from GET /api/status (default: true).
 .It Cm root
 Confine the surface to this directory: the "/" request maps here and anything
 outside answers 403. Empty means unrestricted — "/" lists the host's drive
 letters on Windows and the real filesystem root elsewhere (default: empty).
 .It Cm upload_size_limit_gb
-Size cap for one POST /filesystem/upload body in GiB, 1-1024 (default: 50)
+Size cap for one POST /api/filesystem/upload body in GiB, 1-1024 (default: 50)
 .It Cm security.prevent_traversal
 Boolean rejecting paths carrying ".." or "~" (default: true)
 .It Cm security.max_directory_entries
@@ -478,12 +478,12 @@ List of path prefixes; anything underneath them answers 403
 List of glob-style patterns (* matches anything) that forbid matching paths
 (default: empty)
 .It Cm archive.enabled
-Boolean serving the /filesystem/archive endpoints (default: true)
+Boolean serving the /api/filesystem/archive endpoints (default: true)
 .It Cm archive.max_archive_size_mb
 A created archive larger than this many megabytes is deleted and the task
 fails, minimum 1 (default: 10240)
 .It Cm archive.supported_formats
-Formats POST /filesystem/archive/create accepts. The agent creates zip, tar,
+Formats POST /api/filesystem/archive/create accepts. The agent creates zip, tar,
 and tar.gz natively (Go's bzip2 is decompress-only); extraction additionally
 handles tar.bz2 and .gz regardless of this list (default: zip, tar, tar.gz).
 .El
@@ -492,18 +492,18 @@ QEMU guest-agent channel (the guest-agent capability token).
 .Bl -tag -width "enabled"
 .It Cm enabled
 Boolean MASTER gate for the guest-agent channel: serves
-/machines/{name}/guest/* — the credential-less guest channel (live IPs,
+/api/machines/{name}/guest/* — the credential-less guest channel (live IPs,
 exec, clean shutdown) for guests running qemu-ga, no SSH or Guest Additions
 required. The COM2 UART itself is a per-machine option: creates wire it
 only when the machine document sets zones.guest_agent true (default false —
 the Proxmox model, shared vocabulary with zoneweaver), and
-POST /machines/{name}/guest-agent/setup opts existing machines in. When
+POST /api/machines/{name}/guest-agent/setup opts existing machines in. When
 false no UART is ever added and the surface answers 503 (default: true).
 .El
 .Ss snapshots
 Scheduled machine snapshot rotation — zoneweaver's snapshots vocabulary on
 VBoxManage snapshots. The default policy applies to every machine unless the
-machine overrides it (the PUT /machines/{name}
+machine overrides it (the PUT /api/machines/{name}
 .Cm snapshots
 field, stored at configuration.snapshots; type none disables per machine,
 null clears back to the agent default). Defaults are deliberately
@@ -542,7 +542,7 @@ rotation: per-tier keep counts as
 each minimum 1 (defaults: 2 / 3 / 2)
 .El
 .Ss applications
-External launcher applications (GET /applications and the host-launchers
+External launcher applications (GET /api/applications and the host-launchers
 capability token): user-chosen desktop tools the agent launches on its own
 host against a machine (SHI's per-server app buttons, generalized).
 .Bl -tag -width "applications"
@@ -576,6 +576,9 @@ Boolean enabling the ticket/support link (default: true)
 Base URL for the ticket system
 .It Cm req_type
 Default request type parameter (default: "sso")
+.It Cm fallback_customer_id
+Customer id the ticket link carries when the person and their organization
+hold none (default: empty)
 .It Cm context
 Context URL for the ticket system, usually the repository URL
 .El
@@ -587,7 +590,7 @@ Seconds between cleanup runs — task retention runs on this cadence, 60-86400
 (default: 300)
 .El
 .Ss monitoring
-Host telemetry (the /monitoring endpoints and the monitoring capability
+Host telemetry (the /api/monitoring endpoints and the monitoring capability
 token). The endpoints always serve realtime samples; storage adds history.
 .Bl -tag -width "collection_interval"
 .It Cm storage_enabled
@@ -608,7 +611,7 @@ Stored samples older than this many days are deleted by the periodic
 cleanup, 1-365 (default: 7)
 .El
 .Ss host_power
-Host power management (the /system/host endpoints, the host-power
+Host power management (the /api/system/host endpoints, the host-power
 capability token, and sleep prevention).
 .Bl -tag -width "prevent_sleep"
 .It Cm enabled
@@ -645,7 +648,7 @@ Beside the configuration file the agent also keeps
 (per-boot hwa:// handoff secret, 0600),
 .Pa secrets.yaml
 (the global secrets store, 0600 — plain text by design; served by the
-admin-only /secrets API and injected into generated Hosts.yml files as
+admin-only /api/secrets API and injected into generated Hosts.yml files as
 SECRETS_* variables), and
 .Pa backups/
 (configuration backups). Under the data directory

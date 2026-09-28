@@ -26,7 +26,7 @@ type hostsYAMLResponse struct {
 //	@Success		200	{object}	hostsYAMLResponse	"The document as YAML"
 //	@Failure		404	"Machine not found"
 //	@Failure		500	"Serialization failure"
-//	@Router			/machines/{machineName}/hosts-yml [get]
+//	@Router			/api/machines/{machineName}/hosts-yml [get]
 func (s *Server) handleGetHostsYAML(w http.ResponseWriter, r *http.Request) {
 	machine := s.findMachine(w, r)
 	if machine == nil {
@@ -72,7 +72,7 @@ type hostsYAMLProblem struct {
 // @Success		200	{object}	hostsYAMLStoreResponse	"Document stored"
 // @Failure		400	{object}	hostsYAMLProblem	"Refused, nothing stored — parse error ({error, line, column}), impossible shape, converged pre-flight, bookkeeping/unknown top-level key ({error})"
 // @Failure		404	"Machine not found"
-// @Router			/machines/{machineName}/hosts-yml [put]
+// @Router			/api/machines/{machineName}/hosts-yml [put]
 func (s *Server) handlePutHostsYAML(w http.ResponseWriter, r *http.Request) {
 	machine := s.findMachine(w, r)
 	if machine == nil {

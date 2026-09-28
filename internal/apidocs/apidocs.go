@@ -168,17 +168,21 @@ func schemaMap(doc map[string]any) map[string]any {
 // @Security inherits the global schemes), so this list names the public
 // surface and the merge stamps it.
 var publicPaths = []string{
-	"/status",
 	"/api/status",
+	"/api/health",
 	"/api/config/ticket",
-	"/api-keys/bootstrap",
-	"/auth/tray-claim",
-	"/protocol/open",
-	"/tasks/{taskId}/stream",
-	"/term/{sessionId}",
-	"/ssh/{sessionId}",
-	"/machines/{machineName}/vnc/websockify",
-	"/machines/{machineName}/rdp-bridge",
+	"/api/api-keys/bootstrap",
+	"/api/auth/tray-claim",
+	"/api/auth/oidc/device-start",
+	"/api/auth/oidc/device-status",
+	"/api/auth/oidc/silent-start",
+	"/api/auth/oidc/callback",
+	"/api/protocol/open",
+	"/api/tasks/{taskId}/stream",
+	"/api/term/{sessionId}",
+	"/api/ssh/{sessionId}",
+	"/api/machines/{machineName}/vnc/websockify",
+	"/api/machines/{machineName}/rdp-bridge",
 }
 
 // stampPublicPaths applies publicPaths to the merged document.

@@ -95,7 +95,7 @@ func (s *Server) healVRDETLS(ctx context.Context, vboxExe string, machine *machi
 //	@Success		200	{object}	map[string]interface{}	"TLS applied live (running), setup queued (powered off), or accrued (live apply failed)"
 //	@Failure		404	"Machine not found, or no VM exists behind it yet"
 //	@Failure		503	"VirtualBox is not installed"
-//	@Router			/machines/{machineName}/vrde-tls [post]
+//	@Router			/api/machines/{machineName}/vrde-tls [post]
 func (s *Server) handleVRDETLSSetup(w http.ResponseWriter, r *http.Request) {
 	machine := s.findMachine(w, r)
 	if machine == nil {

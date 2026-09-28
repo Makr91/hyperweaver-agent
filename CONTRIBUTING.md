@@ -34,7 +34,7 @@ We appreciate all pull requests! To ensure smooth collaboration:
 3. Copy the tray icon assets from the UI project (see README "Building from source")
 4. Fetch dependencies: `go mod tidy`
 5. Build and run: `go build -o hyperweaver-agent . && ./hyperweaver-agent`
-6. The web UI is served at `http://127.0.0.1:9420/ui/` (placeholder page unless a UI artifact is unpacked into `internal/webui/dist/`)
+6. The web UI is served at `http://127.0.0.1:9420/` (placeholder page unless a UI artifact is unpacked into `internal/webui/dist/`)
 
 Platform notes:
 

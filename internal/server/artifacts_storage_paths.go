@@ -25,14 +25,14 @@ type storagePathsResponse struct {
 // handleListStoragePaths: GET /artifacts/storage/paths (?type, ?enabled).
 //
 //	@Summary		List storage locations
-//	@Description	Minimum role: viewer. Every storage location — the five built-ins plus config/API-added paths. 503 when artifact_storage.enabled is false (every /artifacts endpoint shares this gate).
+//	@Description	Minimum role: viewer. Every storage location — the five built-ins plus config/API-added paths. 503 when artifact_storage.enabled is false (every /api/artifacts endpoint shares this gate).
 //	@Tags			Artifacts
 //	@Produce		json
 //	@Param			type	query	string	false	"Filter by location type"
 //	@Param			enabled	query	bool	false	"Filter by enabled state"
 //	@Success		200	{object}	storagePathsResponse	"Storage locations"
 //	@Failure		503	"Artifact storage is disabled"
-//	@Router			/artifacts/storage/paths [get]
+//	@Router			/api/artifacts/storage/paths [get]
 func (s *Server) handleListStoragePaths(w http.ResponseWriter, r *http.Request) {
 	query := r.URL.Query()
 	filter := assets.LocationFilter{Type: query.Get("type")}
@@ -103,7 +103,7 @@ type storageLocationResponse struct {
 //	@Failure		400	"Missing name/path/type, invalid type, or directory not creatable"
 //	@Failure		409	"Path already registered ({error, existing_location})"
 //	@Failure		503	"Artifact storage is disabled"
-//	@Router			/artifacts/storage/paths [post]
+//	@Router			/api/artifacts/storage/paths [post]
 func (s *Server) handleCreateStoragePath(w http.ResponseWriter, r *http.Request) {
 	var body createStoragePathRequest
 	if err := decodeBody(r, &body); err != nil {
@@ -204,7 +204,7 @@ type updateStoragePathRequest struct {
 //	@Success		200	{object}	storageLocationResponse	"Location updated"
 //	@Failure		404	"Storage path not found"
 //	@Failure		503	"Artifact storage is disabled"
-//	@Router			/artifacts/storage/paths/{id} [put]
+//	@Router			/api/artifacts/storage/paths/{id} [put]
 func (s *Server) handleUpdateStoragePath(w http.ResponseWriter, r *http.Request) {
 	var body updateStoragePathRequest
 	if err := decodeBody(r, &body); err != nil {
@@ -264,7 +264,7 @@ type deleteStoragePathRequest struct {
 //	@Failure		400	"Built-in location"
 //	@Failure		404	"Storage path not found"
 //	@Failure		503	"Artifact storage is disabled"
-//	@Router			/artifacts/storage/paths/{id} [delete]
+//	@Router			/api/artifacts/storage/paths/{id} [delete]
 func (s *Server) handleDeleteStoragePath(w http.ResponseWriter, r *http.Request) {
 	var body deleteStoragePathRequest
 	if r.ContentLength > 0 {

@@ -37,6 +37,8 @@ type Server struct {
 	sshSessions    *sshSessions
 	termSessions   *termSessions
 	machineMetrics *machineMetricsState
+	events         *eventHub
+	health         *healthState
 	httpSrv        *http.Server
 	listener       net.Listener
 	startedAt      time.Time
@@ -75,6 +77,8 @@ func New(cfg *config.Config, keyStore *keys.Store, trayTokens *auth.TrayTokens, 
 		sshSessions:    newSSHSessions(),
 		termSessions:   newTermSessions(),
 		machineMetrics: newMachineMetricsState(),
+		events:         newEventHub(),
+		health:         &healthState{},
 		startedAt:      time.Now(),
 		restartArgs:    restartArgs,
 		openUI:         openUI,
@@ -83,6 +87,8 @@ func New(cfg *config.Config, keyStore *keys.Store, trayTokens *auth.TrayTokens, 
 	s.oidcMgr = newOIDCManager(cfg, keyStore)
 	s.oidcStarts = newStartLimiter()
 	machines.SetOIDCTokenSource(s.oidcMgr.bearerToken)
+	taskQueue.Store().Notify = s.publishTask
+	machineStore.Notify = s.publishStats
 
 	mux := http.NewServeMux()
 	if err := s.registerRoutes(mux); err != nil {
@@ -94,12 +100,14 @@ func New(cfg *config.Config, keyStore *keys.Store, trayTokens *auth.TrayTokens, 
 		Handler:           handler,
 		ReadHeaderTimeout: 10 * time.Second,
 	}
+	s.httpSrv.RegisterOnShutdown(s.events.shutdown)
 	if cfg.SSL.Enabled {
 		s.httpsSrv = &http.Server{
 			Addr:              cfg.HTTPSListenAddr(),
 			Handler:           handler,
 			ReadHeaderTimeout: 10 * time.Second,
 		}
+		s.httpsSrv.RegisterOnShutdown(s.events.shutdown)
 	}
 	return s, nil
 }

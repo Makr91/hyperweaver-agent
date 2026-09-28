@@ -82,14 +82,14 @@ type deviceStatusResponse struct {
 }
 
 // @Summary		Start a federated device login
-// @Description	Public, rate-limited (6 starts per source address per minute). Direct-mode federated login via the OAuth device grant (RFC 8628, the frozen cross-agent wire — a Go-agent-only surface; auth[] advertises oidc only when oidc.enabled): the agent calls the issuer's discovered device_authorization endpoint and answers the user code + verification URI the UI shows. The device_code NEVER leaves the agent — handle is an opaque agent-side flow id, and the agent itself polls the identity provider (honoring the grant's interval/slow_down) while the UI polls GET /auth/oidc/device-status freely. On approval the agent validates the tokens against the issuer's JWKS, holds them in memory (background-refreshed), and mints a local admin API key. The FIRST successful login BINDS the agent to that account (TOFU, the bootstrap-key model; persisted in oidc.json beside the config); later logins by other accounts are refused unless listed in oidc.allowed_users.
+// @Description	Public, rate-limited (6 starts per source address per minute). Direct-mode federated login via the OAuth device grant (RFC 8628, the frozen cross-agent wire — a Go-agent-only surface; auth[] advertises oidc only when oidc.enabled): the agent calls the issuer's discovered device_authorization endpoint and answers the user code + verification URI the UI shows. The device_code NEVER leaves the agent — handle is an opaque agent-side flow id, and the agent itself polls the identity provider (honoring the grant's interval/slow_down) while the UI polls GET /api/auth/oidc/device-status freely. On approval the agent validates the tokens against the issuer's JWKS, holds them in memory (background-refreshed), and mints a local admin API key. The FIRST successful login BINDS the agent to that account (TOFU, the bootstrap-key model; persisted in oidc.json beside the config); later logins by other accounts are refused unless listed in oidc.allowed_users.
 // @Tags			Local Login
 // @Produce		json
 // @Success		200	{object}	deviceStartResponse	"Device login started"
 // @Failure		429	{object}	taskErrorBody	"Too many login attempts from this address"
 // @Failure		502	{object}	taskErrorBody	"Identity provider unreachable or without a usable device grant"
 // @Failure		503	{object}	taskErrorBody	"OIDC login is disabled"
-// @Router			/auth/oidc/device-start [post]
+// @Router			/api/auth/oidc/device-start [post]
 func (s *Server) handleOIDCDeviceStart(w http.ResponseWriter, r *http.Request) {
 	if !s.cfg.OIDC.Enabled {
 		taskError(w, http.StatusServiceUnavailable, "OIDC login is disabled")
@@ -116,7 +116,7 @@ func (s *Server) handleOIDCDeviceStart(w http.ResponseWriter, r *http.Request) {
 // @Success		200	{object}	deviceStatusResponse	"Flow status (credential fields present only on the single approved answer)"
 // @Failure		404	{object}	taskErrorBody	"Unknown, already-delivered, or expired-and-forgotten handle"
 // @Failure		503	{object}	taskErrorBody	"OIDC login is disabled"
-// @Router			/auth/oidc/device-status [get]
+// @Router			/api/auth/oidc/device-status [get]
 func (s *Server) handleOIDCDeviceStatus(w http.ResponseWriter, r *http.Request) {
 	if !s.cfg.OIDC.Enabled {
 		taskError(w, http.StatusServiceUnavailable, "OIDC login is disabled")

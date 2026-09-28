@@ -95,7 +95,7 @@ func (s *Server) queueAddressTask(w http.ResponseWriter, r *http.Request,
 //	@Param			request	body	createNetworkAddressRequest	true	"Address creation request"
 //	@Success		202	{object}	addressTaskResponse	"Creation task queued ({success, message, task_id, addrobj, type, interface})"
 //	@Failure		400	"Missing interface/type/addrobj, missing address for static, non-CIDR address, dhcp off-Windows, or addrconf"
-//	@Router			/network/addresses [post]
+//	@Router			/api/network/addresses [post]
 func (s *Server) handleCreateNetworkAddress(w http.ResponseWriter, r *http.Request) {
 	var body createNetworkAddressRequest
 	if err := decodeBody(r, &body); err != nil {
@@ -154,7 +154,7 @@ func (s *Server) handleCreateNetworkAddress(w http.ResponseWriter, r *http.Reque
 //	@Success		202	{object}	addressTaskResponse	"Deletion task queued ({success, message, task_id, addrobj, release})"
 //	@Failure		400	"Malformed addrobj, or several live addresses without ?address="
 //	@Failure		404	"Address object not found ({error, details})"
-//	@Router			/network/addresses/{addrobj} [delete]
+//	@Router			/api/network/addresses/{addrobj} [delete]
 func (s *Server) handleDeleteNetworkAddress(w http.ResponseWriter, r *http.Request) {
 	addrobj := r.PathValue("addrobj")
 	iface, version, ok := netaddr.SplitAddrObj(addrobj)
@@ -195,15 +195,15 @@ func (s *Server) handleDeleteNetworkAddress(w http.ResponseWriter, r *http.Reque
 // enable/disable verbs split from the one wildcard here.
 //
 //	@Summary		Enable an address's interface (task)
-//	@Description	Minimum role: operator. Queues enable_ip_address. HONESTY, loud: no platform here has illumos's per-address enable — the toggle applies to the INTERFACE the addrobj names (netsh set interface / `ip link set up` / ifconfig up), affecting every address on it; the 202 body and the task output both say so. (Route mechanics: one PUT wildcard under /network/addresses/ splits the enable/disable suffix — Go 1.22 ServeMux forbids literal segments after a trailing wildcard.)
+//	@Description	Minimum role: operator. Queues enable_ip_address. HONESTY, loud: no platform here has illumos's per-address enable — the toggle applies to the INTERFACE the addrobj names (netsh set interface / `ip link set up` / ifconfig up), affecting every address on it; the 202 body and the task output both say so. (Route mechanics: one PUT wildcard under /api/network/addresses/ splits the enable/disable suffix — Go 1.22 ServeMux forbids literal segments after a trailing wildcard.)
 //	@Tags			Host Configuration
 //	@Produce		json
 //	@Param			addrobj	path	string	true	"The listing's addrobj value — may carry a slash (<interface>/v4)"
 //	@Success		202	{object}	addressTaskResponse	"Enable task queued ({success, message, task_id, addrobj, note})"
 //	@Failure		400	"Malformed addrobj"
 //	@Failure		404	"Unknown action suffix"
-//	@Router			/network/addresses/{addrobj}/enable [put]
-//	@Router			/network/addresses/{addrobj}/disable [put]
+//	@Router			/api/network/addresses/{addrobj}/enable [put]
+//	@Router			/api/network/addresses/{addrobj}/disable [put]
 func (s *Server) handleNetworkAddressAction(w http.ResponseWriter, r *http.Request) {
 	rest := r.PathValue("rest")
 	addrobj, action := "", ""
@@ -215,7 +215,7 @@ func (s *Server) handleNetworkAddressAction(w http.ResponseWriter, r *http.Reque
 	}
 	if action == "" {
 		netconfigError(w, http.StatusNotFound,
-			"Unknown address action — PUT /network/addresses/{addrobj}/enable or /disable", "")
+			"Unknown address action — PUT /api/network/addresses/{addrobj}/enable or /disable", "")
 		return
 	}
 	iface, _, ok := netaddr.SplitAddrObj(addrobj)

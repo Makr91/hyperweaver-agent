@@ -9,27 +9,12 @@ import "net/http"
 // base_url&req=<req_type>&customerId=&user=&email=&context=<context>;
 // it renders the link only when enabled AND base_url are set.
 
-type ticketEnabledValue struct {
-	Value bool `json:"value"`
-}
-
-type ticketBaseURLValue struct {
-	Value string `json:"value" example:"https://xd.prominic.net/app/apprequest.nsf/router?openagent"`
-}
-
-type ticketReqTypeValue struct {
-	Value string `json:"value" example:"sso"`
-}
-
-type ticketContextValue struct {
-	Value string `json:"value" example:"https://github.com/Makr91/hyperweaver-agent"`
-}
-
 type ticketSystemConfig struct {
-	Enabled ticketEnabledValue `json:"enabled"`
-	BaseURL ticketBaseURLValue `json:"base_url"`
-	ReqType ticketReqTypeValue `json:"req_type"`
-	Context ticketContextValue `json:"context"`
+	Enabled            bool   `json:"enabled"`
+	BaseURL            string `json:"base_url" example:"https://xd.prominic.net/app/apprequest.nsf/router?openagent"`
+	ReqType            string `json:"req_type" example:"sso"`
+	FallbackCustomerID string `json:"fallback_customer_id"`
+	Context            string `json:"context" example:"https://github.com/Makr91/hyperweaver-agent"`
 }
 
 type ticketConfigResponse struct {
@@ -40,7 +25,7 @@ type ticketConfigResponse struct {
 // it without credentials, exactly like the Server's).
 //
 //	@Summary		Ticket-system configuration (public)
-//	@Description	The Help & Support link's config feed (the Server's /api/config/ticket served on this agent too, so Direct mode renders the same profile-dropdown link). No authentication. Fields ride BoxVault's {value}-wrapped shape; the UI renders the link only when enabled AND base_url are set, building base_url&req=<req_type>&customerId=&user=&email=&context=<context>.
+//	@Description	The Help & Support link's config feed. No authentication. Every member of ticket_system is a plain value: enabled, base_url, req_type, fallback_customer_id and context. The UI renders the link only when enabled AND base_url are set, building base_url&req=<req_type>&customerId=&user=&email=&context=<context>, customerId falling back to fallback_customer_id.
 //	@Tags			Status
 //	@Produce		json
 //	@Success		200	{object}	ticketConfigResponse	"Ticket-system configuration"
@@ -49,10 +34,11 @@ func (s *Server) handleTicketConfig(w http.ResponseWriter, _ *http.Request) {
 	ticket := s.cfg.TicketSystem
 	writeJSON(w, ticketConfigResponse{
 		TicketSystem: ticketSystemConfig{
-			Enabled: ticketEnabledValue{Value: ticket.Enabled},
-			BaseURL: ticketBaseURLValue{Value: ticket.BaseURL},
-			ReqType: ticketReqTypeValue{Value: ticket.ReqType},
-			Context: ticketContextValue{Value: ticket.Context},
+			Enabled:            ticket.Enabled,
+			BaseURL:            ticket.BaseURL,
+			ReqType:            ticket.ReqType,
+			FallbackCustomerID: ticket.FallbackCustomerID,
+			Context:            ticket.Context,
 		},
 	})
 }

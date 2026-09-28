@@ -80,7 +80,7 @@ type hostsFileResponse struct {
 //	@Produce		json
 //	@Success		200	{object}	hostsFileResponse	"Hosts file"
 //	@Failure		500	{object}	wrappedError	"Failed to read hosts file"
-//	@Router			/system/hosts [get]
+//	@Router			/api/system/hosts [get]
 func (s *Server) handleGetHostsFile(w http.ResponseWriter, _ *http.Request) {
 	path := hostsFilePath()
 	raw, err := os.ReadFile(filepath.Clean(path))
@@ -143,7 +143,7 @@ type hostsUpdateResponse struct {
 //	@Success		200	{object}	hostsUpdateResponse	"Hosts file updated"
 //	@Failure		400	{object}	wrappedError	"Invalid body or entry values"
 //	@Failure		500	{object}	wrappedError	"Backup or write failure (typically missing OS privilege)"
-//	@Router			/system/hosts [put]
+//	@Router			/api/system/hosts [put]
 func (s *Server) handleUpdateHostsFile(w http.ResponseWriter, r *http.Request) {
 	var body hostsUpdateRequest
 	if err := decodeBody(r, &body); err != nil {

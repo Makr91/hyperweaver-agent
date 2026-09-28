@@ -56,7 +56,7 @@ cors:
   whitelist: []
 
 ui:
-  # Serve the bundled Hyperweaver UI at /ui/ (and / redirects there).
+  # Serve the bundled UI at /.
   enabled: true
   # Optional: serve the UI from this directory instead of the copy embedded in
   # the binary. Leave empty for normal operation.
@@ -90,7 +90,7 @@ logging:
   categories: {}
 
 api_keys:
-  # Allow POST /api-keys/bootstrap to create the first API key.
+  # Allow POST /api/api-keys/bootstrap to create the first API key.
   bootstrap_enabled: true
   # Lock the bootstrap endpoint once any key exists.
   bootstrap_auto_disable: true
@@ -106,7 +106,7 @@ oidc:
   # Direct-mode federated login. Two doors, both minting a local admin API
   # key: the silent SSO pre-check (a live IdP session signs the first open in
   # with zero clicks — the IdP must register this agent's loopback callback,
-  # <base url>/auth/oidc/callback) and the device grant (RFC 8628: the login
+  # <base url>/api/auth/oidc/callback) and the device grant (RFC 8628: the login
   # page shows a user code you approve at the identity provider). The FIRST
   # successful login binds this agent to that account; later logins by other
   # accounts are refused unless listed in allowed_users. Enabling also
@@ -141,7 +141,7 @@ api_docs:
   enabled: true
 
 stats:
-  # Serve GET /stats without an API key.
+  # Serve GET /api/stats without an API key.
   public_access: false
 
 data:
@@ -177,7 +177,7 @@ tasks:
   poll_interval_seconds: 2
   # Maximum number of tasks running at once.
   max_concurrent: 5
-  # Default limit for GET /tasks when the request does not send one.
+  # Default limit for GET /api/tasks when the request does not send one.
   default_pagination_limit: 50
   # Completed/failed/cancelled tasks older than this many days are deleted
   # by the periodic cleanup.
@@ -208,7 +208,7 @@ machines:
   # When machine-create/clone requests carry no explicit name, derive it as
   # <server_id>--<hostname>.<domain> (the partition-id convention). Explicit
   # names always win — machine names stay free-form. With this on,
-  # settings.server_id is REQUIRED at create (GET /machines/ids/next feeds it).
+  # settings.server_id is REQUIRED at create (GET /api/machines/ids/next feeds it).
   prefix_machine_names: true
   # Seconds a graceful stop waits for the guest to power off after the ACPI
   # signal before forcing poweroff.
@@ -240,7 +240,7 @@ provisioning:
   default_sync_method: rsync
   # Host bridge interface injected into templates as
   # DEFAULT_NETWORK_INTERFACE when the spec sets none. Values come from
-  # GET /provisioning/bridged-interfaces (VBoxManage list bridgedifs).
+  # GET /api/provisioning/bridged-interfaces (VBoxManage list bridgedifs).
   default_network_interface: ''
   # Timeout for one in-guest ansible-playbook run.
   playbook_timeout_seconds: 21600
@@ -264,7 +264,7 @@ provisioning:
   network:
     # Dedicated provisioning network: ONE VirtualBox host-only interface
     # (identified by host_ip — VirtualBox assigns interface names itself)
-    # plus its DHCP server. Set up via POST /provisioning/network/setup.
+    # plus its DHCP server. Set up via POST /api/provisioning/network/setup.
     enabled: true
     subnet: 10.190.190.0/24
     host_ip: 10.190.190.1
@@ -305,7 +305,7 @@ catalog_sources:
 artifact_storage:
   # The merged artifact system (the artifacts capability token): typed
   # storage locations — iso, image, installer, fixpack, hotfix — with one
-  # scan, one SHA-256 checksum store, one /artifacts surface. Installer-
+  # scan, one SHA-256 checksum store, one /api/artifacts surface. Installer-
   # family files are hash-verified before they ever reach a machine;
   # disabling removes the surface and skips mounting/verification entirely
   # (a loud warning at machine prepare).
@@ -336,8 +336,8 @@ artifact_storage:
   paths: []
 
 file_browser:
-  # Host file browser (the file-browser capability token): GET /filesystem
-  # lists agent-host directories, and the /filesystem mutate family edits
+  # Host file browser (the file-browser capability token): GET /api/filesystem
+  # lists agent-host directories, and the /api/filesystem mutate family edits
   # them — create/rename/move/copy/delete, text content read/write,
   # upload/download, archives, permissions (the UI's path pickers and file
   # manager). Set false to remove the whole surface.
@@ -346,7 +346,7 @@ file_browser:
   # answers 403. Empty = unrestricted — "/" lists the host's drive letters
   # on Windows and the real filesystem root elsewhere.
   root: ''
-  # Size cap for one POST /filesystem/upload body, in GiB.
+  # Size cap for one POST /api/filesystem/upload body, in GiB.
   upload_size_limit_gb: 50
   security:
     # Reject paths carrying ".." or "~".
@@ -368,7 +368,7 @@ file_browser:
     enabled: true
     # A created archive larger than this (MB) is deleted and the task fails.
     max_archive_size_mb: 10240
-    # Formats POST /filesystem/archive/create accepts. This agent creates
+    # Formats POST /api/filesystem/archive/create accepts. This agent creates
     # zip, tar, and tar.gz natively; extraction additionally handles
     # tar.bz2 and .gz regardless of this list.
     supported_formats:
@@ -381,7 +381,7 @@ guest_agent:
   # gate. The UART itself is a per-machine option (zones.guest_agent at
   # create / the PUT guest_agent toggle / the setup endpoint, default off —
   # the Proxmox model); guests run qemu-ga on the COM2 → host-pipe channel
-  # (baked into the box templates), and /machines/{name}/guest/* speaks the
+  # (baked into the box templates), and /api/machines/{name}/guest/* speaks the
   # credential-less JSON protocol — live guest IPs, exec, clean shutdown —
   # with no SSH and no Guest Additions. Set false to disable per-machine
   # wiring and remove the surface entirely.
@@ -390,7 +390,7 @@ guest_agent:
 snapshots:
   # Scheduled machine snapshot rotation (zoneweaver's snapshots vocabulary on
   # VBoxManage snapshots). The default policy below applies to EVERY machine
-  # unless a machine overrides it (the PUT /machines/{name} snapshots field;
+  # unless a machine overrides it (the PUT /api/machines/{name} snapshots field;
   # type none disables per machine, null clears back to this default).
   # Defaults are deliberately CONSERVATIVE for VirtualBox: snapshot creation
   # is CoW-thin, but pruning is a physical disk merge and snapshots of
@@ -439,6 +439,7 @@ ticket_system:
   base_url: https://xd.prominic.net/app/apprequest.nsf/router?openagent
   # Default request type parameter.
   req_type: sso
+  fallback_customer_id: ''
   # Context URL for the ticket system (usually the repository URL).
   context: https://github.com/Makr91/hyperweaver-agent
 
@@ -447,7 +448,7 @@ cleanup:
   interval: 300
 
 monitoring:
-  # The /monitoring/* endpoints always serve realtime samples. Enabling
+  # The /api/monitoring/* endpoints always serve realtime samples. Enabling
   # storage adds a background collector writing time series into
   # per-datatype database files (monitoring-cpu.sqlite, monitoring-memory.sqlite,
   # monitoring-network.sqlite) so history charts work.
@@ -459,7 +460,7 @@ monitoring:
   retention_days: 7
 
 host_power:
-  # Serve the host power-management endpoints (/system/host/*): status,
+  # Serve the host power-management endpoints (/api/system/host/*): status,
   # uptime, and admin-key-gated shutdown/restart/poweroff/halt of the machine
   # this agent runs on. Set false to remove the surface entirely.
   enabled: true

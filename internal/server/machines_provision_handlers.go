@@ -23,7 +23,7 @@ import (
 //	@Failure		400	"No provisioner config stored, missing settings.vagrant_user, no control IP in networks[], or host-target hooks while provisioning.host_hooks is false"
 //	@Failure		404	"Machine not found"
 //	@Failure		409	{object}	map[string]interface{}	"Host-target hooks need the one-time confirmation — STRICTLY pre-flight, never a mid-sequence failure"
-//	@Router			/machines/{machineName}/provision [post]
+//	@Router			/api/machines/{machineName}/provision [post]
 func (s *Server) handleProvisionMachine(w http.ResponseWriter, r *http.Request) {
 	machine := s.findMachine(w, r)
 	if machine == nil {
@@ -105,7 +105,7 @@ func (s *Server) handleProvisionMachine(w http.ResponseWriter, r *http.Request) 
 //	@Success		200	{object}	map[string]interface{}	"Sync (or syncback) chain created"
 //	@Failure		400	"No provisioner config, no folders configured, (syncback) no folders flagged syncback: true, or the machine uses the winrm communicator (folder sync needs ssh)"
 //	@Failure		404	"Machine not found"
-//	@Router			/machines/{machineName}/sync [post]
+//	@Router			/api/machines/{machineName}/sync [post]
 func (s *Server) handleSyncMachine(w http.ResponseWriter, r *http.Request) {
 	machine := s.findMachine(w, r)
 	if machine == nil {
@@ -225,7 +225,7 @@ func (s *Server) handleSyncMachine(w http.ResponseWriter, r *http.Request) {
 //	@Success		200	{object}	map[string]interface{}	"Provisioner tasks created (or the all-skipped no-op)"
 //	@Failure		400	"No provisioner config, no playbooks configured, missing credentials, or no control IP"
 //	@Failure		404	"Machine not found"
-//	@Router			/machines/{machineName}/run-provisioners [post]
+//	@Router			/api/machines/{machineName}/run-provisioners [post]
 func (s *Server) handleRunProvisioners(w http.ResponseWriter, r *http.Request) {
 	machine := s.findMachine(w, r)
 	if machine == nil {
@@ -382,7 +382,7 @@ func (s *Server) handleRunProvisioners(w http.ResponseWriter, r *http.Request) {
 //	@Param			machineName	path	string	true	"Machine name"
 //	@Success		200	{object}	map[string]interface{}	"Provisioning status"
 //	@Failure		404	"Machine not found"
-//	@Router			/machines/{machineName}/provision/status [get]
+//	@Router			/api/machines/{machineName}/provision/status [get]
 func (s *Server) handleProvisionStatus(w http.ResponseWriter, r *http.Request) {
 	machine := s.findMachine(w, r)
 	if machine == nil {

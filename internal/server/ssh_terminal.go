@@ -135,14 +135,14 @@ func (s *Server) sshTransport(ctx context.Context, machine *machines.Machine,
 // /machines/{name}/ssh/start — each call is an independent session).
 //
 //	@Summary		Start an SSH terminal session
-//	@Description	Minimum role: operator. Mints an SSH terminal session for a RUNNING machine; connect the terminal at the /ssh/{sessionId} WebSocket. Each call is an independent session. Credentials come from the stored configuration (settings.vagrant_user/vagrant_user_pass/vagrant_user_private_key_path; the agent's provisioning key is the last-resort fallback). Transport = the pipeline's ladder: the provisioning NAT ssh port-forward first (immune to guest network reconfiguration), the document's control IP as fallback.
+//	@Description	Minimum role: operator. Mints an SSH terminal session for a RUNNING machine; connect the terminal at the /api/ssh/{sessionId} WebSocket. Each call is an independent session. Credentials come from the stored configuration (settings.vagrant_user/vagrant_user_pass/vagrant_user_private_key_path; the agent's provisioning key is the last-resort fallback). Transport = the pipeline's ladder: the provisioning NAT ssh port-forward first (immune to guest network reconfiguration), the document's control IP as fallback.
 //	@Tags			Console
 //	@Produce		json
 //	@Param			machineName	path	string	true	"Machine name"
 //	@Success		200	{object}	sshSession	"Session created"
 //	@Failure		400	"Machine not running, no credentials configured, or no SSH transport"
 //	@Failure		404	"Machine not found"
-//	@Router			/machines/{machineName}/ssh/start [post]
+//	@Router			/api/machines/{machineName}/ssh/start [post]
 func (s *Server) handleStartSSHSession(w http.ResponseWriter, r *http.Request) {
 	machine := s.findMachine(w, r)
 	if machine == nil {
@@ -194,7 +194,7 @@ func (s *Server) handleStartSSHSession(w http.ResponseWriter, r *http.Request) {
 //	@Tags			Console
 //	@Produce		json
 //	@Success		200	{array}	sshSession	"Sessions"
-//	@Router			/ssh/sessions [get]
+//	@Router			/api/ssh/sessions [get]
 func (s *Server) handleListSSHSessions(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, s.sshSessions.snapshot())
 }
@@ -208,7 +208,7 @@ func (s *Server) handleListSSHSessions(w http.ResponseWriter, _ *http.Request) {
 //	@Param			sessionId	path	string	true	"SSH session id"
 //	@Success		200	{object}	sshSession	"The session"
 //	@Failure		404	"SSH session not found"
-//	@Router			/ssh/sessions/{sessionId} [get]
+//	@Router			/api/ssh/sessions/{sessionId} [get]
 func (s *Server) handleSSHSessionInfo(w http.ResponseWriter, r *http.Request) {
 	session := s.sshSessions.get(r.PathValue("sessionId"))
 	if session == nil {
@@ -227,7 +227,7 @@ func (s *Server) handleSSHSessionInfo(w http.ResponseWriter, r *http.Request) {
 //	@Param			sessionId	path	string	true	"SSH session id"
 //	@Success		200	{object}	map[string]interface{}	"Session stopped"
 //	@Failure		404	"SSH session not found"
-//	@Router			/ssh/sessions/{sessionId}/stop [delete]
+//	@Router			/api/ssh/sessions/{sessionId}/stop [delete]
 func (s *Server) handleStopSSHSession(w http.ResponseWriter, r *http.Request) {
 	if !s.sshSessions.close(r.PathValue("sessionId")) {
 		taskError(w, http.StatusNotFound, "SSH session not found")
@@ -249,14 +249,14 @@ type terminalControl struct {
 // handleSSHConnection + setupSSHPiping.
 //
 //	@Summary		SSH terminal (WebSocket)
-//	@Description	WEBSOCKET upgrade — authenticate with ?ticket= (GET /ws-ticket) minted with ?machine= matching the session's machine (the frozen cross-agent shape: machine streams take ONLY a matching scoped ticket; a mismatch answers the same 401 as an invalid ticket). Opens the interactive shell (xterm-256color PTY) for a session minted at POST /machines/{name}/ssh/start. Wire: remote output arrives as raw text frames; send raw text as terminal input; send {"type": "resize", "cols": N, "rows": N} JSON frames to resize the PTY. "Connecting to SSH..." opens the stream; "SSH connection closed." marks remote exit.
+//	@Description	WEBSOCKET upgrade — authenticate with ?ticket= (GET /api/ws-ticket) minted with ?machine= matching the session's machine (the frozen cross-agent shape: machine streams take ONLY a matching scoped ticket; a mismatch answers the same 401 as an invalid ticket). Opens the interactive shell (xterm-256color PTY) for a session minted at POST /api/machines/{name}/ssh/start. Wire: remote output arrives as raw text frames; send raw text as terminal input; send {"type": "resize", "cols": N, "rows": N} JSON frames to resize the PTY. "Connecting to SSH..." opens the stream; "SSH connection closed." marks remote exit.
 //	@Tags			Console
 //	@Param			sessionId	path	string	true	"SSH session id"
-//	@Param			ticket	query	string	true	"WebSocket upgrade ticket (GET /ws-ticket?machine={name} — must be scoped to the session's machine)"
+//	@Param			ticket	query	string	true	"WebSocket upgrade ticket (GET /api/ws-ticket?machine={name} — must be scoped to the session's machine)"
 //	@Success		101	"Switching Protocols — the terminal begins"
 //	@Failure		401	"Missing, invalid, or wrong-scope ticket"
 //	@Failure		404	"SSH session or machine not found"
-//	@Router			/ssh/{sessionId} [get]
+//	@Router			/api/ssh/{sessionId} [get]
 func (s *Server) handleSSHSocket(w http.ResponseWriter, r *http.Request) {
 	scope, ok := s.ticketScope(w, r)
 	if !ok {

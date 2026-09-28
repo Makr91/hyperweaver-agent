@@ -54,7 +54,19 @@ func formatTime(t time.Time) string {
 
 // Store persists tasks in tasks.sqlite.
 type Store struct {
-	db *sql.DB
+	db     *sql.DB
+	Notify func(*Task)
+}
+
+func (s *Store) changed(ctx context.Context, id string) {
+	if s.Notify == nil {
+		return
+	}
+	task, err := s.Get(ctx, id)
+	if err != nil {
+		return
+	}
+	s.Notify(task)
 }
 
 // NewStore wraps an opened tasks database.
@@ -146,7 +158,11 @@ func (s *Store) Create(ctx context.Context, nt *NewTask) (*Task, error) {
 	if err != nil {
 		return nil, err
 	}
-	return s.Get(ctx, id)
+	task, err := s.Get(ctx, id)
+	if err == nil && s.Notify != nil {
+		s.Notify(task)
+	}
+	return task, err
 }
 
 // Get returns the task with the given id, or ErrNotFound.

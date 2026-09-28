@@ -45,7 +45,7 @@ type archiveExtractResponse struct {
 //	@Failure		400	"Missing fields"
 //	@Failure		403	"Path forbidden"
 //	@Failure		503	"File browser or archive operations disabled"
-//	@Router			/filesystem/archive/extract [post]
+//	@Router			/api/filesystem/archive/extract [post]
 func (s *Server) handleExtractArchive(w http.ResponseWriter, r *http.Request) {
 	if !s.archiveGate(w) {
 		return

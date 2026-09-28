@@ -40,7 +40,7 @@ type transferArtifactRequest struct {
 //	@Failure		400	"Missing destination"
 //	@Failure		404	"Artifact or storage location not found"
 //	@Failure		503	"Artifact storage is disabled"
-//	@Router			/artifacts/{id}/move [post]
+//	@Router			/api/artifacts/{id}/move [post]
 func (s *Server) handleArtifactAction(w http.ResponseWriter, r *http.Request) {
 	switch r.PathValue("action") {
 	case "move":
@@ -67,7 +67,7 @@ func (s *Server) handleArtifactAction(w http.ResponseWriter, r *http.Request) {
 //	@Failure		400	"Missing destination"
 //	@Failure		404	"Artifact or storage location not found"
 //	@Failure		503	"Artifact storage is disabled"
-//	@Router			/artifacts/{id}/copy [post]
+//	@Router			/api/artifacts/{id}/copy [post]
 func (s *Server) queueTransfer(w http.ResponseWriter, r *http.Request, operation, message string) {
 	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
 	if err != nil {
@@ -122,7 +122,7 @@ type downloadArtifactRequest struct {
 //	@Failure		400	"Invalid url/filename/checksum, missing role, disabled location, or non-sha256 algorithm"
 //	@Failure		404	"Storage location not found"
 //	@Failure		503	"Artifact storage is disabled"
-//	@Router			/artifacts/download [post]
+//	@Router			/api/artifacts/download [post]
 func (s *Server) handleArtifactDownloadFromURL(w http.ResponseWriter, r *http.Request) {
 	var body downloadArtifactRequest
 	if err := decodeBody(r, &body); err != nil {
@@ -204,7 +204,7 @@ type prepareUploadResponse struct {
 //	@Failure		400	"Missing fields, unusable filename, over the size cap, disabled location, or missing role"
 //	@Failure		404	"Storage location not found"
 //	@Failure		503	"Artifact storage is disabled"
-//	@Router			/artifacts/upload/prepare [post]
+//	@Router			/api/artifacts/upload/prepare [post]
 func (s *Server) handlePrepareArtifactUpload(w http.ResponseWriter, r *http.Request) {
 	var body prepareUploadRequest
 	if err := decodeBody(r, &body); err != nil {
@@ -272,7 +272,7 @@ func (s *Server) handlePrepareArtifactUpload(w http.ResponseWriter, r *http.Requ
 	writeJSON(w, prepareUploadResponse{
 		Success:   true,
 		TaskID:    task.ID,
-		UploadURL: "/artifacts/upload/" + task.ID,
+		UploadURL: "/api/artifacts/upload/" + task.ID,
 		ExpiresAt: time.Now().Add(2 * time.Hour).UTC().Format(time.RFC3339),
 		StorageLocation: prepareUploadLocation{
 			ID: location.ID, Name: location.Name, Path: location.Path,
@@ -310,7 +310,7 @@ type uploadCompleteResponse struct {
 //	@Failure		400	"Task not prepared, wrong task type, malformed multipart body, file already exists, or no file part"
 //	@Failure		404	"Upload task or storage location not found"
 //	@Failure		503	"Artifact storage is disabled"
-//	@Router			/artifacts/upload/{taskId} [post]
+//	@Router			/api/artifacts/upload/{taskId} [post]
 func (s *Server) handleUploadArtifactToTask(w http.ResponseWriter, r *http.Request) {
 	task, err := s.tasks.Store().Get(r.Context(), r.PathValue("taskId"))
 	if errors.Is(err, tasks.ErrNotFound) {
@@ -425,7 +425,7 @@ func (s *Server) handleUploadArtifactToTask(w http.ResponseWriter, r *http.Reque
 //	@Success		200	{file}	binary	"The file"
 //	@Failure		404	"Artifact not found, expectation-only, or file gone from disk"
 //	@Failure		503	"Artifact storage is disabled"
-//	@Router			/artifacts/{id}/download [get]
+//	@Router			/api/artifacts/{id}/download [get]
 func (s *Server) handleDownloadArtifactFile(w http.ResponseWriter, r *http.Request) {
 	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
 	if err != nil {

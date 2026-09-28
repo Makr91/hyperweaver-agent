@@ -47,7 +47,7 @@ type secureBootResponse struct {
 //	@Failure		404	{object}	taskErrorBody	"Machine not found"
 //	@Failure		500	{object}	taskErrorBody	"A modifynvram step failed (BIOS firmware, missing var store, ...)"
 //	@Failure		503	{object}	taskErrorBody	"VirtualBox is not installed"
-//	@Router			/machines/{machineName}/nvram/secureboot [post]
+//	@Router			/api/machines/{machineName}/nvram/secureboot [post]
 func (s *Server) handleSecureBoot(w http.ResponseWriter, r *http.Request) {
 	machine := s.findMachine(w, r)
 	if machine == nil {
@@ -146,7 +146,7 @@ type guestControlRunResponse struct {
 //	@Failure		404	{object}	taskErrorBody	"Machine not found"
 //	@Failure		502	{object}	taskErrorBody	"guestcontrol failed to start (Guest Additions absent?)"
 //	@Failure		503	{object}	taskErrorBody	"VirtualBox is not installed"
-//	@Router			/machines/{machineName}/guestcontrol/run [post]
+//	@Router			/api/machines/{machineName}/guestcontrol/run [post]
 func (s *Server) handleGuestControlRun(w http.ResponseWriter, r *http.Request) {
 	machine := s.findMachine(w, r)
 	if machine == nil {

@@ -31,7 +31,7 @@ type orchestrationStatusResponse struct {
 //	@Tags			Machine Management
 //	@Produce		json
 //	@Success		200	{object}	orchestrationStatusResponse	"Orchestration status"
-//	@Router			/machines/orchestration/status [get]
+//	@Router			/api/machines/orchestration/status [get]
 func (s *Server) handleOrchestrationStatus(w http.ResponseWriter, _ *http.Request) {
 	controller := "none"
 	if s.cfg.Machines.Orchestration.Enabled {
@@ -74,7 +74,7 @@ type orchestrationEnableResponse struct {
 //	@Param			request	body		orchestrationEnableRequest	true	"Requires confirm: true"
 //	@Success		200		{object}	orchestrationEnableResponse	"Orchestration enabled"
 //	@Failure		400		{object}	map[string]string			"Missing confirmation"
-//	@Router			/machines/orchestration/enable [post]
+//	@Router			/api/machines/orchestration/enable [post]
 func (s *Server) handleOrchestrationEnable(w http.ResponseWriter, r *http.Request) {
 	var body orchestrationEnableRequest
 	if err := decodeBody(r, &body); err != nil {
@@ -116,7 +116,7 @@ type orchestrationDisableResponse struct {
 //	@Tags			Machine Management
 //	@Produce		json
 //	@Success		200	{object}	orchestrationDisableResponse	"Orchestration disabled"
-//	@Router			/machines/orchestration/disable [post]
+//	@Router			/api/machines/orchestration/disable [post]
 func (s *Server) handleOrchestrationDisable(w http.ResponseWriter, r *http.Request) {
 	if err := s.persistOrchestrationEnabled(false); err != nil {
 		slog.Error("disable orchestration", "error", err)
@@ -151,11 +151,11 @@ type machinePrioritiesResponse struct {
 // with its priority, plus the tens-range grouping.
 //
 //	@Summary		Machine boot priorities
-//	@Description	Minimum role: viewer. Every machine with its boot priority (settings.boot_priority, 1-100, default 95 — set via PUT /machines/{name} {boot_priority}, DB-immediate) plus the tens-range grouping.
+//	@Description	Minimum role: viewer. Every machine with its boot priority (settings.boot_priority, 1-100, default 95 — set via PUT /api/machines/{name} {boot_priority}, DB-immediate) plus the tens-range grouping.
 //	@Tags			Machine Management
 //	@Produce		json
 //	@Success		200	{object}	machinePrioritiesResponse	"Priorities"
-//	@Router			/machines/priorities [get]
+//	@Router			/api/machines/priorities [get]
 func (s *Server) handleMachinePriorities(w http.ResponseWriter, r *http.Request) {
 	entries, err := machines.Prioritized(r.Context(), s.machines)
 	if err != nil {
@@ -212,7 +212,7 @@ type orchestrationTestResponse struct {
 //	@Param			request	body		orchestrationTestRequest	false	"Optional shutdown strategy selector"
 //	@Success		200		{object}	orchestrationTestResponse	"Execution plan"
 //	@Failure		400		{object}	map[string]string			"Invalid strategy"
-//	@Router			/machines/orchestration/test [post]
+//	@Router			/api/machines/orchestration/test [post]
 func (s *Server) handleOrchestrationTest(w http.ResponseWriter, r *http.Request) {
 	var body orchestrationTestRequest
 	if err := decodeBody(r, &body); err != nil {

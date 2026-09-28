@@ -143,7 +143,7 @@ func matchProcesses(ctx context.Context, user string, command *regexp.Regexp) ([
 //	@Param			limit		query	int		false	"Maximum rows to return"		minimum(1)	maximum(1000)	default(100)
 //	@Success		200	{array}		processInfo		"Processes"
 //	@Failure		400	{object}	wrappedError	"Invalid command pattern"
-//	@Router			/system/processes [get]
+//	@Router			/api/system/processes [get]
 func (s *Server) handleListProcesses(w http.ResponseWriter, r *http.Request) {
 	query := r.URL.Query()
 	detailed := query.Get("detailed") == "true"
@@ -207,7 +207,7 @@ func (s *Server) findProcess(w http.ResponseWriter, r *http.Request) *process.Pr
 //	@Success		200	{object}	processInfo		"Process details"
 //	@Failure		400	{object}	wrappedError	"Invalid process ID"
 //	@Failure		404	{object}	wrappedError	"Process not found"
-//	@Router			/system/processes/{pid} [get]
+//	@Router			/api/system/processes/{pid} [get]
 func (s *Server) handleProcessDetails(w http.ResponseWriter, r *http.Request) {
 	p := s.findProcess(w, r)
 	if p == nil {
@@ -244,7 +244,7 @@ type processOpenFile struct {
 //	@Param			pid	path	int	true	"Process ID"
 //	@Success		200	{array}		processOpenFile	"Open files"
 //	@Failure		404	{object}	wrappedError	"Process not found"
-//	@Router			/system/processes/{pid}/files [get]
+//	@Router			/api/system/processes/{pid}/files [get]
 func (s *Server) handleProcessFiles(w http.ResponseWriter, r *http.Request) {
 	p := s.findProcess(w, r)
 	if p == nil {
@@ -279,7 +279,7 @@ type findProcessesResponse struct {
 //	@Param			user	query	string	false	"Filter by username"
 //	@Success		200	{object}	findProcessesResponse	"Matching process IDs"
 //	@Failure		400	{object}	wrappedError			"Missing or invalid pattern"
-//	@Router			/system/processes/find [get]
+//	@Router			/api/system/processes/find [get]
 func (s *Server) handleFindProcesses(w http.ResponseWriter, r *http.Request) {
 	pattern := r.URL.Query().Get("pattern")
 	if pattern == "" {
@@ -330,7 +330,7 @@ type processStatRow struct {
 //	@Tags			Processes
 //	@Produce		json
 //	@Success		200	{array}	processStatRow	"Process statistics"
-//	@Router			/system/processes/stats [get]
+//	@Router			/api/system/processes/stats [get]
 func (s *Server) handleProcessStats(w http.ResponseWriter, r *http.Request) {
 	matched, err := matchProcesses(r.Context(), "", nil)
 	if err != nil {

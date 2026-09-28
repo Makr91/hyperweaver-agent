@@ -36,7 +36,7 @@ func (s *Server) templateSources() []machines.TemplateSource {
 //	@Tags			Machine Management
 //	@Produce		json
 //	@Success		200	{object}	map[string]interface{}	"Templates retrieved"
-//	@Router			/templates [get]
+//	@Router			/api/templates [get]
 func (s *Server) handleListTemplates(w http.ResponseWriter, r *http.Request) {
 	list, err := s.machines.ListTemplates(r.Context())
 	if err != nil {
@@ -54,13 +54,13 @@ func (s *Server) handleListTemplates(w http.ResponseWriter, r *http.Request) {
 // /templates/local/{id}).
 //
 //	@Summary		Local template details
-//	@Description	Minimum role: viewer. One local template registry row (the base's GET /templates/local/{id}).
+//	@Description	Minimum role: viewer. One local template registry row (the base's GET /api/templates/local/{id}).
 //	@Tags			Machine Management
 //	@Produce		json
 //	@Param			templateId	path	int	true	"Template ID"
 //	@Success		200	"The template row"
 //	@Failure		404	"Template not found"
-//	@Router			/templates/{templateId} [get]
+//	@Router			/api/templates/{templateId} [get]
 func (s *Server) handleGetTemplate(w http.ResponseWriter, r *http.Request) {
 	id, err := strconv.ParseInt(r.PathValue("templateId"), 10, 64)
 	if err != nil {
@@ -90,7 +90,7 @@ func (s *Server) handleGetTemplate(w http.ResponseWriter, r *http.Request) {
 //	@Param			templateId	path	int	true	"Template ID"
 //	@Success		202	"Delete task created"
 //	@Failure		404	"Template not found"
-//	@Router			/templates/{templateId} [delete]
+//	@Router			/api/templates/{templateId} [delete]
 func (s *Server) handleDeleteTemplate(w http.ResponseWriter, r *http.Request) {
 	id, err := strconv.ParseInt(r.PathValue("templateId"), 10, 64)
 	if err != nil {
@@ -142,7 +142,7 @@ func (s *Server) handleDeleteTemplate(w http.ResponseWriter, r *http.Request) {
 //	@Success		202	"Export task created"
 //	@Failure		400	"Missing machine_name"
 //	@Failure		404	"Machine not found"
-//	@Router			/templates/export [post]
+//	@Router			/api/templates/export [post]
 func (s *Server) handleExportTemplate(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		MachineName string `json:"machine_name"`
@@ -203,7 +203,7 @@ func (s *Server) handleExportTemplate(w http.ResponseWriter, r *http.Request) {
 //	@Success		202	"Publish task created"
 //	@Failure		400	"Missing required fields"
 //	@Failure		404	"Machine not found"
-//	@Router			/templates/publish [post]
+//	@Router			/api/templates/publish [post]
 func (s *Server) handlePublishTemplate(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		MachineName  string `json:"machine_name"`
@@ -283,7 +283,7 @@ func (s *Server) handlePublishTemplate(w http.ResponseWriter, r *http.Request) {
 //	@Success		202	"Move task created"
 //	@Failure		400	"Missing target_path"
 //	@Failure		404	"Template not found"
-//	@Router			/templates/{templateId}/move [post]
+//	@Router			/api/templates/{templateId}/move [post]
 func (s *Server) handleMoveTemplate(w http.ResponseWriter, r *http.Request) {
 	id, err := strconv.ParseInt(r.PathValue("templateId"), 10, 64)
 	if err != nil {
@@ -349,7 +349,7 @@ func (s *Server) handleMoveTemplate(w http.ResponseWriter, r *http.Request) {
 //	@Success		202	"Template download task queued"
 //	@Failure		400	"Missing tuple fields, non-specific version, an invalid provider, or no usable source"
 //	@Failure		409	{object}	map[string]interface{}	"Template already exists locally"
-//	@Router			/templates/pull [post]
+//	@Router			/api/templates/pull [post]
 func (s *Server) handlePullTemplate(w http.ResponseWriter, r *http.Request) {
 	var meta machines.TemplateDownloadMetadata
 	if err := decodeBody(r, &meta); err != nil {

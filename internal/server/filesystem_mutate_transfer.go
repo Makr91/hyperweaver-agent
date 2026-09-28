@@ -26,7 +26,7 @@ import (
 //	@Failure		403	"Path forbidden"
 //	@Failure		404	"File not found"
 //	@Failure		503	"File browser is disabled"
-//	@Router			/filesystem/download [get]
+//	@Router			/api/filesystem/download [get]
 func (s *Server) handleDownloadFile(w http.ResponseWriter, r *http.Request) {
 	path := r.URL.Query().Get("path")
 	if path == "" {
@@ -94,7 +94,7 @@ type uploadFileResponse struct {
 //	@Failure		409	"File already exists (set overwrite)"
 //	@Failure		413	"Body exceeds file_browser.upload_size_limit_gb"
 //	@Failure		503	"File browser is disabled"
-//	@Router			/filesystem/upload [post]
+//	@Router			/api/filesystem/upload [post]
 func (s *Server) handleUploadFile(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, int64(s.cfg.FileBrowser.UploadSizeLimitGB)<<30)
 	reader, err := r.MultipartReader()

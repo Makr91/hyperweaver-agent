@@ -321,7 +321,7 @@ type ipSuggestions struct {
 //	@Param			count	query	int	false	"How many suggestions to return (positive integer; capped at 256; junk keeps the default)"	default(10)	maximum(256)
 //	@Success		200	{object}	ipSuggestions	"The suggestion document (bare — the network-controller family's shape)"
 //	@Failure		500	"No default route on this host, the routing tool failed, or the default-route interface carries no IPv4 ({error, details?})"
-//	@Router			/network/ip-suggestions [get]
+//	@Router			/api/network/ip-suggestions [get]
 func (s *Server) handleIPSuggestions(w http.ResponseWriter, r *http.Request) {
 	gateway, iface, err := defaultRoute(r)
 	if err != nil {

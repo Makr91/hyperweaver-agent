@@ -1,20 +1,119 @@
 package server
 
 import (
-	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
+	"errors"
+	"io"
 	"io/fs"
 	"log/slog"
 	"net/http"
 	"path"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Makr91/hyperweaver-agent/internal/version"
 )
 
-// mountUI serves the SPA at /ui/ (with client-side-route fallback) and
-// redirects / to /ui/.
+const uiIndex = "index.html"
+
+type uiFileTag struct {
+	size     int64
+	modified time.Time
+	etag     string
+}
+
+type uiFiles struct {
+	fsys fs.FS
+	mu   sync.Mutex
+	tags map[string]uiFileTag
+}
+
+func (u *uiFiles) etag(name string, info fs.FileInfo, file io.ReadSeeker) (string, error) {
+	u.mu.Lock()
+	known, ok := u.tags[name]
+	u.mu.Unlock()
+	if ok && known.size == info.Size() && known.modified.Equal(info.ModTime()) {
+		return known.etag, nil
+	}
+
+	digest := sha256.New()
+	if _, err := io.Copy(digest, file); err != nil {
+		return "", err
+	}
+	if _, err := file.Seek(0, io.SeekStart); err != nil {
+		return "", err
+	}
+	etag := `"` + hex.EncodeToString(digest.Sum(nil)) + `"`
+
+	u.mu.Lock()
+	u.tags[name] = uiFileTag{size: info.Size(), modified: info.ModTime(), etag: etag}
+	u.mu.Unlock()
+	return etag, nil
+}
+
+func (u *uiFiles) open(name string) (fs.File, fs.FileInfo, error) {
+	file, err := u.fsys.Open(name)
+	if err != nil {
+		return nil, nil, err
+	}
+	info, err := file.Stat()
+	if err != nil {
+		_ = file.Close()
+		return nil, nil, err
+	}
+	if info.IsDir() {
+		_ = file.Close()
+		return nil, nil, fs.ErrNotExist
+	}
+	return file, info, nil
+}
+
+func (u *uiFiles) serve(w http.ResponseWriter, r *http.Request) {
+	name := strings.TrimPrefix(path.Clean(r.URL.Path), "/")
+	if name == "" || name == "." {
+		name = uiIndex
+	}
+	file, info, err := u.open(name)
+	if (errors.Is(err, fs.ErrNotExist) || errors.Is(err, fs.ErrInvalid)) && name != uiIndex {
+		name = uiIndex
+		file, info, err = u.open(name)
+	}
+	if err != nil {
+		slog.Error("open UI file", "file", name, "error", err)
+		http.Error(w, "internal server error", http.StatusInternalServerError)
+		return
+	}
+	defer func() {
+		_ = file.Close()
+	}()
+
+	content, ok := file.(io.ReadSeeker)
+	if !ok {
+		slog.Error("UI file is not seekable", "file", name)
+		http.Error(w, "internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	if name == uiIndex {
+		w.Header().Set("Cache-Control", "no-store")
+		http.ServeContent(w, r, name, time.Time{}, content)
+		return
+	}
+
+	etag, err := u.etag(name, info, content)
+	if err != nil {
+		slog.Error("hash UI file", "file", name, "error", err)
+		http.Error(w, "internal server error", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("ETag", etag)
+	http.ServeContent(w, r, name, time.Time{}, content)
+}
+
 func (s *Server) mountUI(mux *http.ServeMux, uiFS fs.FS) error {
 	source := "embedded"
 	if s.cfg.UI.Path != "" {
@@ -22,32 +121,16 @@ func (s *Server) mountUI(mux *http.ServeMux, uiFS fs.FS) error {
 	}
 	slog.Info("serving UI", "source", source)
 
-	index, err := fs.ReadFile(uiFS, "index.html")
-	if err != nil {
+	if _, err := fs.Stat(uiFS, uiIndex); err != nil {
 		return err
 	}
-	fileServer := http.FileServerFS(uiFS)
-
-	mux.Handle("GET /ui/", http.StripPrefix("/ui/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		p := strings.TrimPrefix(path.Clean(r.URL.Path), "/")
-		if p == "" || p == "." {
-			p = "index.html"
-		}
-		if _, statErr := fs.Stat(uiFS, p); statErr != nil {
-			// Client-side route: fall back to the SPA entry point. ServeContent
-			// (not ServeFileFS) because ServeFileFS redirects */index.html.
-			w.Header().Set("Cache-Control", "no-cache")
-			http.ServeContent(w, r, "index.html", time.Time{}, bytes.NewReader(index))
-			return
-		}
-		if p == "index.html" {
-			w.Header().Set("Cache-Control", "no-cache")
-		}
-		fileServer.ServeHTTP(w, r)
-	})))
-
-	mux.Handle("GET /{$}", http.RedirectHandler("/ui/", http.StatusFound))
+	files := &uiFiles{fsys: uiFS, tags: map[string]uiFileTag{}}
+	mux.HandleFunc("GET /", files.serve)
 	return nil
+}
+
+func handleUnknownAPI(w http.ResponseWriter, _ *http.Request) {
+	taskError(w, http.StatusNotFound, "Not found")
 }
 
 // mountDocs serves the docs site the UI artifact carries at dist/docs

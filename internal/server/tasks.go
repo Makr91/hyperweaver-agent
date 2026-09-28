@@ -59,7 +59,7 @@ type listTasksResponse struct {
 //	@Param			order			query	string	false	"Sort direction"
 //	@Param			include_count	query	string	false	"Also return the total matching count"
 //	@Success		200	{object}	listTasksResponse	"Tasks retrieved"
-//	@Router			/tasks [get]
+//	@Router			/api/tasks [get]
 func (s *Server) handleListTasks(w http.ResponseWriter, r *http.Request) {
 	query := r.URL.Query()
 	filter := tasks.ListFilter{
@@ -129,7 +129,7 @@ type taskStatsResponse struct {
 //	@Tags			Task Management
 //	@Produce		json
 //	@Success		200	{object}	taskStatsResponse	"Queue statistics"
-//	@Router			/tasks/stats [get]
+//	@Router			/api/tasks/stats [get]
 func (s *Server) handleTaskStats(w http.ResponseWriter, r *http.Request) {
 	counts, err := s.tasks.Store().StatusCounts(r.Context())
 	if err != nil {
@@ -151,13 +151,13 @@ func (s *Server) handleTaskStats(w http.ResponseWriter, r *http.Request) {
 // handleTaskDetails mirrors GET /tasks/{taskId}.
 //
 //	@Summary		Task details
-//	@Description	Minimum role: viewer. The task document's output field is ALWAYS null (the converged task wire) — GET /tasks/{taskId}/output and the /tasks/{taskId}/stream WebSocket serve the output.
+//	@Description	Minimum role: viewer. The task document's output field is ALWAYS null (the converged task wire) — GET /api/tasks/{taskId}/output and the /api/tasks/{taskId}/stream WebSocket serve the output.
 //	@Tags			Task Management
 //	@Produce		json
 //	@Param			taskId	path	string	true	"Task id"
 //	@Success		200	{object}	tasks.Task	"The task"
 //	@Failure		404	{object}	taskErrorBody	"Task not found"
-//	@Router			/tasks/{taskId} [get]
+//	@Router			/api/tasks/{taskId} [get]
 func (s *Server) handleTaskDetails(w http.ResponseWriter, r *http.Request) {
 	task, err := s.tasks.Store().Get(r.Context(), r.PathValue("taskId"))
 	if errors.Is(err, tasks.ErrNotFound) {
@@ -189,7 +189,7 @@ type taskOutputResponse struct {
 //	@Param			taskId	path	string	true	"Task id"
 //	@Success		200	{object}	taskOutputResponse	"Output entries"
 //	@Failure		404	{object}	taskErrorBody	"Task not found"
-//	@Router			/tasks/{taskId}/output [get]
+//	@Router			/api/tasks/{taskId}/output [get]
 func (s *Server) handleTaskOutput(w http.ResponseWriter, r *http.Request) {
 	taskID := r.PathValue("taskId")
 	task, err := s.tasks.Store().Get(r.Context(), taskID)
@@ -242,7 +242,7 @@ type cancelConflictError struct {
 //	@Success		200	{object}	cancelTaskResponse	"Cancelled (pending) or cancellation in progress (running)"
 //	@Failure		400	{object}	cancelConflictError	"Task already in a terminal state"
 //	@Failure		404	{object}	taskErrorBody	"Task not found"
-//	@Router			/tasks/{taskId} [delete]
+//	@Router			/api/tasks/{taskId} [delete]
 func (s *Server) handleCancelTask(w http.ResponseWriter, r *http.Request) {
 	taskID := r.PathValue("taskId")
 	wasRunning, err := s.tasks.Cancel(r.Context(), taskID)
@@ -296,7 +296,7 @@ type clearCompletedTasksResponse struct {
 //	@Tags			Task Management
 //	@Produce		json
 //	@Success		200	{object}	clearCompletedTasksResponse	"Finished tasks deleted"
-//	@Router			/tasks/completed [delete]
+//	@Router			/api/tasks/completed [delete]
 func (s *Server) handleClearCompletedTasks(w http.ResponseWriter, r *http.Request) {
 	deleted, err := s.tasks.Store().DeleteFinished(r.Context())
 	if err != nil {

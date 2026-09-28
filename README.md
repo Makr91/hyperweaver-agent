@@ -13,7 +13,7 @@ The agent follows the LedFx model: it runs quietly in the OS system tray (Window
 ### Current features
 
 - **Native system tray**: app name + version, Open, Quit — the real OS tray, nothing custom.
-- **Embedded Hyperweaver UI**: the published [hyperweaver-ui](https://github.com/MarkProminic/hyperweaver-ui) artifact is baked into release binaries and served at `/ui/` (docs at `/docs`).
+- **Embedded Hyperweaver UI**: the published [hyperweaver-ui](https://github.com/MarkProminic/hyperweaver-ui) artifact is baked into release binaries and served at `/` (docs at `/docs`, the API under `/api`).
 - **Agent API v1 identity**: public `GET /api/status` advertising role, hypervisor, platform, and capability tokens.
 - **Single binary per OS**: pure Go on Windows/Linux; macOS builds add only the tray's Cocoa bridge.
 
@@ -54,7 +54,7 @@ server:
   port: 9420
 
 ui:
-  enabled: true             # serve the web UI at /ui/
+  enabled: true             # serve the web UI at /
   path: ''                  # optional: serve UI from a directory instead of the embedded copy
 
 browser:
@@ -86,7 +86,7 @@ go mod tidy
 go build -o hyperweaver-agent .
 ```
 
-Development builds serve a placeholder page at `/ui/`. To bundle the real UI, unpack a [hyperweaver-ui release artifact](https://github.com/MarkProminic/hyperweaver-ui/releases) into `internal/webui/dist/` before building (release CI does this automatically), or point `ui.path` at an unpacked copy.
+Development builds serve a placeholder page at `/`. To bundle the real UI, unpack a [hyperweaver-ui release artifact](https://github.com/MarkProminic/hyperweaver-ui/releases) into `internal/webui/dist/` before building (release CI does this automatically), or point `ui.path` at an unpacked copy.
 
 For UI development, copy the SPA build into the (gitignored) `ui/` folder and point `ui.path` at it — the agent serves it from disk, so UI changes never require a Go rebuild:
 

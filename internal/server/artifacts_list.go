@@ -47,7 +47,7 @@ type artifactListResponse struct {
 //	@Param			sort_order		query	string	false	"Sort direction"
 //	@Success		200	{object}	artifactListResponse	"Artifacts with pagination"
 //	@Failure		503	"Artifact storage is disabled"
-//	@Router			/artifacts [get]
+//	@Router			/api/artifacts [get]
 func (s *Server) handleListArtifacts(w http.ResponseWriter, r *http.Request) {
 	query := r.URL.Query()
 	limit, _ := strconv.Atoi(query.Get("limit"))
@@ -102,12 +102,12 @@ func (s *Server) handleListArtifacts(w http.ResponseWriter, r *http.Request) {
 // handleListISOArtifacts / handleListImageArtifacts: the typed conveniences.
 //
 //	@Summary		List ISO artifacts
-//	@Description	Minimum role: viewer. GET /artifacts pinned to type=iso — the create wizard's ISO-picker feed (cdroms[].iso names entries by filename). Same query parameters minus type.
+//	@Description	Minimum role: viewer. GET /api/artifacts pinned to type=iso — the create wizard's ISO-picker feed (cdroms[].iso names entries by filename). Same query parameters minus type.
 //	@Tags			Artifacts
 //	@Produce		json
-//	@Success		200	"ISO artifacts (the /artifacts list shape)"
+//	@Success		200	"ISO artifacts (the /api/artifacts list shape)"
 //	@Failure		503	"Artifact storage is disabled"
-//	@Router			/artifacts/iso [get]
+//	@Router			/api/artifacts/iso [get]
 func (s *Server) handleListISOArtifacts(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	q.Set("type", assets.KindISO)
@@ -118,12 +118,12 @@ func (s *Server) handleListISOArtifacts(w http.ResponseWriter, r *http.Request) 
 // handleListImageArtifacts pins the /artifacts list to type=image.
 //
 //	@Summary		List image artifacts
-//	@Description	Minimum role: viewer. GET /artifacts pinned to type=image. Same query parameters minus type.
+//	@Description	Minimum role: viewer. GET /api/artifacts pinned to type=image. Same query parameters minus type.
 //	@Tags			Artifacts
 //	@Produce		json
-//	@Success		200	"Image artifacts (the /artifacts list shape)"
+//	@Success		200	"Image artifacts (the /api/artifacts list shape)"
 //	@Failure		503	"Artifact storage is disabled"
-//	@Router			/artifacts/image [get]
+//	@Router			/api/artifacts/image [get]
 func (s *Server) handleListImageArtifacts(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	q.Set("type", assets.KindImage)
@@ -141,7 +141,7 @@ func (s *Server) handleListImageArtifacts(w http.ResponseWriter, r *http.Request
 //	@Success		200	{object}	assets.Artifact	"The artifact"
 //	@Failure		404	"Artifact not found"
 //	@Failure		503	"Artifact storage is disabled"
-//	@Router			/artifacts/{id} [get]
+//	@Router			/api/artifacts/{id} [get]
 func (s *Server) handleArtifactDetails(w http.ResponseWriter, r *http.Request) {
 	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
 	if err != nil {
@@ -172,7 +172,7 @@ func (s *Server) handleArtifactDetails(w http.ResponseWriter, r *http.Request) {
 //	@Produce		json
 //	@Success		200	{object}	map[string]interface{}	"Statistics"
 //	@Failure		503	"Artifact storage is disabled"
-//	@Router			/artifacts/stats [get]
+//	@Router			/api/artifacts/stats [get]
 func (s *Server) handleArtifactStats(w http.ResponseWriter, r *http.Request) {
 	locations, err := s.assets.ListLocations(r.Context(), &assets.LocationFilter{})
 	if err != nil {
@@ -244,7 +244,7 @@ func (s *Server) handleArtifactStats(w http.ResponseWriter, r *http.Request) {
 //	@Produce		json
 //	@Success		200	{object}	map[string]interface{}	"Service status"
 //	@Failure		503	"Artifact storage is disabled"
-//	@Router			/artifacts/service/status [get]
+//	@Router			/api/artifacts/service/status [get]
 func (s *Server) handleArtifactServiceStatus(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, s.artifactSvc.Status())
 }

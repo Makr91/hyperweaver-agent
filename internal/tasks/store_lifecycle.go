@@ -16,27 +16,38 @@ func (s *Store) CancelDependents(ctx context.Context) ([]string, error) {
 		    completed_at = ?, updated_at = ?
 		WHERE status = 'pending'
 		  AND depends_on IN (SELECT id FROM tasks WHERE status IN ('failed', 'cancelled'))
-		RETURNING parent_task_id`, now, now)
+		RETURNING id, parent_task_id`, now, now)
 	if err != nil {
 		return nil, err
 	}
-	defer func() {
-		_ = rows.Close()
-	}()
 
 	seen := map[string]bool{}
 	parents := []string{}
+	cancelled := []string{}
 	for rows.Next() {
+		var id string
 		var parent sql.NullString
-		if serr := rows.Scan(&parent); serr != nil {
+		if serr := rows.Scan(&id, &parent); serr != nil {
+			_ = rows.Close()
 			return nil, serr
 		}
+		cancelled = append(cancelled, id)
 		if parent.Valid && !seen[parent.String] {
 			seen[parent.String] = true
 			parents = append(parents, parent.String)
 		}
 	}
-	return parents, rows.Err()
+	if rerr := rows.Err(); rerr != nil {
+		_ = rows.Close()
+		return nil, rerr
+	}
+	if cerr := rows.Close(); cerr != nil {
+		return nil, cerr
+	}
+	for _, id := range cancelled {
+		s.changed(ctx, id)
+	}
+	return parents, nil
 }
 
 // CancelPending cancels a still-pending task (the DELETE /tasks/{id} fast
@@ -50,6 +61,9 @@ func (s *Store) CancelPending(ctx context.Context, id string) (bool, error) {
 		return false, err
 	}
 	n, err := res.RowsAffected()
+	if err == nil && n > 0 {
+		s.changed(ctx, id)
+	}
 	return n > 0, err
 }
 

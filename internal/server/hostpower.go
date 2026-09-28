@@ -94,7 +94,7 @@ type hostStatusResponse struct {
 //	@Produce		json
 //	@Success		200	{object}	hostStatusResponse	"System status"
 //	@Failure		503	"Host power management is disabled in configuration"
-//	@Router			/system/host/status [get]
+//	@Router			/api/system/host/status [get]
 func (s *Server) handleHostStatus(w http.ResponseWriter, _ *http.Request) {
 	hostname, err := os.Hostname()
 	if err != nil {
@@ -141,7 +141,7 @@ type hostUptimeResponse struct {
 //	@Produce		json
 //	@Success		200	{object}	hostUptimeResponse	"Uptime information"
 //	@Failure		503	"Host power management is disabled in configuration"
-//	@Router			/system/host/uptime [get]
+//	@Router			/api/system/host/uptime [get]
 func (s *Server) handleHostUptime(w http.ResponseWriter, _ *http.Request) {
 	uptime := hostinfo.UptimeSeconds()
 	loadavg := hostinfo.LoadAvg()
@@ -265,7 +265,7 @@ func (s *Server) queuePowerTask(w http.ResponseWriter, r *http.Request, operatio
 // @Success		202	{object}	powerTaskResponse	"Shutdown task created"
 // @Failure		400	"Missing confirmation or invalid parameters"
 // @Failure		503	"Host power management is disabled in configuration"
-// @Router			/system/host/shutdown [post]
+// @Router			/api/system/host/shutdown [post]
 func (s *Server) handleHostShutdown(w http.ResponseWriter, r *http.Request) {
 	s.queuePowerTask(w, r, hostpower.OpShutdown, "shutdown", false)
 }
@@ -279,7 +279,7 @@ func (s *Server) handleHostShutdown(w http.ResponseWriter, r *http.Request) {
 // @Success		202	"Restart task created"
 // @Failure		400	"Missing confirmation or invalid parameters"
 // @Failure		503	"Host power management is disabled in configuration"
-// @Router			/system/host/restart [post]
+// @Router			/api/system/host/restart [post]
 func (s *Server) handleHostRestart(w http.ResponseWriter, r *http.Request) {
 	s.queuePowerTask(w, r, hostpower.OpRestart, "restart", false)
 }
@@ -293,7 +293,7 @@ func (s *Server) handleHostRestart(w http.ResponseWriter, r *http.Request) {
 // @Success		202	"Poweroff task created"
 // @Failure		400	"Missing confirmation or invalid parameters"
 // @Failure		503	"Host power management is disabled in configuration"
-// @Router			/system/host/poweroff [post]
+// @Router			/api/system/host/poweroff [post]
 func (s *Server) handleHostPoweroff(w http.ResponseWriter, r *http.Request) {
 	s.queuePowerTask(w, r, hostpower.OpPoweroff, "poweroff", false)
 }
@@ -307,7 +307,7 @@ func (s *Server) handleHostPoweroff(w http.ResponseWriter, r *http.Request) {
 // @Success		202	"Halt task created"
 // @Failure		400	"Missing confirmation or emergency acknowledgement"
 // @Failure		503	"Host power management is disabled in configuration"
-// @Router			/system/host/halt [post]
+// @Router			/api/system/host/halt [post]
 func (s *Server) handleHostHalt(w http.ResponseWriter, r *http.Request) {
 	s.queuePowerTask(w, r, hostpower.OpHalt, "halt", true)
 }

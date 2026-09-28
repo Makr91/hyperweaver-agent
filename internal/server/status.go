@@ -18,9 +18,38 @@ import (
 // statusPayload is the public identity + capabilities document of the
 // Hyperweaver dual-mode contract (Agent API v1). Field names and semantics
 // mirror the Zoneweaver Agent's StatusController exactly.
+type statusBrand struct {
+	Name    string `json:"name"     example:"Hyperweaver"`
+	LogoURL string `json:"logo_url" example:"/brand/hyperweaver/mark.svg"`
+	Repo    string `json:"repo"     example:"https://github.com/Makr91/hyperweaver-agent"`
+}
+
+type statusLinks struct {
+	Docs    string `json:"docs"    example:"/docs"`
+	Contact string `json:"contact"`
+	API     string `json:"api"     example:"/api-docs"`
+}
+
+type statusTicket struct {
+	BaseURL            string `json:"base_url"`
+	ReqType            string `json:"req_type"`
+	FallbackCustomerID string `json:"fallback_customer_id"`
+}
+
+type statusEvents struct {
+	Path   string   `json:"path"   example:"/api/events"`
+	Topics []string `json:"topics" example:"health,tasks,hosts"`
+}
+
 type statusPayload struct {
-	Role  string `json:"role"`
-	Agent string `json:"agent"`
+	Role        string        `json:"role"        example:"hyperweaver-agent"`
+	Brand       statusBrand   `json:"brand"`
+	Collections []string      `json:"collections"`
+	Links       statusLinks   `json:"links"`
+	Ticket      *statusTicket `json:"ticket"`
+	Config      []string      `json:"config"`
+	Events      statusEvents  `json:"events"`
+	Agent       string        `json:"agent"`
 	// virtualbox always; utm joins on macOS agents where utmctl is present and UTM meets the 4.6.5 floor (cached capability probe)
 	Hypervisors        []string `json:"hypervisors"`
 	Platform           string   `json:"platform"`
@@ -101,6 +130,7 @@ var platformFeatures = []string{
 	"provisioner-registry", "secrets", "ssh", "templates",
 	"host-launchers", "host-terminal", "hosts-file", "dns",
 	"hostname", "ip-addresses", "network-spaces",
+	"hosts", "footer", "health", "events",
 }
 
 // features derives the advertised token list: platform tokens plus the
@@ -184,11 +214,10 @@ func (s *Server) consoles(ctx context.Context) []string {
 }
 
 // @Summary		Public identity and capabilities
-// @Description	Canonical path of the public status probe. No authentication.
+// @Description	The public status probe. No authentication. role is the package name, hyperweaver-agent, the one member that tells the shared UI it is served by an agent directly. brand, collections, links, ticket and config are the shared status members: links.api is the path of this agent's API reference while api_docs.enabled is on, and ticket is null because GET /api/config/ticket serves the ticket system.
 // @Tags			Status
 // @Produce		json
 // @Success		200	{object}	statusPayload	"Agent identity and capabilities"
-// @Router			/status [get]
 // @Router			/api/status [get]
 func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 	hostname, err := os.Hostname()
@@ -206,8 +235,22 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		authMethods = append(authMethods, "oidc")
 	}
 
+	links := statusLinks{Docs: "/docs"}
+	if s.cfg.APIDocs.Enabled {
+		links.API = "/api-docs"
+	}
+
 	payload := statusPayload{
-		Role:        "agent",
+		Role: "hyperweaver-agent",
+		Brand: statusBrand{
+			Name:    "Hyperweaver",
+			LogoURL: "/brand/hyperweaver/mark.svg",
+			Repo:    "https://github.com/Makr91/hyperweaver-agent",
+		},
+		Collections: []string{},
+		Links:       links,
+		Config:      []string{},
+		Events:      statusEvents{Path: "/api/events", Topics: eventTopics},
 		Agent:       "hyperweaver-agent",
 		Hypervisors: s.hypervisors(r.Context()),
 		Platform:    runtime.GOOS,

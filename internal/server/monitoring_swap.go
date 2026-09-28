@@ -34,7 +34,7 @@ type lowSwapHostsResponse struct {
 //	@Produce		json
 //	@Param			threshold	query	number	false	"Utilization threshold percentage"	default(50)
 //	@Success		200	{object}	lowSwapHostsResponse	"Hosts with low swap space"
-//	@Router			/monitoring/hosts/low-swap [get]
+//	@Router			/api/monitoring/hosts/low-swap [get]
 func (s *Server) handleLowSwapHosts(w http.ResponseWriter, r *http.Request) {
 	threshold := 50.0
 	if raw := r.URL.Query().Get("threshold"); raw != "" {

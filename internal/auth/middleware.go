@@ -23,21 +23,21 @@ var roleLevels = map[string]int{"viewer": 1, "operator": 2, "admin": 3}
 
 // Admin-only surfaces for MUTATING requests (reads stay viewer-accessible).
 var adminWritePrefixes = []string{
-	"/server",
-	"/system/host",
-	"/system/users",
-	"/system/groups",
-	"/system/roles",
-	"/database",
+	"/api/server",
+	"/api/system/host",
+	"/api/system/users",
+	"/api/system/groups",
+	"/api/system/roles",
+	"/api/database",
 	// Applying an agent update replaces the binary and exits the process.
-	"/app",
+	"/api/app",
 }
 
 // Surfaces that are admin-only regardless of method: key management, agent
 // settings (which can expose credentials), the global secrets store, and the
 // host terminal (a shell as the agent's own user is full host access — even
 // listing sessions stays admin).
-var adminAlwaysPrefixes = []string{"/api-keys", "/settings", "/secrets", "/term"}
+var adminAlwaysPrefixes = []string{"/api/api-keys", "/api/settings", "/api/secrets", "/api/term"}
 
 func underPrefix(path string, prefixes []string) bool {
 	for _, prefix := range prefixes {
@@ -51,13 +51,13 @@ func underPrefix(path string, prefixes []string) bool {
 // RequiredRole is the central method+path policy (Agent API v1), ported
 // verbatim from the Node agent's middleware/VerifyApiKey.js.
 func RequiredRole(method, path string) string {
-	if path == "/api-keys/info" {
+	if path == "/api/api-keys/info" {
 		return "viewer"
 	}
 	if underPrefix(path, adminAlwaysPrefixes) {
 		return "admin"
 	}
-	if path == "/ws-ticket" || underPrefix(path, []string{"/filesystem"}) {
+	if path == "/api/ws-ticket" || underPrefix(path, []string{"/api/filesystem"}) {
 		return "operator"
 	}
 	if method == http.MethodGet || method == http.MethodHead {

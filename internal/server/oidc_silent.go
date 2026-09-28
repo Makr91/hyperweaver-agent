@@ -120,14 +120,14 @@ type silentStartResponse struct {
 }
 
 // @Summary		Start a silent SSO pre-check
-// @Description	Public, rate-limited (shared with device-start: 6 per source address per minute). The identity-first login probe (a Go-agent-only surface): mints state + a PKCE S256 verifier held agent-side and answers the IdP authorize URL with prompt=none — the UI navigates there; a live IdP session comes straight back to GET /auth/oidc/callback with a code and signs in without any interaction, no session bounces back benignly. NEVER auto-fires anything — this endpoint only returns a URL. Fast-fails when the identity provider is unreachable (cached discovery; a cold probe is bounded to ~3s) so an offline machine loses milliseconds, never hangs.
+// @Description	Public, rate-limited (shared with device-start: 6 per source address per minute). The identity-first login probe (a Go-agent-only surface): mints state + a PKCE S256 verifier held agent-side and answers the IdP authorize URL with prompt=none — the UI navigates there; a live IdP session comes straight back to GET /api/auth/oidc/callback with a code and signs in without any interaction, no session bounces back benignly. NEVER auto-fires anything — this endpoint only returns a URL. Fast-fails when the identity provider is unreachable (cached discovery; a cold probe is bounded to ~3s) so an offline machine loses milliseconds, never hangs.
 // @Tags			Local Login
 // @Produce		json
 // @Success		200	{object}	silentStartResponse	"Authorize URL minted"
 // @Failure		429	{object}	taskErrorBody	"Too many attempts from this address"
 // @Failure		502	{object}	taskErrorBody	"Identity provider unreachable or without an authorization endpoint"
 // @Failure		503	{object}	taskErrorBody	"OIDC login is disabled"
-// @Router			/auth/oidc/silent-start [post]
+// @Router			/api/auth/oidc/silent-start [post]
 func (s *Server) handleOIDCSilentStart(w http.ResponseWriter, r *http.Request) {
 	if !s.cfg.OIDC.Enabled {
 		taskError(w, http.StatusServiceUnavailable, "OIDC login is disabled")
@@ -147,16 +147,16 @@ func (s *Server) handleOIDCSilentStart(w http.ResponseWriter, r *http.Request) {
 }
 
 // @Summary		Silent SSO callback
-// @Description	Browser redirect target of the silent authorize round-trip (registered at the IdP as the loopback redirect_uri) — never called by API clients. Benign IdP answers (login_required, interaction_required, consent_required, access_denied) and EVERY hard failure (unknown/expired state, exchange or validation error, non-bound account) all 302 to /ui/login?sso=unavailable — silent must never strand the browser on an error page. On success the code is exchanged with the held PKCE verifier, the token validated (issuer JWKS, UUID-first identity, TOFU binding), the OIDC admin key minted, and the browser 302s to the existing /ui/#tray= claim path carrying a single-use grant that answers THAT key — the tray-claim exchange the UI already speaks, now with a federated identity.
+// @Description	Browser redirect target of the silent authorize round-trip (registered at the IdP as the loopback redirect_uri) — never called by API clients. Benign IdP answers (login_required, interaction_required, consent_required, access_denied) and EVERY hard failure (unknown/expired state, exchange or validation error, non-bound account) all 302 to /login?sso=unavailable — silent must never strand the browser on an error page. On success the code is exchanged with the held PKCE verifier, the token validated (issuer JWKS, UUID-first identity, TOFU binding), the OIDC admin key minted, and the browser 302s to the /#tray= claim path carrying a single-use grant that answers THAT key — the tray-claim exchange the UI already speaks, now with a federated identity.
 // @Tags			Local Login
 // @Param			state	query	string	false	"The flow id minted at silent-start"
 // @Param			code	query	string	false	"The IdP's authorization code"
 // @Param			error	query	string	false	"The IdP's OAuth error (login_required and friends bounce benignly)"
-// @Success		302	"To /ui/#tray=<one-time grant> on success; to /ui/login?sso=unavailable otherwise"
-// @Router			/auth/oidc/callback [get]
+// @Success		302	"To /#tray=<one-time grant> on success; to /login?sso=unavailable otherwise"
+// @Router			/api/auth/oidc/callback [get]
 func (s *Server) handleOIDCCallback(w http.ResponseWriter, r *http.Request) {
 	unavailable := func() {
-		http.Redirect(w, r, "/ui/login?sso=unavailable", http.StatusFound)
+		http.Redirect(w, r, "/login?sso=unavailable", http.StatusFound)
 	}
 	if !s.cfg.OIDC.Enabled {
 		unavailable()
@@ -186,5 +186,5 @@ func (s *Server) handleOIDCCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	slog.Info("oidc silent login succeeded", "entity_id", credential.entityID, "name", credential.name)
-	http.Redirect(w, r, "/ui/#tray="+grant, http.StatusFound)
+	http.Redirect(w, r, "/#tray="+grant, http.StatusFound)
 }

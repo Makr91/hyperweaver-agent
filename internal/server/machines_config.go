@@ -23,7 +23,7 @@ import (
 //	@Param			machineName	path	string	true	"Machine name"
 //	@Success		200	{object}	map[string]interface{}	"Machine configuration"
 //	@Failure		404	"Machine not found"
-//	@Router			/machines/{machineName}/config [get]
+//	@Router			/api/machines/{machineName}/config [get]
 func (s *Server) handleMachineConfig(w http.ResponseWriter, r *http.Request) {
 	machine := s.findMachine(w, r)
 	if machine == nil {

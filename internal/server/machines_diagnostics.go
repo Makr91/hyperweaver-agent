@@ -36,7 +36,7 @@ type injectNMIResponse struct {
 //	@Failure		404	"Machine not found"
 //	@Failure		500	"VBoxManage debugvm failed"
 //	@Failure		503	"VirtualBox is not installed"
-//	@Router			/machines/{machineName}/nmi [post]
+//	@Router			/api/machines/{machineName}/nmi [post]
 func (s *Server) handleInjectNMI(w http.ResponseWriter, r *http.Request) {
 	machine := s.findMachine(w, r)
 	if machine == nil {
@@ -78,7 +78,7 @@ func (s *Server) handleInjectNMI(w http.ResponseWriter, r *http.Request) {
 //	@Failure		404	"Machine not found"
 //	@Failure		502	"Machine not running, or capture failed"
 //	@Failure		503	"VirtualBox is not installed"
-//	@Router			/machines/{machineName}/vnc/screenshot [get]
+//	@Router			/api/machines/{machineName}/vnc/screenshot [get]
 func (s *Server) handleMachineScreenshot(w http.ResponseWriter, r *http.Request) {
 	machine := s.findMachine(w, r)
 	if machine == nil {
@@ -138,7 +138,7 @@ func (s *Server) handleMachineScreenshot(w http.ResponseWriter, r *http.Request)
 //	@Success		200	{object}	map[string]interface{}	"Guest properties"
 //	@Failure		404	"Machine not found, or no VM exists behind it yet"
 //	@Failure		503	"VirtualBox is not installed"
-//	@Router			/machines/{machineName}/guest-properties [get]
+//	@Router			/api/machines/{machineName}/guest-properties [get]
 func (s *Server) handleGuestProperties(w http.ResponseWriter, r *http.Request) {
 	machine := s.findMachine(w, r)
 	if machine == nil {

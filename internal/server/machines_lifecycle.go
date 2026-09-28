@@ -16,13 +16,13 @@ import (
 // boot child).
 //
 //	@Summary		Start a machine
-//	@Description	Minimum role: operator. One native start task for EVERY machine (VBoxManage startvm --type headless) — the provision pipeline queues this same operation as its boot child. Idempotent: already-running machines answer already_running; an existing pending/running start task is reused. Accrued pending changes (the accrue-changes contract) apply FIRST — a machine_modify task is chained ahead and the start DEPENDS on it, so a bad pending value fails the boot honestly (clear via DELETE /machines/{name}/pending-changes or re-PUT the value). With machines.provision_on_start enabled, a machine's VERY FIRST start (stored provisioner document, never provisioned) queues the full provision pipeline instead — the answer carries operation machine_provision_orchestration and the parent task id; later starts, restarts, and document-less machines always boot plainly.
+//	@Description	Minimum role: operator. One native start task for EVERY machine (VBoxManage startvm --type headless) — the provision pipeline queues this same operation as its boot child. Idempotent: already-running machines answer already_running; an existing pending/running start task is reused. Accrued pending changes (the accrue-changes contract) apply FIRST — a machine_modify task is chained ahead and the start DEPENDS on it, so a bad pending value fails the boot honestly (clear via DELETE /api/machines/{name}/pending-changes or re-PUT the value). With machines.provision_on_start enabled, a machine's VERY FIRST start (stored provisioner document, never provisioned) queues the full provision pipeline instead — the answer carries operation machine_provision_orchestration and the parent task id; later starts, restarts, and document-less machines always boot plainly.
 //	@Tags			Machine Management
 //	@Produce		json
 //	@Param			machineName	path	string	true	"Machine name"
 //	@Success		200	{object}	queuedOperation	"Start task queued (or machine already running)"
 //	@Failure		404	"Machine not found"
-//	@Router			/machines/{machineName}/start [post]
+//	@Router			/api/machines/{machineName}/start [post]
 func (s *Server) handleStartMachine(w http.ResponseWriter, r *http.Request) {
 	machine := s.findMachine(w, r)
 	if machine == nil {
@@ -112,7 +112,7 @@ func (s *Server) cancelPendingStarts(ctx context.Context, machineName string) {
 //	@Param			machineName	path	string	true	"Machine name"
 //	@Success		200	{object}	queuedOperation	"Stop task queued (or machine already stopped)"
 //	@Failure		404	"Machine not found"
-//	@Router			/machines/{machineName}/stop [post]
+//	@Router			/api/machines/{machineName}/stop [post]
 func (s *Server) handleStopMachine(w http.ResponseWriter, r *http.Request) {
 	machine := s.findMachine(w, r)
 	if machine == nil {
@@ -185,7 +185,7 @@ func stopMetadataJSON(force bool) (*string, error) {
 //	@Param			machineName	path	string	true	"Machine name"
 //	@Success		200	{object}	map[string]interface{}	"Restart tasks queued"
 //	@Failure		404	"Machine not found"
-//	@Router			/machines/{machineName}/restart [post]
+//	@Router			/api/machines/{machineName}/restart [post]
 func (s *Server) handleRestartMachine(w http.ResponseWriter, r *http.Request) {
 	machine := s.findMachine(w, r)
 	if machine == nil {
@@ -253,7 +253,7 @@ func (s *Server) handleRestartMachine(w http.ResponseWriter, r *http.Request) {
 //	@Success		200	{object}	queuedOperation	"Suspend task queued"
 //	@Failure		400	"Machine is not running"
 //	@Failure		404	"Machine not found"
-//	@Router			/machines/{machineName}/suspend [post]
+//	@Router			/api/machines/{machineName}/suspend [post]
 func (s *Server) handleSuspendMachine(w http.ResponseWriter, r *http.Request) {
 	machine := s.findMachine(w, r)
 	if machine == nil {
@@ -301,7 +301,7 @@ func (s *Server) handleSuspendMachine(w http.ResponseWriter, r *http.Request) {
 //	@Success		200	{object}	queuedOperation	"Reset task queued"
 //	@Failure		400	"Machine is not running"
 //	@Failure		404	"Machine not found"
-//	@Router			/machines/{machineName}/reset [post]
+//	@Router			/api/machines/{machineName}/reset [post]
 func (s *Server) handleResetMachine(w http.ResponseWriter, r *http.Request) {
 	machine := s.findMachine(w, r)
 	if machine == nil {
@@ -326,7 +326,7 @@ func (s *Server) handleResetMachine(w http.ResponseWriter, r *http.Request) {
 //	@Success		200	{object}	queuedOperation	"Pause task queued"
 //	@Failure		400	"Machine is not running"
 //	@Failure		404	"Machine not found"
-//	@Router			/machines/{machineName}/pause [post]
+//	@Router			/api/machines/{machineName}/pause [post]
 func (s *Server) handlePauseMachine(w http.ResponseWriter, r *http.Request) {
 	machine := s.findMachine(w, r)
 	if machine == nil {
@@ -350,7 +350,7 @@ func (s *Server) handlePauseMachine(w http.ResponseWriter, r *http.Request) {
 //	@Success		200	{object}	queuedOperation	"Resume task queued"
 //	@Failure		400	"Machine is not paused"
 //	@Failure		404	"Machine not found"
-//	@Router			/machines/{machineName}/resume [post]
+//	@Router			/api/machines/{machineName}/resume [post]
 func (s *Server) handleResumeMachine(w http.ResponseWriter, r *http.Request) {
 	machine := s.findMachine(w, r)
 	if machine == nil {
@@ -368,7 +368,7 @@ func (s *Server) handleResumeMachine(w http.ResponseWriter, r *http.Request) {
 // CRITICAL stop before the CRITICAL delete.
 //
 //	@Summary		Delete a machine
-//	@Description	Minimum role: operator. Running machines need force=true, which chains a CRITICAL stop before the CRITICAL delete. The machine is powered off if still running, unregistered from VirtualBox — with media deletion when cleanup_disks (default true) — its working directory removed (only when it sits under the machines root), its registry row removed, and its leftover pending tasks cancelled. SAFETY — the PROVENANCE STAMP rule (typed disk spec, converged sync 2026-07-17; it replaced the workdir-prefix heuristic): before the unregister, every attached medium is checked for the agent's stamp (the hyperweaver:source medium property, .hw-source sidecar fallback — written when the agent CREATED the medium: template clones, blank VDIs). Stamped = ours, cleanup_disks destroys it; UNSTAMPED = foreign (image attaches, external ISOs, pre-stamp media) — detached and preserved with a narrated skip, wherever it lives. One honest caveat, narrated in the task output: cleanup_disks also removes the working directory, so a foreign medium whose FILE sits inside it still goes with the directory. cleanup_disks=false unregisters only — every medium file and the working directory stay on disk. GET /media lists every registered medium with its stamp.
+//	@Description	Minimum role: operator. Running machines need force=true, which chains a CRITICAL stop before the CRITICAL delete. The machine is powered off if still running, unregistered from VirtualBox — with media deletion when cleanup_disks (default true) — its working directory removed (only when it sits under the machines root), its registry row removed, and its leftover pending tasks cancelled. SAFETY — the PROVENANCE STAMP rule (typed disk spec, converged sync 2026-07-17; it replaced the workdir-prefix heuristic): before the unregister, every attached medium is checked for the agent's stamp (the hyperweaver:source medium property, .hw-source sidecar fallback — written when the agent CREATED the medium: template clones, blank VDIs). Stamped = ours, cleanup_disks destroys it; UNSTAMPED = foreign (image attaches, external ISOs, pre-stamp media) — detached and preserved with a narrated skip, wherever it lives. One honest caveat, narrated in the task output: cleanup_disks also removes the working directory, so a foreign medium whose FILE sits inside it still goes with the directory. cleanup_disks=false unregisters only — every medium file and the working directory stay on disk. GET /api/media lists every registered medium with its stamp.
 //	@Tags			Machine Management
 //	@Produce		json
 //	@Param			machineName	path	string	true	"Machine name"
@@ -376,7 +376,7 @@ func (s *Server) handleResumeMachine(w http.ResponseWriter, r *http.Request) {
 //	@Success		200	{object}	map[string]interface{}	"Delete tasks queued"
 //	@Failure		400	"Machine is running and force is not set"
 //	@Failure		404	"Machine not found"
-//	@Router			/machines/{machineName} [delete]
+//	@Router			/api/machines/{machineName} [delete]
 func (s *Server) handleDeleteMachine(w http.ResponseWriter, r *http.Request) {
 	machine := s.findMachine(w, r)
 	if machine == nil {

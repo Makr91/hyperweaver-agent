@@ -68,7 +68,7 @@ type guestExecRequest struct {
 // for GET /machines/{name}/guest/exec/{pid}.
 //
 //	@Summary		Run a command in the guest
-//	@Description	Minimum role: operator. guest-exec with capture-output: path is the guest executable (absolute; no shell — wrap in /bin/sh -c or cmd.exe /c yourself for shell syntax), args[] its arguments. wait (default true) polls guest-exec-status until exit or timeout_seconds (default 30, max 600) and answers {exitcode, stdout, stderr} (base64 decoded); wait:false answers {pid} immediately for GET /machines/{name}/guest/exec/{pid}. Credential-less by design — the channel itself is the authority (operator role + the machine's own host).
+//	@Description	Minimum role: operator. guest-exec with capture-output: path is the guest executable (absolute; no shell — wrap in /bin/sh -c or cmd.exe /c yourself for shell syntax), args[] its arguments. wait (default true) polls guest-exec-status until exit or timeout_seconds (default 30, max 600) and answers {exitcode, stdout, stderr} (base64 decoded); wait:false answers {pid} immediately for GET /api/machines/{name}/guest/exec/{pid}. Credential-less by design — the channel itself is the authority (operator role + the machine's own host).
 //	@Tags			Guest Agent
 //	@Accept			json
 //	@Produce		json
@@ -79,7 +79,7 @@ type guestExecRequest struct {
 //	@Failure		404			{object}	taskErrorBody		"Machine not found"
 //	@Failure		502			{object}	taskErrorBody		"Guest agent did not answer"
 //	@Failure		503			{object}	taskErrorBody		"Guest agent channel is disabled"
-//	@Router			/machines/{machineName}/guest/exec [post]
+//	@Router			/api/machines/{machineName}/guest/exec [post]
 func (s *Server) handleGuestExec(w http.ResponseWriter, r *http.Request) {
 	var body guestExecRequest
 	if err := decodeBody(r, &body); err != nil || body.Path == "" {
@@ -141,7 +141,7 @@ func (s *Server) handleGuestExec(w http.ResponseWriter, r *http.Request) {
 			"success":      true,
 			"machine_name": machine.Name,
 			"pid":          started.PID,
-			"message":      "Command started — poll GET /machines/{name}/guest/exec/" + strconv.Itoa(started.PID),
+			"message":      "Command started — poll GET /api/machines/{name}/guest/exec/" + strconv.Itoa(started.PID),
 		})
 		return
 	}
@@ -185,7 +185,7 @@ func (s *Server) handleGuestExec(w http.ResponseWriter, r *http.Request) {
 				"machine_name": machine.Name,
 				"pid":          started.PID,
 				"exited":       false,
-				"message":      "Still running after " + strconv.Itoa(timeout) + "s — poll GET /machines/{name}/guest/exec/" + strconv.Itoa(started.PID),
+				"message":      "Still running after " + strconv.Itoa(timeout) + "s — poll GET /api/machines/{name}/guest/exec/" + strconv.Itoa(started.PID),
 			})
 			return
 		}
@@ -210,7 +210,7 @@ func (s *Server) handleGuestExec(w http.ResponseWriter, r *http.Request) {
 //	@Failure		404			{object}	taskErrorBody			"Machine not found"
 //	@Failure		502			{object}	taskErrorBody			"Guest agent did not answer"
 //	@Failure		503			{object}	taskErrorBody			"Guest agent channel is disabled"
-//	@Router			/machines/{machineName}/guest/exec/{pid} [get]
+//	@Router			/api/machines/{machineName}/guest/exec/{pid} [get]
 func (s *Server) handleGuestExecStatus(w http.ResponseWriter, r *http.Request) {
 	pid, err := strconv.Atoi(r.PathValue("pid"))
 	if err != nil || pid <= 0 {

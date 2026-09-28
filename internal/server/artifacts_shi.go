@@ -28,7 +28,7 @@ import (
 //	@Success		202	"HCL download task queued"
 //	@Failure		400	"Invalid key_name/role/kind/filename"
 //	@Failure		503	"Artifact storage is disabled"
-//	@Router			/artifacts/hcl-download [post]
+//	@Router			/api/artifacts/hcl-download [post]
 func (s *Server) handleHCLDownload(w http.ResponseWriter, r *http.Request) {
 	var meta assets.HCLDownloadMetadata
 	if err := decodeBody(r, &meta); err != nil {
@@ -69,7 +69,7 @@ type registerArtifactRequest struct {
 //	@Failure		400	"Unusable path/filename, missing role, disabled location, or neither storage_path_id nor a valid type"
 //	@Failure		404	"Storage location not found"
 //	@Failure		503	"Artifact storage is disabled"
-//	@Router			/artifacts/register [post]
+//	@Router			/api/artifacts/register [post]
 func (s *Server) handleRegisterArtifact(w http.ResponseWriter, r *http.Request) {
 	var body registerArtifactRequest
 	if err := decodeBody(r, &body); err != nil {

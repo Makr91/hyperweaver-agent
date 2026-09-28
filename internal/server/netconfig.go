@@ -109,7 +109,7 @@ type hostnameState struct {
 //	@Produce		json
 //	@Success		200	{object}	hostnameState	"Hostname state (bare document)"
 //	@Failure		500	"Failed to get hostname"
-//	@Router			/network/hostname [get]
+//	@Router			/api/network/hostname [get]
 func (s *Server) handleGetHostname(w http.ResponseWriter, r *http.Request) {
 	system, err := os.Hostname()
 	if err != nil {
@@ -211,7 +211,7 @@ type hostnameChangeQueued struct {
 //	@Success		202	{object}	hostnameChangeQueued	"Hostname change task created"
 //	@Failure		400	"Zoneweaver's exact refusals, {error} shape: "hostname is required and must be a string" (missing/non-string hostname or an unparseable body), "Invalid hostname format. Must be alphanumeric with hyphens and dots, 1-253 characters", "Invalid hostname format. Each part between dots must be 1-63 characters", or "Invalid hostname format. Each part must start and end with alphanumeric characters""
 //	@Failure		500	"Failed to create hostname change task"
-//	@Router			/network/hostname [put]
+//	@Router			/api/network/hostname [put]
 func (s *Server) handleSetHostname(w http.ResponseWriter, r *http.Request) {
 	var body hostnameUpdateRequest
 	if err := decodeBody(r, &body); err != nil || body.Hostname == nil {

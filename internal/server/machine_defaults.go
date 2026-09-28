@@ -65,7 +65,7 @@ var machineCreateDefaults = map[string]any{
 //	@Tags			Machine Management
 //	@Produce		json
 //	@Success		200	{object}	map[string]interface{}	"Defaults document"
-//	@Router			/machines/defaults [get]
+//	@Router			/api/machines/defaults [get]
 func (s *Server) handleMachineCreateDefaults(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, machineCreateDefaults)
 }
@@ -81,7 +81,7 @@ func (s *Server) handleMachineCreateDefaults(w http.ResponseWriter, _ *http.Requ
 //	@Produce		json
 //	@Success		200	{object}	map[string]interface{}	"OS types"
 //	@Failure		503	{object}	map[string]string	"VirtualBox is not installed"
-//	@Router			/machines/ostypes [get]
+//	@Router			/api/machines/ostypes [get]
 func (s *Server) handleMachineOSTypes(w http.ResponseWriter, r *http.Request) {
 	exe := machines.VBoxManagePath(r.Context())
 	if exe == "" {

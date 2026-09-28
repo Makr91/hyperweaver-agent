@@ -26,7 +26,7 @@ import (
 //	@Success		200			{object}	map[string]interface{}		"Setup queued (powered off) or accrued (pending_power_cycle)"
 //	@Failure		404			{object}	taskErrorBody				"Machine not found, or no VM exists behind it yet"
 //	@Failure		503			{object}	taskErrorBody				"VirtualBox is not installed, or the guest agent channel is disabled"
-//	@Router			/machines/{machineName}/guest-agent/setup [post]
+//	@Router			/api/machines/{machineName}/guest-agent/setup [post]
 func (s *Server) handleGuestAgentSetup(w http.ResponseWriter, r *http.Request) {
 	machine := s.findMachine(w, r)
 	if machine == nil {

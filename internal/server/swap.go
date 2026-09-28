@@ -111,7 +111,7 @@ type swapSummaryResponse struct {
 //	@Tags			Swap Management
 //	@Produce		json
 //	@Success		200	{object}	swapSummaryResponse	"Swap summary"
-//	@Router			/system/swap/summary [get]
+//	@Router			/api/system/swap/summary [get]
 func (s *Server) handleSwapSummary(w http.ResponseWriter, _ *http.Request) {
 	hostname, err := os.Hostname()
 	if err != nil {
@@ -201,7 +201,7 @@ type swapAreasResponse struct {
 //	@Param			limit	query	int	false	"Page size"	default(100)
 //	@Param			offset	query	int	false	"Page offset"	default(0)
 //	@Success		200	{object}	swapAreasResponse	"Swap areas"
-//	@Router			/system/swap/areas [get]
+//	@Router			/api/system/swap/areas [get]
 func (s *Server) handleSwapAreas(w http.ResponseWriter, r *http.Request) {
 	hostname, err := os.Hostname()
 	if err != nil {

@@ -20,7 +20,7 @@ var schemaTasks = map[string]any{
 		},
 		"default_pagination_limit": map[string]any{
 			"type":        "integer",
-			"description": "Default limit for GET /tasks when the request does not send one",
+			"description": "Default limit for GET /api/tasks when the request does not send one",
 			"default":     50,
 			"min":         1,
 			"max":         1000,
@@ -105,7 +105,7 @@ var schemaMachines = map[string]any{
 		},
 		"prefix_machine_names": map[string]any{
 			"type":        "boolean",
-			"description": "Derive created machines' names as <server_id>--<hostname>.<domain> when no explicit name is given; explicit names always win (machine names stay free-form). When on, settings.server_id is required at create (GET /machines/ids/next feeds it)",
+			"description": "Derive created machines' names as <server_id>--<hostname>.<domain> when no explicit name is given; explicit names always win (machine names stay free-form). When on, settings.server_id is required at create (GET /api/machines/ids/next feeds it)",
 			"default":     true,
 		},
 		"shutdown_timeout": map[string]any{
@@ -131,7 +131,7 @@ var schemaMachines = map[string]any{
 			"properties": map[string]any{
 				"enabled": map[string]any{
 					"type":        "boolean",
-					"description": "Boot autostart machines in priority order at agent startup (also togglable via POST /machines/orchestration/enable|disable)",
+					"description": "Boot autostart machines in priority order at agent startup (also togglable via POST /api/machines/orchestration/enable|disable)",
 					"default":     false,
 				},
 				"strategy": map[string]any{
@@ -266,7 +266,7 @@ var schemaProvisioning = map[string]any{
 		},
 		"default_network_interface": map[string]any{
 			"type":        "string",
-			"description": "Host bridge interface injected into templates as DEFAULT_NETWORK_INTERFACE when the spec sets none; values from GET /provisioning/bridged-interfaces",
+			"description": "Host bridge interface injected into templates as DEFAULT_NETWORK_INTERFACE when the spec sets none; values from GET /api/provisioning/bridged-interfaces",
 			"default":     "",
 		},
 		"playbook_timeout_seconds": map[string]any{
@@ -315,7 +315,7 @@ var schemaProvisioning = map[string]any{
 			"properties": map[string]any{
 				"enabled": map[string]any{
 					"type":        "boolean",
-					"description": "Enable the provisioning network (setup runs via POST /provisioning/network/setup)",
+					"description": "Enable the provisioning network (setup runs via POST /api/provisioning/network/setup)",
 					"default":     true,
 				},
 				"subnet": map[string]any{

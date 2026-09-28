@@ -341,7 +341,7 @@ type browseListingError struct {
 // list, hidden filter, user sort, parent path.
 //
 //	@Summary		Browse directory contents
-//	@Description	Minimum role: operator (the file-browser capability token; the whole /filesystem surface is operator-gated by the central policy). Lists one agent-host directory — zoneweaver's browseDirectory: hidden-file filter, sortable, parent-path navigation. THE "/" REQUEST (the browse top): with file_browser.root configured, "/" maps to that directory and any path outside it answers 403 (the containment check rides every request); unconfined (root empty, the default), "/" answers the DRIVE-LETTER LISTING on Windows (one directory item per mounted drive — C:/, D:/, ... — current_path "/", parent_path null; drive roots' parent_path points back to "/") and the real filesystem root elsewhere. Security bounds from file_browser.security: traversal guard (".."/"~" rejected), forbidden path prefixes and glob patterns answer 403, directories over max_directory_entries answer 500 with details. 503 when file_browser.enabled is false (the token disappears with it).
+//	@Description	Minimum role: operator (the file-browser capability token; the whole /api/filesystem surface is operator-gated by the central policy). Lists one agent-host directory — zoneweaver's browseDirectory: hidden-file filter, sortable, parent-path navigation. THE "/" REQUEST (the browse top): with file_browser.root configured, "/" maps to that directory and any path outside it answers 403 (the containment check rides every request); unconfined (root empty, the default), "/" answers the DRIVE-LETTER LISTING on Windows (one directory item per mounted drive — C:/, D:/, ... — current_path "/", parent_path null; drive roots' parent_path points back to "/") and the real filesystem root elsewhere. Security bounds from file_browser.security: traversal guard (".."/"~" rejected), forbidden path prefixes and glob patterns answer 403, directories over max_directory_entries answer 500 with details. 503 when file_browser.enabled is false (the token disappears with it).
 //	@Tags			File System
 //	@Produce		json
 //	@Param			path		query	string	false	"Directory path to browse. \"/\" is the browse top: the configured file_browser.root when set, the Windows drive listing or the real root when not"	default(/)
@@ -353,7 +353,7 @@ type browseListingError struct {
 //	@Failure		404	"Directory not found"
 //	@Failure		500	"Listing failure ({error, details} — includes the over-the-entry-cap refusal)"
 //	@Failure		503	"File browser is disabled"
-//	@Router			/filesystem [get]
+//	@Router			/api/filesystem [get]
 func (s *Server) handleBrowseFilesystem(w http.ResponseWriter, r *http.Request) {
 	query := r.URL.Query()
 	dirPath := query.Get("path")

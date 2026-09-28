@@ -92,7 +92,7 @@ func (s *Server) machineFTPInfo(w http.ResponseWriter, r *http.Request) *ftpInfo
 //	@Success		200	{object}	ftpInfo	"SFTP target"
 //	@Failure		400	"Machine not running, no credentials configured, or no SSH transport"
 //	@Failure		404	"Machine not found"
-//	@Router			/machines/{machineName}/ftp [get]
+//	@Router			/api/machines/{machineName}/ftp [get]
 func (s *Server) handleMachineFTPInfo(w http.ResponseWriter, r *http.Request) {
 	info := s.machineFTPInfo(w, r)
 	if info == nil {
@@ -122,7 +122,7 @@ type openMachineFTPResponse struct {
 //	@Success		200	{object}	openMachineFTPResponse	"Launch requested"
 //	@Failure		400	"Machine not running, no credentials configured, or no SSH transport"
 //	@Failure		404	"Machine not found"
-//	@Router			/machines/{machineName}/open-ftp [post]
+//	@Router			/api/machines/{machineName}/open-ftp [post]
 func (s *Server) handleOpenMachineFTP(w http.ResponseWriter, r *http.Request) {
 	info := s.machineFTPInfo(w, r)
 	if info == nil {
@@ -159,11 +159,11 @@ type applicationListResponse struct {
 // the UI's per-machine launch menu and its applications settings page.
 //
 //	@Summary		List external launcher applications
-//	@Description	Minimum role: viewer (the host-launchers capability token). The configured applications[] registry — user-chosen desktop tools (PuTTY, WinSCP, mstsc, ...) the agent can launch on its OWN host against a machine (SHI's per-server app buttons, generalized from its single hardcoded FileZilla entry). Each entry carries name, path (the executable), args (the argument template with {host}/{port}/{user}/{password}/{machine} placeholders), and exists — whether the executable is actually present on the agent host, so the UI greys out what cannot launch. The list lives in config applications[]; edit it through PUT /settings.
+//	@Description	Minimum role: viewer (the host-launchers capability token). The configured applications[] registry — user-chosen desktop tools (PuTTY, WinSCP, mstsc, ...) the agent can launch on its OWN host against a machine (SHI's per-server app buttons, generalized from its single hardcoded FileZilla entry). Each entry carries name, path (the executable), args (the argument template with {host}/{port}/{user}/{password}/{machine} placeholders), and exists — whether the executable is actually present on the agent host, so the UI greys out what cannot launch. The list lives in config applications[]; edit it through PUT /api/settings.
 //	@Tags			Machine Management
 //	@Produce		json
 //	@Success		200	{object}	applicationListResponse	"Configured applications"
-//	@Router			/applications [get]
+//	@Router			/api/applications [get]
 func (s *Server) handleListApplications(w http.ResponseWriter, _ *http.Request) {
 	list := make([]applicationInfo, 0, len(s.cfg.Applications))
 	for i := range s.cfg.Applications {
@@ -224,11 +224,11 @@ type launchApplicationResponse struct {
 //	@Tags			Machine Management
 //	@Produce		json
 //	@Param			machineName	path	string	true	"Machine name"
-//	@Param			appName	path	string	true	"The applications[] entry name (GET /applications lists them)"
+//	@Param			appName	path	string	true	"The applications[] entry name (GET /api/applications lists them)"
 //	@Success		200	{object}	launchApplicationResponse	"Launch requested"
 //	@Failure		400	"Machine not running, executable missing on the agent host, or no transport to the machine"
 //	@Failure		404	"Machine not found, or no application by that name is configured"
-//	@Router			/machines/{machineName}/applications/{appName}/launch [post]
+//	@Router			/api/machines/{machineName}/applications/{appName}/launch [post]
 func (s *Server) handleLaunchApplication(w http.ResponseWriter, r *http.Request) {
 	application := s.findApplication(r.PathValue("appName"))
 	if application == nil {
@@ -315,7 +315,7 @@ type openMachineDirectoryResponse struct {
 //	@Success		200	{object}	openMachineDirectoryResponse	"Launch requested"
 //	@Failure		400	"Machine has no working directory"
 //	@Failure		404	"Machine not found, or the directory no longer exists"
-//	@Router			/machines/{machineName}/open-directory [post]
+//	@Router			/api/machines/{machineName}/open-directory [post]
 func (s *Server) handleOpenMachineDirectory(w http.ResponseWriter, r *http.Request) {
 	machine := s.findMachine(w, r)
 	if machine == nil {

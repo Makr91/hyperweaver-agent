@@ -88,8 +88,9 @@ type ApplicationConfig struct {
 // GET /api/config/ticket in the {value}-wrapped shape the UI consumes; the
 // link renders only when enabled AND base_url is set.
 type TicketSystemConfig struct {
-	Enabled bool   `yaml:"enabled"  json:"enabled"`
-	BaseURL string `yaml:"base_url" json:"base_url"`
-	ReqType string `yaml:"req_type" json:"req_type"`
-	Context string `yaml:"context"  json:"context"`
+	Enabled            bool   `yaml:"enabled"              json:"enabled"`
+	BaseURL            string `yaml:"base_url"             json:"base_url"`
+	ReqType            string `yaml:"req_type"             json:"req_type"`
+	FallbackCustomerID string `yaml:"fallback_customer_id" json:"fallback_customer_id"`
+	Context            string `yaml:"context"              json:"context"`
 }

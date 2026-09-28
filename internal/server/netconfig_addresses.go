@@ -52,7 +52,7 @@ type networkAddressList struct {
 //     @Param			live		query	bool	false	"Accepted for wire parity and IGNORED — this agent is always live (no collector database)"
 //     @Success		200	{object}	networkAddressList	"IP addresses (bare document, always live)"
 //     @Failure		500	"Failed to get IP addresses"
-//     @Router			/network/addresses [get]
+//     @Router			/api/network/addresses [get]
 func (s *Server) handleListNetworkAddresses(w http.ResponseWriter, r *http.Request) {
 	interfaces, err := net.Interfaces()
 	if err != nil {

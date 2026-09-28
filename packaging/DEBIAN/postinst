@@ -51,7 +51,7 @@ echo "2. Start the service: systemctl enable --now hyperweaver-agent"
 echo "3. Check status: systemctl status hyperweaver-agent"
 echo "4. View logs: journalctl -u hyperweaver-agent -f"
 echo ""
-echo "Default access: http://127.0.0.1:9420/ui/"
+echo "Default access: http://127.0.0.1:9420/"
 echo "======================================================================"
 echo ""
 

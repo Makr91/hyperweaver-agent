@@ -135,7 +135,7 @@ type rdpInfoResponse struct {
 //	@Failure		400	"Machine not running, or no RDP target resolves (VRDE off and no host-reachable guest IP)"
 //	@Failure		404	"Machine not found, or no VM exists behind it yet"
 //	@Failure		503	"VirtualBox is not installed"
-//	@Router			/machines/{machineName}/rdp [get]
+//	@Router			/api/machines/{machineName}/rdp [get]
 func (s *Server) handleMachineRDPInfo(w http.ResponseWriter, r *http.Request) {
 	machine, targets := s.machineRDPTargets(w, r)
 	if machine == nil {
@@ -201,7 +201,7 @@ type openRDPResponse struct {
 //	@Failure		400	"Machine not running, requested target unresolvable, or no target at all"
 //	@Failure		404	"Machine not found, or no VM exists behind it yet"
 //	@Failure		503	"VirtualBox is not installed"
-//	@Router			/machines/{machineName}/open-rdp [post]
+//	@Router			/api/machines/{machineName}/open-rdp [post]
 func (s *Server) handleOpenMachineRDP(w http.ResponseWriter, r *http.Request) {
 	machine, targets := s.machineRDPTargets(w, r)
 	if machine == nil {

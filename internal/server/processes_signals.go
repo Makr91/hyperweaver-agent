@@ -39,7 +39,7 @@ type processSignalResponse struct {
 //	@Failure		400	{object}	wrappedError			"Invalid process ID or unsupported signal"
 //	@Failure		404	{object}	wrappedError			"Process not found"
 //	@Failure		500	{object}	wrappedError			"Failed to send signal"
-//	@Router			/system/processes/{pid}/signal [post]
+//	@Router			/api/system/processes/{pid}/signal [post]
 func (s *Server) handleProcessSignal(w http.ResponseWriter, r *http.Request) {
 	p := s.findProcess(w, r)
 	if p == nil {
@@ -101,7 +101,7 @@ type processKillResponse struct {
 //	@Failure		400	{object}	wrappedError		"Invalid process ID"
 //	@Failure		404	{object}	wrappedError		"Process not found"
 //	@Failure		500	{object}	wrappedError		"Failed to kill process"
-//	@Router			/system/processes/{pid}/kill [post]
+//	@Router			/api/system/processes/{pid}/kill [post]
 func (s *Server) handleProcessKill(w http.ResponseWriter, r *http.Request) {
 	p := s.findProcess(w, r)
 	if p == nil {
@@ -166,7 +166,7 @@ type batchKillResponse struct {
 //	@Param			request	body	batchKillRequest	true	"Match pattern, optional user filter, and signal"
 //	@Success		200	{object}	batchKillResponse	"Batch results"
 //	@Failure		400	{object}	wrappedError		"Missing pattern or unsupported signal"
-//	@Router			/system/processes/batch-kill [post]
+//	@Router			/api/system/processes/batch-kill [post]
 func (s *Server) handleBatchKillProcesses(w http.ResponseWriter, r *http.Request) {
 	var body batchKillRequest
 	if err := decodeBody(r, &body); err != nil || body.Pattern == "" {

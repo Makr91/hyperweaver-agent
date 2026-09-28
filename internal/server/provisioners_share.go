@@ -32,7 +32,7 @@ const importUploadMaxBytes = int64(4) << 30
 //	@Param			version	path	string	true	"Version string or directory name"
 //	@Success		202	"Export task queued"
 //	@Failure		404	"Provisioner or version not found"
-//	@Router			/provisioning/provisioners/{name}/versions/{version}/export [post]
+//	@Router			/api/provisioning/provisioners/{name}/versions/{version}/export [post]
 func (s *Server) handleExportProvisionerVersion(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
 	version, err := s.provisioners.GetVersion(name, r.PathValue("version"))
@@ -90,7 +90,7 @@ func (s *Server) handleExportProvisionerVersion(w http.ResponseWriter, r *http.R
 //	@Success		202	"Import task queued ({success, task_id, filename, size, status, message})"
 //	@Failure		400	"Not multipart, no file part, not a supported archive name, or an invalid checksum ("checksum must be a 64-character sha256 hex digest")"
 //	@Failure		413	"Upload exceeds the 4 GiB cap"
-//	@Router			/provisioning/provisioners/import-upload [post]
+//	@Router			/api/provisioning/provisioners/import-upload [post]
 func (s *Server) handleImportUploadProvisioner(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, importUploadMaxBytes)
 	reader, err := r.MultipartReader()

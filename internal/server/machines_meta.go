@@ -24,7 +24,7 @@ type machineNotesResponse struct {
 //	@Param			machineName	path	string	true	"Machine name"
 //	@Success		200	{object}	machineNotesResponse	"Notes"
 //	@Failure		404	"Machine not found"
-//	@Router			/machines/{machineName}/notes [get]
+//	@Router			/api/machines/{machineName}/notes [get]
 func (s *Server) handleGetMachineNotes(w http.ResponseWriter, r *http.Request) {
 	machine := s.findMachine(w, r)
 	if machine == nil {
@@ -48,7 +48,7 @@ type machineNotesRequest struct {
 // @Param			request	body	machineNotesRequest	true	"Notes to set"
 // @Success		200	"Notes updated"
 // @Failure		404	"Machine not found"
-// @Router			/machines/{machineName}/notes [put]
+// @Router			/api/machines/{machineName}/notes [put]
 func (s *Server) handleUpdateMachineNotes(w http.ResponseWriter, r *http.Request) {
 	machine := s.findMachine(w, r)
 	if machine == nil {
@@ -102,7 +102,7 @@ type machineTagsResponse struct {
 //	@Param			machineName	path	string	true	"Machine name"
 //	@Success		200	{object}	machineTagsResponse	"Tags"
 //	@Failure		404	"Machine not found"
-//	@Router			/machines/{machineName}/tags [get]
+//	@Router			/api/machines/{machineName}/tags [get]
 func (s *Server) handleGetMachineTags(w http.ResponseWriter, r *http.Request) {
 	machine := s.findMachine(w, r)
 	if machine == nil {
@@ -134,7 +134,7 @@ type machineTagsRequest struct {
 // @Param			request	body	machineTagsRequest	true	"Tags to set"
 // @Success		200	"Tags updated"
 // @Failure		404	"Machine not found"
-// @Router			/machines/{machineName}/tags [put]
+// @Router			/api/machines/{machineName}/tags [put]
 func (s *Server) handleUpdateMachineTags(w http.ResponseWriter, r *http.Request) {
 	machine := s.findMachine(w, r)
 	if machine == nil {

@@ -86,7 +86,7 @@ func newOIDCManager(cfg *config.Config, keyStore *keys.Store) *oidcManager {
 		storePath:    filepath.Join(filepath.Dir(cfg.Path()), "oidc.json"),
 		hashRounds:   cfg.APIKeys.HashRounds,
 		keyLength:    cfg.APIKeys.KeyLength,
-		redirectURI:  strings.TrimRight(cfg.BaseURL(), "/") + "/auth/oidc/callback",
+		redirectURI:  strings.TrimRight(cfg.BaseURL(), "/") + "/api/auth/oidc/callback",
 		keys:         keyStore,
 		ctx:          ctx,
 		cancel:       cancel,

@@ -79,7 +79,7 @@ func probeRunningAgent(selfClient *http.Client, baseURL string) bool {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, baseURL+"/status", http.NoBody)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, baseURL+"/api/status", http.NoBody)
 	if err != nil {
 		return false
 	}
@@ -147,7 +147,7 @@ func waitForServer(selfClient *http.Client, baseURL string) {
 	client := &http.Client{Transport: selfClient.Transport, Timeout: 500 * time.Millisecond}
 	for attempt := 0; attempt < 10; attempt++ {
 		req, err := http.NewRequestWithContext(context.Background(),
-			http.MethodGet, baseURL+"/status", http.NoBody)
+			http.MethodGet, baseURL+"/api/status", http.NoBody)
 		if err != nil {
 			return
 		}

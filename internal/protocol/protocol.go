@@ -135,7 +135,7 @@ func Forward(ctx context.Context, client *http.Client, baseURL, action, secret s
 		return err
 	}
 	req, err := http.NewRequestWithContext(reqCtx, http.MethodPost,
-		baseURL+"/protocol/"+action, bytes.NewReader(body))
+		baseURL+"/api/protocol/"+action, bytes.NewReader(body))
 	if err != nil {
 		return err
 	}

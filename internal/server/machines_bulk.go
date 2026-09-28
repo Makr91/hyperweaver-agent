@@ -96,7 +96,7 @@ func (s *Server) resolveBulkTargets(ctx context.Context, raw json.RawMessage, wa
 //	@Produce		json
 //	@Param			request	body	bulkRequest	true	"all or an array of machine names"
 //	@Success		200	{object}	bulkResponse	"Bulk start queued"
-//	@Router			/machines/bulk/start [post]
+//	@Router			/api/machines/bulk/start [post]
 func (s *Server) handleBulkStart(w http.ResponseWriter, r *http.Request) {
 	s.handleBulk(w, r, "bulk_start", machines.OpStart, tasks.PriorityMedium,
 		[]string{machines.StatusStopped, machines.StatusConfigured, machines.StatusAborted, machines.StatusSuspended},
@@ -117,7 +117,7 @@ func (s *Server) handleBulkStart(w http.ResponseWriter, r *http.Request) {
 //	@Produce		json
 //	@Param			request	body	bulkRequest	true	"all or an array of machine names"
 //	@Success		200	{object}	bulkResponse	"Bulk stop queued"
-//	@Router			/machines/bulk/stop [post]
+//	@Router			/api/machines/bulk/stop [post]
 func (s *Server) handleBulkStop(w http.ResponseWriter, r *http.Request) {
 	s.handleBulk(w, r, "bulk_stop", machines.OpStop, tasks.PriorityHigh,
 		[]string{machines.StatusRunning},
@@ -241,11 +241,11 @@ type serverIDsResponse struct {
 // handleServerIDs lists used server_ids, constraints, and the next free id.
 //
 //	@Summary		Server ID usage
-//	@Description	Minimum role: viewer. Used server_ids, constraints, and the next available id — create NEVER auto-assigns (with prefix_machine_names the caller must send settings.server_id; this endpoint and /machines/ids/next feed the field).
+//	@Description	Minimum role: viewer. Used server_ids, constraints, and the next available id — create NEVER auto-assigns (with prefix_machine_names the caller must send settings.server_id; this endpoint and /api/machines/ids/next feed the field).
 //	@Tags			Machine Management
 //	@Produce		json
 //	@Success		200	{object}	serverIDsResponse	"Server ID information"
-//	@Router			/machines/ids [get]
+//	@Router			/api/machines/ids [get]
 func (s *Server) handleServerIDs(w http.ResponseWriter, r *http.Request) {
 	used, err := s.machines.UsedServerIDs(r.Context())
 	if err != nil {
@@ -285,7 +285,7 @@ type nextServerIDResponse struct {
 //	@Tags			Machine Management
 //	@Produce		json
 //	@Success		200	{object}	nextServerIDResponse	"Next server ID"
-//	@Router			/machines/ids/next [get]
+//	@Router			/api/machines/ids/next [get]
 func (s *Server) handleNextServerID(w http.ResponseWriter, r *http.Request) {
 	next, err := s.machines.NextServerID(r.Context(), s.cfg.Machines.ServerIDStart)
 	if err != nil {

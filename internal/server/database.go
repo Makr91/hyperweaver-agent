@@ -105,7 +105,7 @@ type databaseStats struct {
 //	@Produce		json
 //	@Success		200	{object}	databaseStats	"Database statistics"
 //	@Failure		500	{object}	wrappedError	"Failed to retrieve database statistics"
-//	@Router			/database/stats [get]
+//	@Router			/api/database/stats [get]
 func (s *Server) handleDatabaseStats(w http.ResponseWriter, r *http.Request) {
 	databases := make([]databaseStatsDB, 0, len(s.dbs))
 	var totalRows, totalTables int64
@@ -189,7 +189,7 @@ type databaseVacuumResponse struct {
 //	@Produce		json
 //	@Success		200	{object}	databaseVacuumResponse	"VACUUM completed"
 //	@Failure		500	{object}	wrappedError	"VACUUM failed"
-//	@Router			/database/vacuum [post]
+//	@Router			/api/database/vacuum [post]
 func (s *Server) handleDatabaseVacuum(w http.ResponseWriter, r *http.Request) {
 	results := make([]databaseVacuumResult, 0, len(s.dbs))
 	var before, after int64
@@ -233,7 +233,7 @@ func (s *Server) handleDatabaseVacuum(w http.ResponseWriter, r *http.Request) {
 //	@Produce		json
 //	@Success		200	"ANALYZE completed"
 //	@Failure		500	{object}	wrappedError	"ANALYZE failed"
-//	@Router			/database/analyze [post]
+//	@Router			/api/database/analyze [post]
 func (s *Server) handleDatabaseAnalyze(w http.ResponseWriter, r *http.Request) {
 	for _, handle := range s.dbs {
 		if _, err := handle.DB.ExecContext(r.Context(), "ANALYZE"); err != nil {
@@ -273,7 +273,7 @@ type databaseCleanupResponse struct {
 //	@Produce		json
 //	@Success		200	{object}	databaseCleanupResponse	"Cleanup triggered"
 //	@Failure		500	{object}	wrappedError	"Cleanup failed"
-//	@Router			/database/cleanup [post]
+//	@Router			/api/database/cleanup [post]
 func (s *Server) handleDatabaseCleanup(w http.ResponseWriter, r *http.Request) {
 	deleted, err := s.tasks.CleanupNow(r.Context())
 	if err != nil {

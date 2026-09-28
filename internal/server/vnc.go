@@ -111,7 +111,7 @@ type vncStateResponse struct {
 //	@Success		200	{object}	vncStateResponse	"Console state"
 //	@Failure		404	"Machine not found, or no VM exists behind it yet"
 //	@Failure		503	"VirtualBox is not installed"
-//	@Router			/machines/{machineName}/vnc [get]
+//	@Router			/api/machines/{machineName}/vnc [get]
 func (s *Server) handleVncInfo(w http.ResponseWriter, r *http.Request) {
 	machine := s.findMachine(w, r)
 	if machine == nil {
@@ -142,7 +142,7 @@ func (s *Server) handleVncInfo(w http.ResponseWriter, r *http.Request) {
 		// Console-details facts (the UI AI's third ask, 2026-07-10).
 		Video:             videoDims(info),
 		AdditionsRunLevel: additionsRunLevel(info),
-		WebSocketURL:      "/machines/" + machine.Name + "/vnc/websockify",
+		WebSocketURL:      "/api/machines/" + machine.Name + "/vnc/websockify",
 	})
 }
 
@@ -186,16 +186,16 @@ func additionsRunLevel(info *vbox.Info) int {
 // when either side ends.
 //
 //	@Summary		VNC console bridge (WebSocket)
-//	@Description	WEBSOCKET upgrade — authenticate with ?ticket= (GET /ws-ticket) minted with ?machine= matching this machine (the frozen cross-agent shape: machine streams take ONLY a matching scoped ticket; a mismatch answers the same 401 as an invalid ticket). Bridges binary WebSocket frames onto the running machine's VRDE port (subprotocol "binary" — noVNC's wire). Requires an active VRDE console (settings.consoleport at create, or vnc: on via modify) AND a VNC-speaking VRDE module (the console list advertises vnc only then).
+//	@Description	WEBSOCKET upgrade — authenticate with ?ticket= (GET /api/ws-ticket) minted with ?machine= matching this machine (the frozen cross-agent shape: machine streams take ONLY a matching scoped ticket; a mismatch answers the same 401 as an invalid ticket). Bridges binary WebSocket frames onto the running machine's VRDE port (subprotocol "binary" — noVNC's wire). Requires an active VRDE console (settings.consoleport at create, or vnc: on via modify) AND a VNC-speaking VRDE module (the console list advertises vnc only then).
 //	@Tags			Console
 //	@Param			machineName	path	string	true	"Machine name"
-//	@Param			ticket	query	string	true	"WebSocket upgrade ticket (GET /ws-ticket?machine={name} — must be scoped to this machine)"
+//	@Param			ticket	query	string	true	"WebSocket upgrade ticket (GET /api/ws-ticket?machine={name} — must be scoped to this machine)"
 //	@Success		101	"Switching Protocols — RFB flows"
 //	@Failure		400	"Machine not running, or no active VRDE console"
 //	@Failure		401	"Missing, invalid, or wrong-scope ticket"
 //	@Failure		404	"Machine not found"
 //	@Failure		502	"Console server connection failed"
-//	@Router			/machines/{machineName}/vnc/websockify [get]
+//	@Router			/api/machines/{machineName}/vnc/websockify [get]
 func (s *Server) handleVncWebsockify(w http.ResponseWriter, r *http.Request) {
 	scope, ok := s.ticketScope(w, r)
 	if !ok {

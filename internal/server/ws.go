@@ -81,12 +81,12 @@ type wsTicketResponse struct {
 // — operator role via the central policy's explicit /ws-ticket rule).
 //
 //	@Summary		Mint a WebSocket upgrade ticket
-//	@Description	Minimum role: operator. A short-lived (60s) ticket appended as ?ticket= to every WebSocket upgrade URL. Reusable within its lifetime; fetch a fresh one before each connect or reconnect. MACHINE SCOPE (the frozen cross-agent shape): ?machine={name} binds the ticket to that machine name (verbatim string, no existence check — the upgrade validates). Machine streams (VNC websockify, RDP bridge, machine SSH terminals, machine-task streams) accept ONLY a scoped ticket whose machine matches the target; host-level streams (the /term host shell, task streams of system/artifact/filesystem tasks) accept ONLY an unscoped ticket; any mismatch answers the same 401 as an invalid ticket.
+//	@Description	Minimum role: operator. A short-lived (60s) ticket appended as ?ticket= to every WebSocket upgrade URL. Reusable within its lifetime; fetch a fresh one before each connect or reconnect. MACHINE SCOPE (the frozen cross-agent shape): ?machine={name} binds the ticket to that machine name (verbatim string, no existence check — the upgrade validates). Machine streams (VNC websockify, RDP bridge, machine SSH terminals, machine-task streams) accept ONLY a scoped ticket whose machine matches the target; host-level streams (the /api/term host shell, task streams of system/artifact/filesystem tasks) accept ONLY an unscoped ticket; any mismatch answers the same 401 as an invalid ticket.
 //	@Tags			Console
 //	@Produce		json
 //	@Param			machine	query	string	false	"Bind the ticket to this machine name — required for machine console/stream upgrades; omit for host-level streams"
 //	@Success		200	{object}	wsTicketResponse	"Ticket minted"
-//	@Router			/ws-ticket [get]
+//	@Router			/api/ws-ticket [get]
 func (s *Server) handleWsTicket(w http.ResponseWriter, r *http.Request) {
 	ticket, err := s.wsTickets.Mint(r.URL.Query().Get("machine"))
 	if err != nil {
@@ -97,7 +97,7 @@ func (s *Server) handleWsTicket(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, wsTicketResponse{Ticket: ticket})
 }
 
-const ticketRefusal = "Missing or invalid ticket — mint one via GET /ws-ticket"
+const ticketRefusal = "Missing or invalid ticket — mint one via GET /api/ws-ticket"
 
 func (s *Server) ticketScope(w http.ResponseWriter, r *http.Request) (string, bool) {
 	scope, ok := s.wsTickets.Lookup(r.URL.Query().Get("ticket"))
@@ -161,14 +161,14 @@ func writeFrame(ctx context.Context, conn *websocket.Conn, frame *outputFrame) e
 // the base's handleTaskStreamConnection.
 //
 //	@Summary		Live task output stream (WebSocket)
-//	@Description	WEBSOCKET upgrade — authenticate with ?ticket= (GET /ws-ticket), not API-key headers. Ticket scope (the frozen cross-agent shape): a machine task's stream requires a ticket minted with ?machine= matching the task's machine_name; a host-level task's stream (machine_name "system", "artifact", or "filesystem") requires an UNSCOPED ticket — any mismatch answers the same 401 as an invalid ticket. Replays the task's buffered (or persisted) output as {type: "output", task_id, stream, data, timestamp} frames, streams live entries while the task runs, then sends {type: "status", task_id, status} and closes. Already-finished tasks get the full replay plus the status frame immediately.
+//	@Description	WEBSOCKET upgrade — authenticate with ?ticket= (GET /api/ws-ticket), not API-key headers. Ticket scope (the frozen cross-agent shape): a machine task's stream requires a ticket minted with ?machine= matching the task's machine_name; a host-level task's stream (machine_name "system", "artifact", or "filesystem") requires an UNSCOPED ticket — any mismatch answers the same 401 as an invalid ticket. Replays the task's buffered (or persisted) output as {type: "output", task_id, stream, data, timestamp} frames, streams live entries while the task runs, then sends {type: "status", task_id, status} and closes. Already-finished tasks get the full replay plus the status frame immediately.
 //	@Tags			Console
 //	@Param			taskId	path	string	true	"Task id"	format(uuid)
-//	@Param			ticket	query	string	true	"WebSocket upgrade ticket (GET /ws-ticket) — scope must match the task (machine-scoped for machine tasks, unscoped for host-level tasks)"
+//	@Param			ticket	query	string	true	"WebSocket upgrade ticket (GET /api/ws-ticket) — scope must match the task (machine-scoped for machine tasks, unscoped for host-level tasks)"
 //	@Success		101	"Switching Protocols — the stream begins"
 //	@Failure		401	"Missing, invalid, or wrong-scope ticket"
 //	@Failure		404	"Task not found"
-//	@Router			/tasks/{taskId}/stream [get]
+//	@Router			/api/tasks/{taskId}/stream [get]
 func (s *Server) handleTaskStream(w http.ResponseWriter, r *http.Request) {
 	scope, ok := s.ticketScope(w, r)
 	if !ok {

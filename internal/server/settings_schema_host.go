@@ -1,7 +1,7 @@
 package server
 
 var schemaApplications = map[string]any{
-	"description":      "External launcher applications (GET /applications, the host-launchers token): user-chosen desktop tools (PuTTY, WinSCP, mstsc, ...) the agent launches on its own host against a machine — SHI's per-server app buttons generalized (the UI's per-machine launch menu, POST /machines/{name}/applications/{appName}/launch). Each entry: {name, path, args[]}. args placeholders {host}/{port}/{user}/{password} resolve per machine through the SSH transport ladder and stored credentials, {machine} is the machine name; substitution is per-argument (no quoting). A missing executable is refused, never spawned. Direct-mode desktop contract; a headless service opens them on the service host's desktop",
+	"description":      "External launcher applications (GET /api/applications, the host-launchers token): user-chosen desktop tools (PuTTY, WinSCP, mstsc, ...) the agent launches on its own host against a machine — SHI's per-server app buttons generalized (the UI's per-machine launch menu, POST /api/machines/{name}/applications/{appName}/launch). Each entry: {name, path, args[]}. args placeholders {host}/{port}/{user}/{password} resolve per machine through the SSH transport ladder and stored credentials, {machine} is the machine name; substitution is per-argument (no quoting). A missing executable is refused, never spawned. Direct-mode desktop contract; a headless service opens them on the service host's desktop",
 	"requires_restart": true,
 	"type":             "array",
 	"items":            "object",
@@ -27,6 +27,11 @@ var schemaTicketSystem = map[string]any{
 			"description": "Default request type parameter",
 			"default":     "sso",
 		},
+		"fallback_customer_id": map[string]any{
+			"type":        "string",
+			"description": "Customer id the ticket link carries when the person and their organization hold none",
+			"default":     "",
+		},
 		"context": map[string]any{
 			"type":        "string",
 			"description": "Context URL for the ticket system (usually the repository URL)",
@@ -50,7 +55,7 @@ var schemaCleanup = map[string]any{
 }
 
 var schemaMonitoring = map[string]any{
-	"description":      "Host telemetry configuration (/monitoring endpoints always serve realtime samples; storage adds history)",
+	"description":      "Host telemetry configuration (/api/monitoring endpoints always serve realtime samples; storage adds history)",
 	"requires_restart": true,
 	"properties": map[string]any{
 		"storage_enabled": map[string]any{
@@ -76,7 +81,7 @@ var schemaMonitoring = map[string]any{
 }
 
 var schemaHostPower = map[string]any{
-	"description":      "Host power management (/system/host endpoints, the host-power capability token, and sleep prevention)",
+	"description":      "Host power management (/api/system/host endpoints, the host-power capability token, and sleep prevention)",
 	"requires_restart": true,
 	"properties": map[string]any{
 		"enabled": map[string]any{

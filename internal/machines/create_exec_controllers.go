@@ -249,7 +249,7 @@ func (e *executors) resolveCdromPath(ctx context.Context, cdrom map[string]any) 
 	}
 	artifact, err := e.env.Assets.FindByKindFilename(ctx, assets.KindISO, name)
 	if errors.Is(err, assets.ErrNotFound) {
-		return "", fmt.Errorf("ISO %q is not in any storage location — upload or download it first (GET /artifacts/iso lists what exists)", name)
+		return "", fmt.Errorf("ISO %q is not in any storage location — upload or download it first (GET /api/artifacts/iso lists what exists)", name)
 	}
 	if err != nil {
 		return "", err

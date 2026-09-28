@@ -135,7 +135,7 @@ func (e *executors) createStorage(ctx context.Context, task *tasks.Task, out *ta
 			stringOr(settings["box_version"], "latest"), TemplateProvider,
 			stringOr(settings["box_arch"], "amd64"))
 		if terr != nil {
-			return fmt.Errorf("template %s/%s: %w (download it first — POST /templates/pull or let create chain it)", org, box, terr)
+			return fmt.Errorf("template %s/%s: %w (download it first — POST /api/templates/pull or let create chain it)", org, box, terr)
 		}
 		e.taskProgress(task, 30, "importing_template")
 		if stringOr(boot["clone_strategy"], CloneStrategyCopy) == CloneStrategyClone {
@@ -347,7 +347,7 @@ func (e *executors) createStorageUTM(ctx context.Context, task *tasks.Task, spec
 		stringOr(settings["box_version"], "latest"), TemplateProviderUTM,
 		stringOr(settings["box_arch"], "amd64"))
 	if terr != nil {
-		return fmt.Errorf("template %s/%s: %w (download it first — POST /templates/pull or let create chain it)", org, box, terr)
+		return fmt.Errorf("template %s/%s: %w (download it first — POST /api/templates/pull or let create chain it)", org, box, terr)
 	}
 	info, serr := os.Stat(template.DiskPath)
 	if serr != nil || !info.IsDir() {

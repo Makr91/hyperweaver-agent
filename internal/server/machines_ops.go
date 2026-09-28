@@ -41,7 +41,7 @@ type applianceImportResponse struct {
 //	@Success		202	{object}	applianceImportResponse	"Import task queued ({success, task_id, path, operation, status, message})"
 //	@Failure		400	{object}	taskErrorBody	"Missing/invalid path, not .ova/.ovf, file absent, or invalid name"
 //	@Failure		409	{object}	taskErrorBody	"A machine with that name already exists"
-//	@Router			/machines/import [post]
+//	@Router			/api/machines/import [post]
 func (s *Server) handleImportMachine(w http.ResponseWriter, r *http.Request) {
 	var body machines.ImportMetadata
 	if err := decodeBody(r, &body); err != nil {
@@ -131,7 +131,7 @@ type queuedOperation struct {
 //	@Success		200	{object}	queuedOperation	"Move task queued"
 //	@Failure		400	{object}	taskErrorBody	"Missing target_path, or machine is not powered off"
 //	@Failure		404	{object}	taskErrorBody	"Machine not found"
-//	@Router			/machines/{machineName}/move [post]
+//	@Router			/api/machines/{machineName}/move [post]
 func (s *Server) handleMoveMachine(w http.ResponseWriter, r *http.Request) {
 	machine := s.findMachine(w, r)
 	if machine == nil {
@@ -176,7 +176,7 @@ type unattendedDetectResponse struct {
 // and whether unattended installation supports it (the wizard's probe).
 //
 //	@Summary		Probe an installer ISO
-//	@Description	Minimum role: viewer. Synchronous VBoxManage unattended detect — what the ISO contains and whether VirtualBox can install it unattended. iso is an agent-host path (cached ISOs carry theirs in GET /artifacts/iso's path field). detected keys are VBoxManage's own fields snake_cased (os_typeid, os_version, os_flavor, os_languages, os_hints, unattended_installation_supported); os_languages is a string array (split from VBoxManage's comma-joined list), every other value a string.
+//	@Description	Minimum role: viewer. Synchronous VBoxManage unattended detect — what the ISO contains and whether VirtualBox can install it unattended. iso is an agent-host path (cached ISOs carry theirs in GET /api/artifacts/iso's path field). detected keys are VBoxManage's own fields snake_cased (os_typeid, os_version, os_flavor, os_languages, os_hints, unattended_installation_supported); os_languages is a string array (split from VBoxManage's comma-joined list), every other value a string.
 //	@Tags			Machine Management
 //	@Produce		json
 //	@Param			iso	query	string	true	"Agent-host ISO path"
@@ -184,11 +184,11 @@ type unattendedDetectResponse struct {
 //	@Failure		400	{object}	taskErrorBody	"Missing iso, or file absent"
 //	@Failure		500	{object}	taskErrorBody	"Detection failed"
 //	@Failure		503	{object}	taskErrorBody	"VirtualBox is not installed"
-//	@Router			/machines/unattended/detect [get]
+//	@Router			/api/machines/unattended/detect [get]
 func (s *Server) handleUnattendedDetect(w http.ResponseWriter, r *http.Request) {
 	iso := r.URL.Query().Get("iso")
 	if iso == "" {
-		taskError(w, http.StatusBadRequest, "iso query parameter is required (an agent-host ISO path — cached ISOs carry theirs on GET /artifacts/iso)")
+		taskError(w, http.StatusBadRequest, "iso query parameter is required (an agent-host ISO path — cached ISOs carry theirs on GET /api/artifacts/iso)")
 		return
 	}
 	if _, serr := os.Stat(filepath.Clean(filepath.FromSlash(iso))); serr != nil {
@@ -239,7 +239,7 @@ type unattendedInstallRequest struct {
 // document with the account nested (the provision chain's credentials shape).
 //
 //	@Summary		Start an unattended OS install
-//	@Description	Minimum role: operator. Queues machine_unattended_install — VBoxManage's own answer-file machinery onto an EXISTING powered-off machine (create a diskless/scratch-disk machine first; probe the ISO via GET /machines/unattended/detect). The ISO comes as path (agent-host file) or iso (cached-ISO filename, cdroms[]'s vocabulary — resolved through the artifact registry). VirtualBox prepares the distro-appropriate unattended script and — with start (default true) — boots the machine headless straight into the installer; watch progress on the console or screenshot. user/password are the account the installer creates; image_index picks the Windows edition; install_additions slipstreams Guest Additions. The password rides task metadata (stored credentials are never redacted — Mark's visibility ruling).
+//	@Description	Minimum role: operator. Queues machine_unattended_install — VBoxManage's own answer-file machinery onto an EXISTING powered-off machine (create a diskless/scratch-disk machine first; probe the ISO via GET /api/machines/unattended/detect). The ISO comes as path (agent-host file) or iso (cached-ISO filename, cdroms[]'s vocabulary — resolved through the artifact registry). VirtualBox prepares the distro-appropriate unattended script and — with start (default true) — boots the machine headless straight into the installer; watch progress on the console or screenshot. user/password are the account the installer creates; image_index picks the Windows edition; install_additions slipstreams Guest Additions. The password rides task metadata (stored credentials are never redacted — Mark's visibility ruling).
 //	@Tags			Machine Management
 //	@Accept			json
 //	@Produce		json
@@ -248,7 +248,7 @@ type unattendedInstallRequest struct {
 //	@Success		200	{object}	queuedOperation	"Unattended install task queued"
 //	@Failure		400	{object}	taskErrorBody	"Missing ISO reference or credentials, or machine not powered off"
 //	@Failure		404	{object}	taskErrorBody	"Machine not found"
-//	@Router			/machines/{machineName}/unattended [post]
+//	@Router			/api/machines/{machineName}/unattended [post]
 func (s *Server) handleUnattendedInstall(w http.ResponseWriter, r *http.Request) {
 	machine := s.findMachine(w, r)
 	if machine == nil {
@@ -315,7 +315,7 @@ type displayHintResponse struct {
 //	@Failure		400	{object}	taskErrorBody	"Missing width/height, or machine is not running"
 //	@Failure		404	{object}	taskErrorBody	"Machine not found"
 //	@Failure		503	{object}	taskErrorBody	"VirtualBox is not installed"
-//	@Router			/machines/{machineName}/display [post]
+//	@Router			/api/machines/{machineName}/display [post]
 func (s *Server) handleSetDisplay(w http.ResponseWriter, r *http.Request) {
 	machine := s.findMachine(w, r)
 	if machine == nil {

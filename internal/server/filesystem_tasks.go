@@ -66,7 +66,7 @@ func (s *Server) registerFilesystemExecutors() {
 //	@Failure		400	"Missing fields"
 //	@Failure		403	"Path forbidden"
 //	@Failure		503	"File browser is disabled"
-//	@Router			/filesystem/copy [post]
+//	@Router			/api/filesystem/copy [post]
 func (s *Server) queueFilesystemTask(r *http.Request, operation string, priority int, metadata any) (*tasks.Task, error) {
 	raw, err := json.Marshal(metadata)
 	if err != nil {
@@ -95,7 +95,7 @@ func (s *Server) queueFilesystemTask(r *http.Request, operation string, priority
 //	@Failure		400	"Missing fields"
 //	@Failure		403	"Path forbidden"
 //	@Failure		503	"File browser is disabled"
-//	@Router			/filesystem/move [put]
+//	@Router			/api/filesystem/move [put]
 func (s *Server) handleTransferItem(operation, verb string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var body fileTransferMetadata
