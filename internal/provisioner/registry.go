@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/Makr91/hyperweaver-agent/internal/locations"
 	"github.com/Makr91/hyperweaver-agent/internal/safepath"
 )
 
@@ -25,18 +26,67 @@ var ErrVersionNotFound = errors.New("provisioner version not found")
 // demand (SHI's discovery model — the filesystem is the source of truth, so
 // packages dropped in by installers or by hand appear without registration).
 type Registry struct {
-	dir string
+	storage *locations.Set
 }
 
-// NewRegistry addresses the registry at dir. The directory may not exist yet
-// — an empty registry, not an error.
-func NewRegistry(dir string) *Registry {
-	return &Registry{dir: dir}
+// NewRegistry addresses the registry over the provisioner storage locations.
+// A directory may not exist yet — an empty registry, not an error.
+func NewRegistry(storage *locations.Set) *Registry {
+	return &Registry{storage: storage}
 }
 
-// Dir returns the registry root.
+// Dir returns the registry root new families land in.
 func (r *Registry) Dir() string {
-	return r.dir
+	return r.storage.DefaultPath(locations.Provisioners)
+}
+
+func (r *Registry) roots() []string {
+	enabled := r.storage.Enabled(locations.Provisioners)
+	roots := make([]string, 0, len(enabled))
+	for i := range enabled {
+		if enabled[i].Default {
+			roots = append(roots, enabled[i].Path)
+		}
+	}
+	for i := range enabled {
+		if !enabled[i].Default {
+			roots = append(roots, enabled[i].Path)
+		}
+	}
+	return roots
+}
+
+func (r *Registry) familyRoot(name string) string {
+	for _, root := range r.roots() {
+		if _, err := os.Stat(filepath.Join(root, name, collectionManifest)); err == nil {
+			return root
+		}
+	}
+	return ""
+}
+
+func (r *Registry) FamilyRoot(name string) string {
+	if root := r.familyRoot(name); root != "" {
+		return root
+	}
+	return r.Dir()
+}
+
+func (r *Registry) FamiliesIn(root string) []string {
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		return nil
+	}
+	names := []string{}
+	for _, entry := range entries {
+		if !entry.IsDir() || !ValidName(entry.Name()) {
+			continue
+		}
+		if _, serr := os.Stat(filepath.Join(root, entry.Name(), collectionManifest)); serr == nil {
+			names = append(names, entry.Name())
+		}
+	}
+	return names
 }
 
 // List scans the registry: every top-level directory carrying
@@ -45,26 +95,29 @@ func (r *Registry) Dir() string {
 // manifest is unparseable or that hold zero valid versions are reported with
 // valid: false (SHI's "(Invalid)" placeholder) rather than hidden.
 func (r *Registry) List() ([]*Collection, error) {
-	entries, err := os.ReadDir(r.dir)
-	if errors.Is(err, fs.ErrNotExist) {
-		return []*Collection{}, nil
-	}
-	if err != nil {
-		return nil, fmt.Errorf("read provisioners dir: %w", err)
-	}
-
 	collections := []*Collection{}
-	for _, entry := range entries {
-		if !entry.IsDir() || !ValidName(entry.Name()) {
+	seen := map[string]bool{}
+	for _, root := range r.roots() {
+		entries, err := os.ReadDir(root)
+		if errors.Is(err, fs.ErrNotExist) {
 			continue
 		}
-		collection, cerr := r.readCollection(entry.Name())
-		if cerr != nil {
-			plog().Warn("skipping unreadable provisioner", "name", entry.Name(), "error", cerr)
-			continue
+		if err != nil {
+			return nil, fmt.Errorf("read provisioners dir: %w", err)
 		}
-		if collection != nil {
-			collections = append(collections, collection)
+		for _, entry := range entries {
+			if !entry.IsDir() || !ValidName(entry.Name()) || seen[entry.Name()] {
+				continue
+			}
+			collection, cerr := r.readCollection(root, entry.Name())
+			if cerr != nil {
+				plog().Warn("skipping unreadable provisioner", "name", entry.Name(), "error", cerr)
+				continue
+			}
+			if collection != nil {
+				seen[entry.Name()] = true
+				collections = append(collections, collection)
+			}
 		}
 	}
 	sort.Slice(collections, func(i, j int) bool {
@@ -78,7 +131,11 @@ func (r *Registry) Get(name string) (*Collection, error) {
 	if !ValidName(name) {
 		return nil, ErrNotFound
 	}
-	collection, err := r.readCollection(name)
+	root := r.familyRoot(name)
+	if root == "" {
+		return nil, ErrNotFound
+	}
+	collection, err := r.readCollection(root, name)
 	if err != nil {
 		return nil, err
 	}
@@ -114,12 +171,13 @@ func (r *Registry) Delete(name string) error {
 	if !ValidName(name) {
 		return ErrNotFound
 	}
-	dir, err := safepath.Under(r.dir, name)
+	root := r.familyRoot(name)
+	if root == "" {
+		return ErrNotFound
+	}
+	dir, err := safepath.Under(root, name)
 	if err != nil {
 		return err
-	}
-	if _, serr := os.Stat(filepath.Join(dir, collectionManifest)); serr != nil {
-		return ErrNotFound
 	}
 	return removeAllForce(dir)
 }
@@ -136,8 +194,8 @@ func (r *Registry) DeleteVersion(name, version string) error {
 
 // readCollection loads one family by directory name (already validated).
 // nil means the directory is not a provisioner (no collection manifest).
-func (r *Registry) readCollection(name string) (*Collection, error) {
-	dir := filepath.Join(r.dir, name)
+func (r *Registry) readCollection(root, name string) (*Collection, error) {
+	dir := filepath.Join(root, name)
 	manifestPath := filepath.Join(dir, collectionManifest)
 	if _, err := os.Stat(manifestPath); errors.Is(err, fs.ErrNotExist) {
 		// Not a provisioner — a normal scan outcome, distinct from errors.
@@ -157,7 +215,7 @@ func (r *Registry) readCollection(name string) (*Collection, error) {
 		// version subdirectories still scan.
 		collection.Description = "invalid " + collectionManifest + ": " + manifestErr.Error()
 	}
-	collection.Source = r.readSource(name)
+	collection.Source = r.readSource(root, name)
 
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -200,8 +258,8 @@ func (r *Registry) readCollection(name string) (*Collection, error) {
 // 2026-07-17). Absence is the normal case (JSON null on the wire); an
 // unreadable or corrupt sidecar degrades to null with a warning — provenance
 // trouble never fails a scan.
-func (r *Registry) readSource(name string) *Source {
-	raw, err := os.ReadFile(filepath.Clean(filepath.Join(r.dir, name, sourceFileName)))
+func (r *Registry) readSource(root, name string) *Source {
+	raw, err := os.ReadFile(filepath.Clean(filepath.Join(root, name, sourceFileName)))
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil
 	}

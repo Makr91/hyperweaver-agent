@@ -41,7 +41,7 @@ func (e *executors) syncFolder(ctx context.Context, task *tasks.Task, out *tasks
 		return e.attachSharedFolder(ctx, task, meta, folder, out)
 	}
 
-	workdir := e.machineWorkdir(task.MachineName)
+	workdir := e.machineWorkdir(ctx, task)
 	source := folder.Map
 	if !strings.HasPrefix(source, "/") && !strings.Contains(source, ":") {
 		source = workdir + "/" + strings.TrimPrefix(strings.TrimPrefix(source, "./"), ".")
@@ -96,7 +96,7 @@ func (e *executors) attachSharedFolder(ctx context.Context, task *tasks.Task,
 	}
 	hostPath := filepath.FromSlash(folder.Map)
 	if !filepath.IsAbs(hostPath) {
-		hostPath = filepath.Join(e.machineWorkdir(task.MachineName),
+		hostPath = filepath.Join(e.machineWorkdir(ctx, task),
 			strings.TrimPrefix(strings.TrimPrefix(folder.Map, "./"), "."))
 	}
 	shareName := sharedFolderName(folder.To)
@@ -127,7 +127,7 @@ func (e *executors) attachSharedFolder(ctx context.Context, task *tasks.Task,
 		"sudo mkdir -p %s && (mount | grep -q ' %s ' || sudo mount -t vboxsf -o uid=$(id -u %s),gid=$(getent group %s | cut -d: -f3) %s %s)",
 		folder.To, folder.To, owner, group, shareName, folder.To)
 	if merr := sshrun.Run(ctx, meta.IP, meta.Port, meta.Credentials, mount,
-		e.machineWorkdir(task.MachineName), e.env.ProvisionKeyPath, time.Minute, out.Write); merr != nil {
+		e.machineWorkdir(ctx, task), e.env.ProvisionKeyPath, time.Minute, out.Write); merr != nil {
 		out.Write("stderr", "Guest mount failed ("+merr.Error()+") — vboxsf needs Guest Additions; the automount lands it at "+folder.To+" when they run\n")
 	} else {
 		out.Write("stdout", "Shared folder mounted at "+folder.To+"\n")

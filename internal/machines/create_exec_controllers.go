@@ -133,7 +133,7 @@ func resolveController(plans []*controllerPlan, entry map[string]any) (*controll
 // controller's port 0 (or its own controller/port/device), additional disks
 // and cdroms at their declared controller/port/device or the controller's
 // next free port.
-func (e *executors) attachStorage(ctx context.Context, vboxExe, name string,
+func (e *executors) attachStorage(ctx context.Context, vboxExe, name, workdir string,
 	document MachineConfig, output *createExecutionOutput, out *tasks.OutputWriter,
 ) error {
 	plans, err := storageControllers(document)
@@ -185,7 +185,7 @@ func (e *executors) attachStorage(ctx context.Context, vboxExe, name string,
 			// addendum) exactly as createStorage placed it — the two MUST
 			// agree or the attach misses the medium.
 			targetDir, derr := diskDirectory(disk,
-				filepath.Join(e.machineWorkdir(name), "disks"),
+				filepath.Join(workdir, "disks"),
 				"disks.additional_disks["+strconv.Itoa(i+1)+"]")
 			if derr != nil {
 				return derr

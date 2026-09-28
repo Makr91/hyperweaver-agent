@@ -227,13 +227,13 @@ provisioning:
   # <name>/provisioner-collection.yml with <version>/provisioner.yml trees
   # beneath). Installer-bundled packages are extracted here on startup
   # without ever overwriting existing versions.
-  # Empty = <data dir>/provisioners
   provisioners_dir: ''
+  provisioners_paths: {}
   # Root of the per-machine working directories: the materialized provisioner
   # copy, the generated Hosts.yml, id-files, installers, and ssls trees
-  # vagrant runs from. Working copies are VM-scale data — keep this off
-  # roaming profiles. Empty = <data dir>/machines
+  # vagrant runs from.
   machines_dir: ''
+  machines_paths: {}
   # Sync method for machines whose spec sets none: rsync | scp (SHI's global
   # preference; platform rules still apply — forced rsync on Windows, macOS
   # auto-fallback to SCP on the ancient Apple rsync).
@@ -279,6 +279,7 @@ template_sources:
   # Storage root (<root>/<organization>/<box>/<version>/).
   # Empty = <data dir>/templates
   local_storage_path: ''
+  storage_paths: {}
   # Vagrant/BoxVault-compatible registries. The entry flagged default serves
   # requests that name no source; names are display-only. auth_token
   # authenticates private boxes.

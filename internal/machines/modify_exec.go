@@ -103,11 +103,7 @@ func (e *executors) modifyMachine(ctx context.Context, task *tasks.Task, out *ta
 		} else {
 			var uartFlags []string
 			if onOff(raw) == "on" {
-				workdir := e.machineWorkdir(machine.Name)
-				if machine.Home != nil && *machine.Home != "" {
-					workdir = *machine.Home
-				}
-				pipe := qga.PipePath(workdir, machine.Name)
+				pipe := qga.PipePath(e.machineHome(ctx, machine.Name), machine.Name)
 				uartFlags = []string{"--uart2", "0x2F8", "3", "--uart-mode2", "server", pipe}
 				out.Write("stdout", "Guest-agent channel: COM2 → "+pipe+"\n")
 			} else {

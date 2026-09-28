@@ -16,6 +16,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/Makr91/hyperweaver-agent/internal/locations"
 	"github.com/Makr91/hyperweaver-agent/internal/safepath"
 	"github.com/Makr91/hyperweaver-agent/internal/tasks"
 )
@@ -95,7 +96,7 @@ func (e *executors) templateDownload(ctx context.Context, task *tasks.Task, out 
 		return fmt.Errorf("template download failed: HTTP %s", response.Status)
 	}
 
-	targetDir, err := safepath.Under(e.env.TemplatesDir,
+	targetDir, err := safepath.Under(e.env.Locations.DefaultPath(locations.Templates),
 		filepath.Join(meta.Organization, meta.BoxName, meta.Version))
 	if err != nil {
 		return err

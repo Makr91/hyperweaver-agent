@@ -73,7 +73,7 @@ func (e *executors) waitWinRM(ctx context.Context, task *tasks.Task,
 	if err != nil {
 		return 0, errWinRMNeedsAnsible
 	}
-	workdir := e.machineWorkdir(task.MachineName)
+	workdir := e.machineWorkdir(ctx, task)
 	start := time.Now()
 	deadline := start.Add(timeout)
 	for {
@@ -119,7 +119,7 @@ func (e *executors) runWinRMScript(ctx context.Context, task *tasks.Task,
 		return err
 	}
 	defer cleanupTransport()
-	workdir := e.machineWorkdir(task.MachineName)
+	workdir := e.machineWorkdir(ctx, task)
 	local := filepath.FromSlash(script)
 	if !filepath.IsAbs(local) {
 		local = filepath.Join(workdir,

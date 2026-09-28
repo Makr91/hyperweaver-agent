@@ -59,8 +59,15 @@ func (s *Server) createMultiHostMachines(w http.ResponseWriter, r *http.Request,
 		}
 	}
 
+	location, problem := s.machinesLocation(body.StoragePathID)
+	if problem != "" {
+		taskError(w, http.StatusBadRequest, problem)
+		return
+	}
+
 	type entryPlan struct {
 		name     string
+		home     string
 		spec     *machines.Spec
 		document map[string]any
 	}
@@ -134,7 +141,7 @@ func (s *Server) createMultiHostMachines(w http.ResponseWriter, r *http.Request,
 				return
 			}
 		}
-		taken, home, terr := s.workdirTaken(r.Context(), name)
+		taken, home, terr := s.workdirTaken(r.Context(), location.Path, name)
 		if terr != nil {
 			taskError(w, http.StatusInternalServerError, "Failed to create machines")
 			return
@@ -217,7 +224,7 @@ func (s *Server) createMultiHostMachines(w http.ResponseWriter, r *http.Request,
 		// document: failures join the atomic refusal (entry + machine
 		// annotated); warnings collect per machine name — the typed-disk
 		// rows ride in front of them.
-		resourceErrors, resourceWarnings := s.validateCreationResources(r.Context(), document)
+		resourceErrors, resourceWarnings := s.validateCreationResources(r.Context(), location.Path, document)
 		if len(resourceErrors) > 0 {
 			for _, issue := range resourceErrors {
 				issue["entry"] = k + 1
@@ -251,7 +258,7 @@ func (s *Server) createMultiHostMachines(w http.ResponseWriter, r *http.Request,
 			specCopy.Settings["server_id"] = serverID
 		}
 		specCopy.HostIndex = k
-		plans = append(plans, entryPlan{name: name, spec: &specCopy, document: document})
+		plans = append(plans, entryPlan{name: name, home: home, spec: &specCopy, document: document})
 	}
 
 	// Every entry passed — queue in hosts[] declaration order, chaining each
@@ -272,7 +279,7 @@ func (s *Server) createMultiHostMachines(w http.ResponseWriter, r *http.Request,
 	for k := range plans {
 		plan := &plans[k]
 		parentID, subTasks, _, lastTaskID, qerr := s.queueCreateOrchestration(r.Context(),
-			plan.name, plan.spec, plan.document, body.StartAfterCreate, createdBy, dependsOn)
+			plan.name, plan.home, plan.spec, plan.document, body.StartAfterCreate, createdBy, dependsOn)
 		if qerr != nil {
 			cancelAll()
 			entryError(k, http.StatusBadRequest, qerr.Error())

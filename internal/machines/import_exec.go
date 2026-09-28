@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/Makr91/hyperweaver-agent/internal/locations"
 	"github.com/Makr91/hyperweaver-agent/internal/tasks"
 	"github.com/Makr91/hyperweaver-agent/internal/vbox"
 )
@@ -63,7 +64,8 @@ func (e *executors) importAppliance(ctx context.Context, task *tasks.Task, out *
 	}
 
 	out.Write("stdout", "Importing appliance "+path+"\n")
-	if ierr := vbox.ImportAppliance(ctx, exe, path, meta.Name, e.env.MachinesDir); ierr != nil {
+	if ierr := vbox.ImportAppliance(ctx, exe, path, meta.Name,
+		e.env.Locations.DefaultPath(locations.Machines)); ierr != nil {
 		return ierr
 	}
 	out.Write("stdout", "Import complete — reconciling the registry\n")

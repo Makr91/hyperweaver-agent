@@ -209,11 +209,7 @@ func (e *executors) freezeGuest(ctx context.Context, machine *Machine, vboxExe s
 		MapVBoxState(info.State) != StatusRunning {
 		return noop
 	}
-	workdir := e.machineWorkdir(machine.Name)
-	if machine.Home != nil && *machine.Home != "" {
-		workdir = *machine.Home
-	}
-	pipe := qga.PipePath(workdir, machine.Name)
+	pipe := qga.PipePath(e.machineHome(ctx, machine.Name), machine.Name)
 	freezeCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 	if _, ferr := qga.Do(freezeCtx, pipe, "guest-fsfreeze-freeze", nil); ferr != nil {

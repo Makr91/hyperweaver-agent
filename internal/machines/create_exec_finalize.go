@@ -39,7 +39,7 @@ func (e *executors) createFinalize(ctx context.Context, task *tasks.Task, out *t
 	if _, cerr := e.store.Create(ctx, &NewMachine{
 		Name:       task.MachineName,
 		Host:       hostname,
-		Home:       e.machineWorkdir(task.MachineName),
+		Home:       e.machineWorkdir(ctx, task),
 		ServerID:   serverID,
 		Hypervisor: meta.Spec.Hypervisor,
 		Spec:       rawSpec,

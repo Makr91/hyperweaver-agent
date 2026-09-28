@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Makr91/hyperweaver-agent/internal/locations"
 	"github.com/Makr91/hyperweaver-agent/internal/provisioner"
 	"github.com/Makr91/hyperweaver-agent/internal/qga"
 	"github.com/Makr91/hyperweaver-agent/internal/utm"
@@ -44,7 +45,8 @@ func (r *Reconciler) refreshGuestInfo(ctx context.Context, vboxExe, target, name
 			workdir = *existing.Home
 		}
 		if workdir == "" {
-			workdir = filepath.Join(r.machinesDir, provisioner.MachineDirName(name))
+			workdir = filepath.Join(r.storage.DefaultPath(locations.Machines),
+				provisioner.MachineDirName(name))
 		}
 		probeCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
 		agentIPs, err := qga.GuestIPv4s(probeCtx, qga.PipePath(workdir, name))

@@ -307,7 +307,8 @@ func (s *Server) handleModifyMachine(w http.ResponseWriter, r *http.Request) {
 	// Pre-flight resource validation on the changed fields (add_disks/ram/
 	// vcpus), excluding this machine from committed sums — the base's modify
 	// hook.
-	resourceErrors, resourceWarnings := s.validateModificationResources(r.Context(), body, machine.Name)
+	resourceErrors, resourceWarnings := s.validateModificationResources(r.Context(),
+		s.machineRoot(machine), body, machine.Name)
 	if len(resourceErrors) > 0 {
 		insufficientResources(w, resourceErrors)
 		return

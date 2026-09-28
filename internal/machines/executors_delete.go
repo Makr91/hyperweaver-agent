@@ -102,10 +102,7 @@ func (e *executors) deleteMachine(ctx context.Context, task *tasks.Task, out *ta
 		// Lease cleanup precedes unregister — the DHCP individual config's
 		// --vm reference stops resolving the moment the VM is gone.
 		e.removeDHCPLeases(ctx, vboxExe, machine, out)
-		workdir := e.machineWorkdir(machine.Name)
-		if machine.Home != nil && *machine.Home != "" {
-			workdir = *machine.Home
-		}
+		workdir := e.machineHome(ctx, machine.Name)
 		if meta.CleanupDisks {
 			e.detachForeignMedia(ctx, vboxExe, target, info, workdir, out)
 			out.Write("stdout", "Unregistering "+machine.Name+" from VirtualBox (deleting stamped media)\n")

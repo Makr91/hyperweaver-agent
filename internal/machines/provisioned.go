@@ -16,6 +16,7 @@ import (
 	"github.com/goccy/go-yaml"
 
 	"github.com/Makr91/hyperweaver-agent/internal/assets"
+	"github.com/Makr91/hyperweaver-agent/internal/locations"
 	"github.com/Makr91/hyperweaver-agent/internal/prereqs"
 	"github.com/Makr91/hyperweaver-agent/internal/provisioner"
 	"github.com/Makr91/hyperweaver-agent/internal/safepath"
@@ -168,7 +169,7 @@ func ParseSpec(machine *Machine) (*Spec, error) {
 type ProvisionEnv struct {
 	Registry    *provisioner.Registry
 	SecretsVars func() map[string]string
-	MachinesDir string
+	Locations   *locations.Set
 	Assets      *assets.Store
 	CACertPath  string
 	CAKeyPath   string
@@ -191,9 +192,6 @@ type ProvisionEnv struct {
 	// settings.default_network_interface / DEFAULT_NETWORK_INTERFACE when
 	// the spec sets none (SHI's bridge-interface fallback).
 	DefaultNetworkInterface string
-	// TemplatesDir is the box-template storage root (the base's
-	// template_sources.local_storage_path).
-	TemplatesDir string
 	// TemplateSources are the configured Vagrant/BoxVault registries.
 	TemplateSources []TemplateSource
 	// ProvisionKeyPath is the agent's own SSH provisioning key
@@ -399,11 +397,16 @@ func machinePriority(machine *Machine) int {
 // configured machines root. A DISCOVERED vagrant machine's home is the
 // user's own project and is never touched.
 func (e *executors) removeWorkdir(machine *Machine, out *tasks.OutputWriter) {
-	if !machine.Provisioned() || e.env.MachinesDir == "" {
+	if !machine.Provisioned() {
 		return
 	}
 	home := *machine.Home
-	contained, err := safepath.Under(e.env.MachinesDir, filepath.Base(home))
+	location, found := e.env.Locations.Containing(locations.Machines, home)
+	if !found {
+		out.Write("stderr", "Working directory "+home+" is outside every machines storage path — left in place\n")
+		return
+	}
+	contained, err := safepath.Under(location.Path, filepath.Base(home))
 	if err != nil || !strings.EqualFold(contained, home) {
 		out.Write("stderr", "Working directory "+home+" is outside the machines root — left in place\n")
 		return

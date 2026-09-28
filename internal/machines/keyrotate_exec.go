@@ -64,7 +64,7 @@ func (e *executors) keyRotate(ctx context.Context, task *tasks.Task, out *tasks.
 		username = "root"
 	}
 	remote := "/home/" + username + "/.ssh/id_ssh_rsa"
-	workdir := e.machineWorkdir(task.MachineName)
+	workdir := e.machineWorkdir(ctx, task)
 
 	e.taskProgress(task, 15, "fetching_rotated_key")
 	out.Write("stdout", "Fetching rotated key "+remote+" from the guest\n")
@@ -146,15 +146,11 @@ func (e *executors) rewaitAfterKeyRecovery(ctx context.Context, task *tasks.Task
 		out.Write("stderr", "Guest-agent recovery unavailable: the document names no vagrant_user_private_key_path to recover into\n")
 		return 0, noTransport
 	}
-	workdir := e.machineWorkdir(task.MachineName)
-	pipeWorkdir := workdir
-	if machine.Home != nil && *machine.Home != "" {
-		pipeWorkdir = *machine.Home
-	}
+	workdir := e.machineWorkdir(ctx, task)
 	local := rotatedKeyDestination(keyPath, workdir)
 
 	out.Write("stdout", "SSH wait exhausted — attempting key recovery over the guest-agent channel (tier 3, recovery only)\n")
-	if rerr := e.recoverKeyViaQGA(ctx, machine, pipeWorkdir, local, out); rerr != nil {
+	if rerr := e.recoverKeyViaQGA(ctx, machine, workdir, local, out); rerr != nil {
 		return 0, fmt.Errorf("%w — guest-agent key recovery failed (%w) — re-provision the machine or supply the key", waitErr, rerr)
 	}
 	out.Write("stdout", "Recovered key landed at "+local+" — retrying the SSH wait once\n")

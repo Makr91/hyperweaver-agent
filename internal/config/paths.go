@@ -97,9 +97,7 @@ func (c *Config) SecretsPath() string {
 }
 
 // DataDir returns the agent's data root: data.dir when configured, else the
-// per-OS local app-data location — deliberately NOT the (Windows-roaming)
-// config directory, since machine working copies and databases must not ride
-// a roaming profile.
+// per-OS local app-data location.
 func (c *Config) DataDir() (string, error) {
 	if c.Data.Dir != "" {
 		return safepath.CleanAbs(c.Data.Dir)
@@ -165,28 +163,31 @@ func (c *Config) MonitoringDBPath(kind string) (string, error) {
 	return filepath.Join(dir, "monitoring-"+kind+".sqlite"), nil
 }
 
-// ProvisionersDir returns the provisioner package registry root:
-// provisioning.provisioners_dir when configured, else provisioners under the
-// data root.
+func (c *Config) definitionsDir() (string, error) {
+	if c.Data.Dir == "" && runtime.GOOS == "windows" {
+		return Dir()
+	}
+	return c.DataDir()
+}
+
+// ProvisionersDir returns the provisioner package registry root.
 func (c *Config) ProvisionersDir() (string, error) {
 	if c.Provisioning.ProvisionersDir != "" {
 		return safepath.CleanAbs(c.Provisioning.ProvisionersDir)
 	}
-	dir, err := c.DataDir()
+	dir, err := c.definitionsDir()
 	if err != nil {
 		return "", err
 	}
 	return filepath.Join(dir, "provisioners"), nil
 }
 
-// MachinesDir returns the root of the per-machine working directories:
-// provisioning.machines_dir when configured, else machines under the data
-// root.
+// MachinesDir returns the root of the per-machine working directories.
 func (c *Config) MachinesDir() (string, error) {
 	if c.Provisioning.MachinesDir != "" {
 		return safepath.CleanAbs(c.Provisioning.MachinesDir)
 	}
-	dir, err := c.DataDir()
+	dir, err := c.definitionsDir()
 	if err != nil {
 		return "", err
 	}

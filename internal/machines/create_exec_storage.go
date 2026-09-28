@@ -56,7 +56,7 @@ func (e *executors) createStorage(ctx context.Context, task *tasks.Task, out *ta
 		return errors.New("VirtualBox is not installed")
 	}
 
-	workdir := e.machineWorkdir(task.MachineName)
+	workdir := e.machineWorkdir(ctx, task)
 	// prepare's materialize normally creates the working directory; a
 	// provisioner-less create has no prepare, so ensure it (idempotent) —
 	// media land in it either way.
@@ -335,7 +335,7 @@ func (e *executors) createStorageUTM(ctx context.Context, task *tasks.Task, spec
 	// prepare's materialize normally creates the working directory; a
 	// provisioner-less create has no prepare, so ensure it (idempotent) —
 	// finalize records Home pointing at it either way.
-	if merr := os.MkdirAll(e.machineWorkdir(task.MachineName), 0o750); merr != nil {
+	if merr := os.MkdirAll(e.machineWorkdir(ctx, task), 0o750); merr != nil {
 		return merr
 	}
 	boxRef := stringOr(settings["box"], "")

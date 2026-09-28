@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/Makr91/hyperweaver-agent/internal/auth"
+	"github.com/Makr91/hyperweaver-agent/internal/locations"
 	"github.com/Makr91/hyperweaver-agent/internal/machines"
 	"github.com/Makr91/hyperweaver-agent/internal/provisioner"
 	"github.com/Makr91/hyperweaver-agent/internal/qga"
@@ -45,11 +46,8 @@ func (s *Server) machineQGAPipe(machine *machines.Machine) (string, error) {
 		workdir = *machine.Home
 	}
 	if workdir == "" {
-		machinesDir, err := s.cfg.MachinesDir()
-		if err != nil {
-			return "", err
-		}
-		workdir = filepath.Join(machinesDir, provisioner.MachineDirName(machine.Name))
+		workdir = filepath.Join(s.storage.DefaultPath(locations.Machines),
+			provisioner.MachineDirName(machine.Name))
 	}
 	return qga.PipePath(workdir, machine.Name), nil
 }

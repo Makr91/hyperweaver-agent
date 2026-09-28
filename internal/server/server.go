@@ -11,6 +11,7 @@ import (
 	"github.com/Makr91/hyperweaver-agent/internal/auth"
 	"github.com/Makr91/hyperweaver-agent/internal/config"
 	"github.com/Makr91/hyperweaver-agent/internal/keys"
+	"github.com/Makr91/hyperweaver-agent/internal/locations"
 	"github.com/Makr91/hyperweaver-agent/internal/machines"
 	"github.com/Makr91/hyperweaver-agent/internal/monitoring"
 	"github.com/Makr91/hyperweaver-agent/internal/provisioner"
@@ -28,6 +29,7 @@ type Server struct {
 	tasks          *tasks.Queue
 	machines       *machines.Store
 	provisioners   *provisioner.Registry
+	storage        *locations.Set
 	secrets        *secrets.Store
 	assets         *assets.Store
 	artifactSvc    *assets.Service
@@ -60,7 +62,7 @@ type Server struct {
 }
 
 // New builds the server and its routes.
-func New(cfg *config.Config, keyStore *keys.Store, trayTokens *auth.TrayTokens, taskQueue *tasks.Queue, machineStore *machines.Store, provisioners *provisioner.Registry, secretsStore *secrets.Store, assetsStore *assets.Store, artifactSvc *assets.Service, monitor *monitoring.Service, dbs []DBHandle, restartArgs []string, openUI func()) (*Server, error) {
+func New(cfg *config.Config, keyStore *keys.Store, trayTokens *auth.TrayTokens, taskQueue *tasks.Queue, machineStore *machines.Store, provisioners *provisioner.Registry, storage *locations.Set, secretsStore *secrets.Store, assetsStore *assets.Store, artifactSvc *assets.Service, monitor *monitoring.Service, dbs []DBHandle, restartArgs []string, openUI func()) (*Server, error) {
 	s := &Server{
 		cfg:            cfg,
 		keys:           keyStore,
@@ -68,6 +70,7 @@ func New(cfg *config.Config, keyStore *keys.Store, trayTokens *auth.TrayTokens, 
 		tasks:          taskQueue,
 		machines:       machineStore,
 		provisioners:   provisioners,
+		storage:        storage,
 		secrets:        secretsStore,
 		assets:         assetsStore,
 		artifactSvc:    artifactSvc,

@@ -67,13 +67,14 @@ func (e *executors) createConfig(ctx context.Context, task *tasks.Task, out *tas
 	}
 
 	e.taskProgress(task, 20, "creating_vm")
-	e.clearStaleSettings(ctx, vboxExe, task.MachineName, out)
+	workdir := e.machineWorkdir(ctx, task)
+	e.clearStaleSettings(ctx, vboxExe, task, out)
 	arch := "x86"
 	if strings.Contains(stringOr(settings["box_arch"], "amd64"), "arm") {
 		arch = "arm"
 	}
 	uuid, err := vbox.CreateVM(ctx, vboxExe, task.MachineName, arch,
-		stringOr(settings["os_type"], "Debian_64"), e.env.MachinesDir)
+		stringOr(settings["os_type"], "Debian_64"), filepath.Dir(workdir))
 	if err != nil {
 		return err
 	}
@@ -84,7 +85,7 @@ func (e *executors) createConfig(ctx context.Context, task *tasks.Task, out *tas
 		if uerr := vbox.UnregisterVM(cleanupCtx, vboxExe, task.MachineName, false); uerr != nil {
 			out.Write("stderr", "Unregister failed: "+uerr.Error()+"\n")
 		}
-		e.clearStaleSettings(cleanupCtx, vboxExe, task.MachineName, out)
+		e.clearStaleSettings(cleanupCtx, vboxExe, task, out)
 		return ferr
 	}
 
@@ -153,7 +154,7 @@ func (e *executors) createConfig(ctx context.Context, task *tasks.Task, out *tas
 		if serialPortClaimed(document.Section("vbox"), 2) {
 			out.Write("stderr", "Document claims serial port 2 — guest-agent UART skipped\n")
 		} else {
-			pipe := qga.PipePath(e.machineWorkdir(task.MachineName), task.MachineName)
+			pipe := qga.PipePath(workdir, task.MachineName)
 			flags = append(flags, "--uart2", "0x2F8", "3", "--uart-mode2", "server", pipe)
 			out.Write("stdout", "Guest-agent channel: COM2 → "+pipe+"\n")
 		}
@@ -238,7 +239,7 @@ func (e *executors) createConfig(ctx context.Context, task *tasks.Task, out *tas
 	}
 
 	e.taskProgress(task, 60, "attaching_storage")
-	if serr := e.attachStorage(ctx, vboxExe, task.MachineName, document, output, out); serr != nil {
+	if serr := e.attachStorage(ctx, vboxExe, task.MachineName, workdir, document, output, out); serr != nil {
 		return failed("storage attach", serr)
 	}
 

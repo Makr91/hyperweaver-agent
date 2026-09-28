@@ -71,7 +71,7 @@ func (e *executors) cloneCurrent(ctx context.Context, task *tasks.Task, out *tas
 	e.taskProgress(task, 10, "cloning_vm")
 	out.Write("stdout", "Cloning "+meta.Source+" → "+task.MachineName+" (VBoxManage clonevm — current state)\n")
 	if cerr := vbox.CloneVM(ctx, vboxExe, sourceTarget, task.MachineName,
-		e.env.MachinesDir, meta.Snapshot, meta.Linked); cerr != nil {
+		filepath.Dir(e.machineWorkdir(ctx, task)), meta.Snapshot, meta.Linked); cerr != nil {
 		return cerr
 	}
 	cleanup := func(step string, ferr error) error {
@@ -190,7 +190,7 @@ func (e *executors) cloneCurrentUTM(ctx context.Context, task *tasks.Task,
 		return errors.New("source machine is " + status + " — utm export needs it stopped; stop it first")
 	}
 
-	workdir := e.machineWorkdir(task.MachineName)
+	workdir := e.machineWorkdir(ctx, task)
 	if merr := os.MkdirAll(workdir, 0o750); merr != nil {
 		return merr
 	}

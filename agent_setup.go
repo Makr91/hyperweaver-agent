@@ -12,6 +12,7 @@ import (
 	"github.com/Makr91/hyperweaver-agent/internal/db"
 	"github.com/Makr91/hyperweaver-agent/internal/hostname"
 	"github.com/Makr91/hyperweaver-agent/internal/hostpower"
+	"github.com/Makr91/hyperweaver-agent/internal/locations"
 	"github.com/Makr91/hyperweaver-agent/internal/machines"
 	"github.com/Makr91/hyperweaver-agent/internal/monitoring"
 	"github.com/Makr91/hyperweaver-agent/internal/netaddr"
@@ -30,6 +31,7 @@ type agentSystems struct {
 	queue        *tasks.Queue
 	machines     *machines.Store
 	provisioners *provisioner.Registry
+	storage      *locations.Set
 	assets       *assets.Store
 	artifactSvc  *assets.Service
 	reconciler   *machines.Reconciler
@@ -37,6 +39,16 @@ type agentSystems struct {
 	monitor      *monitoring.Service
 	dbs          []server.DBHandle
 	closeDBs     func()
+}
+
+func storageLocations(cfg *config.Config) (*locations.Set, error) {
+	set := locations.New()
+	for _, kind := range []locations.Kind{locations.Machines, locations.Provisioners, locations.Templates} {
+		if err := cfg.LoadStorageLocations(set, kind); err != nil {
+			return nil, err
+		}
+	}
+	return set, nil
 }
 
 // setupTasks opens the agent's databases and builds the task queue, the
@@ -192,12 +204,12 @@ func setupTasks(cfg *config.Config, secretsStore *secrets.Store) (*agentSystems,
 
 	// Provisioner package registry (architecture §8): the directory is the
 	// source of truth — scanned live, seeded after the port is owned.
-	provisionersDir, err := cfg.ProvisionersDir()
+	storage, err := storageLocations(cfg)
 	if err != nil {
 		closer()
 		return nil, err
 	}
-	provisioners := provisioner.NewRegistry(provisionersDir)
+	provisioners := provisioner.NewRegistry(storage)
 	catalogSources := make([]provisioner.CatalogSource, 0, len(cfg.CatalogSources.Sources))
 	for _, source := range cfg.CatalogSources.Sources {
 		catalogSources = append(catalogSources, provisioner.CatalogSource{
@@ -242,17 +254,6 @@ func setupTasks(cfg *config.Config, secretsStore *secrets.Store) (*agentSystems,
 		pipelineAssets = assetsStore
 	}
 
-	machinesDir, err := cfg.MachinesDir()
-	if err != nil {
-		closer()
-		return nil, err
-	}
-	templatesDir, err := cfg.TemplatesDir()
-	if err != nil {
-		closer()
-		return nil, err
-	}
-
 	// The agent's own provisioning SSH key (the base generates one at
 	// startup): the pipeline's auth fallback of LAST RESORT — used only when
 	// the document supplies neither a key path nor a password. Nothing
@@ -280,13 +281,13 @@ func setupTasks(cfg *config.Config, secretsStore *secrets.Store) (*agentSystems,
 	reconciler := machines.NewReconciler(machineStore, store,
 		cfg.Machines.AutoDiscovery,
 		time.Duration(cfg.Machines.DiscoveryInterval)*time.Second,
-		machinesDir, cfg.GuestAgent.Enabled)
+		storage, cfg.GuestAgent.Enabled)
 	machines.RegisterExecutors(queue, machineStore, reconciler,
 		time.Duration(cfg.Machines.ShutdownTimeout)*time.Second,
 		&machines.ProvisionEnv{
 			Registry:                provisioners,
 			SecretsVars:             secretsStore.TemplateVars,
-			MachinesDir:             machinesDir,
+			Locations:               storage,
 			Assets:                  pipelineAssets,
 			CACertPath:              cfg.SSLCACertPath(),
 			CAKeyPath:               cfg.SSLCAKeyPath(),
@@ -295,7 +296,6 @@ func setupTasks(cfg *config.Config, secretsStore *secrets.Store) (*agentSystems,
 			HostHooks:               cfg.Provisioning.HostHooks,
 			VRDECertRoot:            cfg.VRDECertRoot(),
 			DefaultNetworkInterface: cfg.Provisioning.DefaultNetworkInterface,
-			TemplatesDir:            templatesDir,
 			TemplateSources:         templateSources,
 			ProvisionKeyPath:        provisionKeyPath,
 			SSHTimeout:              time.Duration(cfg.Provisioning.SSH.TimeoutSeconds) * time.Second,
@@ -351,6 +351,7 @@ func setupTasks(cfg *config.Config, secretsStore *secrets.Store) (*agentSystems,
 		queue:        queue,
 		machines:     machineStore,
 		provisioners: provisioners,
+		storage:      storage,
 		assets:       assetsStore,
 		artifactSvc:  artifactSvc,
 		reconciler:   reconciler,

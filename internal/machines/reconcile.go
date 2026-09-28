@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Makr91/hyperweaver-agent/internal/locations"
 	"github.com/Makr91/hyperweaver-agent/internal/logging"
 	"github.com/Makr91/hyperweaver-agent/internal/prereqs"
 	"github.com/Makr91/hyperweaver-agent/internal/tasks"
@@ -58,13 +59,13 @@ type Reconciler struct {
 	autoDiscovery bool
 	interval      time.Duration
 	hostname      string
-	// machinesDir + guestAgent drive the sweep's guest-info probe: every
+	// storage + guestAgent drive the sweep's guest-info probe: every
 	// RUNNING machine's QGA channel is asked for its live IPs and the answer
 	// is STORED on the row (configuration.guest_info) — the machine list the
 	// UI already polls carries the direct-connect gate, so no per-machine
 	// query storms (Mark's design ruling 2026-07-11).
-	machinesDir string
-	guestAgent  bool
+	storage    *locations.Set
+	guestAgent bool
 
 	mu      sync.Mutex
 	stopCh  chan struct{}
@@ -77,10 +78,10 @@ type Reconciler struct {
 const startupDiscoveryDelay = 5 * time.Second
 
 // NewReconciler builds the reconciler over the machine store; discover tasks
-// are created in taskStore. machinesDir anchors QGA pipe derivation for rows
+// are created in taskStore. storage anchors QGA pipe derivation for rows
 // without a working directory; guestAgent gates the sweep's guest-info probe.
 func NewReconciler(store *Store, taskStore *tasks.Store, autoDiscovery bool, interval time.Duration,
-	machinesDir string, guestAgent bool,
+	storage *locations.Set, guestAgent bool,
 ) *Reconciler {
 	hostname, err := os.Hostname()
 	if err != nil {
@@ -92,7 +93,7 @@ func NewReconciler(store *Store, taskStore *tasks.Store, autoDiscovery bool, int
 		autoDiscovery: autoDiscovery,
 		interval:      interval,
 		hostname:      hostname,
-		machinesDir:   machinesDir,
+		storage:       storage,
 		guestAgent:    guestAgent,
 	}
 }

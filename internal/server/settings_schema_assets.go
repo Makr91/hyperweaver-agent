@@ -6,8 +6,13 @@ var schemaTemplateSources = map[string]any{
 	"properties": map[string]any{
 		"local_storage_path": map[string]any{
 			"type":        "string",
-			"description": "Template storage root, <root>/<organization>/<box>/<version>/ (empty = <data dir>/templates)",
+			"description": "Template storage root, <root>/<organization>/<box>/<version>/ (empty = <data dir>/templates). This is the built-in templates storage path",
 			"default":     "",
+		},
+		"storage_paths": map[string]any{
+			"type":        "object",
+			"description": "Added templates storage paths, keyed by a short id (lower-case letters, digits, underscores): {display_name, path, enabled, default}. Downloaded and exported templates land in the path flagged default (the built-in path when none is flagged); a template keeps the path it was placed in. The /api/storage/paths API writes its entries here",
+			"default":     map[string]any{},
 		},
 		"sources": map[string]any{
 			"type":        "array",

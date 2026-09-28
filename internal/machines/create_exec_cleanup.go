@@ -19,11 +19,12 @@ import (
 // file, and createvm then refuses with "settings file already exists"
 // (runtime-proven 2026-07-06). Only acts when VirtualBox no longer knows
 // the machine.
-func (e *executors) clearStaleSettings(ctx context.Context, vboxExe, name string, out *tasks.OutputWriter) {
+func (e *executors) clearStaleSettings(ctx context.Context, vboxExe string, task *tasks.Task, out *tasks.OutputWriter) {
+	name := task.MachineName
 	if _, err := vbox.ShowVMInfo(ctx, vboxExe, name); !errors.Is(err, vbox.ErrNotFound) {
 		return
 	}
-	workdir := e.machineWorkdir(name)
+	workdir := e.machineWorkdir(ctx, task)
 	for _, file := range []string{name + ".vbox", name + ".vbox-prev"} {
 		path := filepath.Join(workdir, file)
 		if _, serr := os.Stat(path); serr != nil {
@@ -145,7 +146,7 @@ func (e *executors) cancelCreateStorage(task *tasks.Task, out *tasks.OutputWrite
 	if vboxExe == "" {
 		return
 	}
-	workdir := e.machineWorkdir(task.MachineName)
+	workdir := e.machineWorkdir(ctx, task)
 	candidates := []string{}
 	for _, ext := range []string{".vmdk", ".vdi", ".vhd"} {
 		candidates = append(candidates, filepath.Join(workdir, "boot"+ext))
@@ -236,5 +237,5 @@ func (e *executors) cancelCreateConfig(task *tasks.Task, out *tasks.OutputWriter
 		// A machine that never reached createvm has nothing to unregister.
 		out.Write("stderr", "Unregister after cancel: "+err.Error()+"\n")
 	}
-	e.clearStaleSettings(ctx, vboxExe, task.MachineName, out)
+	e.clearStaleSettings(ctx, vboxExe, task, out)
 }

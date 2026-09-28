@@ -50,9 +50,9 @@ type ProvisioningConfig struct {
 	// ProvisionersDir holds provisioner packages in SHI's on-disk format
 	// (<name>/provisioner-collection.yml with <version>/provisioner.yml
 	// trees beneath). Installer-bundled packages are extracted here on
-	// startup without ever overwriting existing versions. Empty selects
-	// provisioners under the data root.
-	ProvisionersDir string `yaml:"provisioners_dir" json:"provisioners_dir"`
+	// startup without ever overwriting existing versions.
+	ProvisionersDir   string                       `yaml:"provisioners_dir" json:"provisioners_dir"`
+	ProvisionersPaths map[string]StoragePathConfig `yaml:"provisioners_paths" json:"provisioners_paths"`
 	// DefaultSyncMethod is the sync method machines without an explicit
 	// spec.sync_method use (rsync | scp; SHI's global syncmethod preference).
 	// Platform rules still apply on top.
@@ -64,9 +64,9 @@ type ProvisioningConfig struct {
 	DefaultNetworkInterface string `yaml:"default_network_interface" json:"default_network_interface"`
 	// MachinesDir holds the per-machine working directories: the
 	// materialized provisioner copy, the rendered Hosts.yml, id-files,
-	// installers, ssls trees, and the machine's media. Empty selects
-	// machines under the data root.
-	MachinesDir string `yaml:"machines_dir" json:"machines_dir"`
+	// installers, ssls trees, and the machine's media.
+	MachinesDir   string                       `yaml:"machines_dir" json:"machines_dir"`
+	MachinesPaths map[string]StoragePathConfig `yaml:"machines_paths" json:"machines_paths"`
 	// PlaybookTimeoutSeconds bounds one ansible-playbook run in the guest.
 	PlaybookTimeoutSeconds int `yaml:"playbook_timeout_seconds" json:"playbook_timeout_seconds"`
 	// AnsibleInstallTimeoutSeconds bounds the in-guest ansible/collection

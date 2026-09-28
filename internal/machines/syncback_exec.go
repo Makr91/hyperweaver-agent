@@ -59,7 +59,7 @@ func (e *executors) syncbackFolder(ctx context.Context, task *tasks.Task, out *t
 
 	// The host destination is the push's SOURCE resolution reversed: a
 	// relative map lands under the machine's working directory.
-	workdir := e.machineWorkdir(task.MachineName)
+	workdir := e.machineWorkdir(ctx, task)
 	dest := folder.Map
 	if !strings.HasPrefix(dest, "/") && !strings.Contains(dest, ":") {
 		dest = filepath.Join(workdir,

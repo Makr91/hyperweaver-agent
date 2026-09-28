@@ -26,7 +26,8 @@ type TemplateSourcesConfig struct {
 	// LocalStoragePath is the template storage root
 	// (<root>/<org>/<box>/<version>/). Empty selects templates under the
 	// data root.
-	LocalStoragePath string `yaml:"local_storage_path" json:"local_storage_path"`
+	LocalStoragePath string                       `yaml:"local_storage_path" json:"local_storage_path"`
+	StoragePaths     map[string]StoragePathConfig `yaml:"storage_paths" json:"storage_paths"`
 	// Sources are the configured registries; the entry flagged default
 	// serves requests that name no source (names are display-only).
 	Sources []TemplateSourceConfig `yaml:"sources" json:"sources"`

@@ -250,13 +250,23 @@ var schemaProvisioning = map[string]any{
 	"properties": map[string]any{
 		"provisioners_dir": map[string]any{
 			"type":        "string",
-			"description": "Directory holding provisioner packages (SHI's on-disk format); installer-bundled packages are extracted here on startup without ever overwriting existing versions (empty = <data dir>/provisioners)",
+			"description": "Directory holding provisioner packages (SHI's on-disk format); installer-bundled packages are extracted here on startup without ever overwriting existing versions. This is the built-in provisioners storage path (empty = provisioners under the configuration folder on Windows, under the data folder elsewhere or when data.dir is set)",
 			"default":     "",
+		},
+		"provisioners_paths": map[string]any{
+			"type":        "object",
+			"description": "Added provisioners storage paths, keyed by a short id (lower-case letters, digits, underscores): {display_name, path, enabled, default}. Every enabled path is scanned; a family gains its new versions in the path it lives in, a new family lands in the path flagged default (the built-in path when none is flagged). The /api/storage/paths API writes its entries here",
+			"default":     map[string]any{},
 		},
 		"machines_dir": map[string]any{
 			"type":        "string",
-			"description": "Root of the per-machine working directories — the materialized provisioner copy, rendered Hosts.yml, id-files, installers, ssls trees, and the machine's media (empty = <data dir>/machines)",
+			"description": "Root of the per-machine working directories — the materialized provisioner copy, rendered Hosts.yml, id-files, installers, ssls trees, and the machine's media. This is the built-in machines storage path (empty = machines under the configuration folder on Windows, under the data folder elsewhere or when data.dir is set)",
 			"default":     "",
+		},
+		"machines_paths": map[string]any{
+			"type":        "object",
+			"description": "Added machines storage paths, keyed by a short id (lower-case letters, digits, underscores): {display_name, path, enabled, default}. A new machine is created in the path the create request names, else in the path flagged default (the built-in path when none is flagged); a machine keeps the path it was created in. The /api/storage/paths API writes its entries here",
+			"default":     map[string]any{},
 		},
 		"default_sync_method": map[string]any{
 			"type":        "string",

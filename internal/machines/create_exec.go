@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"path/filepath"
 
+	"github.com/Makr91/hyperweaver-agent/internal/locations"
 	"github.com/Makr91/hyperweaver-agent/internal/provisioner"
 	"github.com/Makr91/hyperweaver-agent/internal/tasks"
 )
@@ -56,6 +57,7 @@ type createExecutionOutput struct {
 // _execution_output.
 type createTaskMetadata struct {
 	Spec            *Spec                  `json:"spec"`
+	MachineHome     string                 `json:"machine_home,omitempty"`
 	ExecutionOutput *createExecutionOutput `json:"_execution_output,omitempty"`
 }
 
@@ -99,15 +101,56 @@ func (e *executors) dependencyOutput(ctx context.Context, task *tasks.Task) (*cr
 
 // recordOutput writes the child's _execution_output into its own metadata.
 func (e *executors) recordOutput(ctx context.Context, task *tasks.Task, spec *Spec, out *createExecutionOutput) error {
-	raw, err := json.Marshal(&createTaskMetadata{Spec: spec, ExecutionOutput: out})
+	raw, err := json.Marshal(&createTaskMetadata{
+		Spec:            spec,
+		MachineHome:     carriedHome(task),
+		ExecutionOutput: out,
+	})
 	if err != nil {
 		return err
 	}
 	return e.queue.Store().UpdateMetadata(ctx, task.ID, string(raw))
 }
 
-// machineWorkdir is the machine's working directory under the machines root
-// — the provisioning dataset analog, and where the VM's media live.
-func (e *executors) machineWorkdir(machineName string) string {
-	return filepath.Join(e.env.MachinesDir, provisioner.MachineDirName(machineName))
+func carriedHome(task *tasks.Task) string {
+	if task == nil || len(task.Metadata) == 0 {
+		return ""
+	}
+	var carrier struct {
+		MachineHome string `json:"machine_home"`
+	}
+	if err := json.Unmarshal(task.Metadata, &carrier); err != nil {
+		return ""
+	}
+	return carrier.MachineHome
+}
+
+func (e *executors) recordedHome(ctx context.Context, machineName string) string {
+	machine, err := e.store.Get(ctx, machineName)
+	if err != nil || machine.Home == nil {
+		return ""
+	}
+	return *machine.Home
+}
+
+func (e *executors) defaultHome(machineName string) string {
+	return filepath.Join(e.env.Locations.DefaultPath(locations.Machines),
+		provisioner.MachineDirName(machineName))
+}
+
+func (e *executors) machineHome(ctx context.Context, machineName string) string {
+	if home := e.recordedHome(ctx, machineName); home != "" {
+		return home
+	}
+	return e.defaultHome(machineName)
+}
+
+func (e *executors) machineWorkdir(ctx context.Context, task *tasks.Task) string {
+	if home := e.recordedHome(ctx, task.MachineName); home != "" {
+		return home
+	}
+	if home := carriedHome(task); home != "" {
+		return home
+	}
+	return e.defaultHome(task.MachineName)
 }

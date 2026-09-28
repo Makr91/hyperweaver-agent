@@ -88,7 +88,7 @@ func (e *executors) prepareDocument(ctx context.Context, task *tasks.Task, out *
 	if err != nil {
 		return err
 	}
-	workdir := e.machineWorkdir(task.MachineName)
+	workdir := e.machineWorkdir(ctx, task)
 	e.taskProgress(task, 50, "materializing_workdir")
 	out.Write("stdout", "Materializing working directory "+workdir+"\n")
 	if merr := provisioner.Materialize(&provisioner.MaterializeInput{

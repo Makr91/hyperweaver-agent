@@ -355,6 +355,10 @@ func (s *Server) registerRoutes(mux *http.ServeMux) error {
 	// /artifacts wire contract with the merged type vocabulary, plus the SHI
 	// extras (hcl-download, register). Literal segments win over {id} in
 	// ServeMux precedence.
+	mux.Handle("GET /api/storage/paths", requireKey(http.HandlerFunc(s.handleListLibraryPaths)))
+	mux.Handle("POST /api/storage/paths", requireKey(http.HandlerFunc(s.handleCreateLibraryPath)))
+	mux.Handle("PUT /api/storage/paths/{type}/{id}", requireKey(http.HandlerFunc(s.handleUpdateLibraryPath)))
+	mux.Handle("DELETE /api/storage/paths/{type}/{id}", requireKey(http.HandlerFunc(s.handleDeleteLibraryPath)))
 	mux.Handle("GET /api/artifacts/storage/paths", requireKey(s.assetsGate(s.handleListStoragePaths)))
 	mux.Handle("POST /api/artifacts/storage/paths", requireKey(s.assetsGate(s.handleCreateStoragePath)))
 	mux.Handle("PUT /api/artifacts/storage/paths/{id}", requireKey(s.assetsGate(s.handleUpdateStoragePath)))

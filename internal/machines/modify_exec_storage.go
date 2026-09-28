@@ -56,7 +56,7 @@ func (e *executors) modifyStorage(ctx context.Context, task *tasks.Task, vboxExe
 		if verr := ValidateAddDisks(addDisks); verr != nil {
 			return verr
 		}
-		disksDir := filepath.Join(e.machineWorkdir(machineName), "disks")
+		disksDir := filepath.Join(e.machineHome(ctx, machineName), "disks")
 		for i, entry := range addDisks {
 			disk := mapOr(entry)
 			prefix := fmt.Sprintf("add_disks[%d]", i+1)

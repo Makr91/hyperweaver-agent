@@ -17,7 +17,7 @@ import (
 // SAME create orchestration (the clone builds real infrastructure too).
 //
 //	@Summary		Clone a machine
-//	@Description	Minimum role: operator. Spec-carrying machines only. Clones are DATA-COMPLETE BY DEFAULT (Mark's ruling, sync 2026-07-18: a clone carries the same data, every disk, never blank). TWO disk semantics via source: "current" (DEFAULT) runs ONE machine_clone_current task — VBoxManage clonevm copies EVERY attached disk's data into the clone's own folder (those copies stamp "clone" — the clone's own media, destroyed by its delete; referenced ISOs stay shared and unstamped), the clone gets a fresh provisioning ssh port-forward and VRDE off, MACs reinitialize, and the row lands with the identity-stripped spec — the source must be stopped unless snapshot names a source snapshot to clone from (linked=true makes a differencing clone against it); "template" is the EXPLICIT OPT-IN rebuild: the spec copy feeds the SAME create orchestration as POST /api/machines — a fresh build from the original template, additional disks recreated per their typed declaration, no data copy (response shape identical to create, plus source_machine). settings.hostname is required (a clone must not reuse the source hostname); domain and everything else default from the source spec; overrides (memory, vcpus, …) merge into settings; consoleport and server_id never survive (prefix mode requires a fresh server_id in settings). Cloned networks lose mac/address/gateway/netmask/dns so source and clone can never collide; provisional entries clone as dhcp4 with NO address — the provisioning dhcpd allocates on first boot (the static clone-time allocator died; converged clone conformance, sync 2026-07-18). Resource validation runs first (400 Insufficient resources; storage is skipped for source=current — the footprint is the source's current usage, unknowable from the spec). UTM MACHINES: source=current copies the current state via utm export → import (the source must be STOPPED; fresh MAC + fresh ssh forward on the emulated interface) — snapshot/linked are VirtualBox mechanisms and answer 400 on utm; source=template rebuilds through the same create orchestration.
+//	@Description	Minimum role: operator. Spec-carrying machines only. Clones are DATA-COMPLETE BY DEFAULT (Mark's ruling, sync 2026-07-18: a clone carries the same data, every disk, never blank). TWO disk semantics via source: "current" (DEFAULT) runs ONE machine_clone_current task — VBoxManage clonevm copies EVERY attached disk's data into the clone's own folder (those copies stamp "clone" — the clone's own media, destroyed by its delete; referenced ISOs stay shared and unstamped), the clone gets a fresh provisioning ssh port-forward and VRDE off, MACs reinitialize, and the row lands with the identity-stripped spec — the source must be stopped unless snapshot names a source snapshot to clone from (linked=true makes a differencing clone against it); "template" is the EXPLICIT OPT-IN rebuild: the spec copy feeds the SAME create orchestration as POST /api/machines — a fresh build from the original template, additional disks recreated per their typed declaration, no data copy (response shape identical to create, plus source_machine). settings.hostname is required (a clone must not reuse the source hostname); domain and everything else default from the source spec; overrides (memory, vcpus, …) merge into settings; consoleport and server_id never survive (prefix mode requires a fresh server_id in settings). Cloned networks lose mac/address/gateway/netmask/dns so source and clone can never collide; provisional entries clone as dhcp4 with NO address — the provisioning dhcpd allocates on first boot (the static clone-time allocator died; converged clone conformance, sync 2026-07-18). Resource validation runs first (400 Insufficient resources; storage is skipped for source=current — the footprint is the source's current usage, unknowable from the spec). UTM MACHINES: source=current copies the current state via utm export → import (the source must be STOPPED; fresh MAC + fresh ssh forward on the emulated interface) — snapshot/linked are VirtualBox mechanisms and answer 400 on utm; source=template rebuilds through the same create orchestration. STORAGE PATH: the optional storage_path_id names the machines storage path (GET /api/storage/paths?type=machines) the clone's folder is created in; absent, the storage path marked default is used; an unknown or disabled id answers 400.
 //	@Tags			Machine Management
 //	@Accept			json
 //	@Produce		json
@@ -40,6 +40,7 @@ func (s *Server) handleCloneMachine(w http.ResponseWriter, r *http.Request) {
 	}
 	var body struct {
 		Name             string         `json:"name"`
+		StoragePathID    string         `json:"storage_path_id"`
 		Settings         map[string]any `json:"settings"`
 		Overrides        map[string]any `json:"overrides"`
 		StartAfterCreate bool           `json:"start_after_create"`
@@ -116,6 +117,21 @@ func (s *Server) handleCloneMachine(w http.ResponseWriter, r *http.Request) {
 		taskError(w, http.StatusInternalServerError, "Failed to clone machine")
 		return
 	}
+	location, locationProblem := s.machinesLocation(body.StoragePathID)
+	if locationProblem != "" {
+		taskError(w, http.StatusBadRequest, locationProblem)
+		return
+	}
+	taken, home, terr := s.workdirTaken(r.Context(), location.Path, name)
+	if terr != nil {
+		taskError(w, http.StatusInternalServerError, "Failed to clone machine")
+		return
+	}
+	if taken {
+		taskError(w, http.StatusConflict,
+			"Another machine already uses the working directory "+home+" — pick a name that sanitizes differently")
+		return
+	}
 
 	// source=current: one clonevm task copies today's disk state — no create
 	// orchestration (the disks come from the source VM, not the template).
@@ -128,12 +144,12 @@ func (s *Server) handleCloneMachine(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
-		if resourceErrors, _ := s.validateCreationResources(r.Context(),
+		if resourceErrors, _ := s.validateCreationResources(r.Context(), location.Path,
 			map[string]any{"settings": spec.Settings}); len(resourceErrors) > 0 {
 			insufficientResources(w, resourceErrors)
 			return
 		}
-		s.queueCloneCurrent(w, r, source, spec, name, body.Snapshot, body.Linked, body.StartAfterCreate)
+		s.queueCloneCurrent(w, r, source, spec, name, home, body.Snapshot, body.Linked, body.StartAfterCreate)
 		return
 	}
 
@@ -142,7 +158,7 @@ func (s *Server) handleCloneMachine(w http.ResponseWriter, r *http.Request) {
 		taskError(w, http.StatusBadRequest, "Template render failed: "+err.Error())
 		return
 	}
-	resourceErrors, resourceWarnings := s.validateCreationResources(r.Context(), document)
+	resourceErrors, resourceWarnings := s.validateCreationResources(r.Context(), location.Path, document)
 	if len(resourceErrors) > 0 {
 		insufficientResources(w, resourceErrors)
 		return
@@ -151,7 +167,7 @@ func (s *Server) handleCloneMachine(w http.ResponseWriter, r *http.Request) {
 	resourceWarnings = append(diskWarningRows(cloneDiskWarnings), resourceWarnings...)
 	createdBy := auth.FromContext(r.Context()).Name
 	parentID, subTasks, requiresDownload, _, err := s.queueCreateOrchestration(
-		r.Context(), name, spec, document, body.StartAfterCreate, createdBy, nil)
+		r.Context(), name, home, spec, document, body.StartAfterCreate, createdBy, nil)
 	if err != nil {
 		taskError(w, http.StatusBadRequest, err.Error())
 		return
@@ -179,17 +195,18 @@ func (s *Server) handleCloneMachine(w http.ResponseWriter, r *http.Request) {
 // executor fixes identity (fresh ssh forward, VRDE off) and lands the row
 // with the stripped spec.
 func (s *Server) queueCloneCurrent(w http.ResponseWriter, r *http.Request,
-	source *machines.Machine, spec *machines.Spec, name, snapshot string, linked, startAfter bool,
+	source *machines.Machine, spec *machines.Spec, name, home, snapshot string, linked, startAfter bool,
 ) {
 	if linked && snapshot == "" {
 		taskError(w, http.StatusBadRequest, "linked clones require a snapshot to link against")
 		return
 	}
 	raw, err := json.Marshal(map[string]any{
-		"source":   source.Name,
-		"spec":     spec,
-		"snapshot": snapshot,
-		"linked":   linked,
+		"source":       source.Name,
+		"spec":         spec,
+		"snapshot":     snapshot,
+		"linked":       linked,
+		"machine_home": home,
 	})
 	if err != nil {
 		taskError(w, http.StatusInternalServerError, "Failed to clone machine")

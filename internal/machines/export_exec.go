@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/Makr91/hyperweaver-agent/internal/locations"
 	"github.com/Makr91/hyperweaver-agent/internal/provisioner"
 	"github.com/Makr91/hyperweaver-agent/internal/safepath"
 	"github.com/Makr91/hyperweaver-agent/internal/tasks"
@@ -78,7 +79,7 @@ func (e *executors) buildMachineBox(ctx context.Context, task *tasks.Task,
 		return "", "", errors.New("machine is running — VirtualBox exports powered-off machines; stop it first")
 	}
 
-	exportsDir := filepath.Join(e.env.TemplatesDir, "exports")
+	exportsDir := filepath.Join(e.env.Locations.DefaultPath(locations.Templates), "exports")
 	if merr := os.MkdirAll(exportsDir, 0o750); merr != nil {
 		return "", "", merr
 	}

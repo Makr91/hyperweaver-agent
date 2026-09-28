@@ -153,6 +153,15 @@ func (c *Config) validate() error {
 			}
 		}
 	}
+	if err := validateStoragePaths("provisioning.machines_paths", c.Provisioning.MachinesPaths); err != nil {
+		return err
+	}
+	if err := validateStoragePaths("provisioning.provisioners_paths", c.Provisioning.ProvisionersPaths); err != nil {
+		return err
+	}
+	if err := validateStoragePaths("template_sources.storage_paths", c.TemplateSources.StoragePaths); err != nil {
+		return err
+	}
 	for i := range c.TemplateSources.Sources {
 		if c.TemplateSources.Sources[i].Name == "" || c.TemplateSources.Sources[i].URL == "" {
 			return fmt.Errorf("template_sources.sources[%d] needs both name and url", i)

@@ -37,7 +37,7 @@ func (e *executors) provisionPlaybook(ctx context.Context, task *tasks.Task, out
 	}
 	config := ParseConfiguration(machine)
 	e.fillLiveMACs(ctx, machine, config, out)
-	workdir := e.machineWorkdir(task.MachineName)
+	workdir := e.machineWorkdir(ctx, task)
 
 	installTimeout := e.env.AnsibleInstallTimeout
 	if installTimeout <= 0 {

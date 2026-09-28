@@ -128,12 +128,8 @@ func thresholdWarning(resource string, projectedPct, warning, critical float64, 
 }
 
 // validateStorage checks requested bytes against the machines root's volume.
-func (s *Server) validateStorage(ctx context.Context, requested int64, exclude string) (errs, warns []resourceIssue) {
+func (s *Server) validateStorage(ctx context.Context, root string, requested int64, exclude string) (errs, warns []resourceIssue) {
 	cfg := s.cfg.Machines.ResourceValidation.Storage
-	root, err := s.cfg.MachinesDir()
-	if err != nil {
-		return nil, nil
-	}
 	usage, err := disk.UsageWithContext(ctx, root)
 	if err != nil {
 		slog.Warn("resource validation: disk usage probe failed", "path", root, "error", err)
@@ -265,7 +261,7 @@ func (s *Server) validateCPU(ctx context.Context, requested int64, exclude strin
 
 // validateCreationResources runs the enabled validators against a creation
 // document (settings + disks) — the base's validateZoneCreationResources.
-func (s *Server) validateCreationResources(ctx context.Context, document map[string]any) (errs, warns []resourceIssue) {
+func (s *Server) validateCreationResources(ctx context.Context, root string, document map[string]any) (errs, warns []resourceIssue) {
 	rv := s.cfg.Machines.ResourceValidation
 	if !rv.Enabled {
 		return nil, nil
@@ -275,7 +271,7 @@ func (s *Server) validateCreationResources(ctx context.Context, document map[str
 
 	if rv.Storage.Enabled {
 		if requested := requestedStorageBytes(disks); requested > 0 {
-			e, w := s.validateStorage(ctx, requested, "")
+			e, w := s.validateStorage(ctx, root, requested, "")
 			errs, warns = append(errs, e...), append(warns, w...)
 		}
 	}
@@ -299,7 +295,7 @@ func (s *Server) validateCreationResources(ctx context.Context, document map[str
 // validateModificationResources checks only the fields a modify body changes
 // (add_disks → storage, ram → memory, vcpus → CPU), excluding the machine
 // itself from committed sums — validateZoneModificationResources.
-func (s *Server) validateModificationResources(ctx context.Context, body map[string]any, machineName string) (errs, warns []resourceIssue) {
+func (s *Server) validateModificationResources(ctx context.Context, root string, body map[string]any, machineName string) (errs, warns []resourceIssue) {
 	rv := s.cfg.Machines.ResourceValidation
 	if !rv.Enabled {
 		return nil, nil
@@ -307,7 +303,7 @@ func (s *Server) validateModificationResources(ctx context.Context, body map[str
 	if rv.Storage.Enabled {
 		if addDisks, ok := body["add_disks"].([]any); ok && len(addDisks) > 0 {
 			if requested := requestedStorageBytes(map[string]any{"additional_disks": addDisks}); requested > 0 {
-				e, w := s.validateStorage(ctx, requested, machineName)
+				e, w := s.validateStorage(ctx, root, requested, machineName)
 				errs, warns = append(errs, e...), append(warns, w...)
 			}
 		}

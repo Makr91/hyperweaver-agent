@@ -158,11 +158,7 @@ func diskWarningRows(warnings []string) []resourceIssue {
 
 // workdirTaken reports whether another machine row claims the working
 // directory the name sanitizes to.
-func (s *Server) workdirTaken(ctx context.Context, name string) (taken bool, home string, err error) {
-	machinesRoot, err := s.cfg.MachinesDir()
-	if err != nil {
-		return false, "", err
-	}
+func (s *Server) workdirTaken(ctx context.Context, machinesRoot, name string) (taken bool, home string, err error) {
 	home, err = safepath.Under(machinesRoot, provisioner.MachineDirName(name))
 	if err != nil {
 		return false, "", err

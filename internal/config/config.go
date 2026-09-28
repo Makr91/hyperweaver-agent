@@ -147,6 +147,8 @@ func Default() *Config {
 			},
 		},
 		Provisioning: ProvisioningConfig{
+			ProvisionersPaths:            map[string]StoragePathConfig{},
+			MachinesPaths:                map[string]StoragePathConfig{},
 			DefaultSyncMethod:            "rsync",
 			PlaybookTimeoutSeconds:       21600,
 			AnsibleInstallTimeoutSeconds: 300,
@@ -166,6 +168,7 @@ func Default() *Config {
 			},
 		},
 		TemplateSources: TemplateSourcesConfig{
+			StoragePaths: map[string]StoragePathConfig{},
 			// The seed carries the registry's REAL name (Mark's ask 2026-07-09
 			// — "Default Registry" was a placeholder the UI printed verbatim);
 			// the default flag, not the name, selects the default source.
@@ -249,6 +252,9 @@ func Default() *Config {
 // (%AppData%\hyperweaver-agent on Windows, ~/Library/Application
 // Support/hyperweaver-agent on macOS, XDG config dir on Linux).
 func Dir() (string, error) {
+	if dir := os.Getenv("CONFIG_DIR"); dir != "" {
+		return safepath.CleanAbs(dir)
+	}
 	base, err := os.UserConfigDir()
 	if err != nil {
 		return "", fmt.Errorf("resolve user config dir: %w", err)

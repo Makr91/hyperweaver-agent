@@ -215,11 +215,7 @@ func (e *executors) guestShutdown(ctx context.Context, machine *Machine, out *ta
 	if !e.env.GuestAgentEnabled {
 		return false
 	}
-	workdir := e.machineWorkdir(machine.Name)
-	if machine.Home != nil && *machine.Home != "" {
-		workdir = *machine.Home
-	}
-	pipe := qga.PipePath(workdir, machine.Name)
+	pipe := qga.PipePath(e.machineHome(ctx, machine.Name), machine.Name)
 	callCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	if _, err := qga.Do(callCtx, pipe, "guest-shutdown", map[string]any{"mode": "powerdown"}); err != nil &&

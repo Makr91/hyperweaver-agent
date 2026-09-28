@@ -56,7 +56,7 @@ func (e *executors) runShellScript(ctx context.Context, task *tasks.Task, out *t
 func (e *executors) runGuestScript(ctx context.Context, task *tasks.Task,
 	meta *provisionTaskMetadata, script string, out *tasks.OutputWriter,
 ) error {
-	workdir := e.machineWorkdir(task.MachineName)
+	workdir := e.machineWorkdir(ctx, task)
 	local := filepath.FromSlash(script)
 	if !filepath.IsAbs(local) {
 		local = filepath.Join(workdir,
@@ -155,11 +155,7 @@ func (e *executors) runHook(ctx context.Context, task *tasks.Task, out *tasks.Ou
 func (e *executors) runHostHookScript(ctx context.Context, task *tasks.Task,
 	script string, out *tasks.OutputWriter,
 ) error {
-	workdir := e.machineWorkdir(task.MachineName)
-	if machine, gerr := e.store.Get(ctx, task.MachineName); gerr == nil &&
-		machine.Home != nil && *machine.Home != "" {
-		workdir = *machine.Home
-	}
+	workdir := e.machineWorkdir(ctx, task)
 	local := filepath.FromSlash(script)
 	if !filepath.IsAbs(local) {
 		local = filepath.Join(workdir,

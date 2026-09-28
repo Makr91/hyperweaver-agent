@@ -59,10 +59,7 @@ func (e *executors) runRemotePlaybook(ctx context.Context, task *tasks.Task, out
 	}
 	config := ParseConfiguration(machine)
 	e.fillLiveMACs(ctx, machine, config, out)
-	workdir := e.machineWorkdir(task.MachineName)
-	if machine.Home != nil && *machine.Home != "" {
-		workdir = *machine.Home
-	}
+	workdir := e.machineWorkdir(ctx, task)
 
 	timeout := e.env.PlaybookTimeout
 	if timeout <= 0 {
@@ -256,7 +253,7 @@ func (e *executors) dockerCompose(ctx context.Context, task *tasks.Task, out *ta
 	if timeout <= 0 {
 		timeout = 21600 * time.Second
 	}
-	workdir := e.machineWorkdir(task.MachineName)
+	workdir := e.machineWorkdir(ctx, task)
 	quoted := "'" + strings.ReplaceAll(meta.ComposeFile, "'", `'\''`) + "'"
 
 	e.taskProgress(task, 20, "running_compose")

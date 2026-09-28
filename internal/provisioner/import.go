@@ -291,7 +291,7 @@ func (e *executors) importCollection(root string, out *tasks.OutputWriter) (stri
 		return "", fmt.Errorf("collection manifest carries an unusable name %q", name)
 	}
 
-	targetDir, err := safepath.Under(e.registry.Dir(), name)
+	targetDir, err := safepath.Under(e.registry.FamilyRoot(name), name)
 	if err != nil {
 		return "", err
 	}
@@ -363,7 +363,7 @@ func (e *executors) importVersion(root string, out *tasks.OutputWriter) (string,
 		return "", fmt.Errorf("provisioner manifest carries an unusable version %q", version)
 	}
 
-	familyDir, err := safepath.Under(e.registry.Dir(), name)
+	familyDir, err := safepath.Under(e.registry.FamilyRoot(name), name)
 	if err != nil {
 		return "", err
 	}
@@ -407,7 +407,7 @@ func (e *executors) recordSource(meta *ImportMetadata, name string, out *tasks.O
 	if meta.SourceType != SourceGit {
 		return nil
 	}
-	familyDir, err := safepath.Under(e.registry.Dir(), name)
+	familyDir, err := safepath.Under(e.registry.FamilyRoot(name), name)
 	if err != nil {
 		return err
 	}
