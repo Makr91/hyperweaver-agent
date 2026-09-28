@@ -2,6 +2,7 @@ package server
 
 import (
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"regexp"
 	"sort"
@@ -61,6 +62,35 @@ func (s *Server) handleMachineConfig(w http.ResponseWriter, r *http.Request) {
 		"configuration": configuration,
 		"nat_forwards":  parseNATForwards(flat),
 	})
+}
+
+func machineNATForwards(machine *machines.Machine, liveRaw map[string]string) []natForwardRule {
+	if liveRaw != nil {
+		return parseNATForwards(liveRaw)
+	}
+	flat := map[string]string{}
+	for key, value := range machines.ParseConfiguration(machine) {
+		if text, ok := value.(string); ok {
+			flat[key] = text
+		}
+	}
+	return parseNATForwards(flat)
+}
+
+func detailConfiguration(machine *machines.Machine, liveRaw map[string]string) json.RawMessage {
+	sections := machines.ParseRawConfiguration(machine)
+	forwards, err := json.Marshal(machineNATForwards(machine, liveRaw))
+	if err != nil {
+		slog.Error("serialize nat forwards", "machine", machine.Name, "error", err)
+		forwards = json.RawMessage("[]")
+	}
+	sections["nat_forwards"] = forwards
+	configuration, err := json.Marshal(sections)
+	if err != nil {
+		slog.Error("serialize machine configuration", "machine", machine.Name, "error", err)
+		return json.RawMessage("{}")
+	}
+	return configuration
 }
 
 // natForwardRule is one parsed NAT port-forward rule — GET

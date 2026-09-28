@@ -200,7 +200,7 @@ func (s *Server) handleGuestExec(w http.ResponseWriter, r *http.Request) {
 // handleGuestExecStatus serves GET /machines/{name}/guest/exec/{pid}.
 //
 //	@Summary		Poll a guest command
-//	@Description	Minimum role: viewer. guest-exec-status for a pid from POST /guest/exec: {exited, exitcode?, stdout?, stderr?} — output arrives once the process exits.
+//	@Description	Minimum role: viewer. guest-exec-status for a pid from POST /api/machines/{machineName}/guest/exec: {exited, exitcode?, stdout?, stderr?} — output arrives once the process exits.
 //	@Tags			Guest Agent
 //	@Produce		json
 //	@Param			machineName	path		string					true	"Machine name"

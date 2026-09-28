@@ -37,7 +37,7 @@ func decodeBody(r *http.Request, dst any) error {
 type bootstrapRequest struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
-	SetupToken  string `json:"setupToken"` // 64-character claim token from the agent host
+	SetupToken  string `json:"setup_token"` // 64-character claim token from the agent host
 }
 
 type bootstrapKeyResponse struct {
@@ -80,7 +80,7 @@ func (s *Server) handleBootstrapKey(w http.ResponseWriter, r *http.Request) {
 	if akCfg.BootstrapRequireClaimToken {
 		if !auth.VerifySetupToken(s.cfg.SetupTokenPath(), body.SetupToken) {
 			auth.WriteMsg(w, http.StatusForbidden,
-				"Invalid or missing setup token. Read it from the agent host (setup.token beside the config file, or the startup log) and send it as setupToken.")
+				"Invalid or missing setup token. Read it from the agent host (setup.token beside the config file, or the startup log) and send it as setup_token.")
 			return
 		}
 	}

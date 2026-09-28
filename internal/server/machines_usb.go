@@ -333,7 +333,7 @@ type usbFilterRemoveResponse struct {
 // /machines/{machineName}/usb/filters/{filterIndex}.
 //
 //	@Summary		Remove a USB capture filter
-//	@Description	Minimum role: operator. usbfilter remove by 0-based index (GET /usb/filters reports it).
+//	@Description	Minimum role: operator. usbfilter remove by 0-based index (GET /api/machines/{machineName}/usb/filters reports it).
 //	@Tags			Machine Management
 //	@Produce		json
 //	@Param			machineName	path	string	true	"Machine name"

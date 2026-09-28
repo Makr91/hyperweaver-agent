@@ -139,7 +139,7 @@ func (s *Server) handleListMachines(w http.ResponseWriter, r *http.Request) {
 // tasks.
 //
 //	@Summary		Machine details
-//	@Description	Minimum role: viewer. Live-checks VirtualBox (updating the registry on drift) and returns the record, its live configuration, pending tasks, and knob_current — the current values in PUT's own vocabulary (the Edit-surface prefill).
+//	@Description	Minimum role: viewer. Live-checks VirtualBox (updating the registry on drift) and returns the record, its live configuration, pending tasks, and knob_current — the current values in PUT's own vocabulary (the Edit-surface prefill). configuration carries nat_forwards, the NAT port-forward rules as the rows GET /api/machines/{machineName}/config answers ({name, protocol, host_ip, host_port, guest_ip, guest_port, adapter}), read from the live view and from the last reconciled copy when the hypervisor does not answer.
 //	@Tags			Machine Management
 //	@Produce		json
 //	@Param			machineName	path	string	true	"Machine name"
@@ -203,13 +203,6 @@ func (s *Server) handleMachineDetails(w http.ResponseWriter, r *http.Request) {
 		active = append(active, list...)
 	}
 
-	var configuration json.RawMessage
-	if fresh.Configuration != nil {
-		configuration = fresh.Configuration
-	} else {
-		configuration = json.RawMessage("{}")
-	}
-
 	// The post-provision welcome page (SHI's web address), read live from
 	// the working copy's results.yml/.vagrant/done.txt — null until the
 	// first successful provision writes it.
@@ -257,7 +250,7 @@ func (s *Server) handleMachineDetails(w http.ResponseWriter, r *http.Request) {
 
 	writeJSON(w, map[string]any{
 		"machine_info":       fresh,
-		"configuration":      configuration,
+		"configuration":      detailConfiguration(fresh, liveRaw),
 		"active_vnc_session": nil,
 		"pending_tasks":      active,
 		"system_status":      systemStatus,
