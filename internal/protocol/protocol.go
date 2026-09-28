@@ -29,9 +29,16 @@ import (
 	"github.com/Makr91/hyperweaver-agent/internal/safepath"
 )
 
-// Scheme is the agent's registered custom URL scheme (architecture item 5:
-// our own scheme, deliberately not SwitchBoard's swb://).
-const Scheme = "hwa"
+var schemes = []string{"hwa", "hyperweaver-agent", "com.startcloud.hyperweaver-agent"}
+
+func knownScheme(name string) bool {
+	for _, scheme := range schemes {
+		if strings.EqualFold(name, scheme) {
+			return true
+		}
+	}
+	return false
+}
 
 // ActionOpen is the only action in the vocabulary today: behave exactly like
 // the tray "Open" click (mint a one-time token, open the signed-in UI).
@@ -52,8 +59,11 @@ const forwardTimeout = 3 * time.Second
 // Windows (registry command "%1") and Linux (.desktop Exec %u).
 func URIFromArgs(args []string) (string, bool) {
 	for _, arg := range args {
-		if strings.HasPrefix(strings.ToLower(arg), Scheme+"://") {
-			return arg, true
+		lowered := strings.ToLower(arg)
+		for _, scheme := range schemes {
+			if strings.HasPrefix(lowered, scheme+"://") {
+				return arg, true
+			}
 		}
 	}
 	return "", false
@@ -66,7 +76,7 @@ func ParseAction(uri string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("invalid protocol URI: %w", err)
 	}
-	if !strings.EqualFold(parsed.Scheme, Scheme) {
+	if !knownScheme(parsed.Scheme) {
 		return "", fmt.Errorf("unsupported scheme %q", parsed.Scheme)
 	}
 	action := strings.ToLower(parsed.Host)

@@ -63,6 +63,14 @@ Root: HKA; Subkey: "Software\Classes\hwa"; ValueType: string; ValueName: ""; Val
 Root: HKA; Subkey: "Software\Classes\hwa"; ValueType: string; ValueName: "URL Protocol"; ValueData: ""
 Root: HKA; Subkey: "Software\Classes\hwa\DefaultIcon"; ValueType: string; ValueName: ""; ValueData: "{app}\{#AppExeName},0"
 Root: HKA; Subkey: "Software\Classes\hwa\shell\open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\{#AppExeName}"" ""%1"""
+Root: HKA; Subkey: "Software\Classes\hyperweaver-agent"; ValueType: string; ValueName: ""; ValueData: "URL:Hyperweaver Agent Protocol"; Flags: uninsdeletekey
+Root: HKA; Subkey: "Software\Classes\hyperweaver-agent"; ValueType: string; ValueName: "URL Protocol"; ValueData: ""
+Root: HKA; Subkey: "Software\Classes\hyperweaver-agent\DefaultIcon"; ValueType: string; ValueName: ""; ValueData: "{app}\{#AppExeName},0"
+Root: HKA; Subkey: "Software\Classes\hyperweaver-agent\shell\open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\{#AppExeName}"" ""%1"""
+Root: HKA; Subkey: "Software\Classes\com.startcloud.hyperweaver-agent"; ValueType: string; ValueName: ""; ValueData: "URL:Hyperweaver Agent Protocol"; Flags: uninsdeletekey
+Root: HKA; Subkey: "Software\Classes\com.startcloud.hyperweaver-agent"; ValueType: string; ValueName: "URL Protocol"; ValueData: ""
+Root: HKA; Subkey: "Software\Classes\com.startcloud.hyperweaver-agent\DefaultIcon"; ValueType: string; ValueName: ""; ValueData: "{app}\{#AppExeName},0"
+Root: HKA; Subkey: "Software\Classes\com.startcloud.hyperweaver-agent\shell\open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\{#AppExeName}"" ""%1"""
 
 [Icons]
 Name: "{group}\{#AppName}"; Filename: "{app}\{#AppExeName}"

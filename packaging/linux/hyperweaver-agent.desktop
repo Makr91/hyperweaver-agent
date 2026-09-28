@@ -8,4 +8,4 @@ Terminal=false
 Categories=System;Utility;
 Keywords=hyperweaver;virtualbox;vagrant;vm;
 StartupNotify=false
-MimeType=x-scheme-handler/hwa;
+MimeType=x-scheme-handler/hwa;x-scheme-handler/hyperweaver-agent;x-scheme-handler/com.startcloud.hyperweaver-agent;

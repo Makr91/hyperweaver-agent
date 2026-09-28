@@ -34,6 +34,8 @@
 			<key>CFBundleURLSchemes</key>
 			<array>
 				<string>hwa</string>
+				<string>hyperweaver-agent</string>
+				<string>com.startcloud.hyperweaver-agent</string>
 			</array>
 		</dict>
 	</array>
