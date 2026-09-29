@@ -15,6 +15,7 @@ import (
 	"github.com/Makr91/hyperweaver-agent/internal/locations"
 	"github.com/Makr91/hyperweaver-agent/internal/machines"
 	"github.com/Makr91/hyperweaver-agent/internal/monitoring"
+	"github.com/Makr91/hyperweaver-agent/internal/oidc"
 	"github.com/Makr91/hyperweaver-agent/internal/prefs"
 	"github.com/Makr91/hyperweaver-agent/internal/provisioner"
 	"github.com/Makr91/hyperweaver-agent/internal/secrets"
@@ -26,7 +27,7 @@ type Server struct {
 	cfg            *config.Config
 	keys           *keys.Store
 	trayTokens     *auth.TrayTokens
-	oidcMgr        *oidcManager
+	oidcMgr        *oidc.Manager
 	oidcStarts     *startLimiter
 	tasks          *tasks.Queue
 	machines       *machines.Store
@@ -101,9 +102,9 @@ func New(cfg *config.Config, keyStore *keys.Store, trayTokens *auth.TrayTokens, 
 		openUI:         openUI,
 	}
 
-	s.oidcMgr = newOIDCManager(cfg, keyStore)
+	s.oidcMgr = oidc.New(cfg, keyStore)
 	s.oidcStarts = newStartLimiter()
-	machines.SetOIDCTokenSource(s.oidcMgr.bearerToken)
+	machines.SetOIDCTokenSource(s.oidcMgr.BearerToken)
 	taskQueue.Store().Notify = s.publishTask
 	machineStore.Notify = s.publishStats
 	monitor.SetOnCollected(s.publishSamples)

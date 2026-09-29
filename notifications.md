@@ -86,25 +86,6 @@ against.
 - `G:\Projects\hyperweaver-ui\notifications.md`: the UI side of the same
   rule and the feature-first tree
 
-## 6. Stale documentation
-
-Why: the README roadmap hides shipped work and advertises Vagrant
-orchestration that never runs, the wrong Go version and the incomplete
-sample config fail a first build or a first boot, and the packaging README
-stages a package missing the PKI, man pages and seeds the workflow ships.
-
-| File:line | What it says | What is true | Required change |
-| --- | --- | --- | --- |
-| `README.md:20-22` | Roadmap: provisioning engine, API-key auth with tray handoff, VNC over WebSocket, BoxVault integration, OIDC federation | all shipped: `internal/provisioner/generate.go:138-163`, `server_routes.go:299-301,339-353`; `internal/auth/middleware.go:128-182`, `internal/auth/traytoken.go:36-83`, `internal/server/trayclaim.go:63-110`; `internal/server/vnc.go:199-288`, `server_routes.go:263-265`; `internal/server/templates_remote.go:240-334`, `config.go:172-177`; `internal/server/oidc_login.go:93-139`, `oidc_silent.go:131-190`, `server_routes.go:26-29` | rewrite the section as Current features, or delete it |
-| `README.md:22`, `README.md:115` | `vagrant`/`VBoxManage` orchestration; the agent manages VMs "via Vagrant" | `main.go:26` and `internal/machines/create_exec.go:14-20`: native VBoxManage orchestration, vagrant is never executed, vagrant projects are discovered read-only | say VBoxManage; remove the Vagrant claims |
-| `README.md:75`, `CONTRIBUTING.md:32` | Requires Go 1.24+ | `go.mod:3` is `go 1.25.0` | state the version `go.mod` states, and keep them equal |
-| `README.md:51-69` | the sample `config.yaml` | `internal/config/defaults.go:14-471` carries `https_port`, `ssl`, `cors`, `api_keys`, `oidc`, `logging.compression`, `logging.categories` and every later section | replace the sample with the shape `defaults.go` writes, or point at it |
-| `README.md:15` | tray = app name + version, Open, Quit | `internal/tray/tray.go:76-83` adds a Troubleshooting submenu (log, config folder, data folder, restart) | list the submenu |
-| `README.md:75-80`, `internal/tray/assets/README.md:4-10` | copy `icon.ico` and `icon.png` from hyperweaver-ui before building | both files are committed and embedded (`internal/tray/icon.go:17-21`; `.gitignore` excludes neither) | drop the copy step from README; keep the assets README as the re-copy instruction only |
-| `packaging/DEBIAN/README.md:11-15,36-42` | installed file list and the manual stage tree | `.github/workflows/build-packages.yml:449-477` also installs `/etc/hyperweaver-agent/ssl/{root-ca.crt,ca.crt,ca.key}`, the man5 and man8 pages and `/usr/share/hyperweaver-agent/provisioners-seed`, and needs the PKI fetch of `:402-435` first | list every installed file; add the PKI and seed steps |
-| `packaging/DEBIAN/README.md:31` | the build command | `build-packages.yml:440-442` also passes `-X github.com/Makr91/hyperweaver-agent/internal/version.Version=` | add the ldflag |
-| `packaging/DEBIAN/man/hyperweaver-agent.yaml.5:669-688` | "the packaged default" example | `packaging/config/production-config.yaml:7-427` carries `https_port`, `ssl`, `cors`, `api_keys` and every other section | replace the example with the packaged file's shape |
-
 ## 7. Code gaps against the contracts
 
 Why: `GET /settings` hands the registry token to any admin session in the
@@ -127,16 +108,11 @@ Each row: what the code does → required change → deciding source.
 
 ## 8. Packaging and workflows
 
-Why: on a minimal Debian without `adduser` or `ca-certificates` the
-`postinst` fails and the package is left unconfigured, two start-at-login
-mechanisms launch two agents or leave a stale shortcut after the setting is
-turned off, and a workflow that grows a hand-written smoke script diverges
-from every sibling repository the moment the testing contract lands.
+Why: a workflow that grows a hand-written smoke script diverges from every
+sibling repository the moment the testing contract lands.
 
 | File:line | What is | Required change | Deciding source |
 | --- | --- | --- | --- |
-| `.github/workflows/build-packages.yml:479-491`; `packaging/DEBIAN/README.md:44-56` | the control block carries no `Depends` | `Depends: adduser, ca-certificates` for `postinst:6` (`adduser`) and `postinst:34` (`update-ca-certificates`) | `packaging/DEBIAN/postinst:5-9,30-35` |
-| `packaging/windows/hyperweaver-agent.iss:39,69`; `main.go:216`; `internal/config/config_agent.go:19-24` | two start-at-login mechanisms: the installer's `{userstartup}` shortcut task and the agent's own `startup.start_at_login` convergence | one mechanism: the agent's `startup.start_at_login` owns the registration; the installer task is removed or seeds the configuration value instead of a shortcut | `internal/loginitem/loginitem.go`; `config_agent.go:19-24` |
 | `.github/workflows/ci.yml:18-74`; `build-packages.yml:1-554` | the workflows carry lint, build, vet, govulncheck, CodeQL and the packaging steps, and no hand-written smoke script | keep it so: a check that must survive becomes a proper tool in a reusable workflow, never an ad-hoc script; when the Universal Testing Contract is written the browser test tool joins `ci.yml` as a normal step, the same shape as every repository of this class | `priorities.yaml:71-74,276-281`; `universal-identity.md:309-318,2030-2033`; `UI-GROWTH-GUIDE.md:62` |
 | `README.md:127`; `LICENSE.md`; `versioninfo.json:26`; `packaging/macos/Info.plist:43` | GPL-3.0 stated in every place this repository names a license | nothing here until the estate picks one license; when it does, every place above changes together | `priorities.yaml:293-300` |
 
@@ -147,13 +123,11 @@ release, an installer and a module path to three different owners.
 
 | # | Code file:line | What is | Required change |
 | --- | --- | --- | --- |
-| 1 | `internal/server/oidc_flow.go:199,361-362` | every OIDC identity is `admin` | keep for the bound single-user desktop model; any multi-user use maps the role from claims |
-| 3 | `internal/server/oidc_flow.go:1`, `oidc_jwt.go:1`, `oidc_silent.go:1`, `oidc_provider.go:1`, `oidc_state.go:1`, `oidc_refresh.go:1`, `oidc_login.go:1` | the OIDC files live in `package server` with no dependency on it | move them to `internal/oidc/` |
-| 4 | `internal/server/oidc_flow.go:45-76,117-124,171-200,202-238`; `server.go:85` | one `oidcManager` is the resource-server validator, the OAuth client (device, silent, refresh) and the outbound token source | split the three roles when next touched |
-| 5 | `go.mod:1`; `.github/workflows/build-packages.yml:47,64,92`; `.golangci.yml:70`; `packaging/macos/Info.plist:10,43`; `packaging/windows/hyperweaver-agent.iss:11-12`; `README.md:16,26,89` | three namespaces: the `Makr91` module path and release URLs, the `MarkProminic` UI artifact, the `STARTcloud` seeds, PKI, publisher and bundle id | consolidate under one namespace in a quiet window; import-path churn |
+| 1 | `internal/oidc/manager.go:284,472` | every OIDC identity is `admin` | keep for the bound single-user desktop model; any multi-user use maps the role from claims |
+| 4 | `internal/oidc/manager.go:57-93,150-158,181-203,239-285`; `internal/server/server.go:30` | one `oidc.Manager` is the resource-server validator, the OAuth client (device, silent, refresh) and the outbound token source | split the three roles when next touched: `binding`, `provider`, `validator`, `tokenSource`, `client` inside `internal/oidc`, the exported surface unchanged |
+| 5 | `go.mod:1`; `.github/workflows/build-packages.yml:47,64,92,317,487,492`; `.golangci.yml:70`; `packaging/macos/Info.plist:10,45`; `packaging/windows/hyperweaver-agent.iss:11-12`; `README.md:16,26,89`; `internal/server/status.go:25,250` | three namespaces: the `Makr91` module path and release URLs, the `MarkProminic` UI artifact, the `STARTcloud` seeds, PKI, publisher and bundle id | consolidate under one namespace in a quiet window; import-path churn |
 | 6 | `.github/workflows/build-packages.yml:40-116,201-262,374-435` | the UI bake, seed and PKI steps are repeated across the three OS jobs | a composite action, or the duplication kept knowingly |
 | 7 | `.golangci.yml:26-35,47-54` | `gosec` excludes G204 file-wide; `forbidigo` bans `fmt.Print*` | keep both scoped and intentional |
-| 8 | `README.md:75`; `CONTRIBUTING.md:32`; `go.mod:3` | Go 1.24+ in the docs, `go 1.25.0` in `go.mod` | the docs state the `go.mod` version |
 
 ## 11. What the shared UI reads from `GET /api/status` and the host's own row
 
@@ -222,7 +196,7 @@ Shell tokens are read from the status payload; host tokens from the host's own r
 | `machine-create` | New machine and the create wizard, Clone, the provisioning editor and Hosts.yml | `utils/machineCreate.js:112`; `utils/machineTools.js:107`; `utils/provisioning.js:77` | yes | `universal-navbar.md:1562` |
 | `machine-modify` | the Settings page and tab, the retention policy, a topology rewire | `machinePages.js:36`; `components/MachineSettingsView.jsx:34`; `utils/machineTools.js:102`; `components/NetworkTopology/TopologyPanel.jsx:471` | yes | `universal-navbar.md:1562` |
 | `machine-snapshots` | the Snapshots page and tab, the Snapshot row, the clone's snapshot picker | `machinePages.js:44`; `hooks/useMachineSnapshots.js:44`; `utils/machineTools.js:60,93,237` | yes | `universal-navbar.md:1562` |
-| `machine-screenshot` | the Screen card and the console's frame of a running machine | `components/MachineScreenshotCard.jsx:87`; `components/InactiveConsoleDisplay.jsx:149`; `components/VncConsoleDisplay.jsx:67` | yes | `universal-navbar.md:1561` |
+| `machine-screenshot` | the console's frame of a running machine while no console is live | `components/InactiveConsoleDisplay.jsx:149`; `components/VncConsoleDisplay.jsx:67` | yes | `universal-navbar.md:1561` |
 | `machine-suspend` | Suspend, and Resume of a paused machine | `utils/capabilities.js:55,83` | yes | `universal-navbar.md:1559` |
 | `machine-resume-suspended` | Resume of a machine whose row reads `suspended` | `utils/capabilities.js:57` | no | `universal-navbar.md:1559,2155-2160` |
 | `host-power` | Restart host and Power off host, the tree's host rows, the Runlevel section | `components/HostControls.jsx:74`; `hooks/useTreeMenu.js:180`; `utils/manage.js:245` | while `host_power.enabled` | `universal-navbar.md:1559,1564` |
@@ -365,6 +339,6 @@ has no config routes (`config: []`, contract decision 31).
 | restart keys | the flagged leaves of the five schemas, each with `restartReason`; the restart spawns the agent's own successor over the handoff channel, systemd's `Restart=always` on a headless install | `internal/server/settings.go:154-187`; `internal/server/trayclaim.go` (`POST /api/protocol/handoff`) |
 | key case | `snake_case` | |
 | public subsets | `GET /api/config/ticket` | `internal/server/server_routes.go` |
-| `last_modified_by` | the email the OIDC login minted the key with when the key has one, else the key's name, which for a tray key is the local OS account | `internal/server/settings.go:26-35`; `internal/server/oidc_state.go:66-71` |
+| `last_modified_by` | the email the OIDC login minted the key with when the key has one, else the key's name, which for a tray key is the local OS account | `internal/server/settings.go:26-35`; `internal/oidc/state.go:65-71` |
 | backups | the contract's one `<name>.config.yaml.bak` on every save, and beside it the timestamped history under `backups/` with restore, an extension Mark ruled stays and is to grow into the other backends | `internal/configengine/save.go:40-52`; `internal/config/backups.go` |
 | exit timing | the restart handler answers 202 and exits at once; the successor's spawn and the listener shutdown drain the answer, so no wait on the response's end is needed (BoxVault exits on `finish`, the authorization server after 500 ms) | `internal/configengine/routes.go:167-171`; `internal/server/settings.go:175-186` |

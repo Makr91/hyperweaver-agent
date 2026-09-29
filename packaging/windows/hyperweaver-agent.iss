@@ -35,9 +35,6 @@ ArchitecturesInstallIn64BitMode=x64compatible
 CloseApplications=yes
 WizardStyle=modern
 
-[Tasks]
-Name: "startupicon"; Description: "Start {#AppName} when Windows starts"; GroupDescription: "Startup:"
-
 [Files]
 Source: "..\..\bin\{#AppExeName}"; DestDir: "{app}"; Flags: ignoreversion
 ; STARTcloud PKI seed (Mark's shape-A ruling, sync 2026-07-17): root-ca.crt
@@ -74,7 +71,6 @@ Root: HKA; Subkey: "Software\Classes\com.startcloud.hyperweaver-agent\shell\open
 
 [Icons]
 Name: "{group}\{#AppName}"; Filename: "{app}\{#AppExeName}"
-Name: "{userstartup}\{#AppName}"; Filename: "{app}\{#AppExeName}"; Tasks: startupicon
 
 [Run]
 ; Plant the STARTcloud PKI machine-wide at the ONE elevated moment (Mark's

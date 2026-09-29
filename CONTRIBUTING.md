@@ -29,12 +29,11 @@ We appreciate all pull requests! To ensure smooth collaboration:
 
 ### Development Setup
 
-1. Install Go 1.24 or newer
+1. Install Go 1.25.0 (the `go` line of `go.mod`)
 2. Clone your fork of the repository
-3. Copy the tray icon assets from the UI project (see README "Building from source")
-4. Fetch dependencies: `go mod tidy`
-5. Build and run: `go build -o hyperweaver-agent . && ./hyperweaver-agent`
-6. The web UI is served at `http://127.0.0.1:9420/` (placeholder page unless a UI artifact is unpacked into `internal/webui/dist/`)
+3. Fetch dependencies: `go mod tidy`
+4. Build and run: `go build -o hyperweaver-agent . && ./hyperweaver-agent`
+5. The web UI is served at `http://127.0.0.1:9420/` (placeholder page unless a UI artifact is unpacked into `internal/webui/dist/`)
 
 Platform notes:
 

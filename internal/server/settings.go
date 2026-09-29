@@ -28,7 +28,7 @@ func (s *Server) mountConfigRoutes(mux *http.ServeMux, requireKey func(http.Hand
 			if identity == nil {
 				return ""
 			}
-			if minted, ok := s.oidcMgr.identityForKey(identity.ID); ok && minted.Email != "" {
+			if minted, ok := s.oidcMgr.IdentityForKey(identity.ID); ok && minted.Email != "" {
 				return minted.Email
 			}
 			return identity.Name

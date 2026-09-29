@@ -1,4 +1,4 @@
-package server
+package oidc
 
 import (
 	"context"
@@ -11,9 +11,9 @@ import (
 	"time"
 )
 
-var oidcHTTPClient = &http.Client{Timeout: 15 * time.Second}
+var httpClient = &http.Client{Timeout: 15 * time.Second}
 
-type oidcProviderEndpoints struct {
+type providerEndpoints struct {
 	Issuer              string `json:"issuer"`
 	Authorization       string `json:"authorization_endpoint"`
 	DeviceAuthorization string `json:"device_authorization_endpoint"`
@@ -21,13 +21,13 @@ type oidcProviderEndpoints struct {
 	JWKSURI             string `json:"jwks_uri"`
 }
 
-func oidcDiscover(ctx context.Context, issuer string) (*oidcProviderEndpoints, error) {
+func discover(ctx context.Context, issuer string) (*providerEndpoints, error) {
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet,
 		strings.TrimRight(issuer, "/")+"/.well-known/openid-configuration", http.NoBody)
 	if err != nil {
 		return nil, err
 	}
-	response, err := oidcHTTPClient.Do(request)
+	response, err := httpClient.Do(request)
 	if err != nil {
 		return nil, err
 	}
@@ -37,7 +37,7 @@ func oidcDiscover(ctx context.Context, issuer string) (*oidcProviderEndpoints, e
 	if response.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("discovery answered HTTP %d", response.StatusCode)
 	}
-	endpoints := &oidcProviderEndpoints{}
+	endpoints := &providerEndpoints{}
 	if derr := json.NewDecoder(io.LimitReader(response.Body, 1<<20)).Decode(endpoints); derr != nil {
 		return nil, fmt.Errorf("discovery document unreadable: %w", derr)
 	}
@@ -50,7 +50,8 @@ func oidcDiscover(ctx context.Context, issuer string) (*oidcProviderEndpoints, e
 	return endpoints, nil
 }
 
-type oidcDeviceAuthorization struct {
+// DeviceAuthorization is the issuer's answer to a device authorization request.
+type DeviceAuthorization struct {
 	DeviceCode              string `json:"device_code"`
 	UserCode                string `json:"user_code"`
 	VerificationURI         string `json:"verification_uri"`
@@ -59,19 +60,19 @@ type oidcDeviceAuthorization struct {
 	Interval                int    `json:"interval"`
 }
 
-func oidcStartDeviceAuthorization(ctx context.Context, endpoints *oidcProviderEndpoints, clientID, scope string) (*oidcDeviceAuthorization, error) {
+func startDeviceAuthorization(ctx context.Context, endpoints *providerEndpoints, clientID, scope string) (*DeviceAuthorization, error) {
 	form := url.Values{
 		"client_id": {clientID},
 		"scope":     {scope},
 	}
-	body, status, err := oidcPostForm(ctx, endpoints.DeviceAuthorization, form)
+	body, status, err := postForm(ctx, endpoints.DeviceAuthorization, form)
 	if err != nil {
 		return nil, err
 	}
 	if status != http.StatusOK {
 		return nil, fmt.Errorf("device authorization answered HTTP %d: %s", status, strings.TrimSpace(string(body)))
 	}
-	authorization := &oidcDeviceAuthorization{}
+	authorization := &DeviceAuthorization{}
 	if uerr := json.Unmarshal(body, authorization); uerr != nil {
 		return nil, fmt.Errorf("device authorization endpoint %s answered a non-JSON body: %w", endpoints.DeviceAuthorization, uerr)
 	}
@@ -87,7 +88,7 @@ func oidcStartDeviceAuthorization(ctx context.Context, endpoints *oidcProviderEn
 	return authorization, nil
 }
 
-type oidcTokenAnswer struct {
+type tokenAnswer struct {
 	AccessToken  string `json:"access_token"`
 	RefreshToken string `json:"refresh_token"`
 	IDToken      string `json:"id_token"`
@@ -95,25 +96,25 @@ type oidcTokenAnswer struct {
 	Error        string `json:"error"`
 }
 
-func oidcPollToken(ctx context.Context, endpoints *oidcProviderEndpoints, clientID, deviceCode string) (*oidcTokenAnswer, error) {
+func pollToken(ctx context.Context, endpoints *providerEndpoints, clientID, deviceCode string) (*tokenAnswer, error) {
 	form := url.Values{
 		"grant_type":  {"urn:ietf:params:oauth:grant-type:device_code"},
 		"device_code": {deviceCode},
 		"client_id":   {clientID},
 	}
-	return oidcTokenCall(ctx, endpoints.Token, form)
+	return tokenCall(ctx, endpoints.Token, form)
 }
 
-func oidcRefreshTokens(ctx context.Context, endpoints *oidcProviderEndpoints, clientID, refreshToken string) (*oidcTokenAnswer, error) {
+func refreshTokens(ctx context.Context, endpoints *providerEndpoints, clientID, refreshToken string) (*tokenAnswer, error) {
 	form := url.Values{
 		"grant_type":    {"refresh_token"},
 		"refresh_token": {refreshToken},
 		"client_id":     {clientID},
 	}
-	return oidcTokenCall(ctx, endpoints.Token, form)
+	return tokenCall(ctx, endpoints.Token, form)
 }
 
-func oidcExchangeCode(ctx context.Context, endpoints *oidcProviderEndpoints, clientID, code, redirectURI, verifier string) (*oidcTokenAnswer, error) {
+func exchangeCode(ctx context.Context, endpoints *providerEndpoints, clientID, code, redirectURI, verifier string) (*tokenAnswer, error) {
 	form := url.Values{
 		"grant_type":    {"authorization_code"},
 		"code":          {code},
@@ -121,29 +122,29 @@ func oidcExchangeCode(ctx context.Context, endpoints *oidcProviderEndpoints, cli
 		"client_id":     {clientID},
 		"code_verifier": {verifier},
 	}
-	return oidcTokenCall(ctx, endpoints.Token, form)
+	return tokenCall(ctx, endpoints.Token, form)
 }
 
-func oidcTokenCall(ctx context.Context, endpoint string, form url.Values) (*oidcTokenAnswer, error) {
-	body, status, err := oidcPostForm(ctx, endpoint, form)
+func tokenCall(ctx context.Context, endpoint string, form url.Values) (*tokenAnswer, error) {
+	body, status, err := postForm(ctx, endpoint, form)
 	if err != nil {
 		return nil, err
 	}
-	answer := &oidcTokenAnswer{}
+	answer := &tokenAnswer{}
 	if uerr := json.Unmarshal(body, answer); uerr != nil {
 		return nil, fmt.Errorf("token endpoint answered HTTP %d with an unreadable body", status)
 	}
 	return answer, nil
 }
 
-func oidcPostForm(ctx context.Context, endpoint string, form url.Values) (body []byte, status int, err error) {
+func postForm(ctx context.Context, endpoint string, form url.Values) (body []byte, status int, err error) {
 	request, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint,
 		strings.NewReader(form.Encode()))
 	if err != nil {
 		return nil, 0, err
 	}
 	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	response, err := oidcHTTPClient.Do(request)
+	response, err := httpClient.Do(request)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -157,23 +158,23 @@ func oidcPostForm(ctx context.Context, endpoint string, form url.Values) (body [
 	return body, response.StatusCode, nil
 }
 
-type oidcJWKSDocument struct {
-	Keys []oidcJWKSKey `json:"keys"`
+type jwksDocument struct {
+	Keys []jwksKey `json:"keys"`
 }
 
-type oidcJWKSKey struct {
+type jwksKey struct {
 	Kty string `json:"kty"`
 	Kid string `json:"kid"`
 	N   string `json:"n"`
 	E   string `json:"e"`
 }
 
-func oidcFetchJWKS(ctx context.Context, uri string) (*oidcJWKSDocument, error) {
+func fetchJWKS(ctx context.Context, uri string) (*jwksDocument, error) {
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, uri, http.NoBody)
 	if err != nil {
 		return nil, err
 	}
-	response, err := oidcHTTPClient.Do(request)
+	response, err := httpClient.Do(request)
 	if err != nil {
 		return nil, err
 	}
@@ -183,7 +184,7 @@ func oidcFetchJWKS(ctx context.Context, uri string) (*oidcJWKSDocument, error) {
 	if response.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("jwks fetch answered HTTP %d", response.StatusCode)
 	}
-	document := &oidcJWKSDocument{}
+	document := &jwksDocument{}
 	if derr := json.NewDecoder(io.LimitReader(response.Body, 1<<20)).Decode(document); derr != nil {
 		return nil, fmt.Errorf("jwks document unreadable: %w", derr)
 	}

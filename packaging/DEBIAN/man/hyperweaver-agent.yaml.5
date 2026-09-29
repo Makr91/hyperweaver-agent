@@ -669,26 +669,41 @@ and
 package registry
 .Pq Cm provisioning.provisioners_dir .
 .Sh EXAMPLES
-The packaged default:
+The packaged default: five files under
+.Pa /etc/hyperweaver-agent ,
+seeded by the package's postinst from
+.Pa /usr/share/hyperweaver-agent/config/ .
+.Pa app.config.yaml ,
+.Pa auth.config.yaml ,
+.Pa db.config.yaml
+and
+.Pa machines.config.yaml
+each contain only:
 .Bd -literal -offset indent
-server:
-  bind_address: 127.0.0.1
-  port: 9420
-
-ui:
-  enabled: true
-  path: ''
-
-browser:
-  path: ''
-
-logging:
-  level: info
-  console: true
-  file: /var/log/hyperweaver-agent/agent.log
-  max_size_mb: 20
-  max_backups: 5
+schemaVersion: 1
 .Ed
+.Pp
+.Pa storage.config.yaml
+contains:
+.Bd -literal -offset indent
+schemaVersion: 1
+template_sources:
+  sources:
+    startcloud_boxvault:
+      display_name: STARTcloud BoxVault
+      url: https://boxvault.startcloud.com
+      enabled: true
+      default: true
+catalog_sources:
+  sources:
+    startcloud_catalog:
+      display_name: STARTcloud Provisioner Catalog
+      url: https://provisioner-catalog.startcloud.com/catalog.json
+      enabled: true
+      default: true
+.Ed
+.Pp
+Every key absent from a file takes the default its schema declares.
 .Sh DIAGNOSTICS
 Configuration errors prevent the agent from starting and are reported on
 standard error and in the journal:

@@ -11,6 +11,7 @@ import (
 const (
 	oidcStartWindow   = time.Minute
 	oidcStartsPerSlot = 6
+	oidcLoginMessage  = "OIDC login successful"
 )
 
 type startLimiter struct {
@@ -81,6 +82,11 @@ type deviceStatusResponse struct {
 	Message string `json:"message,omitempty"`
 }
 
+type silentStartResponse struct {
+	// The IdP authorize URL (response_type=code, loopback redirect_uri, S256 PKCE challenge, prompt=none) — navigate the browser here; the agent holds the state and verifier
+	AuthorizeURL string `json:"authorize_url"`
+}
+
 // @Summary		Start a federated device login
 // @Description	Public, rate-limited (6 starts per source address per minute). Direct-mode federated login via the OAuth device grant (RFC 8628, the frozen cross-agent wire — a Go-agent-only surface; auth[] advertises oidc only when oidc.enabled): the agent calls the issuer's discovered device_authorization endpoint and answers the user code + verification URI the UI shows. The device_code NEVER leaves the agent — handle is an opaque agent-side flow id, and the agent itself polls the identity provider (honoring the grant's interval/slow_down) while the UI polls GET /api/auth/oidc/device-status freely. On approval the agent validates the tokens against the issuer's JWKS, holds them in memory (background-refreshed), and mints a local admin API key. The FIRST successful login BINDS the agent to that account (TOFU, the bootstrap-key model; persisted in oidc.json beside the config); later logins by other accounts are refused unless listed in oidc.allowed_users.
 // @Tags			Local Login
@@ -99,13 +105,20 @@ func (s *Server) handleOIDCDeviceStart(w http.ResponseWriter, r *http.Request) {
 		taskError(w, http.StatusTooManyRequests, "Too many login attempts — try again in a minute")
 		return
 	}
-	answer, err := s.oidcMgr.start(r.Context())
+	handle, authorization, err := s.oidcMgr.Start(r.Context())
 	if err != nil {
 		slog.Warn("oidc device start failed", "error", err)
 		taskError(w, http.StatusBadGateway, "Identity provider unreachable: "+err.Error())
 		return
 	}
-	writeJSON(w, answer)
+	writeJSON(w, deviceStartResponse{
+		Handle:                  handle,
+		UserCode:                authorization.UserCode,
+		VerificationURI:         authorization.VerificationURI,
+		VerificationURIComplete: authorization.VerificationURIComplete,
+		ExpiresIn:               authorization.ExpiresIn,
+		Interval:                authorization.Interval,
+	})
 }
 
 // @Summary		Poll a federated device login
@@ -125,20 +138,90 @@ func (s *Server) handleOIDCDeviceStatus(w http.ResponseWriter, r *http.Request) 
 	}
 	handle := r.URL.Query().Get("handle")
 	if r.URL.Query().Get("wait") != "0" {
-		s.oidcMgr.await(r.Context(), handle)
+		s.oidcMgr.Await(r.Context(), handle)
 	}
-	status, credential, ok := s.oidcMgr.status(handle)
+	status, credential, ok := s.oidcMgr.Status(handle)
 	if !ok {
 		taskError(w, http.StatusNotFound, "Unknown login handle")
 		return
 	}
 	response := deviceStatusResponse{Status: status}
 	if credential != nil {
-		response.APIKey = credential.apiKey
-		response.EntityID = credential.entityID
-		response.Name = credential.name
-		response.Role = credential.role
-		response.Message = credential.message
+		response.APIKey = credential.APIKey
+		response.EntityID = credential.EntityID
+		response.Name = credential.Name
+		response.Role = credential.Role
+		response.Message = oidcLoginMessage
 	}
 	writeJSON(w, response)
+}
+
+// @Summary		Start a silent SSO pre-check
+// @Description	Public, rate-limited (shared with device-start: 6 per source address per minute). The identity-first login probe (a Go-agent-only surface): mints state + a PKCE S256 verifier held agent-side and answers the IdP authorize URL with prompt=none — the UI navigates there; a live IdP session comes straight back to GET /api/auth/oidc/callback with a code and signs in without any interaction, no session bounces back benignly. NEVER auto-fires anything — this endpoint only returns a URL. Fast-fails when the identity provider is unreachable (cached discovery; a cold probe is bounded to ~3s) so an offline machine loses milliseconds, never hangs.
+// @Tags			Local Login
+// @Produce		json
+// @Success		200	{object}	silentStartResponse	"Authorize URL minted"
+// @Failure		429	{object}	problem.Body	"Too many attempts from this address"
+// @Failure		502	{object}	problem.Body	"Identity provider unreachable or without an authorization endpoint"
+// @Failure		503	{object}	problem.Body	"OIDC login is disabled"
+// @Router			/api/auth/oidc/silent-start [post]
+func (s *Server) handleOIDCSilentStart(w http.ResponseWriter, r *http.Request) {
+	if !s.cfg.OIDC.Enabled {
+		taskError(w, http.StatusServiceUnavailable, "OIDC login is disabled")
+		return
+	}
+	if !s.oidcStarts.allow(r.RemoteAddr) {
+		taskError(w, http.StatusTooManyRequests, "Too many login attempts — try again in a minute")
+		return
+	}
+	authorizeURL, err := s.oidcMgr.StartSilent(r.Context())
+	if err != nil {
+		slog.Warn("oidc silent start failed", "error", err)
+		taskError(w, http.StatusBadGateway, "Identity provider unreachable: "+err.Error())
+		return
+	}
+	writeJSON(w, silentStartResponse{AuthorizeURL: authorizeURL})
+}
+
+// @Summary		Silent SSO callback
+// @Description	Browser redirect target of the silent authorize round-trip (registered at the IdP as the loopback redirect_uri) — never called by API clients. Benign IdP answers (login_required, interaction_required, consent_required, access_denied) and EVERY hard failure (unknown/expired state, exchange or validation error, non-bound account) all 302 to /login?sso=unavailable — silent must never strand the browser on an error page. On success the code is exchanged with the held PKCE verifier, the token validated (issuer JWKS, UUID-first identity, TOFU binding), the OIDC admin key minted, and the browser 302s to the /#tray= claim path carrying a single-use grant that answers THAT key — the tray-claim exchange the UI already speaks, now with a federated identity.
+// @Tags			Local Login
+// @Param			state	query	string	false	"The flow id minted at silent-start"
+// @Param			code	query	string	false	"The IdP's authorization code"
+// @Param			error	query	string	false	"The IdP's OAuth error (login_required and friends bounce benignly)"
+// @Success		302	"To /#tray=<one-time grant> on success; to /login?sso=unavailable otherwise"
+// @Router			/api/auth/oidc/callback [get]
+func (s *Server) handleOIDCCallback(w http.ResponseWriter, r *http.Request) {
+	unavailable := func() {
+		http.Redirect(w, r, "/login?sso=unavailable", http.StatusFound)
+	}
+	if !s.cfg.OIDC.Enabled {
+		unavailable()
+		return
+	}
+	query := r.URL.Query()
+	if oauthError := query.Get("error"); oauthError != "" {
+		slog.Info("oidc silent probe answered without a session", "error", oauthError)
+		unavailable()
+		return
+	}
+	state, code := query.Get("state"), query.Get("code")
+	if state == "" || code == "" {
+		unavailable()
+		return
+	}
+	credential, err := s.oidcMgr.ExchangeSilent(r.Context(), state, code)
+	if err != nil {
+		slog.Warn("oidc silent callback failed", "error", err)
+		unavailable()
+		return
+	}
+	grant, err := s.trayTokens.MintForKey(credential.APIKey)
+	if err != nil {
+		slog.Error("oidc silent handoff mint failed", "error", err)
+		unavailable()
+		return
+	}
+	slog.Info("oidc silent login succeeded", "entity_id", credential.EntityID, "name", credential.Name)
+	http.Redirect(w, r, "/#tray="+grant, http.StatusFound)
 }

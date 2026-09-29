@@ -285,7 +285,7 @@ func (s *Server) handleKeyInfo(w http.ResponseWriter, r *http.Request) {
 		CreatedAt:   k.CreatedAt,
 		LastUsed:    k.LastUsed,
 	}
-	if ssoIdentity, ok := s.oidcMgr.identityForKey(k.ID); ok {
+	if ssoIdentity, ok := s.oidcMgr.IdentityForKey(k.ID); ok {
 		response.AuthProvider = "oidc"
 		response.Email = ssoIdentity.Email
 		response.CustomerID = ssoIdentity.CustomerID

@@ -1,4 +1,4 @@
-package server
+package oidc
 
 import (
 	"encoding/json"
@@ -10,37 +10,38 @@ import (
 	"github.com/Makr91/hyperweaver-agent/internal/safepath"
 )
 
-type oidcKeyIdentity struct {
+// KeyIdentity is the federated account a minted key stands for.
+type KeyIdentity struct {
 	Email      string `json:"email"`
 	CustomerID string `json:"customer_id"`
 }
 
-type oidcStateFile struct {
-	BoundSubject    string                    `json:"bound_subject"`
-	BoundEmail      string                    `json:"bound_email"`
-	BoundCustomerID string                    `json:"bound_customer_id"`
-	MintedKeys      map[int64]oidcKeyIdentity `json:"minted_keys"`
+type stateFile struct {
+	BoundSubject    string                `json:"bound_subject"`
+	BoundEmail      string                `json:"bound_email"`
+	BoundCustomerID string                `json:"bound_customer_id"`
+	MintedKeys      map[int64]KeyIdentity `json:"minted_keys"`
 }
 
-func oidcLoadState(path string) (*oidcStateFile, error) {
+func loadState(path string) (*stateFile, error) {
 	raw, err := os.ReadFile(filepath.Clean(path))
 	if errors.Is(err, os.ErrNotExist) {
-		return &oidcStateFile{MintedKeys: map[int64]oidcKeyIdentity{}}, nil
+		return &stateFile{MintedKeys: map[int64]KeyIdentity{}}, nil
 	}
 	if err != nil {
 		return nil, err
 	}
-	state := &oidcStateFile{}
+	state := &stateFile{}
 	if uerr := json.Unmarshal(raw, state); uerr != nil {
 		return nil, uerr
 	}
 	if state.MintedKeys == nil {
-		state.MintedKeys = map[int64]oidcKeyIdentity{}
+		state.MintedKeys = map[int64]KeyIdentity{}
 	}
 	return state, nil
 }
 
-func oidcSaveState(path string, state *oidcStateFile) error {
+func saveState(path string, state *stateFile) error {
 	raw, err := json.MarshalIndent(state, "", "  ")
 	if err != nil {
 		return err
@@ -51,19 +52,20 @@ func oidcSaveState(path string, state *oidcStateFile) error {
 	return safepath.WriteFile(path, raw, 0o600)
 }
 
-func (m *oidcManager) saveStateLocked() {
-	state := &oidcStateFile{
+func (m *Manager) saveStateLocked() {
+	state := &stateFile{
 		BoundSubject:    m.boundSubject,
 		BoundEmail:      m.boundEmail,
 		BoundCustomerID: m.boundCustomerID,
 		MintedKeys:      m.mintedKeys,
 	}
-	if err := oidcSaveState(m.storePath, state); err != nil {
+	if err := saveState(m.storePath, state); err != nil {
 		slog.Error("oidc state save failed", "error", err)
 	}
 }
 
-func (m *oidcManager) identityForKey(id int64) (oidcKeyIdentity, bool) {
+// IdentityForKey answers the federated account a key was minted for, false for a plain key.
+func (m *Manager) IdentityForKey(id int64) (KeyIdentity, bool) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	identity, ok := m.mintedKeys[id]

@@ -36,7 +36,7 @@ func (s *Server) personOf(identity *auth.Identity) string {
 	if identity == nil {
 		return ""
 	}
-	if minted, ok := s.oidcMgr.identityForKey(identity.ID); ok && minted.Email != "" {
+	if minted, ok := s.oidcMgr.IdentityForKey(identity.ID); ok && minted.Email != "" {
 		return minted.Email
 	}
 	return identity.Name
@@ -72,7 +72,7 @@ func (s *Server) handleUser(w http.ResponseWriter, r *http.Request) {
 		PreferredMotion:   stored.Motion,
 		PreferredTimezone: stored.Timezone,
 	}
-	if minted, ok := s.oidcMgr.identityForKey(identity.ID); ok {
+	if minted, ok := s.oidcMgr.IdentityForKey(identity.ID); ok {
 		response.AuthProvider = optional("oidc")
 		response.Email = optional(minted.Email)
 		response.CustomerID = optional(minted.CustomerID)

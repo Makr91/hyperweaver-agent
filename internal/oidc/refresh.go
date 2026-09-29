@@ -1,11 +1,11 @@
-package server
+package oidc
 
 import (
 	"log/slog"
 	"time"
 )
 
-func (m *oidcManager) startRefreshLoop() {
+func (m *Manager) startRefreshLoop() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.refreshing || m.refreshToken == "" {
@@ -16,7 +16,7 @@ func (m *oidcManager) startRefreshLoop() {
 	go m.refreshLoop()
 }
 
-func (m *oidcManager) refreshLoop() {
+func (m *Manager) refreshLoop() {
 	defer m.wg.Done()
 	for {
 		m.mu.Lock()
@@ -44,13 +44,13 @@ func (m *oidcManager) refreshLoop() {
 	}
 }
 
-func (m *oidcManager) refreshOnce(refreshToken string) bool {
-	endpoints, err := oidcDiscover(m.ctx, m.issuer)
+func (m *Manager) refreshOnce(refreshToken string) bool {
+	endpoints, err := discover(m.ctx, m.issuer)
 	if err != nil {
 		slog.Warn("oidc refresh: discovery failed — retrying in 5m", "error", err)
 		return m.refreshBackoff()
 	}
-	answer, err := oidcRefreshTokens(m.ctx, endpoints, m.clientID, refreshToken)
+	answer, err := refreshTokens(m.ctx, endpoints, m.clientID, refreshToken)
 	if err != nil {
 		slog.Warn("oidc refresh failed — retrying in 5m", "error", err)
 		return m.refreshBackoff()
@@ -79,7 +79,7 @@ func (m *oidcManager) refreshOnce(refreshToken string) bool {
 	return true
 }
 
-func (m *oidcManager) refreshBackoff() bool {
+func (m *Manager) refreshBackoff() bool {
 	select {
 	case <-m.ctx.Done():
 		return false

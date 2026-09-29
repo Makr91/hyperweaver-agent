@@ -4,7 +4,7 @@
 
 # Hyperweaver Agent
 
-**Hyperweaver Agent** is the VirtualBox/Vagrant host-agent of the Hyperweaver control plane, written in Go. It replaces Super.Human.Installer: a single background binary with a native system-tray icon that serves the Hyperweaver web UI to **your own browser** — no Electron, no embedded webview, no separate GUI shell.
+**Hyperweaver Agent** is the VirtualBox host-agent of the Hyperweaver control plane, written in Go. It replaces Super.Human.Installer: a single background binary with a native system-tray icon that serves the Hyperweaver web UI to **your own browser** — no Electron, no embedded webview, no separate GUI shell.
 
 ## Overview
 
@@ -12,14 +12,15 @@ The agent follows the LedFx model: it runs quietly in the OS system tray (Window
 
 ### Current features
 
-- **Native system tray**: app name + version, Open, Quit — the real OS tray, nothing custom.
+- **Native system tray**: app name + version, Open, a Troubleshooting submenu (Open Log File, Open Config Folder, Open Data Folder, Restart Agent), Quit — the real OS tray, nothing custom.
 - **Embedded Hyperweaver UI**: the published [hyperweaver-ui](https://github.com/MarkProminic/hyperweaver-ui) artifact is baked into release binaries and served at `/` (docs at `/docs`, the API under `/api`).
 - **Agent API v1 identity**: public `GET /api/status` advertising role, hypervisor, platform, and capability tokens.
+- **Provisioning engine**: `Hosts.yml` generation, native `VBoxManage` machine creation and orchestration through the task queue, the SHI-format provisioner package registry and catalog install, hash-verified installer artifacts. Vagrant is never executed; externally created Vagrant projects are discovered read-only.
+- **API-key auth with tray token handoff**: `POST /api/api-keys/bootstrap`, `POST /api/auth/tray-claim`, the `hwa://` protocol handler.
+- **Machine consoles**: SSH terminal sessions, the VNC websockify bridge (`GET /api/machines/{name}/vnc/websockify`), the browser-RDP bridge (`GET /api/machines/{name}/rdp-bridge`), framebuffer screenshots.
+- **BoxVault integration**: box-template registry with remote registry discovery (`GET /api/templates/sources`, `GET /api/templates/remote/{source}`), seeded with STARTcloud BoxVault.
+- **OIDC federation**: RFC 8628 device login and the loopback silent flow (`/api/auth/oidc/*`), advertised as `oidc` in `GET /api/status` when `oidc.enabled`.
 - **Single binary per OS**: pure Go on Windows/Linux; macOS builds add only the tray's Cocoa bridge.
-
-### Roadmap (see the platform architecture document)
-
-Provisioning engine (SHI parity: `Hosts.yml` generation, `vagrant`/`VBoxManage` orchestration, role catalog with hash-verified installers), API-key auth with tray token handoff, VirtualBox VNC console over WebSocket, BoxVault integration, OIDC federation.
 
 ## Getting started
 
@@ -29,7 +30,7 @@ Grab an installer from the [releases page](https://github.com/Makr91/hyperweaver
 - **macOS**: `HyperweaverAgent-Setup.pkg`
 - **Linux**: `hyperweaver-agent_<version>_amd64.deb` (or the bare-binary tarball)
 
-Start the agent, click the tray icon, hit **Open**. On first run the agent writes a commented default configuration to your per-user config directory.
+Start the agent, click the tray icon, hit **Open**. On first run the agent seeds the five configuration files into your per-user config directory.
 
 On Linux the same package works two ways: launch **Hyperweaver Agent** from the application menu for the tray experience (stock GNOME needs the AppIndicator extension to show tray icons), or run it headless as a service:
 
@@ -38,48 +39,51 @@ sudo systemctl enable --now hyperweaver-agent
 journalctl -fu hyperweaver-agent
 ```
 
-Service mode reads `/etc/hyperweaver-agent/config.yaml`; see [packaging/DEBIAN/README.md](packaging/DEBIAN/README.md).
+Service mode reads the configuration directory `/etc/hyperweaver-agent`; see [packaging/DEBIAN/README.md](packaging/DEBIAN/README.md).
 
 ## Configuration
 
-| OS | Config file |
+The configuration is a directory of five files: `app.config.yaml`, `auth.config.yaml`, `db.config.yaml`, `machines.config.yaml`, `storage.config.yaml`. The directory is `CONFIG_DIR` when set, else the per-user configuration directory; `--config <dir>` names another.
+
+| OS | Config directory |
 | --- | --- |
-| Windows | `%AppData%\hyperweaver-agent\config.yaml` |
-| macOS | `~/Library/Application Support/hyperweaver-agent/config.yaml` |
-| Linux | `~/.config/hyperweaver-agent/config.yaml` |
+| Windows | `%AppData%\hyperweaver-agent\` |
+| macOS | `~/Library/Application Support/hyperweaver-agent/` |
+| Linux | `~/.config/hyperweaver-agent/` |
+
+On a desktop run a missing file is seeded from `internal/config/seed/<name>.config.yaml`. Four of the seeds are only:
 
 ```yaml
-server:
-  bind_address: 127.0.0.1   # keep loopback unless you want LAN access
-  port: 9420
-
-ui:
-  enabled: true             # serve the web UI at /
-  path: ''                  # optional: serve UI from a directory instead of the embedded copy
-
-browser:
-  path: ''                  # optional: specific browser for "Open" (empty = system default)
-
-logging:
-  level: info               # error | warn | info | debug
-  console: true
-  file: ''                  # empty = <config dir>/logs/agent.log
-  max_size_mb: 20
-  max_backups: 5
+schemaVersion: 1
 ```
 
-Flags: `--config <path>`, `--headless` (no tray), `--version`.
+`storage.config.yaml` is seeded as:
+
+```yaml
+schemaVersion: 1
+template_sources:
+  sources:
+    startcloud_boxvault:
+      display_name: STARTcloud BoxVault
+      url: https://boxvault.startcloud.com
+      enabled: true
+      default: true
+catalog_sources:
+  sources:
+    startcloud_catalog:
+      display_name: STARTcloud Provisioner Catalog
+      url: https://provisioner-catalog.startcloud.com/catalog.json
+      enabled: true
+      default: true
+```
+
+Every other key takes its default from the file's schema in `internal/config/schema/<name>.schema.yaml`; the shared UI edits each file at `/admin/config/<name>` and `GET /api/config/<name>/schema` serves the schema.
+
+Flags: `--config <dir>`, `--headless` (no tray), `--version`.
 
 ## Building from source
 
-Requires Go 1.24+. Two binary assets come from the UI project so the tray icon matches the web favicon — copy them once:
-
-```bash
-cp ../hyperweaver-ui/public/favicon.ico internal/tray/assets/icon.ico
-cp ../hyperweaver-ui/public/images/logo192.png internal/tray/assets/icon.png
-```
-
-Then:
+Requires Go 1.25.0 (the `go` line of `go.mod`). The tray icon assets under `internal/tray/assets/` are committed and embedded at build time; nothing is copied before a build.
 
 ```bash
 go mod tidy
@@ -94,9 +98,11 @@ For UI development, copy the SPA build into the (gitignored) `ui/` folder and po
 cd ../hyperweaver-ui && npm run build && cp -r dist/. ../hyperweaver-agent/ui/
 ```
 
+In your per-user `app.config.yaml`:
+
 ```yaml
 ui:
-  path: G:\Projects\hyperweaver-agent\ui   # in your per-user config.yaml
+  path: G:\Projects\hyperweaver-agent\ui
 ```
 
 Cross-compile the Windows binary from any OS:
@@ -112,11 +118,11 @@ macOS binaries must be built on macOS (the tray uses Apple's Cocoa API); CI hand
 ```mermaid
 graph TD
     A[Your Browser] -- HTTP + WS --> B[Hyperweaver Agent on your machine];
-    B -- Manages --> C[VirtualBox VMs via Vagrant];
+    B -- Manages --> C[VirtualBox VMs via VBoxManage];
     D[Hyperweaver Server] -. optional aggregation .-> B;
 ```
 
-The Hyperweaver platform: **Hyperweaver UI** (shared React SPA) · **Hyperweaver Agent** (this repo, Go, VirtualBox/Vagrant) · **Zoneweaver Agent** (Node, Bhyve/OmniOS) · **Hyperweaver Server** (aggregator) · **BoxVault** (box registry) · **BoxPress** (box builder).
+The Hyperweaver platform: **Hyperweaver UI** (shared React SPA) · **Hyperweaver Agent** (this repo, Go, VirtualBox via VBoxManage) · **Zoneweaver Agent** (Node, Bhyve/OmniOS) · **Hyperweaver Server** (aggregator) · **BoxVault** (box registry) · **BoxPress** (box builder).
 
 ## Contributing
 

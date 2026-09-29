@@ -1,4 +1,5 @@
-package server
+// Package oidc is the agent's OpenID Connect client, resource-server validator and outbound token source against the configured issuer.
+package oidc
 
 import (
 	"context"
@@ -21,34 +22,39 @@ import (
 	"github.com/Makr91/hyperweaver-agent/internal/logging"
 )
 
+// The states a device login flow passes through.
 const (
-	oidcStatusPending  = "pending"
-	oidcStatusApproved = "approved"
-	oidcStatusDenied   = "denied"
-	oidcStatusExpired  = "expired"
-	oidcStatusFailed   = "failed"
-
-	oidcKeyDescriptionPrefix = "Created by OIDC device login "
-	oidcMintedKeysKept       = 5
+	StatusPending  = "pending"
+	StatusApproved = "approved"
+	StatusDenied   = "denied"
+	StatusExpired  = "expired"
+	StatusFailed   = "failed"
 )
 
-type oidcCredential struct {
-	apiKey   string
-	entityID int64
-	name     string
-	role     string
-	message  string
+const (
+	keyDescriptionPrefix = "Created by OIDC device login "
+	mintedKeysKept       = 5
+	unknownKidCooldown   = 5 * time.Minute
+)
+
+// Credential is the local API key a completed login minted.
+type Credential struct {
+	APIKey   string
+	EntityID int64
+	Name     string
+	Role     string
 }
 
-type oidcFlow struct {
+type flow struct {
 	status     string
-	credential *oidcCredential
+	credential *Credential
 	expiresAt  time.Time
 	interval   time.Duration
 	changed    chan struct{}
 }
 
-type oidcManager struct {
+// Manager drives the device and silent logins, validates issuer tokens and holds the bound account's tokens.
+type Manager struct {
 	enabled      bool
 	issuer       string
 	clientID     string
@@ -66,30 +72,29 @@ type oidcManager struct {
 	redirectURI string
 
 	mu               sync.Mutex
-	flows            map[string]*oidcFlow
-	silent           map[string]*oidcSilentFlow
+	flows            map[string]*flow
+	silent           map[string]*silentFlow
 	boundSubject     string
 	boundEmail       string
 	boundCustomerID  string
-	mintedKeys       map[int64]oidcKeyIdentity
+	mintedKeys       map[int64]KeyIdentity
 	accessToken      string
 	refreshToken     string
 	tokenExpiry      time.Time
 	refreshing       bool
-	jwks             *oidcJWKSDocument
+	jwks             *jwksDocument
 	jwksFetched      time.Time
 	unknownKids      map[string]time.Time
-	endpoints        *oidcProviderEndpoints
+	endpoints        *providerEndpoints
 	endpointsFetched time.Time
 	proofs           *dpop.Seen
 	baseURL          string
 }
 
-const unknownKidCooldown = 5 * time.Minute
-
-func newOIDCManager(cfg *config.Config, keyStore *keys.Store) *oidcManager {
+// New builds the manager from the configuration and loads the bound account from oidc.json beside the configuration files.
+func New(cfg *config.Config, keyStore *keys.Store) *Manager {
 	ctx, cancel := context.WithCancel(context.Background())
-	m := &oidcManager{
+	m := &Manager{
 		enabled:      cfg.OIDC.Enabled,
 		issuer:       cfg.OIDC.Issuer,
 		clientID:     cfg.OIDC.ClientID,
@@ -103,9 +108,9 @@ func newOIDCManager(cfg *config.Config, keyStore *keys.Store) *oidcManager {
 		keys:         keyStore,
 		ctx:          ctx,
 		cancel:       cancel,
-		flows:        map[string]*oidcFlow{},
-		silent:       map[string]*oidcSilentFlow{},
-		mintedKeys:   map[int64]oidcKeyIdentity{},
+		flows:        map[string]*flow{},
+		silent:       map[string]*silentFlow{},
+		mintedKeys:   map[int64]KeyIdentity{},
 		unknownKids:  map[string]time.Time{},
 		proofs:       dpop.NewSeen(),
 		baseURL:      strings.TrimRight(cfg.BaseURL(), "/"),
@@ -113,10 +118,10 @@ func newOIDCManager(cfg *config.Config, keyStore *keys.Store) *oidcManager {
 	if !m.enabled {
 		return m
 	}
-	state, err := oidcLoadState(m.storePath)
+	state, err := loadState(m.storePath)
 	if err != nil {
 		slog.Warn("oidc state unreadable — starting unbound", "path", m.storePath, "error", err)
-		state = &oidcStateFile{MintedKeys: map[int64]oidcKeyIdentity{}}
+		state = &stateFile{MintedKeys: map[int64]KeyIdentity{}}
 	}
 	m.boundSubject = state.BoundSubject
 	m.boundEmail = state.BoundEmail
@@ -135,12 +140,14 @@ func deviceScopeOf(scopes []string) string {
 	return strings.Join(kept, " ")
 }
 
-func (m *oidcManager) close() {
+// Close stops the token refresh loop and every device poll.
+func (m *Manager) Close() {
 	m.cancel()
 	m.wg.Wait()
 }
 
-func (m *oidcManager) bearerToken() string {
+// BearerToken answers the bound account's access token while it is valid, else the empty string.
+func (m *Manager) BearerToken() string {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.accessToken == "" || time.Now().After(m.tokenExpiry) {
@@ -149,7 +156,7 @@ func (m *oidcManager) bearerToken() string {
 	return m.accessToken
 }
 
-func (m *oidcManager) cachedEndpoints(ctx context.Context) (*oidcProviderEndpoints, error) {
+func (m *Manager) cachedEndpoints(ctx context.Context) (*providerEndpoints, error) {
 	m.mu.Lock()
 	endpoints := m.endpoints
 	fresh := time.Since(m.endpointsFetched) < 15*time.Minute
@@ -157,7 +164,7 @@ func (m *oidcManager) cachedEndpoints(ctx context.Context) (*oidcProviderEndpoin
 	if endpoints != nil && fresh {
 		return endpoints, nil
 	}
-	fetched, err := oidcDiscover(ctx, m.issuer)
+	fetched, err := discover(ctx, m.issuer)
 	if err != nil {
 		if endpoints != nil {
 			return endpoints, nil
@@ -171,7 +178,7 @@ func (m *oidcManager) cachedEndpoints(ctx context.Context) (*oidcProviderEndpoin
 	return fetched, nil
 }
 
-func (m *oidcManager) cachedJWKS(force bool) (*oidcJWKSDocument, error) {
+func (m *Manager) cachedJWKS(force bool) (*jwksDocument, error) {
 	m.mu.Lock()
 	jwks := m.jwks
 	fresh := time.Since(m.jwksFetched) < 15*time.Minute
@@ -183,7 +190,7 @@ func (m *oidcManager) cachedJWKS(force bool) (*oidcJWKSDocument, error) {
 	if err != nil {
 		return nil, err
 	}
-	fetched, err := oidcFetchJWKS(m.ctx, endpoints.JWKSURI)
+	fetched, err := fetchJWKS(m.ctx, endpoints.JWKSURI)
 	if err != nil {
 		return nil, err
 	}
@@ -194,7 +201,7 @@ func (m *oidcManager) cachedJWKS(force bool) (*oidcJWKSDocument, error) {
 	return fetched, nil
 }
 
-func (m *oidcManager) kidRefetchAllowed(kid string) bool {
+func (m *Manager) kidRefetchAllowed(kid string) bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	now := time.Now()
@@ -228,7 +235,8 @@ func tokenKid(token string) string {
 	return header.Kid
 }
 
-func (m *oidcManager) authenticateToken(r *http.Request, scheme auth.Scheme, token string) (*auth.Identity, error) {
+// AuthenticateToken validates an issuer token presented as Bearer or DPoP and answers the admin identity of the bound account.
+func (m *Manager) AuthenticateToken(r *http.Request, scheme auth.Scheme, token string) (*auth.Identity, error) {
 	if !m.enabled {
 		return nil, errors.New("federated login is disabled")
 	}
@@ -237,10 +245,10 @@ func (m *oidcManager) authenticateToken(r *http.Request, scheme auth.Scheme, tok
 		slog.Warn("oidc token auth: jwks unavailable", "error", err)
 		return nil, errors.New("the identity provider's keys are unavailable")
 	}
-	claims, err := oidcValidateToken(token, jwks, m.issuer, m.clientID)
-	if errors.Is(err, errOIDCUnknownKey) && m.kidRefetchAllowed(tokenKid(token)) {
+	claims, err := validateToken(token, jwks, m.issuer, m.clientID)
+	if errors.Is(err, errUnknownKey) && m.kidRefetchAllowed(tokenKid(token)) {
 		if jwks, err = m.cachedJWKS(true); err == nil {
-			claims, err = oidcValidateToken(token, jwks, m.issuer, m.clientID)
+			claims, err = validateToken(token, jwks, m.issuer, m.clientID)
 		}
 	}
 	if err != nil {
@@ -276,18 +284,19 @@ func (m *oidcManager) authenticateToken(r *http.Request, scheme auth.Scheme, tok
 	return &auth.Identity{Name: name, Description: "OIDC " + string(scheme) + " token", Role: "admin"}, nil
 }
 
-func (m *oidcManager) start(ctx context.Context) (*deviceStartResponse, error) {
-	endpoints, err := oidcDiscover(ctx, m.issuer)
+// Start begins a device login at the issuer and answers the agent-side handle and the issuer's authorization.
+func (m *Manager) Start(ctx context.Context) (string, *DeviceAuthorization, error) {
+	endpoints, err := discover(ctx, m.issuer)
 	if err != nil {
-		return nil, err
+		return "", nil, err
 	}
-	authorization, err := oidcStartDeviceAuthorization(ctx, endpoints, m.clientID, m.deviceScope)
+	authorization, err := startDeviceAuthorization(ctx, endpoints, m.clientID, m.deviceScope)
 	if err != nil {
-		return nil, err
+		return "", nil, err
 	}
 	raw := make([]byte, 32)
 	if _, rerr := rand.Read(raw); rerr != nil {
-		return nil, rerr
+		return "", nil, rerr
 	}
 	handle := hex.EncodeToString(raw)
 	expiresAt := time.Now().Add(time.Duration(authorization.ExpiresIn) * time.Second)
@@ -298,8 +307,8 @@ func (m *oidcManager) start(ctx context.Context) (*deviceStartResponse, error) {
 			delete(m.flows, existing)
 		}
 	}
-	m.flows[handle] = &oidcFlow{
-		status:    oidcStatusPending,
+	m.flows[handle] = &flow{
+		status:    StatusPending,
 		expiresAt: expiresAt,
 		interval:  time.Duration(authorization.Interval) * time.Second,
 		changed:   make(chan struct{}),
@@ -309,21 +318,14 @@ func (m *oidcManager) start(ctx context.Context) (*deviceStartResponse, error) {
 	m.wg.Add(1)
 	go m.watch(handle, endpoints, authorization, expiresAt)
 
-	return &deviceStartResponse{
-		Handle:                  handle,
-		UserCode:                authorization.UserCode,
-		VerificationURI:         authorization.VerificationURI,
-		VerificationURIComplete: authorization.VerificationURIComplete,
-		ExpiresIn:               authorization.ExpiresIn,
-		Interval:                authorization.Interval,
-	}, nil
+	return handle, authorization, nil
 }
 
-// await blocks while the flow is pending, until it changes, the grant's interval elapses or the request ends.
-func (m *oidcManager) await(ctx context.Context, handle string) {
+// Await blocks while the flow is pending, until it changes, the grant's interval elapses or the request ends.
+func (m *Manager) Await(ctx context.Context, handle string) {
 	m.mu.Lock()
 	entry := m.flows[handle]
-	if entry == nil || entry.status != oidcStatusPending {
+	if entry == nil || entry.status != StatusPending {
 		m.mu.Unlock()
 		return
 	}
@@ -337,7 +339,8 @@ func (m *oidcManager) await(ctx context.Context, handle string) {
 	}
 }
 
-func (m *oidcManager) status(handle string) (string, *oidcCredential, bool) {
+// Status answers a flow's state; an approved flow hands over its credential once and is then forgotten, as is an expired one.
+func (m *Manager) Status(handle string) (string, *Credential, bool) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	entry := m.flows[handle]
@@ -345,28 +348,28 @@ func (m *oidcManager) status(handle string) (string, *oidcCredential, bool) {
 		return "", nil, false
 	}
 	switch entry.status {
-	case oidcStatusApproved:
+	case StatusApproved:
 		credential := entry.credential
 		delete(m.flows, handle)
-		return oidcStatusApproved, credential, true
-	case oidcStatusExpired:
+		return StatusApproved, credential, true
+	case StatusExpired:
 		delete(m.flows, handle)
-		return oidcStatusExpired, nil, true
+		return StatusExpired, nil, true
 	default:
 		return entry.status, nil, true
 	}
 }
 
-func (m *oidcManager) setStatus(handle, status string) {
+func (m *Manager) setStatus(handle, status string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if entry := m.flows[handle]; entry != nil && entry.status == oidcStatusPending {
+	if entry := m.flows[handle]; entry != nil && entry.status == StatusPending {
 		entry.status = status
 		close(entry.changed)
 	}
 }
 
-func (m *oidcManager) watch(handle string, endpoints *oidcProviderEndpoints, authorization *oidcDeviceAuthorization, deadline time.Time) {
+func (m *Manager) watch(handle string, endpoints *providerEndpoints, authorization *DeviceAuthorization, deadline time.Time) {
 	defer m.wg.Done()
 	interval := time.Duration(authorization.Interval) * time.Second
 	for {
@@ -380,10 +383,10 @@ func (m *oidcManager) watch(handle string, endpoints *oidcProviderEndpoints, aut
 		case <-time.After(wait):
 		}
 		if time.Now().After(deadline) {
-			m.setStatus(handle, oidcStatusExpired)
+			m.setStatus(handle, StatusExpired)
 			return
 		}
-		answer, err := oidcPollToken(m.ctx, endpoints, m.clientID, authorization.DeviceCode)
+		answer, err := pollToken(m.ctx, endpoints, m.clientID, authorization.DeviceCode)
 		if err != nil {
 			interval *= 2
 			slog.Warn("oidc token poll failed — retrying", "error", err, "next_poll", interval.String())
@@ -396,27 +399,27 @@ func (m *oidcManager) watch(handle string, endpoints *oidcProviderEndpoints, aut
 			interval += 5 * time.Second
 			continue
 		case "access_denied":
-			m.setStatus(handle, oidcStatusDenied)
+			m.setStatus(handle, StatusDenied)
 			return
 		case "expired_token":
-			m.setStatus(handle, oidcStatusExpired)
+			m.setStatus(handle, StatusExpired)
 			return
 		case "":
 			m.finish(handle, endpoints, answer)
 			return
 		default:
 			slog.Warn("oidc token endpoint refused the device grant", "error", answer.Error)
-			m.setStatus(handle, oidcStatusFailed)
+			m.setStatus(handle, StatusFailed)
 			return
 		}
 	}
 }
 
-func (m *oidcManager) finish(handle string, endpoints *oidcProviderEndpoints, answer *oidcTokenAnswer) {
-	jwks, err := oidcFetchJWKS(m.ctx, endpoints.JWKSURI)
+func (m *Manager) finish(handle string, endpoints *providerEndpoints, answer *tokenAnswer) {
+	jwks, err := fetchJWKS(m.ctx, endpoints.JWKSURI)
 	if err != nil {
 		slog.Error("oidc jwks fetch failed", "error", err)
-		m.setStatus(handle, oidcStatusFailed)
+		m.setStatus(handle, StatusFailed)
 		return
 	}
 	m.mu.Lock()
@@ -427,36 +430,36 @@ func (m *oidcManager) finish(handle string, endpoints *oidcProviderEndpoints, an
 	if identityToken == "" {
 		identityToken = answer.AccessToken
 	}
-	claims, err := oidcValidateToken(identityToken, jwks, m.issuer, m.clientID)
+	claims, err := validateToken(identityToken, jwks, m.issuer, m.clientID)
 	if err != nil {
 		slog.Error("oidc identity token rejected", "error", err)
-		m.setStatus(handle, oidcStatusFailed)
+		m.setStatus(handle, StatusFailed)
 		return
 	}
 	if !m.subjectAllowed(claims) {
 		slog.Warn("oidc login refused — not the bound account and not in oidc.allowed_users",
 			"subject", claims.Subject, "email", claims.Email)
-		m.setStatus(handle, oidcStatusDenied)
+		m.setStatus(handle, StatusDenied)
 		return
 	}
 
 	credential, err := m.completeLogin(claims, answer)
 	if err != nil {
 		slog.Error("oidc login completion failed", "error", err)
-		m.setStatus(handle, oidcStatusFailed)
+		m.setStatus(handle, StatusFailed)
 		return
 	}
 	m.mu.Lock()
-	if entry := m.flows[handle]; entry != nil && entry.status == oidcStatusPending {
-		entry.status = oidcStatusApproved
+	if entry := m.flows[handle]; entry != nil && entry.status == StatusPending {
+		entry.status = StatusApproved
 		entry.credential = credential
 		close(entry.changed)
 	}
 	m.mu.Unlock()
-	slog.Info("oidc device login succeeded", "entity_id", credential.entityID, "name", credential.name)
+	slog.Info("oidc device login succeeded", "entity_id", credential.EntityID, "name", credential.Name)
 }
 
-func (m *oidcManager) completeLogin(claims *oidcIdentityClaims, answer *oidcTokenAnswer) (*oidcCredential, error) {
+func (m *Manager) completeLogin(claims *identityClaims, answer *tokenAnswer) (*Credential, error) {
 	name := claims.Email
 	if name == "" {
 		name = claims.stableID()
@@ -466,11 +469,11 @@ func (m *oidcManager) completeLogin(claims *oidcIdentityClaims, answer *oidcToke
 		return nil, err
 	}
 	entity, err := m.keys.Create(apiKey, name,
-		oidcKeyDescriptionPrefix+time.Now().Format(time.RFC3339), "admin", m.hashRounds)
+		keyDescriptionPrefix+time.Now().Format(time.RFC3339), "admin", m.hashRounds)
 	if err != nil {
 		return nil, err
 	}
-	if removed, perr := m.keys.PruneByDescriptionPrefix(oidcKeyDescriptionPrefix, oidcMintedKeysKept); perr != nil {
+	if removed, perr := m.keys.PruneByDescriptionPrefix(keyDescriptionPrefix, mintedKeysKept); perr != nil {
 		slog.Warn("oidc key prune failed", "error", perr)
 	} else if removed > 0 {
 		slog.Info("stale oidc login keys pruned", "removed", removed)
@@ -487,7 +490,7 @@ func (m *oidcManager) completeLogin(claims *oidcIdentityClaims, answer *oidcToke
 		m.boundEmail = claims.Email
 		m.boundCustomerID = claims.CustomerID
 	}
-	m.mintedKeys[entity.ID] = oidcKeyIdentity{Email: claims.Email, CustomerID: claims.CustomerID}
+	m.mintedKeys[entity.ID] = KeyIdentity{Email: claims.Email, CustomerID: claims.CustomerID}
 	for id := range m.mintedKeys {
 		if id == entity.ID {
 			continue
@@ -504,16 +507,15 @@ func (m *oidcManager) completeLogin(claims *oidcIdentityClaims, answer *oidcToke
 	m.saveStateLocked()
 	m.mu.Unlock()
 	m.startRefreshLoop()
-	return &oidcCredential{
-		apiKey:   apiKey,
-		entityID: entity.ID,
-		name:     entity.Name,
-		role:     entity.Role,
-		message:  "OIDC login successful",
+	return &Credential{
+		APIKey:   apiKey,
+		EntityID: entity.ID,
+		Name:     entity.Name,
+		Role:     entity.Role,
 	}, nil
 }
 
-func (m *oidcManager) subjectAllowed(claims *oidcIdentityClaims) bool {
+func (m *Manager) subjectAllowed(claims *identityClaims) bool {
 	m.mu.Lock()
 	bound := m.boundSubject
 	m.mu.Unlock()
