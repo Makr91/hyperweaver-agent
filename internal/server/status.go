@@ -26,9 +26,10 @@ type statusBrand struct {
 }
 
 type statusLinks struct {
-	Docs    string `json:"docs"    example:"/docs"`
-	Contact string `json:"contact"`
-	API     string `json:"api"     example:"/api-docs"`
+	Docs      string   `json:"docs"    example:"/docs"`
+	Contact   string   `json:"contact"`
+	API       string   `json:"api"     example:"/api-docs"`
+	Community []string `json:"community"`
 }
 
 type statusTicket struct {
@@ -131,7 +132,7 @@ var platformFeatures = []string{
 	"provisioner-registry", "secrets", "ssh", "templates",
 	"host-launchers", "host-terminal", "hosts-file", "dns",
 	"hostname", "ip-addresses", "network-spaces",
-	"hosts", "footer", "health", "events", "admin", "setup",
+	"sidebar", "hosts", "footer", "health", "events", "admin", "setup",
 }
 
 // features derives the advertised token list: platform tokens plus the
@@ -236,7 +237,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		authMethods = append(authMethods, "oidc")
 	}
 
-	links := statusLinks{Docs: "/docs"}
+	links := statusLinks{Docs: "/docs", Community: []string{}}
 	if s.cfg.APIDocs.Enabled {
 		links.API = "/api-docs"
 	}

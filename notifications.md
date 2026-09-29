@@ -156,3 +156,150 @@ release, an installer and a module path to three different owners.
 | 6 | `.github/workflows/build-packages.yml:40-116,201-262,374-435` | the UI bake, seed and PKI steps are repeated across the three OS jobs | a composite action, or the duplication kept knowingly |
 | 7 | `.golangci.yml:26-35,47-54` | `gosec` excludes G204 file-wide; `forbidigo` bans `fmt.Print*` | keep both scoped and intentional |
 | 8 | `README.md:75`; `CONTRIBUTING.md:32`; `go.mod:3` | Go 1.24+ in the docs, `go 1.25.0` in `go.mod` | the docs state the `go.mod` version |
+
+## 11. What the shared UI reads from `GET /api/status` and the host's own row
+
+Why: the shared UI builds every surface from the status payload and from
+the host's own row, and asks nothing of a route whose token the row does
+not list; a token this agent leaves out draws nothing, and a member it
+leaves out is read as absent, so the payload is the one list of what the
+UI shows here. On this agent's role the host's own row is the status
+payload itself (`../startcloud-ui/src/features/hosts/utils/hosts.js:76-81`),
+so `features`, `console`, `hypervisors` and `platform` are read from one
+document for the shell and for every host surface alike.
+
+Every file below is under `../startcloud-ui/src/`.
+
+### The top-level members
+
+| Member | Read by | Present | Absent | Deciding source |
+| --- | --- | --- | --- | --- |
+| `role` | `features/hosts/utils/hosts.js:12,25-26`; `app/router.jsx:700,1436`; `hooks/useTicketUrl.js:12`; `features/about/hasAbout.js:10`; `features/search/hooks/useAppSearch.js:20`; `app/index.jsx:41` | `hyperweaver-server` addresses every agent read at `/api/agents/{id}/…`, `/` draws the hosts page and the organization filter; any other role addresses `/api/…` and `/` draws the dashboard; `zoneweaver-agent` opens `/setup/zone`; the update command and the `about.<role>.*` keys follow it | required, `statusShape` | `universal-navbar.md:1503` |
+| `version` | `components/layout/AppShell.jsx:87,282,577`; `features/about/components/AboutRoute.jsx:173`; `hooks/useTicketUrl.js:30` | the footer's `v<version>`, the About chip, the ticket `context`, the user menu's version while `footer` is not listed | required | `universal-navbar.md:1503,1824-1833` |
+| `brand { name, logo_url, repo, changelog, theme, themes }` | `lib/runtime.js:79-94,203`; `contexts/StatusContext.jsx:77-88`; `app/App.jsx:198-199,218-219,275`; `components/layout/AppShell.jsx:86,281,570,576`; `config/brand.js:9,18`; `components/common/BrandLogo.jsx:12-13`; `features/about/components/AboutRoute.jsx:70-71,82,159`; `features/hosts/components/InactiveConsoleDisplay.jsx:324`, `VncConsoleDisplay.jsx:133`; `components/layout/SearchPanel.jsx:246`, `Search.jsx:305`; `features/search/components/SearchPage.jsx:200`; `features/notifications/api/adapters.js:66` | `name` names the app everywhere, `logo_url` is the mark, the favicon and the console placeholder, `repo` and `changelog` the About links, `theme` the pack stamped as `data-brand`, `themes` the Theme picker completed from the build's manifest | `name` and `logo_url` required, `brand.logo_url.replace` throws without them | `universal-navbar.md:1504` |
+| `auth` | `utils/capabilities.js:49-55` through `lib/createSession.js:50-97`, `lib/runtime.js:212`, `app/router.jsx:333,443,623,744,1537-1539`, `app/App.jsx:170-171`, `components/layout/AppShell.jsx:47,478-479`, `app/index.jsx:39`, `features/auth/utils/agentSignIns.js:17-23`, `features/hosts/sidebar.js:97`, `features/vdi/sidebar.js:118`, `features/profile/sidebar.js:85`, `components/common/SignInPlacard.jsx:51`, `features/notifications/api/adapters.js:48,63` | the first word picks the provider: `apikey` is `createApiKeySession`, `/login` drawing `AgentSignIns` (`features/auth/components/AgentSignIns.jsx`), the second word `oidc` the device flow and the loopback silent probe; `none` no session; `backend`, `idp`, `cookie` their providers | `backend`; an empty list is `none` | `universal-session.md:22,307-332`; `universal-navbar.md:1505` |
+| `bootstrapAvailable` | `features/auth/utils/agentSignIns.js:23` | the first-boot form on `/login`, `POST /api/api-keys/bootstrap` | no form | `universal-session.md:307-332` |
+| `hostname` | `features/hosts/utils/hosts.js:78`; `features/auth/components/AgentSignIns.jsx:303` | the one host's row is named by it; the key form's hidden username | `window.location.hostname` | `universal-navbar.md:1555` |
+| `features` | `utils/capabilities.js:11-28`; `features/hosts/utils/capabilities.js:13-14` | the gate of every surface below | no array: `hasFeature` answers true for every shell token, `hasFeatureStrict` false, so `hosts` and `fleet` never draw, and `hostHasFeature` false, so no host surface draws | `universal-navbar.md:1511` |
+| `events { path, topics }` | `lib/runtime.js:166-177`; `hooks/useSessionKeepalive.js:41-50`; `components/layout/AppShell.jsx:286`; `hooks/useSidebarBadges.js:44`; `components/layout/NotificationsItem.jsx:20`; `features/hosts/utils/machineTools.js:113-131` | with the `events` token one stream at `path` with every topic of `topics`, a same-origin path alone; a topic a host lists in `events.topics` is followed instead of a read | no stream; every page reads on open, on Refresh and after the person's own action | `universal-events.md:68-88`; `universal-navbar.md:1514` |
+| `config` | `hooks/useConfigTree.js:31`; `app/router.jsx:440,730`; `features/setup/components/SetupPage.jsx:66`; `features/admin/components/AdminConfig.jsx:104`; `features/admin/sidebar.js:34`; `features/identity/sidebar.js:48` | one route per name at `/admin/config/<name>`, the Configuration row while one name and the tree while more, the setup page's tabs | the empty state `configManager.noFiles`, no `config` adapter | `universal-navbar.md:1515` |
+| `links { docs, contact, api, community }` | `components/layout/AppShell.jsx:337-352,561`; `app/App.jsx:91-92,100`; `features/hosts/apiReference.js:27`; `features/about/components/AboutRoute.jsx:50,72,76`; `features/onboarding/components/PhoneStep.jsx:100` | Docs, Contact and API reference rows of the user menu's app section, the About page's links | `links` itself required, `status.links.api` is read unguarded at `app/App.jsx:92`; each member absent draws no row | `universal-navbar.md:1512` |
+| `ticket` | `hooks/useTicketUrl.js:10,27-30` | the Help row and the cluster's ticket icon from its members | `null` or absent reads `GET /api/config/ticket` | `universal-navbar.md:1513` |
+| `analytics` | `lib/runtime.js:96-104,202` | one script tag with the data attribute | nothing | `universal-navbar.md:1506` |
+| `idp` | `lib/createSession.js:60-65`; `lib/runtime.js:214-215`; `hooks/useTicketUrl.js:12` | the browser OIDC provider, only while `auth` begins `idp` | nothing on any other `auth` | `universal-navbar.md:1507` |
+| `collections` | `utils/capabilities.js:37-38`; `features/collections/registry.js:25-28` | the collections mounted, in order | none mounted | `universal-navbar.md:1508` |
+| `organization` | `components/layout/AppShell.jsx:503` | the one organization's crumb is left out | nothing | `universal-navbar.md:1509` |
+| `sorts`, `groups` | `utils/capabilities.js:68-87` | a collection level's default sort and grouping | the page's own defaults | `universal-navbar.md:1510` |
+| `agent`, `arch`, `platform`, `hypervisors`, `console`, `shi_mode`, `uptime` | nothing reads them at the top level; `platform`, `hypervisors` and `console` are read on the host's row alone (the capabilities table below) | — | — | `hosts.js:76-81` |
+
+### The feature tokens
+
+Shell tokens are read from the status payload; host tokens from the host's own row, which on this agent's role is the same document.
+
+| Token | Surface | Gate | Emitted today (`internal/server/status.go`) | Deciding source |
+| --- | --- | --- | --- | --- |
+| `hosts` | the thirteen `/hosts/*` routes and `/` as the dashboard; the Hosts group and tree; the Controls menu; the footer's pane; the API reference rows on the server role | `app/router.jsx:448,1338-1413,1476-1482,1541`; `features/hosts/sidebar.js:97`; `features/hosts/actionMenu.js:21`; `features/hosts/footerPane.js:105`; `features/hosts/apiReference.js:28`; `features/hosts/utils/organizations.js:18` | yes | `universal-navbar.md:1555` |
+| `sidebar` | the whole sidebar column; without it `sidebarEntries` answers nothing and no feature's group draws, the Hosts group included | `app/router.jsx:620` | no | `universal-navbar.md:369-372,1550` |
+| `admin` | `/admin`, `/admin/config/*`, `/admin/system`; the Admin menu row; the Admin sidebar group for `ROLE_ADMIN` | `app/router.jsx:690,717,746`; `app/App.jsx:128`; `features/admin/sidebar.js:31`; `features/identity/sidebar.js:45`; `features/catalog/sidebar.js:30` | yes | `universal-navbar.md:1538` |
+| `setup` | `/setup` and the setup gate before every route | `app/router.jsx:1429,1436,1545`; `app/App.jsx:205` | yes | `universal-navbar.md:1537` |
+| `health` | the footer's heart over `GET /api/health` | `app/App.jsx:133`; `components/layout/Footer.jsx:33-106` | yes | `universal-navbar.md:1549` |
+| `events` | the one stream | `components/layout/AppShell.jsx:286`; `hooks/useSessionKeepalive.js:41`; `hooks/useSidebarBadges.js:44`; `components/layout/NotificationsItem.jsx:20`; `features/hosts/utils/machineTools.js:115` | yes | `universal-navbar.md:1553` |
+| `footer` | the footer row; without it the version moves to the user menu | `components/layout/AppShell.jsx:87,276` | yes | `universal-navbar.md:1556` |
+| `search` | the navbar search box, its panel and `/search` over `GET /api/search` | `app/router.jsx:1588`; `components/layout/SearchPanel.jsx:288`; `components/layout/Search.jsx:234` | no | `universal-navbar.md:1552` |
+| `notifications` | the Notifications menu row and the inbox adapter | `app/App.jsx:85` | no | `universal-navbar.md:1548` |
+| `favorites` | the Add to Favorites toggle on About | `features/about/components/AboutRoute.jsx:157` | no | `universal-navbar.md:1547` |
+| `local-accounts` | `/register`, `/registration`, `/passwordRecovery`, `/passwordReset`; the profile's password, email and delete sections; the setup page's sign-in link | `app/router.jsx:340,1029,1152,1641`; `features/setup/components/SetupPage.jsx:164` | no | `universal-navbar.md:1536` |
+| `discover` | `/organizations/discover` and the cluster's compass | `app/router.jsx:1598`; `components/layout/AppShell.jsx:545`; `features/organizations/components/OrganizationsPage.jsx:396` | no | `universal-navbar.md:1540` |
+| `org-console` | `/org-console`, `/user/organizations`; the Organization console menu row and sidebar row | `app/router.jsx:1103,1220,1233,1239`; `app/App.jsx:130`; `features/profile/sidebar.js:96` | no | `universal-navbar.md:1539` |
+| `invitations` | the Invitations tab of the organization console; `/org/invite` | `app/router.jsx:1245`; `features/organizations/components/IssuerOrgConsole.jsx:1025`, `OrgConsolePage.jsx:598` | no | `universal-navbar.md:1541` |
+| `tfa`, `onboarding`, `interstitials`, `inbox`, `integrations`, `policies` | the identity provider's pages, under the `cookie` auth token alone | `app/router.jsx:1028-1133,1259-1271`; `features/identity/sidebar.js:124`; `features/profile/sidebar.js:110-128`; `components/layout/AppShell.jsx:56` | no | `universal-navbar.md:1566` |
+| `fleet` | `/` as the fleet page, `/vm/:instance`, the Fleet group | `app/router.jsx:1540,1576`; `features/vdi/sidebar.js:118` | no | `universal-navbar.md:1554` |
+| `uploads` | every write control of the boxes, ISOs and downloads collections | `utils/permissions.js:104`; `features/collections/boxes/components/BoxList.jsx:129`, `BoxItem.jsx:497,719,820`, `BoxVersion.jsx:134,288,401,588,626`, `BoxProvider.jsx:120,550,589`; `isos/components/Iso.jsx:149,329,482,583`, `IsoVersion.jsx:118,260,373,506,572`; `downloads/components/Download.jsx:79,307,398`, `DownloadRelease.jsx:127,303,340,379`, `DownloadPatch.jsx:109,292,466` | no | `universal-navbar.md:1542` |
+| `watches` | the watch stars and the Watched filter | `features/collections/registry.js:28` | no | `universal-navbar.md:1544` |
+| `deploy` | the Deploy glyph and column | `features/deploy/components/DeployControls.jsx:86,122` | no | `universal-navbar.md:1545` |
+| `rebuild` | the Rebuild catalog data menu row | `app/App.jsx:132` | no | `universal-navbar.md:1546` |
+| `private-catalogs` | the memberships handed to the catalog adapter | `app/App.jsx:183` | no | `universal-navbar.md:1543` |
+| `browse` | the catalog's Browse group for every visitor | `features/catalog/sidebar.js:30` | no | `universal-navbar.md:1551` |
+| `machines` | the Machines page and tab, the tree's machine rows, the machine page's row and detail, the bulk rows, New machine, Import, the orchestration section, the dashboard's counts | `features/hosts/pages.js:48`; `components/HostPage.jsx:120`; `components/MachinesPage.jsx:376`; `hooks/useHostMachines.js:130`; `hooks/useMachineDetail.js:38`; `components/HostControls.jsx:75,94`; `utils/machineCreate.js:111`; `utils/machineTools.js:157`; `components/NetworkingPage.jsx:125`; `components/ManagePage.jsx:420`; `components/NetworkTopology/useTopologyFeed.js:87`; `components/Dashboard/Dashboard.jsx:180-181`, `DashboardServerCards.jsx:48`, `DashboardQuickActions.jsx:120`, `DashboardSummaryCards.jsx:66`; `utils/manage.js:45,237` | yes | `universal-navbar.md:1559,1564` |
+| `machine-create` | New machine and the create wizard, Clone, the provisioning editor and Hosts.yml | `utils/machineCreate.js:112`; `utils/machineTools.js:107`; `utils/provisioning.js:77` | yes | `universal-navbar.md:1562` |
+| `machine-modify` | the Settings page and tab, the retention policy, a topology rewire | `machinePages.js:36`; `components/MachineSettingsView.jsx:34`; `utils/machineTools.js:102`; `components/NetworkTopology/TopologyPanel.jsx:471` | yes | `universal-navbar.md:1562` |
+| `machine-snapshots` | the Snapshots page and tab, the Snapshot row, the clone's snapshot picker | `machinePages.js:44`; `hooks/useMachineSnapshots.js:44`; `utils/machineTools.js:60,93,237` | yes | `universal-navbar.md:1562` |
+| `machine-screenshot` | the Screen card and the console's frame of a running machine | `components/MachineScreenshotCard.jsx:87`; `components/InactiveConsoleDisplay.jsx:149`; `components/VncConsoleDisplay.jsx:67` | yes | `universal-navbar.md:1561` |
+| `machine-suspend` | Suspend, and Resume of a paused machine | `utils/capabilities.js:55,83` | yes | `universal-navbar.md:1559` |
+| `machine-resume-suspended` | Resume of a machine whose row reads `suspended` | `utils/capabilities.js:57` | no | `universal-navbar.md:1559,2155-2160` |
+| `host-power` | Restart host and Power off host, the tree's host rows, the Runlevel section | `components/HostControls.jsx:74`; `hooks/useTreeMenu.js:180`; `utils/manage.js:245` | while `host_power.enabled` | `universal-navbar.md:1559,1564` |
+| `host-fast-reboot` | the fast reboot among the restart's options | `components/HostRows.jsx:111`; `components/TreeDialogs.jsx:42` | no | `universal-navbar.md:1559,2155-2160` |
+| `host-launchers` | the Open in application rows, the console's launchers, the Applications tab of Agent settings | `components/ApplicationRows.jsx:24`; `components/ConsoleLaunchers.jsx:18`; `components/InactiveConsoleDisplay.jsx:154`; `components/AgentSettings.jsx:423` | yes | `universal-navbar.md:1559` |
+| `host-terminal` | the footer's Shell view | `footerPane.js:85` | yes | `universal-navbar.md:1558` |
+| `tasks` | the footer's Tasks view, the task queue row, View task on every queued notice, the task dialog | `footerPane.js:86`; `hooks/useFocus.js:49`; `utils/monitoring.js:25`; `hooks/useHostManage.js:112`; `hooks/useMachineTools.js:18`; `hooks/useZfsTools.js:57`; `hooks/useSettingsApply.js:56`; `hooks/useNetworkingTools.js:20`; `components/MachineProvisioning.jsx:215` | yes | `universal-navbar.md:1557,1560` |
+| `monitoring` | the monitoring service and health rows, the interfaces, the storage summary, the performance charts, the monitoring database, the networking page's tables and charts, the machine's charts | `utils/monitoring.js:16-39,70-119`; `utils/machineTools.js:176`; `components/NetworkStorageSummary.jsx:156`; `components/PerformanceCharts.jsx:39` | yes | `universal-navbar.md:1560,1563` |
+| `zfs` | the Storage page and tab, the ZFS management, the storage summary, the Storage I/O and ARC charts, the holds, the rollback wording, the ZFS placement of the create wizard, the Storage and ARC sections | `pages.js:76`; `utils/StorageUtils.js:57`; `utils/machineTools.js:60,94,236`; `utils/monitoring.js:22-23,101,109,117`; `components/MachineCreateModal.jsx:155`; `components/MachineSettings.jsx:569`; `utils/manage.js:122,129` | no | `universal-navbar.md:1560,1562` |
+| `swap` | the swap bar | `utils/monitoring.js:26` | yes | `universal-navbar.md:1560` |
+| `provisioning` | the pipeline rows, the Provisioning status card, the provisioning tools row, the Provisioning network and Recipes sections | `utils/provisioning.js:73`; `components/MachineProvisioning.jsx:170`; `utils/monitoring.js:27`; `hooks/useManageCatalogData.js:145`; `utils/manage.js:212,220` | yes | `universal-navbar.md:1560` |
+| `provisioner-registry` | the roles catalog of the editor, the Provisioners section, with `artifacts` the Installer files section | `utils/provisioning.js:78`; `components/ProvisioningEditor.jsx:306`; `hooks/useManageCatalogData.js:144,147`; `utils/manage.js:204,253` | yes | `universal-navbar.md:1560,1310` |
+| `templates` | Convert to template, the template of a snapshot, the wizard's box catalogs, the Templates section | `utils/machineTools.js:95`; `components/MachineCreateModal.jsx:157`; `hooks/useManageCatalogData.js:146`; `utils/manage.js:229` | yes | `universal-navbar.md:1562` |
+| `artifacts` | the ISO and artifacts section, the wizard's cached ISOs, the unattended install's cached ISO, with `provisioner-registry` the Installer files section | `hooks/useArtifactStorage.js:46`; `components/MachineCreateModal.jsx:158`; `components/UnattendedInstallModal.jsx:153`; `hooks/useManageCatalogData.js:144`; `utils/manage.js:137,253` | while `artifact_storage.enabled` | `universal-navbar.md:1310` |
+| `secrets` | the Global secrets tab of Agent settings | `components/AgentSettings.jsx:422` | yes | `universal-navbar.md:807` |
+| `ssh` | the SSH console door and start button | `utils/consoles.js:31-36,57`; `components/InactiveConsoleDisplay.jsx:152` | yes | `universal-navbar.md:1565` |
+| `guest-agent` | Guest shutdown and reboot on a bhyve host, the guest agent card's requests, the `qga` wire of Run in guest | `utils/capabilities.js:86`; `utils/guestTools.js:29`; `components/MachineGuestAgentCard.jsx:208` | while `guest_agent.enabled` | `universal-navbar.md:1559,1561` |
+| `file-browser` | the Browse button of every path field, the File manager section | `components/PathPicker.jsx:244`; `utils/manage.js:188` | while `file_browser.enabled` | `universal-navbar.md:1302` |
+| `vnics` | the Networking page (either of two), the VNIC, VLAN, etherstub, bridge and aggregate sections, the routing table, the Network section, the settings page's VNIC feed | `utils/networking.js:8,46`; `utils/networkingManagement.js:80-104`; `utils/monitoring.js:21,28-38`; `components/MachineSettings.jsx:568`; `utils/manage.js:80` | no | `universal-navbar.md:1563,1294` |
+| `network-spaces` | the Networking page (either of two), the network spaces section, the topology's VirtualBox shape and the machines usage read | `utils/networking.js:8,46`; `utils/networkingManagement.js:76`; `utils/monitoring.js:34,39`; `components/NetworkTopology/TopologyPanel.jsx:62`, `useTopologyFeed.js:78` | yes | `universal-navbar.md:1563` |
+| `ip-addresses` | the addresses section of the networking page | `utils/networkingManagement.js:80`; `utils/monitoring.js:28` | yes | `universal-navbar.md:1125` |
+| `hostname` | the hostname section | `utils/networkingManagement.js:102`; `utils/monitoring.js:35` | yes | `universal-navbar.md:1125` |
+| `dns` | the DNS section | `utils/networkingManagement.js:104`; `utils/monitoring.js:36` | yes | `universal-navbar.md:1125` |
+| `hosts-file` | the hosts file section, with `vnics` the Manage page's Network section | `utils/networkingManagement.js:105`; `utils/monitoring.js:37`; `utils/manage.js:80` | yes | `universal-navbar.md:1125,1294` |
+| `devices` | the Devices page and tab | `pages.js:69`; `components/DevicesPage.jsx:212` | no | `universal-navbar.md:802` |
+| `services` | the Services section | `hooks/useHostManageData.js:58`; `components/ManagePage.jsx:481`; `utils/manage.js:72` | no | `universal-navbar.md:1293,1564` |
+| `processes` | the Processes section | `hooks/useHostManageData.js:59`; `components/ManagePage.jsx:491`; `utils/manage.js:153` | yes | `universal-navbar.md:1300,1564` |
+| `system-users` | the Users and groups section | `hooks/useHostManageData.js:60`; `components/ManagePage.jsx:469`; `utils/manage.js:196` | no | `universal-navbar.md:1303,1564` |
+| `time-sync` | the Time and NTP section | `hooks/useHostManageData.js:61`; `components/ManagePage.jsx:561`; `utils/manage.js:145` | no | `universal-navbar.md:1299,1564` |
+| `packages` | the Packages and System updates sections, with `repositories` the Repositories section | `hooks/useHostManageData.js:62`; `hooks/useManageSectionsData.js:59`; `hooks/useManageCatalogData.js:143`; `components/ManagePage.jsx:571`; `utils/manage.js:87,95,103` | no | `universal-navbar.md:1295-1296,1564` |
+| `repositories` | with `packages` the Repositories section | `hooks/useManageSectionsData.js:59`; `utils/manage.js:95` | no | none names it |
+| `boot-environments` | the Boot environments section | `hooks/useManageSectionsData.js:56`; `utils/manage.js:114` | no | `universal-navbar.md:1297` |
+| `fault-management` | the Fault management section, with `syslog` and `log-streaming` the two log sections | `hooks/useManageSectionsData.js:52`; `utils/manage.js:164,172,180` | no | `universal-navbar.md:1301` |
+| `syslog` | with `fault-management` the Syslog section | `hooks/useManageSectionsData.js:54`; `utils/manage.js:180` | no | none names it |
+| `log-streaming` | with `fault-management` the System logs section | `hooks/useManageSectionsData.js:55`; `utils/manage.js:172` | no | none names it |
+
+The Manage page draws behind any token of `MANAGE_TOKENS`
+(`utils/manage.js:32-47`): `services`, `vnics`, `packages`,
+`boot-environments`, `zfs`, `time-sync`, `processes`, `fault-management`,
+`file-browser`, `system-users`, `provisioner-registry`, `templates`,
+`machines`, `provisioning`. The Agent settings page draws for any row
+that names a hypervisor (`utils/agentSettings.js:12`). `system-updates`
+and `runlevel` are section keys, gated by `packages` and `host-power`;
+no token of those names is read.
+
+### The members of the host's row
+
+| Member | Values read | Read by | Deciding source |
+| --- | --- | --- | --- |
+| `capabilities.features` | the host tokens above | `utils/capabilities.js:13-14`; `hooks/useFocus.js:11-14`; `hooks/useHostManage.js:111-113`; `utils/machineTools.js:113-117` | `universal-navbar.md:520-530` |
+| `capabilities.console` | `vnc`, `zlogin`, `rdp` | `utils/capabilities.js:26-27`; `utils/consoles.js:15-44,57`; `components/InactiveConsoleDisplay.jsx:150-153`; `components/MachineConsolePanel.jsx:93-94`; `components/StandaloneConsole.jsx:47`; `components/StandaloneRdpConsole.jsx:79` | `universal-navbar.md:863,1565` |
+| `capabilities.hypervisors` | `virtualbox`, `utm`, `bhyve` | `utils/capabilities.js:38-39,79,86`; `utils/hosts.js:62-66`; `utils/agentSettings.js:12`; `utils/machineTools.js:108-109,158,178-183`; `utils/guestTools.js:26`; `utils/machineSettings.js:669,672,693`; `utils/settingsForm.js:222`; `utils/networkingManagement.js:137`; `hooks/useManageCatalogData.js:145`; `components/MachineCreateModal.jsx:156,695-697`; `components/MachineSettings.jsx:113,400,567`; `components/GeneralSettingsTab.jsx:677`; `components/MachineGuestInfoCard.jsx:96`; `components/ZoneRows.jsx:109`; `components/ManagePage.jsx:457`; `utils/manage.js:278` | `universal-navbar.md:534-567,1562` |
+| `capabilities.platform` | `windows`, `darwin` | `utils/manage.js:437`; `utils/networkingManagement.js:150,947` | `universal-navbar.md:1300` |
+| `capabilities.role` | `agent` | `sidebar.js:40` | `universal-navbar.md:1555` |
+| `capabilities.events.topics` with `capabilities.features` listing `events` | the topics below | `utils/machineTools.js:113-131` | `universal-events.md:68-88` |
+| `id`, `hostname`, `entity_name`, `port`, `org_uuids` | the row's name and identity, the organization filter | `utils/hosts.js:49-51`; `components/Dashboard/DashboardServerCards.jsx:93-94`; `utils/organizations.js:31-35` | `universal-navbar.md:1875-1931` |
+
+### The topics the UI subscribes to
+
+| Topic | Event | Fed surfaces | Deciding source |
+| --- | --- | --- | --- |
+| `health` | `health` | the footer's heart (`components/layout/Footer.jsx:59`) | `universal-events.md:180-201` |
+| `tasks` | `task-updated` | the tasks pane (`hooks/useTasks.js:207`), the task dialog (`components/TaskDialog.jsx:372`), the task queue row and the networking answers (`components/HostReadingsProvider.jsx:106`), a machine's detail and snapshots at a task's end (`components/MachineDetailProvider.jsx:144`, `MachineSnapshotsProvider.jsx:139`), the start after a restore (`components/MachineRestoreProvider.jsx:133`), the Manage page's follow (`hooks/useHostManage.js:166`), the ZFS writes (`hooks/useZfsTools.js:43`), the settings apply (`hooks/useSettingsApply.js:214`), the artifact transfers (`hooks/useArtifactDownloads.js:39`), the holds (`components/SnapshotHoldsDialog.jsx:220`), the provisioning status (`components/MachineProvisioning.jsx:185`) | `universal-events.md:254` |
+| `hosts` | `stats-updated` | the stats, the machine rows and the details of a host (`components/HostStatsProvider.jsx:127`, `HostMachinesProvider.jsx:137`, `MachineDetailProvider.jsx:139`), the settings apply's stop step (`hooks/useSettingsApply.js:203`); `servers-updated` is the server role's alone (`components/ServersProvider.jsx:111`) | `universal-events.md:255-256` |
+| `monitoring` | `cpu-sample`, `memory-sample`, `network-sample`, `pool-io-sample`, `arc-sample`, `disk-io-sample` | the host's series (`components/HostSeriesProvider.jsx:195-205`), a machine's link series on `network-sample` (`components/MachineSeriesProvider.jsx:186`) | `universal-events.md:257-262` |
+| `admin` | `restart-required` | the restart card of the configuration page (`components/common/RestartCard.jsx:66`); `blocked-count` is the identity provider's badge (`hooks/useSidebarBadges.js:101`) | `universal-events.md:221-240` |
+| `notifications`, `session`, `profile`, `fleet` | `unread-count`, `session-terminated`, `profile-updated`, the fleet events | `components/layout/NotificationsItem.jsx:55`; `hooks/useSessionKeepalive.js:52-58`; `features/vdi/hooks/useFleet.js:77-94`; none of them read from this agent | `universal-events.md:180-219` |
+
+Every subscriber reads again when the stream opens fresh and on `reset`
+(`hooks/useEventStream.js`, the `ready` and `reset` handlers of every
+provider above).
+
+A token absent from `features` draws nothing and asks nothing of its
+routes: no tab, no row, no panel, no request. A token present must have
+every route its surface reads answering, because the surface draws and
+sends as soon as the row lists it. The sidebar's Hosts group draws only
+while `features` lists `sidebar` and `hosts` and a person is signed in
+(`app/router.jsx:620`; `features/hosts/sidebar.js:97`).
