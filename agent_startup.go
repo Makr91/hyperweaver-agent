@@ -65,7 +65,7 @@ func handleBindConflict(cfg *config.Config, selfClient *http.Client, bindErr err
 		return fmt.Errorf("agent already running at %s, and its handoff secret is unreadable: %w",
 			cfg.BaseURL(), serr)
 	}
-	if ferr := protocol.Forward(context.Background(), selfClient, cfg.BaseURL(), protocol.ActionOpen, secret); ferr != nil {
+	if ferr := protocol.Forward(context.Background(), selfClient, cfg.BaseURL(), protocol.ActionOpen, secret, ""); ferr != nil {
 		return fmt.Errorf("agent already running at %s but refused the open handoff: %w",
 			cfg.BaseURL(), ferr)
 	}
@@ -106,36 +106,38 @@ func probeRunningAgent(selfClient *http.Client, baseURL string) bool {
 // handleProtocolInvocation processes an hwa:// URI this process was spawned
 // with. True means the action was delivered to the running agent (this
 // process should exit); false means no agent answered and startup should
-// continue, completing the action once the server is up.
-func handleProtocolInvocation(cfg *config.Config, selfClient *http.Client, uri string) (bool, error) {
-	if _, err := protocol.ParseAction(uri); err != nil {
-		return false, err
+// continue, completing the action once the server is up. The query is the
+// link's, validated, for the cold-start open.
+func handleProtocolInvocation(cfg *config.Config, selfClient *http.Client, uri string) (bool, string, error) {
+	_, query, err := protocol.ParseAction(uri)
+	if err != nil {
+		return false, "", err
 	}
 
 	secret, err := protocol.ReadSecret(cfg.ProtocolSecretPath())
 	if errors.Is(err, fs.ErrNotExist) {
 		// No secret on disk: no agent has ever booted for this user.
-		return false, nil
+		return false, query, nil
 	}
 	if err != nil {
 		// Present but unreadable — typically an agent running as a different
 		// user (e.g. the packaged systemd service); its secret is 0600 and
 		// the running instance would reject a handoff we cannot read anyway.
-		return false, fmt.Errorf("read protocol secret (agent running as another user?): %w", err)
+		return false, "", fmt.Errorf("read protocol secret (agent running as another user?): %w", err)
 	}
 
-	ferr := protocol.Forward(context.Background(), selfClient, cfg.BaseURL(), protocol.ActionOpen, secret)
+	ferr := protocol.Forward(context.Background(), selfClient, cfg.BaseURL(), protocol.ActionOpen, secret, query)
 	if ferr == nil {
 		slog.Info("protocol action delivered to the running agent")
-		return true, nil
+		return true, query, nil
 	}
 	if errors.Is(ferr, protocol.ErrRejected) {
-		return false, ferr
+		return false, "", ferr
 	}
 	// Transport failure: stale secret from a dead agent, nothing listening —
 	// become the running agent and finish the action ourselves.
 	slog.Info("no running agent answered the protocol handoff; starting up", "error", ferr)
-	return false, nil
+	return false, query, nil
 }
 
 // awaitPredecessor is the restart's successor side: with a predecessor's

@@ -112,6 +112,8 @@ func (s *Server) handleTrayClaim(w http.ResponseWriter, r *http.Request) {
 type protocolOpenRequest struct {
 	// Contents of the running agent's protocol.secret file
 	Secret string `json:"secret" binding:"required"`
+	// The link's raw query, the deploy vocabulary alone (create=machine with box or provisioner members); the UI lands on /?query
+	Query string `json:"query,omitempty"`
 }
 
 type protocolOpenResponse struct {
@@ -127,13 +129,13 @@ type protocolOpenResponse struct {
 // fresh browser tab this agent opens, never in this response.
 //
 //	@Summary		hwa:// single-instance handoff
-//	@Description	Public but secret-gated: when the OS spawns a fresh agent process for an hwa://open invocation (Windows registry handler, Linux .desktop handler), that process forwards the action here and exits. The per-boot secret file (0600, beside the running agent's config) authenticates it — web pages cannot read local files, so possession proves a local same-user process. On success the running agent opens the signed-in UI in the user's browser, exactly like a tray Open click.
+//	@Description	Public but secret-gated: when the OS spawns a fresh agent process for an hwa://open invocation (Windows registry handler, Linux .desktop handler), that process forwards the action here and exits. The per-boot secret file (0600, beside the running agent's config) authenticates it — web pages cannot read local files, so possession proves a local same-user process. On success the running agent opens the signed-in UI in the user's browser, exactly like a tray Open click; a query carried by the link (the deploy vocabulary: create=machine with box, box_version, box_arch, box_url or provisioner, provisioner_version, provisioner_url) lands on /?query so the hosts page opens the create wizard seeded, any other key refused 400.
 //	@Tags			Local Login
 //	@Accept			json
 //	@Produce		json
 //	@Param			request	body		protocolOpenRequest	true	"Protocol open request"
 //	@Success		200		{object}	protocolOpenResponse	"Action accepted; the agent is opening the browser"
-//	@Failure		400		{object}	problem.Body		"Missing secret"
+//	@Failure		400		{object}	problem.Body		"Missing secret, or a query outside the deploy vocabulary"
 //	@Failure		403		{object}	problem.Body		"Invalid secret"
 //	@Router			/api/protocol/open [post]
 func (s *Server) handleProtocolOpen(w http.ResponseWriter, r *http.Request) {
@@ -147,9 +149,13 @@ func (s *Server) handleProtocolOpen(w http.ResponseWriter, r *http.Request) {
 		auth.WriteMsg(w, http.StatusForbidden, "Invalid protocol secret")
 		return
 	}
+	if err := protocol.ValidateQuery(body.Query); err != nil {
+		auth.WriteMsg(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	slog.Info("protocol handoff accepted; opening the signed-in UI")
 	// The response must not wait on the browser launch.
-	go s.openUI()
+	go s.openUI(body.Query)
 
 	writeJSON(w, protocolOpenResponse{
 		Message: "Opening the Hyperweaver UI",

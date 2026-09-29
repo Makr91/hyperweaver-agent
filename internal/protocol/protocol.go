@@ -54,6 +54,19 @@ var ErrRejected = errors.New("running agent rejected the protocol handoff")
 // The secret file holds 32 random bytes as hex, rewritten on every boot.
 const secretHexLength = 64
 
+const maxQueryLength = 2048
+
+var queryKeys = map[string]bool{
+	"create":              true,
+	"box":                 true,
+	"box_version":         true,
+	"box_arch":            true,
+	"box_url":             true,
+	"provisioner":         true,
+	"provisioner_version": true,
+	"provisioner_url":     true,
+}
+
 // forwardTimeout bounds the whole handoff attempt; the target is loopback.
 const forwardTimeout = 3 * time.Second
 
@@ -73,23 +86,55 @@ func URIFromArgs(args []string) (string, bool) {
 }
 
 // ParseAction validates an incoming protocol URI (untrusted input) against
-// the closed action vocabulary and returns the action.
-func ParseAction(uri string) (string, error) {
+// the closed action vocabulary and returns the action and its raw query.
+func ParseAction(uri string) (string, string, error) {
 	parsed, err := url.Parse(uri)
 	if err != nil {
-		return "", fmt.Errorf("invalid protocol URI: %w", err)
+		return "", "", fmt.Errorf("invalid protocol URI: %w", err)
 	}
 	if !knownScheme(parsed.Scheme) {
-		return "", fmt.Errorf("unsupported scheme %q", parsed.Scheme)
+		return "", "", fmt.Errorf("unsupported scheme %q", parsed.Scheme)
 	}
-	action := strings.ToLower(parsed.Host)
+	if parsed.User != nil || parsed.Port() != "" || parsed.Fragment != "" {
+		return "", "", errors.New("protocol URI carries userinfo, a port or a fragment")
+	}
+	action := strings.ToLower(parsed.Hostname())
 	if action != ActionOpen {
-		return "", fmt.Errorf("unsupported protocol action %q", parsed.Host)
+		return "", "", fmt.Errorf("unsupported protocol action %q", parsed.Host)
 	}
 	if parsed.Path != "" && parsed.Path != "/" {
-		return "", fmt.Errorf("unsupported protocol path %q", parsed.Path)
+		return "", "", fmt.Errorf("unsupported protocol path %q", parsed.Path)
 	}
-	return action, nil
+	if err := ValidateQuery(parsed.RawQuery); err != nil {
+		return "", "", err
+	}
+	return action, parsed.RawQuery, nil
+}
+
+// ValidateQuery refuses a query longer than 2048 bytes, one with a key outside the deploy vocabulary, or one whose create is not machine.
+func ValidateQuery(raw string) error {
+	if raw == "" {
+		return nil
+	}
+	if len(raw) > maxQueryLength {
+		return errors.New("protocol query too long")
+	}
+	values, err := url.ParseQuery(raw)
+	if err != nil {
+		return fmt.Errorf("invalid protocol query: %w", err)
+	}
+	for key, entries := range values {
+		if !queryKeys[key] {
+			return fmt.Errorf("unsupported protocol query key %q", key)
+		}
+		if len(entries) != 1 {
+			return fmt.Errorf("protocol query key %q given more than once", key)
+		}
+	}
+	if values.Has("create") && values.Get("create") != "machine" {
+		return fmt.Errorf("unsupported protocol create %q", values.Get("create"))
+	}
+	return nil
 }
 
 // WriteSecret generates and persists a fresh handoff secret, replacing any
@@ -139,19 +184,23 @@ func VerifySecret(path, supplied string) bool {
 // transport-level failure (nothing listening) is returned as-is; an HTTP
 // rejection wraps ErrRejected so the caller can tell "no agent" from "an
 // agent said no".
-func Forward(ctx context.Context, client *http.Client, baseURL, action, secret string) error {
+func Forward(ctx context.Context, client *http.Client, baseURL, action, secret, query string) error {
 	reqCtx, cancel := context.WithTimeout(ctx, forwardTimeout)
 	defer cancel()
-	return post(reqCtx, client, baseURL, action, secret)
+	return post(reqCtx, client, baseURL, action, secret, query)
 }
 
 // AwaitRelease asks the running agent to hand over its port and databases and returns once it has, with no deadline; ErrRejected means no restart is pending there.
 func AwaitRelease(ctx context.Context, client *http.Client, baseURL, secret string) error {
-	return post(ctx, client, baseURL, ActionHandoff, secret)
+	return post(ctx, client, baseURL, ActionHandoff, secret, "")
 }
 
-func post(ctx context.Context, client *http.Client, baseURL, action, secret string) error {
-	body, err := json.Marshal(map[string]string{"secret": secret})
+func post(ctx context.Context, client *http.Client, baseURL, action, secret, query string) error {
+	payload := map[string]string{"secret": secret}
+	if query != "" {
+		payload["query"] = query
+	}
+	body, err := json.Marshal(payload)
 	if err != nil {
 		return err
 	}

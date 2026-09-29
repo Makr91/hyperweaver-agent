@@ -137,8 +137,9 @@ func run() error {
 	// agent already running for this user; with none running, keep starting
 	// up and finish the action once the server is listening.
 	pendingProtocolOpen := false
+	pendingQuery := ""
 	if uri, ok := protocol.URIFromArgs(flag.Args()); ok {
-		delivered, perr := handleProtocolInvocation(cfg, selfClient(cfg), uri)
+		delivered, query, perr := handleProtocolInvocation(cfg, selfClient(cfg), uri)
 		if perr != nil {
 			slog.Error("protocol invocation failed", "uri", uri, "error", perr)
 			return perr
@@ -147,6 +148,7 @@ func run() error {
 			return nil
 		}
 		pendingProtocolOpen = true
+		pendingQuery = query
 	}
 
 	// SHI's preventsystemfromsleep: hold the OS's native sleep inhibitor for
@@ -206,8 +208,11 @@ func run() error {
 	// cold-start protocol invocation. Local presence is the credential: a
 	// single-use token in the URL fragment signs the SPA in without a login
 	// screen.
-	openUI := func() {
+	openUI := func(query string) {
 		url := cfg.LocalURL()
+		if query != "" {
+			url += "?" + query
+		}
 		if token, mintErr := trayTokens.Mint(); mintErr == nil {
 			url += "#tray=" + token
 		} else {
@@ -330,14 +335,14 @@ func run() error {
 	}()
 
 	if pendingProtocolOpen {
-		go openUI()
+		go openUI(pendingQuery)
 	}
 
 	// Open the signed-in UI when the desktop agent starts (Mark's ruling
 	// 2026-07-07: one less click — a fresh install lands in the browser
 	// instead of a tray hunt). A protocol invocation already opens above.
 	if !*headless && cfg.Browser.OpenOnStart && !pendingProtocolOpen {
-		go openUI()
+		go openUI("")
 	}
 
 	shutdown := func() {
@@ -387,11 +392,12 @@ func run() error {
 	// No-op on other platforms. Installed before the tray takes the main
 	// thread so an event that cold-launched the app is not dropped.
 	protocol.InstallURLHandler(func(uri string) {
-		if _, perr := protocol.ParseAction(uri); perr != nil {
+		_, query, perr := protocol.ParseAction(uri)
+		if perr != nil {
 			slog.Warn("ignoring invalid protocol invocation", "uri", uri, "error", perr)
 			return
 		}
-		openUI()
+		openUI(query)
 	})
 
 	// Troubleshooting submenu targets. Path resolution failures degrade to
@@ -410,7 +416,7 @@ func run() error {
 	tray.Run(&tray.Options{
 		Title:           "Hyperweaver Agent v" + version.Version,
 		Tooltip:         "Hyperweaver Agent",
-		OnOpen:          openUI,
+		OnOpen:          func() { openUI("") },
 		OnExit:          shutdown,
 		OnOpenLog:       func() { openbrowser.Open(logPath, "") },
 		OnOpenConfigDir: func() { openbrowser.Open(resolvedPath, "") },

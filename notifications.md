@@ -124,7 +124,6 @@ Each row: what the code does → required change → deciding source.
 | `internal/server/status.go:21-40` | no `analytics` member | optional: `{ script_url, attribute, value }` only when an estate-run collector is configured and its hostname is one this agent's configuration names; absent otherwise, and absent today is correct | `universal-navbar.md:623`; `universal-identity.md:261` |
 | `internal/server/status.go:21-40`; `server_routes.go:11-445` | the payload carries no sidebar member, and none is wanted: sidebar entries come only from a feature's `sidebar(status, account)` export, and the `actionMenu` swap that moves the user menu to the sidebar's foot is a feature export too | nothing for this agent to add; hyperweaver is named the first fit for the `actionMenu` swap and is not being changed now, so when hyperweaver-ui converges on the shared build its feature owns that export, and no field for it ever lands in `/api/status` | `universal-navbar.md:358-475` (`:434-435`, `:463-468`); `UI-GROWTH-GUIDE.md:56` |
 | `internal/keys/keys.go:143`; `middleware.go:140`; `apidocs.go:214` | the API-key prefix is `hw_` | keep `hw_`; a `wh_` anywhere is a defect | this repository's own rule |
-| `internal/protocol/protocol.go:34,36-38,64-80`; `internal/server/server_routes.go:32`; `internal/server/trayclaim.go:139-157`; `main.go:132-142,368-374` | the `hwa` scheme is registered and kept; its vocabulary is `open` alone: `ParseAction` refuses any other URL authority or path, the handoff forwards only `POST /protocol/open`, and no URL parameters are read | `hwa://` stays as the desktop hand-off scheme, the reverse-domain form a recorded deviation, so the import action extends it and never replaces it: parse and validate its parameters, forward them through the handoff and the in-process handler, import through the existing import-upload wire (`server_routes.go:341`) with the sha256 verified before the package lands. Two decisions are open in this repository and unset: (a) the action and parameter vocabulary — the straw-man is `hwa://provisioner/import?url=&sha256=&name=&version=`, nothing is fixed; (b) private-artifact handling when the tar.gz needs GitHub auth the agent lacks — refuse with the reason, prompt, or a token the configuration carries, nothing is fixed. The catalog's Open-in-Hyperweaver button is blocked until both are set here | `universal-identity.md:1178-1186,2076-2077`; `C:\Users\Mark\Desktop\hyperweaver-ai-sync.md:91-100`; `internal/server/provisioners.go` (the import-upload handler) |
 
 ## 8. Packaging and workflows
 
@@ -156,6 +155,23 @@ release, an installer and a module path to three different owners.
 | 6 | `.github/workflows/build-packages.yml:40-116,201-262,374-435` | the UI bake, seed and PKI steps are repeated across the three OS jobs | a composite action, or the duplication kept knowingly |
 | 7 | `.golangci.yml:26-35,47-54` | `gosec` excludes G204 file-wide; `forbidigo` bans `fmt.Print*` | keep both scoped and intentional |
 | 8 | `README.md:75`; `CONTRIBUTING.md:32`; `go.mod:3` | Go 1.24+ in the docs, `go 1.25.0` in `go.mod` | the docs state the `go.mod` version |
+
+## 10. What the shared UI asks of this agent for the local user
+
+Why: the person at a desktop agent is its owner, not a guest; they sign
+in once by the tray and expect the same Profile page every other host of
+the estate draws, their preferences kept for them, and no timer anywhere
+in the shared UI. In Mark's words: "THIS IS NOT A WEB SITE FOR THE
+PUBLIC ... A LOCAL USER RUNNING HYPERWEAVER AGENT ON THEIR LOCAL
+MACHINE, THEY ARE NOT A GUEST, AND SINCE THEY HAVE LOCAL ACCESS THEY
+NEED NO LOGINS, SURE WE CAN MAKE A USER PROFILE END POINT SO WE CAN
+TRACK THE DETAILS FOR THE USER".
+
+| Code file:line | What is | Required change | Deciding source |
+| --- | --- | --- | --- |
+| `internal/server/apikeys.go` (`GET /api/api-keys/info`), `server_routes.go` | the key's profile alone; no `/api/user`, no preferences | `GET /api/user` answering the signed-in person in the identity provider's profile shape the shared UI reads (`id`, `username`, `name`, `email`, `role`, `preferred_language`, `preferred_mode`, `preferred_theme`, `preferred_motion`, `preferred_timezone`), the identity the key was minted with and the preferences stored beside it; `PATCH /api/user/preferences` with the branding contract's write path (`language`, `mode`, `theme`, `motion`, `timezone`, an omitted key unchanged, `null` clearing, a `422` problem body per failing member), stored on this agent for its local user; `profile-updated` on the `profile` topic of the stream when a write changed a column | `preferences-and-branding.md` (Write path; "the account value is authoritative ... a local account with preference columns counts"); `universal-session.md` (the session's `load` reads `/api/user`) |
+| `internal/server/oidc_login.go` (`GET /api/auth/oidc/device-status`) | answers the handle's status at once, `pending` while nothing changed | the brief's own offer, taken: the request stays open until the status leaves `pending` or a wait the agent bounds ends (the RFC's `interval` is a fine bound), then answers the same body; `?wait=0` for the immediate answer; the approved answer still delivered once | `agent-signin-brief.md:229-234`; `universal-session.md` (no timer in the UI); RFC 8628 §3.5 |
+| `internal/server/events.go` (`GET /api/events`) | the `admin` topic answers 403 to a non-admin key | the shared UI opens the one stream with every topic `status.events.topics` lists, so a viewer or operator key gets no stream at all; answer the stream with the topics the key's role may read and leave the others out, 403 only when it may read none | `universal-events.md` (one stream, the topics the status advertises); `src/lib/runtime.js` `connectEventStream` |
 
 ## 11. What the shared UI reads from `GET /api/status` and the host's own row
 
@@ -303,3 +319,23 @@ every route its surface reads answering, because the surface draws and
 sends as soon as the row lists it. The sidebar's Hosts group draws only
 while `features` lists `sidebar` and `hosts` and a person is signed in
 (`app/router.jsx:620`; `features/hosts/sidebar.js:97`).
+
+## 12. Routes the shared UI reads that this agent answers 404 today
+
+Why: the Agent settings page at `/hosts/self/settings` draws "Failed to
+load settings: Not found" on the live agent 0.1.4, so the settings, the
+API keys and the backups cannot be reached from the shared UI, and the
+key a person needs to sign in from another tab cannot be minted there.
+Seen live 2026-09-29 against `https://127.0.0.1:9421`.
+
+Every route below is hyperweaver-ui's own call, carried into the shared
+UI as it was and prefixed `/api` under section 1's rule; the page reads
+each once as it draws and again on Refresh.
+
+| Route the UI sends | Answer today | Read by | Required change |
+| --- | --- | --- | --- |
+| `GET /api/settings` | 404 | `features/hosts/api/manage.js` (`fetchSettings`), `components/AgentSettings.jsx` | serve the settings document under `/api`, the route `internal/server/settings.go` serves at the root today |
+| `GET /api/settings/schema` | 404 | `api/agentSettings.js` (`fetchSettingsSchema`) | serve the schema under `/api` |
+| `GET /api/settings/backups` | 404 | `api/agentSettings.js` (`fetchSettingsBackups`) | serve the backups list under `/api`; with it `POST /api/settings/restore/{file}`, `DELETE /api/settings/backups/{file}`, `PUT /api/settings`, `POST /api/server/restart` |
+| `GET /api/app/updates/check` | 500 "Failed to check for updates: versioninfo fetch returned 404 Not Found" | `api/agentSettings.js` (`checkAgentUpdate`) | answer `{ update_available: false }` with the reason when the version source cannot be reached, never 500; the page draws no Update button either way |
+| `GET /api/api-keys`, `POST /api/api-keys/generate`, `POST /api/api-keys/bootstrap`, `DELETE /api/api-keys/{id}` | unproven, the page never reached them | `api/apiKeyAPI.js`, `components/ApiKeysTab.jsx` | serve under `/api`, the API management tab of the same page |
