@@ -44,6 +44,9 @@ func knownScheme(name string) bool {
 // the tray "Open" click (mint a one-time token, open the signed-in UI).
 const ActionOpen = "open"
 
+// ActionHandoff is the restart handoff: the successor asks the running agent to release the port and databases.
+const ActionHandoff = "handoff"
+
 // ErrRejected reports that a running agent answered the handoff and refused
 // it (bad or stale secret) — not that no agent was reachable.
 var ErrRejected = errors.New("running agent rejected the protocol handoff")
@@ -139,12 +142,20 @@ func VerifySecret(path, supplied string) bool {
 func Forward(ctx context.Context, client *http.Client, baseURL, action, secret string) error {
 	reqCtx, cancel := context.WithTimeout(ctx, forwardTimeout)
 	defer cancel()
+	return post(reqCtx, client, baseURL, action, secret)
+}
 
+// AwaitRelease asks the running agent to hand over its port and databases and returns once it has, with no deadline; ErrRejected means no restart is pending there.
+func AwaitRelease(ctx context.Context, client *http.Client, baseURL, secret string) error {
+	return post(ctx, client, baseURL, ActionHandoff, secret)
+}
+
+func post(ctx context.Context, client *http.Client, baseURL, action, secret string) error {
 	body, err := json.Marshal(map[string]string{"secret": secret})
 	if err != nil {
 		return err
 	}
-	req, err := http.NewRequestWithContext(reqCtx, http.MethodPost,
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
 		baseURL+"/api/protocol/"+action, bytes.NewReader(body))
 	if err != nil {
 		return err

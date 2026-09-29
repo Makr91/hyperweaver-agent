@@ -189,6 +189,10 @@ func run() error {
 
 	trayTokens := auth.NewTrayTokens()
 
+	// A restart's successor asks its predecessor to release the port and
+	// databases before this process overwrites the secret or opens anything.
+	awaitPredecessor(cfg, selfClient(cfg))
+
 	// Handoff secret for the hwa:// protocol handler: rewritten fresh every
 	// boot, so possession proves "local process, same user, current agent
 	// run". A write failure only disables the protocol handoff.
@@ -203,7 +207,6 @@ func run() error {
 	// single-use token in the URL fragment signs the SPA in without a login
 	// screen.
 	openUI := func() {
-		waitForServer(selfClient(cfg), cfg.BaseURL())
 		url := cfg.LocalURL()
 		if token, mintErr := trayTokens.Mint(); mintErr == nil {
 			url += "#tray=" + token
@@ -238,7 +241,19 @@ func run() error {
 	reconciler := systems.reconciler
 	monitor := systems.monitor
 
-	srv, err := server.New(cfg, keyStore, trayTokens, taskQueue, systems.machines, systems.provisioners, systems.storage, secretsStore, systems.assets, systems.artifactSvc, monitor, systems.dbs, restartArgs, openUI)
+	stopServices := func() {
+		systems.snapshots.Stop()
+		systems.artifactSvc.Stop()
+		monitor.Stop()
+		reconciler.Stop()
+		taskQueue.Stop()
+	}
+	teardown := func() {
+		stopServices()
+		systems.closeDBs()
+	}
+
+	srv, err := server.New(cfg, keyStore, trayTokens, taskQueue, systems.machines, systems.provisioners, systems.storage, secretsStore, systems.assets, systems.artifactSvc, monitor, systems.dbs, restartArgs, teardown, openUI)
 	if err != nil {
 		slog.Error("server setup failed", "error", err)
 		return err
@@ -326,11 +341,7 @@ func run() error {
 	}
 
 	shutdown := func() {
-		systems.snapshots.Stop()
-		systems.artifactSvc.Stop()
-		monitor.Stop()
-		reconciler.Stop()
-		taskQueue.Stop()
+		stopServices()
 		// SHI's keepserversrunning: the default leaves VMs alone; turned off,
 		// every provisioned machine is force-powered-off on the way out
 		// (direct commands — the queue is already stopped).

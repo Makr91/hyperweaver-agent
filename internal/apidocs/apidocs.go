@@ -178,6 +178,7 @@ var publicPaths = []string{
 	"/api/auth/oidc/silent-start",
 	"/api/auth/oidc/callback",
 	"/api/protocol/open",
+	"/api/protocol/handoff",
 	"/api/tasks/{taskId}/stream",
 	"/api/term/{sessionId}",
 	"/api/ssh/{sessionId}",

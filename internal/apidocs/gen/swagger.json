@@ -4642,6 +4642,14 @@
                 },
                 "type": "object"
             },
+            "server.protocolHandoffResponse": {
+                "properties": {
+                    "message": {
+                        "type": "string"
+                    }
+                },
+                "type": "object"
+            },
             "server.protocolOpenRequest": {
                 "properties": {
                     "secret": {
@@ -14627,6 +14635,77 @@
                 "summary": "Stop a NAT network's service",
                 "tags": [
                     "Host Configuration"
+                ]
+            }
+        },
+        "/api/protocol/handoff": {
+            "post": {
+                "description": "Public but secret-gated, the restart's successor side: the freshly spawned agent posts the running agent's protocol secret before it opens any database or binds any port. With a restart pending the running agent holds this request open while it closes its listeners, stops its services and closes its databases, then answers 200 and exits; the answer, or the connection closing with it, is the successor's signal that the port and the database files are free. Without a pending restart (an ordinary second launch) it answers 409 and the caller proceeds as a normal launch.",
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "oneOf": [
+                                    {
+                                        "type": "object"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/server.protocolOpenRequest",
+                                        "summary": "request",
+                                        "description": "The running agent's protocol secret"
+                                    }
+                                ]
+                            }
+                        }
+                    },
+                    "description": "The running agent's protocol secret",
+                    "required": true
+                },
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/server.protocolHandoffResponse"
+                                }
+                            }
+                        },
+                        "description": "Port and databases released"
+                    },
+                    "400": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/auth.ErrorMsg"
+                                }
+                            }
+                        },
+                        "description": "Missing secret"
+                    },
+                    "403": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/auth.ErrorMsg"
+                                }
+                            }
+                        },
+                        "description": "Invalid secret"
+                    },
+                    "409": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/auth.ErrorMsg"
+                                }
+                            }
+                        },
+                        "description": "No restart is pending"
+                    }
+                },
+                "summary": "Restart handoff",
+                "tags": [
+                    "Local Login"
                 ]
             }
         },

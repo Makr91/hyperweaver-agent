@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"log/slog"
-	"os"
 	"sort"
 	"time"
 
@@ -139,28 +138,11 @@ func setupTasks(cfg *config.Config, secretsStore *secrets.Store) (*agentSystems,
 		Optimize:          sqliteOpts.Optimize,
 	}
 
-	// Startup-scoped, not request-scoped — Background is correct here.
-	// A restart-spawned successor retries while its predecessor releases the
-	// database file locks — same handshake the port bind uses; the databases
-	// open before the port, so without this a restart races the dying
-	// process's SQLite locks (observed as "disk I/O error (1546)").
+	// Startup-scoped, not request-scoped — Background is correct here. A
+	// restart's successor reaches this only after its predecessor closed its
+	// databases, so one open is enough.
 	openDB := func(path string, migrations []string) (*sql.DB, error) {
-		attempts := 1
-		if os.Getenv("HYPERWEAVER_RESTART") == "1" {
-			attempts = 20
-		}
-		var lastErr error
-		for i := 0; i < attempts; i++ {
-			database, oerr := db.Open(context.Background(), path, &dbOptions, migrations)
-			if oerr == nil {
-				return database, nil
-			}
-			lastErr = oerr
-			if attempts > 1 {
-				time.Sleep(500 * time.Millisecond)
-			}
-		}
-		return nil, lastErr
+		return db.Open(context.Background(), path, &dbOptions, migrations)
 	}
 
 	tasksDB, err := openDB(tasksPath, tasks.Migrations)

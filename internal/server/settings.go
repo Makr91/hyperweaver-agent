@@ -28,7 +28,7 @@ func (s *Server) mountConfigRoutes(mux *http.ServeMux, requireKey func(http.Hand
 			}
 			return ""
 		},
-	}, func() { s.restartSelf(context.Background()) }, configUploadLimit)
+	}, s.restartSelf, configUploadLimit)
 	mux.Handle("GET /api/config/backups", requireKey(http.HandlerFunc(s.handleListBackups)))
 	mux.Handle("POST /api/config/backups", requireKey(http.HandlerFunc(s.handleCreateBackup)))
 	mux.Handle("DELETE /api/config/backups/{id}", requireKey(http.HandlerFunc(s.handleDeleteBackup)))
@@ -128,17 +128,29 @@ func (s *Server) handleRestoreBackup(w http.ResponseWriter, r *http.Request) {
 // Restart restarts the agent process, the tray's Troubleshooting action.
 func (s *Server) Restart() {
 	slog.Warn("server restart requested from the tray")
-	go s.restartSelf(context.Background())
+	go s.restartSelf()
+}
+
+func (s *Server) expectSuccessor() {
+	s.handoffMu.Lock()
+	defer s.handoffMu.Unlock()
+	s.successorExpected = true
+}
+
+func (s *Server) successorPending() bool {
+	s.handoffMu.Lock()
+	defer s.handoffMu.Unlock()
+	return s.successorExpected
 }
 
 // restartSelf restarts the agent process. Under systemd the unit's
 // Restart=always brings it back after a clean exit; everywhere else a
-// detached copy of this executable is spawned (with a bind-retry handshake so
-// the child can wait for this process to release the port). The successor's
-// arguments come from main's parsed flags, never raw process arguments.
-func (s *Server) restartSelf(parent context.Context) {
-	time.Sleep(time.Second)
-
+// detached copy of this executable is spawned, which asks over the handoff
+// channel and is answered only once the services and databases are closed
+// and the listeners after them, so a successor refused instead finds nothing
+// held. The successor's arguments come from main's parsed flags, never raw
+// process arguments.
+func (s *Server) restartSelf() {
 	if os.Getenv("INVOCATION_ID") == "" {
 		exe, err := os.Executable()
 		if err != nil {
@@ -150,8 +162,8 @@ func (s *Server) restartSelf(parent context.Context) {
 			slog.Error("restart: validate executable", "error", err)
 			return
 		}
-		cmd := exec.CommandContext(parent, validated, s.restartArgs...)
-		cmd.Env = append(os.Environ(), "HYPERWEAVER_RESTART=1")
+		s.expectSuccessor()
+		cmd := exec.CommandContext(context.Background(), validated, s.restartArgs...)
 		cmd.SysProcAttr = procattr.NoConsole()
 		if err := cmd.Start(); err != nil {
 			slog.Error("restart: spawn successor", "error", err)
@@ -159,10 +171,13 @@ func (s *Server) restartSelf(parent context.Context) {
 		}
 	}
 
-	shutdownCtx, cancel := context.WithTimeout(parent, 5*time.Second)
-	err := s.Shutdown(shutdownCtx)
-	cancel()
-	if err != nil {
+	s.teardown()
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- s.Shutdown(shutdownCtx) }()
+	close(s.released)
+	if err := <-done; err != nil {
 		slog.Error("restart: shutdown", "error", err)
 	}
 	slog.Info("hyperweaver-agent restarting")

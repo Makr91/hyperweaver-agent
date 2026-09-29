@@ -155,3 +155,42 @@ func (s *Server) handleProtocolOpen(w http.ResponseWriter, r *http.Request) {
 		Message: "Opening the Hyperweaver UI",
 	})
 }
+
+type protocolHandoffResponse struct {
+	Message string `json:"message"`
+}
+
+// @Summary		Restart handoff
+// @Description	Public but secret-gated, the restart's successor side: the freshly spawned agent posts the running agent's protocol secret before it opens any database or binds any port. With a restart pending the running agent holds this request open while it closes its listeners, stops its services and closes its databases, then answers 200 and exits; the answer, or the connection closing with it, is the successor's signal that the port and the database files are free. Without a pending restart (an ordinary second launch) it answers 409 and the caller proceeds as a normal launch.
+// @Tags			Local Login
+// @Accept			json
+// @Produce		json
+// @Param			request	body		protocolOpenRequest		true	"The running agent's protocol secret"
+// @Success		200		{object}	protocolHandoffResponse	"Port and databases released"
+// @Failure		400		{object}	auth.ErrorMsg			"Missing secret"
+// @Failure		403		{object}	auth.ErrorMsg			"Invalid secret"
+// @Failure		409		{object}	auth.ErrorMsg			"No restart is pending"
+// @Router			/api/protocol/handoff [post]
+func (s *Server) handleProtocolHandoff(w http.ResponseWriter, r *http.Request) {
+	var body protocolOpenRequest
+	if err := decodeBody(r, &body); err != nil || body.Secret == "" {
+		auth.WriteMsg(w, http.StatusBadRequest, "Protocol secret required")
+		return
+	}
+	if !protocol.VerifySecret(s.cfg.ProtocolSecretPath(), body.Secret) {
+		slog.Warn("restart handoff with invalid secret", "remote", r.RemoteAddr)
+		auth.WriteMsg(w, http.StatusForbidden, "Invalid protocol secret")
+		return
+	}
+	if !s.successorPending() {
+		auth.WriteMsg(w, http.StatusConflict, "No restart is pending")
+		return
+	}
+	slog.Info("restart successor is waiting for the release")
+	select {
+	case <-s.released:
+	case <-r.Context().Done():
+		return
+	}
+	writeJSON(w, protocolHandoffResponse{Message: "Released"})
+}

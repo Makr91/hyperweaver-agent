@@ -138,27 +138,20 @@ func handleProtocolInvocation(cfg *config.Config, selfClient *http.Client, uri s
 	return false, nil
 }
 
-// waitForServer polls the agent's own status endpoint until the listener
-// answers, bounded to a few seconds — protocol invocations can race server
-// startup (tray clicks always find it up on the first probe). Opening the
-// browser anyway on timeout is deliberate: the user gets a page, or a
-// browser error a reload fixes, instead of silence.
-func waitForServer(selfClient *http.Client, baseURL string) {
-	client := &http.Client{Transport: selfClient.Transport, Timeout: 500 * time.Millisecond}
-	for attempt := 0; attempt < 10; attempt++ {
-		req, err := http.NewRequestWithContext(context.Background(),
-			http.MethodGet, baseURL+"/api/status", http.NoBody)
-		if err != nil {
-			return
-		}
-		resp, err := client.Do(req)
-		if err == nil {
-			_ = resp.Body.Close()
-			if resp.StatusCode == http.StatusOK {
-				return
-			}
-		}
-		time.Sleep(250 * time.Millisecond)
+// awaitPredecessor is the restart's successor side: with a predecessor's
+// secret on disk, ask it to release the port and databases and return once
+// it has. No secret, a transport failure, or 409 means an ordinary launch.
+func awaitPredecessor(cfg *config.Config, selfClient *http.Client) {
+	secret, err := protocol.ReadSecret(cfg.ProtocolSecretPath())
+	if err != nil {
+		return
 	}
-	slog.Warn("server not answering yet; opening the browser anyway")
+	err = protocol.AwaitRelease(context.Background(), selfClient, cfg.BaseURL(), secret)
+	switch {
+	case err == nil:
+		slog.Info("predecessor released its port and databases")
+	case errors.Is(err, protocol.ErrRejected):
+	default:
+		slog.Info("no predecessor holds the port", "detail", err)
+	}
 }

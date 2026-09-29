@@ -5,6 +5,7 @@ package server
 import (
 	"net"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/Makr91/hyperweaver-agent/internal/assets"
@@ -55,6 +56,14 @@ type Server struct {
 	// built by main from parsed flag values (never raw os.Args).
 	restartArgs []string
 
+	// teardown stops the queue and services and closes the databases; the
+	// restart runs it before telling the successor the files are free.
+	teardown func()
+
+	handoffMu         sync.Mutex
+	successorExpected bool
+	released          chan struct{}
+
 	// openUI opens the signed-in UI in the user's browser — the same action a
 	// tray Open click performs, injected by main so the hwa:// protocol
 	// handoff (POST /protocol/open) shares it exactly.
@@ -62,7 +71,7 @@ type Server struct {
 }
 
 // New builds the server and its routes.
-func New(cfg *config.Config, keyStore *keys.Store, trayTokens *auth.TrayTokens, taskQueue *tasks.Queue, machineStore *machines.Store, provisioners *provisioner.Registry, storage *locations.Set, secretsStore *secrets.Store, assetsStore *assets.Store, artifactSvc *assets.Service, monitor *monitoring.Service, dbs []DBHandle, restartArgs []string, openUI func()) (*Server, error) {
+func New(cfg *config.Config, keyStore *keys.Store, trayTokens *auth.TrayTokens, taskQueue *tasks.Queue, machineStore *machines.Store, provisioners *provisioner.Registry, storage *locations.Set, secretsStore *secrets.Store, assetsStore *assets.Store, artifactSvc *assets.Service, monitor *monitoring.Service, dbs []DBHandle, restartArgs []string, teardown, openUI func()) (*Server, error) {
 	s := &Server{
 		cfg:            cfg,
 		keys:           keyStore,
@@ -84,6 +93,8 @@ func New(cfg *config.Config, keyStore *keys.Store, trayTokens *auth.TrayTokens, 
 		health:         &healthState{},
 		startedAt:      time.Now(),
 		restartArgs:    restartArgs,
+		teardown:       teardown,
+		released:       make(chan struct{}),
 		openUI:         openUI,
 	}
 

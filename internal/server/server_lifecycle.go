@@ -11,7 +11,6 @@ import (
 	"os"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/Makr91/hyperweaver-agent/internal/sslcert"
 )
@@ -167,29 +166,12 @@ func (s *Server) Start() error {
 	return err
 }
 
-// listen binds the configured address. A process spawned by /server/restart
-// (HYPERWEAVER_RESTART=1) retries for a few seconds while its predecessor
-// releases the port.
+// listen binds the configured address once; a restart's successor arrives
+// here only after its predecessor released the port.
 func (s *Server) listen() (net.Listener, error) {
-	attempts := 1
-	if os.Getenv("HYPERWEAVER_RESTART") == "1" {
-		attempts = 20
-	}
-
 	// Server-lifetime bind, not request-scoped — Background is correct here.
 	listenConfig := net.ListenConfig{}
-	var lastErr error
-	for i := 0; i < attempts; i++ {
-		listener, err := listenConfig.Listen(context.Background(), "tcp", s.cfg.ListenAddr())
-		if err == nil {
-			return listener, nil
-		}
-		lastErr = err
-		if attempts > 1 {
-			time.Sleep(500 * time.Millisecond)
-		}
-	}
-	return nil, lastErr
+	return listenConfig.Listen(context.Background(), "tcp", s.cfg.ListenAddr())
 }
 
 // Shutdown gracefully drains connections on both listeners.

@@ -28,6 +28,7 @@ func (s *Server) registerRoutes(mux *http.ServeMux) error {
 	// hwa:// single-instance handoff: public route, authenticated by the
 	// per-boot secret file only a local same-user process can read.
 	mux.HandleFunc("POST /api/protocol/open", s.handleProtocolOpen)
+	mux.HandleFunc("POST /api/protocol/handoff", s.handleProtocolHandoff)
 	mux.Handle("POST /api/api-keys/generate", requireKey(http.HandlerFunc(s.handleGenerateKey)))
 	mux.Handle("GET /api/api-keys", requireKey(http.HandlerFunc(s.handleListKeys)))
 	mux.Handle("GET /api/api-keys/info", requireKey(http.HandlerFunc(s.handleKeyInfo)))
