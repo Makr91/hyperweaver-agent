@@ -53,6 +53,7 @@ type oidcManager struct {
 	issuer       string
 	clientID     string
 	scope        string
+	deviceScope  string
 	allowedUsers []string
 	storePath    string
 	hashRounds   int
@@ -93,6 +94,7 @@ func newOIDCManager(cfg *config.Config, keyStore *keys.Store) *oidcManager {
 		issuer:       cfg.OIDC.Issuer,
 		clientID:     cfg.OIDC.ClientID,
 		scope:        strings.Join(cfg.OIDC.Scopes, " "),
+		deviceScope:  deviceScopeOf(cfg.OIDC.Scopes),
 		allowedUsers: cfg.OIDC.AllowedUsers,
 		storePath:    filepath.Join(cfg.Dir(), "oidc.json"),
 		hashRounds:   cfg.APIKeys.HashRounds,
@@ -121,6 +123,16 @@ func newOIDCManager(cfg *config.Config, keyStore *keys.Store) *oidcManager {
 	m.boundCustomerID = state.BoundCustomerID
 	m.mintedKeys = state.MintedKeys
 	return m
+}
+
+func deviceScopeOf(scopes []string) string {
+	kept := make([]string, 0, len(scopes))
+	for _, scope := range scopes {
+		if scope != "openid" {
+			kept = append(kept, scope)
+		}
+	}
+	return strings.Join(kept, " ")
 }
 
 func (m *oidcManager) close() {
@@ -269,7 +281,7 @@ func (m *oidcManager) start(ctx context.Context) (*deviceStartResponse, error) {
 	if err != nil {
 		return nil, err
 	}
-	authorization, err := oidcStartDeviceAuthorization(ctx, endpoints, m.clientID, m.scope)
+	authorization, err := oidcStartDeviceAuthorization(ctx, endpoints, m.clientID, m.deviceScope)
 	if err != nil {
 		return nil, err
 	}
