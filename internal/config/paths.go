@@ -15,7 +15,7 @@ func (c *Config) SSLKeyPath() string {
 	if c.SSL.KeyPath != "" {
 		return c.SSL.KeyPath
 	}
-	return filepath.Join(filepath.Dir(c.path), "ssl", "server.key")
+	return filepath.Join(c.dir, "ssl", "server.key")
 }
 
 // SSLCertPath returns the TLS certificate location: ssl.cert_path when
@@ -24,7 +24,7 @@ func (c *Config) SSLCertPath() string {
 	if c.SSL.CertPath != "" {
 		return c.SSL.CertPath
 	}
-	return filepath.Join(filepath.Dir(c.path), "ssl", "server.crt")
+	return filepath.Join(c.dir, "ssl", "server.crt")
 }
 
 // SSLCACertPath returns the CA certificate location: ssl.ca_cert_path when
@@ -33,7 +33,7 @@ func (c *Config) SSLCACertPath() string {
 	if c.SSL.CACertPath != "" {
 		return c.SSL.CACertPath
 	}
-	return filepath.Join(filepath.Dir(c.path), "ssl", "ca.crt")
+	return filepath.Join(c.dir, "ssl", "ca.crt")
 }
 
 // SSLCAKeyPath returns the CA private-key location: ssl.ca_key_path when
@@ -42,7 +42,7 @@ func (c *Config) SSLCAKeyPath() string {
 	if c.SSL.CAKeyPath != "" {
 		return c.SSL.CAKeyPath
 	}
-	return filepath.Join(filepath.Dir(c.path), "ssl", "ca.key")
+	return filepath.Join(c.dir, "ssl", "ca.key")
 }
 
 // VRDECertRoot returns where per-machine VRDE TLS material lives:
@@ -50,7 +50,7 @@ func (c *Config) SSLCAKeyPath() string {
 // long as the configuration does. Shared by the create executor, the
 // browser-RDP bridge's self-heal, and the vrde-tls endpoint.
 func (c *Config) VRDECertRoot() string {
-	return filepath.Join(filepath.Dir(c.path), "ssl", "vrde")
+	return filepath.Join(c.dir, "ssl", "vrde")
 }
 
 // LogFilePath returns the configured log file, defaulting to
@@ -59,41 +59,32 @@ func (c *Config) LogFilePath() (string, error) {
 	if c.Logging.File != "" {
 		return c.Logging.File, nil
 	}
-	dir, err := Dir()
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(dir, "logs", "agent.log"), nil
+	return filepath.Join(c.dir, "logs", "agent.log"), nil
 }
 
-// Path returns where this configuration was loaded from.
-func (c *Config) Path() string {
-	return c.path
-}
-
-// SetupTokenPath returns the setup (claim) token location: setup.token beside
-// the loaded configuration file, mirroring the Node agent.
+// SetupTokenPath returns the setup token location: setup.token beside the
+// configuration files.
 func (c *Config) SetupTokenPath() string {
-	return filepath.Join(filepath.Dir(c.path), "setup.token")
+	return filepath.Join(c.dir, "setup.token")
 }
 
 // KeyStorePath returns the API-key store location: keys.json beside the
-// loaded configuration file.
+// configuration files.
 func (c *Config) KeyStorePath() string {
-	return filepath.Join(filepath.Dir(c.path), "keys.json")
+	return filepath.Join(c.dir, "keys.json")
 }
 
 // ProtocolSecretPath returns the hwa:// handoff-secret location:
-// protocol.secret beside the loaded configuration file.
+// protocol.secret beside the configuration files.
 func (c *Config) ProtocolSecretPath() string {
-	return filepath.Join(filepath.Dir(c.path), "protocol.secret")
+	return filepath.Join(c.dir, "protocol.secret")
 }
 
 // SecretsPath returns the global secrets store location: secrets.yaml
-// beside the loaded configuration file (architecture D-C — its own store so
-// GET /settings keeps serving just the configuration document).
+// beside the configuration files (architecture D-C — its own store so the
+// configuration routes keep serving just the configuration documents).
 func (c *Config) SecretsPath() string {
-	return filepath.Join(filepath.Dir(c.path), "secrets.yaml")
+	return filepath.Join(c.dir, "secrets.yaml")
 }
 
 // DataDir returns the agent's data root: data.dir when configured, else the
@@ -165,7 +156,7 @@ func (c *Config) MonitoringDBPath(kind string) (string, error) {
 
 func (c *Config) definitionsDir() (string, error) {
 	if c.Data.Dir == "" && runtime.GOOS == "windows" {
-		return Dir()
+		return c.dir, nil
 	}
 	return c.DataDir()
 }
@@ -238,7 +229,7 @@ func (c *Config) ProvisionKeyPath() string {
 	if c.Provisioning.SSH.KeyPath != "" {
 		return c.Provisioning.SSH.KeyPath
 	}
-	return filepath.Join(filepath.Dir(c.path), "ssh", "provision_key")
+	return filepath.Join(c.dir, "ssh", "provision_key")
 }
 
 // TaskLogDir returns where per-task output log files land, defaulting to
@@ -247,9 +238,5 @@ func (c *Config) TaskLogDir() (string, error) {
 	if c.Tasks.Output.LogDirectory != "" {
 		return c.Tasks.Output.LogDirectory, nil
 	}
-	dir, err := Dir()
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(dir, "logs", "tasks"), nil
+	return filepath.Join(c.dir, "logs", "tasks"), nil
 }

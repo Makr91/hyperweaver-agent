@@ -453,9 +453,10 @@ jobs:
                    "$STAGE"/usr/share/icons/hicolor/192x192/apps \
                    "$STAGE"/usr/share/man/man8 \
                    "$STAGE"/usr/share/man/man5 \
+                   "$STAGE"/usr/share/hyperweaver-agent/config \
                    "$STAGE"/DEBIAN
           cp bin/hyperweaver-agent "$STAGE/usr/bin/"
-          cp packaging/config/production-config.yaml "$STAGE/etc/hyperweaver-agent/config.yaml"
+          cp internal/config/seed/*.config.yaml "$STAGE/usr/share/hyperweaver-agent/config/"
           # STARTcloud PKI (Mark's shape-A ruling, sync 2026-07-17): the
           # intermediate pair signs the agent's certificates (full chain
           # served); root-ca.crt is the trust anchor postinst plants

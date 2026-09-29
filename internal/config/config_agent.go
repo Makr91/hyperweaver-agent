@@ -78,9 +78,9 @@ type CleanupConfig struct {
 // machine through the SSH transport ladder and stored credentials — and
 // {machine} (the machine name).
 type ApplicationConfig struct {
-	Name string   `yaml:"name" json:"name"`
-	Path string   `yaml:"path" json:"path"`
-	Args []string `yaml:"args" json:"args"`
+	DisplayName string   `yaml:"display_name" json:"display_name"`
+	Path        string   `yaml:"path"         json:"path"`
+	Args        []string `yaml:"args"         json:"args"`
 }
 
 // TicketSystemConfig feeds the UI's Help & Support link (the profile

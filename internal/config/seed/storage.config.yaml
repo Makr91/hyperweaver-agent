@@ -1,0 +1,15 @@
+schemaVersion: 1
+template_sources:
+  sources:
+    startcloud_boxvault:
+      display_name: STARTcloud BoxVault
+      url: https://boxvault.startcloud.com
+      enabled: true
+      default: true
+catalog_sources:
+  sources:
+    startcloud_catalog:
+      display_name: STARTcloud Provisioner Catalog
+      url: https://provisioner-catalog.startcloud.com/catalog.json
+      enabled: true
+      default: true

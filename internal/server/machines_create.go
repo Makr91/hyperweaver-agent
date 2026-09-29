@@ -230,7 +230,7 @@ func (s *Server) queueCreateOrchestration(ctx context.Context, name, home string
 			return "", nil, false, "", serr
 		}
 		downloadMeta, merr := json.Marshal(&machines.TemplateDownloadMetadata{
-			SourceName:   source.Name,
+			SourceName:   source.ID,
 			Organization: org,
 			BoxName:      boxName,
 			Version:      boxVersion,

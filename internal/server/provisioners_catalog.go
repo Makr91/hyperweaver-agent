@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"sort"
 
 	"github.com/Makr91/hyperweaver-agent/internal/auth"
 	"github.com/Makr91/hyperweaver-agent/internal/provisioner"
@@ -13,10 +14,17 @@ import (
 // catalogSourceList converts the configured catalogs into the provisioner
 // package's source shape.
 func (s *Server) catalogSourceList() []provisioner.CatalogSource {
-	sources := make([]provisioner.CatalogSource, 0, len(s.cfg.CatalogSources.Sources))
-	for _, source := range s.cfg.CatalogSources.Sources {
+	ids := make([]string, 0, len(s.cfg.CatalogSources.Sources))
+	for id := range s.cfg.CatalogSources.Sources {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	sources := make([]provisioner.CatalogSource, 0, len(ids))
+	for _, id := range ids {
+		source := s.cfg.CatalogSources.Sources[id]
 		sources = append(sources, provisioner.CatalogSource{
-			Name:    source.Name,
+			ID:      id,
+			Name:    source.DisplayName,
 			URL:     source.URL,
 			Enabled: source.Enabled,
 			Default: source.Default,
@@ -28,6 +36,7 @@ func (s *Server) catalogSourceList() []provisioner.CatalogSource {
 
 // catalogSourceRow is one entry of GET /provisioning/catalog/sources.
 type catalogSourceRow struct {
+	ID      string `json:"id"`
 	Name    string `json:"name"`
 	URL     string `json:"url"`
 	Default bool   `json:"default"`
@@ -43,7 +52,7 @@ type listCatalogSourcesResponse struct {
 // templates/sources shape — never the CA file path).
 //
 //	@Summary		List configured provisioner catalogs
-//	@Description	Minimum role: viewer. The enabled catalog_sources definitions (name, url, default) — the HACS model's registries; fork the catalog repo and add your own as another source. CA bundles are never returned.
+//	@Description	Minimum role: viewer. The enabled catalog_sources definitions (id, name, url, default) — the HACS model's registries; fork the catalog repo and add your own as another source. The id is what source_name and ?source= name. CA bundles are never returned.
 //	@Tags			Provisioning
 //	@Produce		json
 //	@Success		200	{object}	listCatalogSourcesResponse	"Enabled catalogs"
@@ -55,6 +64,7 @@ func (s *Server) handleListCatalogSources(w http.ResponseWriter, _ *http.Request
 			continue
 		}
 		sources = append(sources, catalogSourceRow{
+			ID:      source.ID,
 			Name:    source.Name,
 			URL:     source.URL,
 			Default: source.Default,
@@ -74,7 +84,7 @@ func (s *Server) handleListCatalogSources(w http.ResponseWriter, _ *http.Request
 //	@Description	Minimum role: viewer. Fetches the source's catalog.json LIVE (?source= names a configured catalog; empty = the default), validates format_version 1, and relays the parsed document: {name, format_version, updated, provisioners: [{name, repo, description, versions: [{version, artifacts: [{url, checksum_type, checksum}]}]}]} — versions semver-DESC, artifact URLs OPAQUE (release tags carry slashes; never parse or construct them). Versions may disappear between fetches when an author deletes a release.
 //	@Tags			Provisioning
 //	@Produce		json
-//	@Param			source	query	string	false	"A configured catalog source; empty = the default"
+//	@Param			source	query	string	false	"A configured catalog source's id; empty = the default"
 //	@Success		200	{object}	provisioner.CatalogDocument	"The catalog document — the parsed catalog.json IS the response (no envelope; the resolved source rides /api/provisioning/catalog/sources)"
 //	@Failure		404	"No such (or no default) enabled catalog source"
 //	@Failure		502	"Catalog unreachable, unparseable, or wrong format_version"
@@ -161,7 +171,7 @@ func (s *Server) handleCatalogInstall(w http.ResponseWriter, r *http.Request) {
 		"task_id": task.ID,
 		"name":    body.Name,
 		"version": body.Version,
-		"source":  source.Name,
+		"source":  source.ID,
 		"status":  tasks.StatusPending,
 		"message": "Catalog install task queued for " + body.Name + "/" + body.Version,
 	}); werr != nil {

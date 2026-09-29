@@ -1,13 +1,13 @@
 // Package config loads and provides the agent's YAML configuration.
 package config
 
-// ArtifactPathConfig is one artifact_storage.paths[] entry — an
-// operator-added storage location (zoneweaver's paths[] shape).
+// ArtifactPathConfig is one artifact_storage.paths entry, an operator-added
+// storage location keyed by its id.
 type ArtifactPathConfig struct {
-	Name    string `yaml:"name"    json:"name"`
-	Path    string `yaml:"path"    json:"path"`
-	Type    string `yaml:"type"    json:"type"`
-	Enabled bool   `yaml:"enabled" json:"enabled"`
+	DisplayName string `yaml:"display_name" json:"display_name"`
+	Path        string `yaml:"path"         json:"path"`
+	Type        string `yaml:"type"         json:"type"`
+	Enabled     bool   `yaml:"enabled"      json:"enabled"`
 }
 
 // ArtifactDownloadConfig tunes URL downloads (zoneweaver's download block;
@@ -43,7 +43,7 @@ type ArtifactStorageConfig struct {
 	MaxUploadGB int                    `yaml:"max_upload_gb" json:"max_upload_gb"`
 	Download    ArtifactDownloadConfig `yaml:"download"      json:"download"`
 	Scanning    ArtifactScanningConfig `yaml:"scanning"      json:"scanning"`
-	// Paths are additional storage locations beyond the built-ins; the API's
-	// storage-path CRUD persists here.
-	Paths []ArtifactPathConfig `yaml:"paths" json:"paths"`
+	// Paths are additional storage locations beyond the built-ins, keyed by
+	// id; the API's storage-path CRUD persists here.
+	Paths map[string]ArtifactPathConfig `yaml:"paths" json:"paths"`
 }

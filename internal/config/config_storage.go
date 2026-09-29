@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"path/filepath"
 	"regexp"
 	"sort"
 
@@ -12,6 +11,7 @@ import (
 	"github.com/Makr91/hyperweaver-agent/internal/safepath"
 )
 
+// StoragePathConfig is one added storage path of machines, provisioners or templates.
 type StoragePathConfig struct {
 	DisplayName string `yaml:"display_name" json:"display_name"`
 	Path        string `yaml:"path"         json:"path"`
@@ -21,10 +21,12 @@ type StoragePathConfig struct {
 
 var storagePathIDPattern = regexp.MustCompile(`^[a-z0-9_]+$`)
 
+// ValidStoragePathID reports whether id is a usable storage path key.
 func ValidStoragePathID(id string) bool {
 	return id != locations.BuiltinID && storagePathIDPattern.MatchString(id)
 }
 
+// StoragePaths answers the added paths of one kind.
 func (c *Config) StoragePaths(kind locations.Kind) map[string]StoragePathConfig {
 	switch kind {
 	case locations.Machines:
@@ -38,6 +40,7 @@ func (c *Config) StoragePaths(kind locations.Kind) map[string]StoragePathConfig 
 	}
 }
 
+// SetStoragePaths replaces the added paths of one kind.
 func (c *Config) SetStoragePaths(kind locations.Kind, paths map[string]StoragePathConfig) {
 	switch kind {
 	case locations.Machines:
@@ -62,6 +65,7 @@ func (c *Config) builtinStoragePath(kind locations.Kind) (string, error) {
 	}
 }
 
+// StorageLocations answers the built-in path followed by the added paths of one kind.
 func (c *Config) StorageLocations(kind locations.Kind) ([]locations.Location, error) {
 	builtin, err := c.builtinStoragePath(kind)
 	if err != nil {
@@ -99,6 +103,7 @@ func (c *Config) StorageLocations(kind locations.Kind) ([]locations.Location, er
 	return list, nil
 }
 
+// LoadStorageLocations loads one kind into set, disabling any added path whose folder cannot be reached.
 func (c *Config) LoadStorageLocations(set *locations.Set, kind locations.Kind) error {
 	list, err := c.StorageLocations(kind)
 	if err != nil {
@@ -115,40 +120,5 @@ func (c *Config) LoadStorageLocations(set *locations.Set, kind locations.Kind) e
 		}
 	}
 	set.Replace(kind, list)
-	return nil
-}
-
-func validateStoragePaths(key string, paths map[string]StoragePathConfig) error {
-	defaults := 0
-	seen := make([]string, 0, len(paths))
-	ids := make([]string, 0, len(paths))
-	for id := range paths {
-		ids = append(ids, id)
-	}
-	sort.Strings(ids)
-	for _, id := range ids {
-		entry := paths[id]
-		if !ValidStoragePathID(id) {
-			return fmt.Errorf("%s.%s: the key must match ^[a-z0-9_]+$ and must not be %q", key, id, locations.BuiltinID)
-		}
-		if entry.DisplayName == "" {
-			return fmt.Errorf("%s.%s.display_name is required", key, id)
-		}
-		if entry.Path == "" || !filepath.IsAbs(filepath.FromSlash(entry.Path)) {
-			return fmt.Errorf("%s.%s.path %q must be an absolute path", key, id, entry.Path)
-		}
-		for _, other := range seen {
-			if locations.SamePath(other, entry.Path) {
-				return fmt.Errorf("%s.%s.path %q is already a storage path", key, id, entry.Path)
-			}
-		}
-		seen = append(seen, entry.Path)
-		if entry.Default {
-			defaults++
-		}
-	}
-	if defaults > 1 {
-		return fmt.Errorf("%s: only one entry may be the default", key)
-	}
 	return nil
 }

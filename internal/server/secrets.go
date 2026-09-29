@@ -14,7 +14,7 @@ import (
 // prefix). GET serves the whole document — plain, nothing masked (Mark's
 // ruling: it is the user's local machine, and the generated Hosts.yml
 // carries these as SECRETS_* vars anyway). PUT replaces the submitted
-// categories, the same top-level shallow-merge shape as PUT /settings.
+// categories whole.
 
 // @Summary		The global secrets document
 // @Description	Minimum role: admin. The whole store, plain — nothing masked (Mark's ruling: the user's local machine; the generated Hosts.yml carries these as SECRETS_* vars anyway).
@@ -35,7 +35,7 @@ type secretsUpdateResponse struct {
 }
 
 // @Summary		Update the global secrets
-// @Description	Minimum role: admin. Replaces the submitted categories whole (the same top-level shallow-merge shape as PUT /api/settings); omitted categories are untouched. Rejected whole on an unknown category or an invalid entry name — the store never half-applies. Persisted atomically to secrets.yaml (0600) beside the config.
+// @Description	Minimum role: admin. Replaces the submitted categories whole; omitted categories are untouched. Rejected whole on an unknown category or an invalid entry name — the store never half-applies. Persisted atomically to secrets.yaml (0600) beside the config.
 // @Tags			Secrets
 // @Accept			json
 // @Produce		json

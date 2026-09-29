@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -141,6 +142,7 @@ func (s *Server) handleOpenMachineFTP(w http.ResponseWriter, r *http.Request) {
 // whether its executable actually exists on this host (SHI's ApplicationData
 // .exists — a launch against a missing binary is refused, never spawned).
 type applicationInfo struct {
+	ID     string   `json:"id"`
 	Name   string   `json:"name"`
 	Path   string   `json:"path"`
 	Args   []string `json:"args"`
@@ -159,18 +161,24 @@ type applicationListResponse struct {
 // the UI's per-machine launch menu and its applications settings page.
 //
 //	@Summary		List external launcher applications
-//	@Description	Minimum role: viewer (the host-launchers capability token). The configured applications[] registry — user-chosen desktop tools (PuTTY, WinSCP, mstsc, ...) the agent can launch on its OWN host against a machine (SHI's per-server app buttons, generalized from its single hardcoded FileZilla entry). Each entry carries name, path (the executable), args (the argument template with {host}/{port}/{user}/{password}/{machine} placeholders), and exists — whether the executable is actually present on the agent host, so the UI greys out what cannot launch. The list lives in config applications[]; edit it through PUT /api/settings.
+//	@Description	Minimum role: viewer (the host-launchers capability token). The configured applications map — user-chosen desktop tools (PuTTY, WinSCP, mstsc, ...) the agent can launch on its OWN host against a machine (SHI's per-server app buttons, generalized from its single hardcoded FileZilla entry). Each entry carries id (the key the launch route names), name, path (the executable), args (the argument template with {host}/{port}/{user}/{password}/{machine} placeholders), and exists — whether the executable is actually present on the agent host, so the UI greys out what cannot launch. The map lives in the app configuration file under applications; edit it through PUT /api/config/app.
 //	@Tags			Machine Management
 //	@Produce		json
 //	@Success		200	{object}	applicationListResponse	"Configured applications"
 //	@Router			/api/applications [get]
 func (s *Server) handleListApplications(w http.ResponseWriter, _ *http.Request) {
-	list := make([]applicationInfo, 0, len(s.cfg.Applications))
-	for i := range s.cfg.Applications {
-		entry := &s.cfg.Applications[i]
+	ids := make([]string, 0, len(s.cfg.Applications))
+	for id := range s.cfg.Applications {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	list := make([]applicationInfo, 0, len(ids))
+	for _, id := range ids {
+		entry := s.cfg.Applications[id]
 		stat, err := os.Stat(entry.Path)
 		list = append(list, applicationInfo{
-			Name:   entry.Name,
+			ID:     id,
+			Name:   entry.DisplayName,
 			Path:   entry.Path,
 			Args:   entry.Args,
 			Exists: err == nil && !stat.IsDir(),
@@ -179,15 +187,13 @@ func (s *Server) handleListApplications(w http.ResponseWriter, _ *http.Request) 
 	writeJSON(w, applicationListResponse{Applications: list, Total: len(list)})
 }
 
-// findApplication answers the configured application with this name (nil when
-// none) — names are unique by convention; the first match wins.
-func (s *Server) findApplication(name string) *config.ApplicationConfig {
-	for i := range s.cfg.Applications {
-		if s.cfg.Applications[i].Name == name {
-			return &s.cfg.Applications[i]
-		}
+// findApplication answers the configured application with this id (nil when none).
+func (s *Server) findApplication(id string) *config.ApplicationConfig {
+	entry, ok := s.cfg.Applications[id]
+	if !ok {
+		return nil
 	}
-	return nil
+	return &entry
 }
 
 // resolveAppArgs substitutes the connection placeholders into an argument
@@ -224,16 +230,17 @@ type launchApplicationResponse struct {
 //	@Tags			Machine Management
 //	@Produce		json
 //	@Param			machineName	path	string	true	"Machine name"
-//	@Param			appName	path	string	true	"The applications[] entry name (GET /api/applications lists them)"
+//	@Param			appName	path	string	true	"The application's id (GET /api/applications lists them)"
 //	@Success		200	{object}	launchApplicationResponse	"Launch requested"
 //	@Failure		400	"Machine not running, executable missing on the agent host, or no transport to the machine"
 //	@Failure		404	"Machine not found, or no application by that name is configured"
 //	@Router			/api/machines/{machineName}/applications/{appName}/launch [post]
 func (s *Server) handleLaunchApplication(w http.ResponseWriter, r *http.Request) {
-	application := s.findApplication(r.PathValue("appName"))
+	appID := r.PathValue("appName")
+	application := s.findApplication(appID)
 	if application == nil {
 		taskError(w, http.StatusNotFound,
-			"No application by that name is configured (applications[] in the agent configuration)")
+			"No application by that id is configured (applications in the app configuration file)")
 		return
 	}
 	if stat, err := os.Stat(application.Path); err != nil || stat.IsDir() {
@@ -272,26 +279,26 @@ func (s *Server) handleLaunchApplication(w http.ResponseWriter, r *http.Request)
 	cmd := exec.CommandContext(context.Background(), application.Path, args...)
 	cmd.SysProcAttr = procattr.NoConsole()
 	if err := cmd.Start(); err != nil {
-		slog.Error("launch application", "application", application.Name,
+		slog.Error("launch application", "application", appID,
 			"machine", machine.Name, "error", err)
-		taskError(w, http.StatusInternalServerError, "Failed to launch "+application.Name+": "+err.Error())
+		taskError(w, http.StatusInternalServerError, "Failed to launch "+application.DisplayName+": "+err.Error())
 		return
 	}
 	go func() {
 		if err := cmd.Wait(); err != nil {
-			slog.Warn("application exited with error", "application", application.Name, "error", err)
+			slog.Warn("application exited with error", "application", appID, "error", err)
 		}
 	}()
-	slog.Info("application launched", "application", application.Name,
+	slog.Info("application launched", "application", appID,
 		"machine", machine.Name, "by", auth.FromContext(r.Context()).Name)
 
 	writeJSON(w, launchApplicationResponse{
 		Success:     true,
 		MachineName: machine.Name,
-		Application: application.Name,
+		Application: appID,
 		Host:        host,
 		Port:        port,
-		Message:     application.Name + " launch requested on the agent host",
+		Message:     application.DisplayName + " launch requested on the agent host",
 	})
 }
 

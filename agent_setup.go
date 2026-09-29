@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"log/slog"
 	"os"
+	"sort"
 	"time"
 
 	"github.com/Makr91/hyperweaver-agent/internal/assets"
@@ -39,6 +40,59 @@ type agentSystems struct {
 	monitor      *monitoring.Service
 	dbs          []server.DBHandle
 	closeDBs     func()
+}
+
+func sortedKeys[T any](entries map[string]T) []string {
+	keys := make([]string, 0, len(entries))
+	for key := range entries {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+func templateSourceList(cfg *config.Config) []machines.TemplateSource {
+	sources := make([]machines.TemplateSource, 0, len(cfg.TemplateSources.Sources))
+	for _, id := range sortedKeys(cfg.TemplateSources.Sources) {
+		source := cfg.TemplateSources.Sources[id]
+		sources = append(sources, machines.TemplateSource{
+			ID:        id,
+			Name:      source.DisplayName,
+			URL:       source.URL,
+			Enabled:   source.Enabled,
+			Default:   source.Default,
+			AuthToken: source.AuthToken,
+			CAFile:    source.CAFile,
+		})
+	}
+	return sources
+}
+
+func catalogSourceList(cfg *config.Config) []provisioner.CatalogSource {
+	sources := make([]provisioner.CatalogSource, 0, len(cfg.CatalogSources.Sources))
+	for _, id := range sortedKeys(cfg.CatalogSources.Sources) {
+		source := cfg.CatalogSources.Sources[id]
+		sources = append(sources, provisioner.CatalogSource{
+			ID:      id,
+			Name:    source.DisplayName,
+			URL:     source.URL,
+			Enabled: source.Enabled,
+			Default: source.Default,
+			CAFile:  source.CAFile,
+		})
+	}
+	return sources
+}
+
+func artifactPathList(cfg *config.Config) []assets.PathConfig {
+	paths := make([]assets.PathConfig, 0, len(cfg.ArtifactStorage.Paths))
+	for _, id := range sortedKeys(cfg.ArtifactStorage.Paths) {
+		entry := cfg.ArtifactStorage.Paths[id]
+		paths = append(paths, assets.PathConfig{
+			ID: id, Name: entry.DisplayName, Path: entry.Path, Type: entry.Type, Enabled: entry.Enabled,
+		})
+	}
+	return paths
 }
 
 func storageLocations(cfg *config.Config) (*locations.Set, error) {
@@ -210,17 +264,7 @@ func setupTasks(cfg *config.Config, secretsStore *secrets.Store) (*agentSystems,
 		return nil, err
 	}
 	provisioners := provisioner.NewRegistry(storage)
-	catalogSources := make([]provisioner.CatalogSource, 0, len(cfg.CatalogSources.Sources))
-	for _, source := range cfg.CatalogSources.Sources {
-		catalogSources = append(catalogSources, provisioner.CatalogSource{
-			Name:    source.Name,
-			URL:     source.URL,
-			Enabled: source.Enabled,
-			Default: source.Default,
-			CAFile:  source.CAFile,
-		})
-	}
-	provisioner.RegisterExecutors(queue, provisioners, secretsStore.GitToken, catalogSources)
+	provisioner.RegisterExecutors(queue, provisioners, secretsStore.GitToken, catalogSourceList(cfg))
 
 	// The merged artifact system (artifact_storage.enabled): typed storage
 	// locations + the hash-verified registry every mounted file passes
@@ -236,16 +280,10 @@ func setupTasks(cfg *config.Config, secretsStore *secrets.Store) (*agentSystems,
 	assetsStore := assets.NewStore(agentDB, artifactsRoot)
 	assets.RegisterExecutors(queue, assetsStore, secretsStore.ResourceAuth, secretsStore,
 		cfg.ArtifactStorage.Scanning.SupportedExtensions)
-	servicePaths := make([]assets.PathConfig, 0, len(cfg.ArtifactStorage.Paths))
-	for _, entry := range cfg.ArtifactStorage.Paths {
-		servicePaths = append(servicePaths, assets.PathConfig{
-			Name: entry.Name, Path: entry.Path, Type: entry.Type, Enabled: entry.Enabled,
-		})
-	}
 	artifactSvc := assets.NewService(assetsStore, assets.ServiceConfig{
 		Enabled:      cfg.ArtifactStorage.Enabled,
 		Root:         artifactsRoot,
-		Paths:        servicePaths,
+		Paths:        artifactPathList(cfg),
 		Extensions:   cfg.ArtifactStorage.Scanning.SupportedExtensions,
 		ScanInterval: cfg.ArtifactStorage.Scanning.PeriodicScanInterval,
 	})
@@ -263,18 +301,6 @@ func setupTasks(cfg *config.Config, secretsStore *secrets.Store) (*agentSystems,
 	provisionKeyPath := cfg.ProvisionKeyPath()
 	if _, kerr := sshrun.EnsureProvisionKey(provisionKeyPath); kerr != nil {
 		slog.Warn("provisioning SSH key setup failed; document credentials required", "error", kerr)
-	}
-
-	templateSources := make([]machines.TemplateSource, 0, len(cfg.TemplateSources.Sources))
-	for _, source := range cfg.TemplateSources.Sources {
-		templateSources = append(templateSources, machines.TemplateSource{
-			Name:      source.Name,
-			URL:       source.URL,
-			Enabled:   source.Enabled,
-			Default:   source.Default,
-			AuthToken: source.AuthToken,
-			CAFile:    source.CAFile,
-		})
 	}
 
 	machineStore := machines.NewStore(agentDB)
@@ -296,7 +322,7 @@ func setupTasks(cfg *config.Config, secretsStore *secrets.Store) (*agentSystems,
 			HostHooks:               cfg.Provisioning.HostHooks,
 			VRDECertRoot:            cfg.VRDECertRoot(),
 			DefaultNetworkInterface: cfg.Provisioning.DefaultNetworkInterface,
-			TemplateSources:         templateSources,
+			TemplateSources:         templateSourceList(cfg),
 			ProvisionKeyPath:        provisionKeyPath,
 			SSHTimeout:              time.Duration(cfg.Provisioning.SSH.TimeoutSeconds) * time.Second,
 			SSHPollInterval:         time.Duration(cfg.Provisioning.SSH.PollIntervalSeconds) * time.Second,

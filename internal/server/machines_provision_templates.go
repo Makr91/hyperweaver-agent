@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"sort"
 	"strconv"
 
 	"github.com/Makr91/hyperweaver-agent/internal/auth"
@@ -15,10 +16,17 @@ import (
 // templateSources converts the configured registries into the machines
 // package's source shape.
 func (s *Server) templateSources() []machines.TemplateSource {
-	sources := make([]machines.TemplateSource, 0, len(s.cfg.TemplateSources.Sources))
-	for _, source := range s.cfg.TemplateSources.Sources {
+	ids := make([]string, 0, len(s.cfg.TemplateSources.Sources))
+	for id := range s.cfg.TemplateSources.Sources {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	sources := make([]machines.TemplateSource, 0, len(ids))
+	for _, id := range ids {
+		source := s.cfg.TemplateSources.Sources[id]
 		sources = append(sources, machines.TemplateSource{
-			Name:      source.Name,
+			ID:        id,
+			Name:      source.DisplayName,
 			URL:       source.URL,
 			Enabled:   source.Enabled,
 			Default:   source.Default,
@@ -199,7 +207,7 @@ func (s *Server) handleExportTemplate(w http.ResponseWriter, r *http.Request) {
 //	@Tags			Machine Management
 //	@Accept			json
 //	@Produce		json
-//	@Param			request	body	map[string]interface{}	true	"{machine_name|box_path, source_name, organization, box_name, version, description, architecture}"
+//	@Param			request	body	map[string]interface{}	true	"{machine_name|box_path, source_name (the source's id), organization, box_name, version, description, architecture}"
 //	@Success		202	"Publish task created"
 //	@Failure		400	"Missing required fields"
 //	@Failure		404	"Machine not found"
@@ -345,7 +353,7 @@ func (s *Server) handleMoveTemplate(w http.ResponseWriter, r *http.Request) {
 //	@Tags			Machine Management
 //	@Accept			json
 //	@Produce		json
-//	@Param			request	body	map[string]interface{}	true	"{organization, box_name, version, source_name, provider, architecture}"
+//	@Param			request	body	map[string]interface{}	true	"{organization, box_name, version, source_name (the source's id), provider, architecture}"
 //	@Success		202	"Template download task queued"
 //	@Failure		400	"Missing tuple fields, non-specific version, an invalid provider, or no usable source"
 //	@Failure		409	{object}	map[string]interface{}	"Template already exists locally"
@@ -368,7 +376,7 @@ func (s *Server) handlePullTemplate(w http.ResponseWriter, r *http.Request) {
 			taskError(w, http.StatusBadRequest, serr.Error())
 			return
 		}
-		meta.SourceName = source.Name
+		meta.SourceName = source.ID
 	}
 	// The provider defaults to this agent's own (virtualbox); "utm" pulls a
 	// box.utm-carrying box for the UTM backend — anything else refuses.

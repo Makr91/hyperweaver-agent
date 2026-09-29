@@ -148,159 +148,76 @@
                 },
                 "type": "object"
             },
-            "config.APIDocsConfig": {
-                "properties": {
-                    "enabled": {
-                        "type": "boolean"
-                    }
-                },
-                "type": "object"
-            },
-            "config.APIKeysConfig": {
-                "properties": {
-                    "bootstrap_auto_disable": {
-                        "type": "boolean"
-                    },
-                    "bootstrap_enabled": {
-                        "type": "boolean"
-                    },
-                    "bootstrap_require_claim_token": {
-                        "type": "boolean"
-                    },
-                    "hash_rounds": {
-                        "type": "integer"
-                    },
-                    "key_length": {
-                        "type": "integer"
-                    }
-                },
-                "type": "object"
-            },
-            "config.ApplicationConfig": {
-                "properties": {
-                    "args": {
-                        "items": {
-                            "type": "string"
-                        },
-                        "type": "array",
-                        "uniqueItems": false
-                    },
-                    "name": {
-                        "type": "string"
-                    },
-                    "path": {
-                        "type": "string"
-                    }
-                },
-                "type": "object"
-            },
-            "config.ArtifactDownloadConfig": {
-                "properties": {
-                    "timeout_seconds": {
-                        "type": "integer"
-                    }
-                },
-                "type": "object"
-            },
-            "config.ArtifactPathConfig": {
-                "properties": {
-                    "enabled": {
-                        "type": "boolean"
-                    },
-                    "name": {
-                        "type": "string"
-                    },
-                    "path": {
-                        "type": "string"
-                    },
-                    "type": {
-                        "type": "string"
-                    }
-                },
-                "type": "object"
-            },
-            "config.ArtifactScanningConfig": {
-                "properties": {
-                    "periodic_scan_interval": {
-                        "description": "PeriodicScanInterval is seconds between automatic direct scans\n(0 disables; startup always scans once).",
-                        "type": "integer"
-                    },
-                    "supported_extensions": {
-                        "additionalProperties": {
-                            "items": {
-                                "type": "string"
-                            },
-                            "type": "array"
-                        },
-                        "description": "SupportedExtensions filter iso/image scans per type. Empty selects the\ndefaults (iso: .iso; image: .vmdk .raw .vdi .qcow2 .img .ova .ovf).",
-                        "type": "object"
-                    }
-                },
-                "type": "object"
-            },
-            "config.ArtifactStorageConfig": {
-                "properties": {
-                    "dir": {
-                        "description": "Dir hosts the built-in locations (\u003cdir\u003e/isos, images, installers,\nfixpacks, hotfixes). Empty selects artifacts under the data root.",
-                        "type": "string"
-                    },
-                    "download": {
-                        "$ref": "#/components/schemas/config.ArtifactDownloadConfig"
-                    },
-                    "enabled": {
-                        "description": "Enabled serves the /artifacts surface and enforces cache verification\nat machine prepare time. Disabled, installer references pass through\nun-mounted with a loud warning.",
-                        "type": "boolean"
-                    },
-                    "max_upload_gb": {
-                        "description": "MaxUploadGB caps one artifact upload's size.",
-                        "type": "integer"
-                    },
-                    "paths": {
-                        "description": "Paths are additional storage locations beyond the built-ins; the API's\nstorage-path CRUD persists here.",
-                        "items": {
-                            "$ref": "#/components/schemas/config.ArtifactPathConfig"
-                        },
-                        "type": "array",
-                        "uniqueItems": false
-                    },
-                    "scanning": {
-                        "$ref": "#/components/schemas/config.ArtifactScanningConfig"
-                    }
-                },
-                "type": "object"
-            },
             "config.Backup": {
                 "properties": {
-                    "createdAt": {
+                    "created_at": {
                         "type": "string"
                     },
-                    "filename": {
-                        "type": "string"
-                    }
-                },
-                "type": "object"
-            },
-            "config.BrowserConfig": {
-                "properties": {
-                    "open_on_start": {
-                        "description": "OpenOnStart opens the signed-in UI in the browser when the desktop\nagent starts (Mark's ruling 2026-07-07: one less click — a fresh\ninstall lands in the browser instead of a tray hunt). Headless mode\nignores it.",
-                        "type": "boolean"
-                    },
-                    "path": {
-                        "description": "Path is an optional browser executable (or macOS .app bundle). Empty\nmeans the operating system's default browser.",
-                        "type": "string"
-                    }
-                },
-                "type": "object"
-            },
-            "config.CORSConfig": {
-                "properties": {
-                    "allow_all": {
-                        "type": "boolean"
-                    },
-                    "whitelist": {
+                    "files": {
                         "items": {
                             "type": "string"
+                        },
+                        "type": "array",
+                        "uniqueItems": false
+                    },
+                    "id": {
+                        "type": "string"
+                    }
+                },
+                "type": "object"
+            },
+            "configengine.MessageResponse": {
+                "properties": {
+                    "message": {
+                        "type": "string"
+                    }
+                },
+                "type": "object"
+            },
+            "configengine.RestartEntry": {
+                "properties": {
+                    "pointer": {
+                        "type": "string"
+                    },
+                    "reason": {
+                        "type": "string"
+                    },
+                    "title": {
+                        "type": "string"
+                    }
+                },
+                "type": "object"
+            },
+            "configengine.RestartStatus": {
+                "properties": {
+                    "last_modified_by": {
+                        "type": "string"
+                    },
+                    "last_modified_time": {
+                        "type": "string"
+                    },
+                    "requires_restart": {
+                        "items": {
+                            "$ref": "#/components/schemas/configengine.RestartEntry"
+                        },
+                        "type": "array",
+                        "uniqueItems": false
+                    },
+                    "restart_required": {
+                        "type": "boolean"
+                    }
+                },
+                "type": "object"
+            },
+            "configengine.SavedResponse": {
+                "properties": {
+                    "message": {
+                        "example": "Configuration saved.",
+                        "type": "string"
+                    },
+                    "requires_restart": {
+                        "items": {
+                            "$ref": "#/components/schemas/configengine.RestartEntry"
                         },
                         "type": "array",
                         "uniqueItems": false
@@ -308,847 +225,53 @@
                 },
                 "type": "object"
             },
-            "config.CPUValidationConfig": {
+            "configengine.SetupConfigsResponse": {
                 "properties": {
-                    "enabled": {
-                        "type": "boolean"
-                    },
-                    "hard_limit": {
-                        "type": "number"
-                    },
-                    "strategy": {
-                        "type": "string"
-                    },
-                    "thresholds": {
-                        "$ref": "#/components/schemas/config.ResourceThresholdsConfig"
-                    }
-                },
-                "type": "object"
-            },
-            "config.CatalogSourceConfig": {
-                "properties": {
-                    "ca_file": {
-                        "description": "CAFile adds a PEM CA bundle to the trust store for this catalog —\nself-hosted forks behind private CAs. Verification always stays on.",
-                        "type": "string"
-                    },
-                    "default": {
-                        "type": "boolean"
-                    },
-                    "enabled": {
-                        "type": "boolean"
-                    },
-                    "name": {
-                        "type": "string"
-                    },
-                    "url": {
-                        "type": "string"
-                    }
-                },
-                "type": "object"
-            },
-            "config.CatalogSourcesConfig": {
-                "properties": {
-                    "sources": {
-                        "items": {
-                            "$ref": "#/components/schemas/config.CatalogSourceConfig"
-                        },
-                        "type": "array",
-                        "uniqueItems": false
-                    }
-                },
-                "type": "object"
-            },
-            "config.CleanupConfig": {
-                "properties": {
-                    "interval": {
-                        "description": "Interval is seconds between cleanup runs.",
-                        "type": "integer"
-                    }
-                },
-                "type": "object"
-            },
-            "config.DataConfig": {
-                "properties": {
-                    "dir": {
-                        "description": "Dir is the data root. Empty selects the per-OS local-appdata default\n(see DataDir).",
-                        "type": "string"
-                    }
-                },
-                "type": "object"
-            },
-            "config.DatabaseConfig": {
-                "properties": {
-                    "sqlite_options": {
-                        "$ref": "#/components/schemas/config.SQLiteOptionsConfig"
-                    }
-                },
-                "type": "object"
-            },
-            "config.FileBrowserArchiveConfig": {
-                "properties": {
-                    "enabled": {
-                        "type": "boolean"
-                    },
-                    "max_archive_size_mb": {
-                        "description": "MaxArchiveSizeMB deletes a created archive that lands larger than this.",
-                        "type": "integer"
-                    },
-                    "supported_formats": {
-                        "description": "SupportedFormats limits what POST /filesystem/archive/create accepts.",
-                        "items": {
-                            "type": "string"
-                        },
-                        "type": "array",
-                        "uniqueItems": false
-                    }
-                },
-                "type": "object"
-            },
-            "config.FileBrowserConfig": {
-                "properties": {
-                    "archive": {
-                        "$ref": "#/components/schemas/config.FileBrowserArchiveConfig"
-                    },
-                    "enabled": {
-                        "type": "boolean"
-                    },
-                    "root": {
-                        "description": "Root confines browsing to one directory: \"/\" maps here and paths\noutside answer 403. Empty means unrestricted — \"/\" lists the host's\ndrive letters on Windows and the real root elsewhere. (The base never\nneeded this: its \"/\" IS the illumos root.)",
-                        "type": "string"
-                    },
-                    "security": {
-                        "$ref": "#/components/schemas/config.FileBrowserSecurityConfig"
-                    },
-                    "upload_size_limit_gb": {
-                        "description": "UploadSizeLimitGB caps one POST /filesystem/upload body.",
-                        "type": "integer"
-                    }
-                },
-                "type": "object"
-            },
-            "config.FileBrowserSecurityConfig": {
-                "properties": {
-                    "forbidden_paths": {
-                        "description": "ForbiddenPaths rejects any path underneath these prefixes.",
-                        "items": {
-                            "type": "string"
-                        },
-                        "type": "array",
-                        "uniqueItems": false
-                    },
-                    "forbidden_patterns": {
-                        "description": "ForbiddenPatterns rejects paths matching these glob-style patterns\n(* matches anything).",
-                        "items": {
-                            "type": "string"
-                        },
-                        "type": "array",
-                        "uniqueItems": false
-                    },
-                    "max_directory_entries": {
-                        "description": "MaxDirectoryEntries refuses listing directories larger than this.",
-                        "type": "integer"
-                    },
-                    "max_edit_size_mb": {
-                        "description": "MaxEditSizeMB caps files the content read/write endpoints handle (the\ntext-editor path; download/upload stream without this bound).",
-                        "type": "integer"
-                    },
-                    "prevent_traversal": {
-                        "description": "PreventTraversal rejects paths carrying \"..\" or \"~\".",
-                        "type": "boolean"
-                    }
-                },
-                "type": "object"
-            },
-            "config.GuestAgentConfig": {
-                "properties": {
-                    "enabled": {
-                        "type": "boolean"
-                    }
-                },
-                "type": "object"
-            },
-            "config.HostPowerConfig": {
-                "properties": {
-                    "enabled": {
-                        "type": "boolean"
-                    },
-                    "prevent_sleep": {
-                        "description": "PreventSleep keeps the host awake while the agent runs (SHI's\npreventsystemfromsleep, default false) using each OS's native\npower-management API — SetThreadExecutionState / IOKit power assertion /\nsystemd-logind inhibitor. System sleep only; the display may still\nsleep and lock.",
-                        "type": "boolean"
-                    }
-                },
-                "type": "object"
-            },
-            "config.LoggingConfig": {
-                "properties": {
-                    "categories": {
-                        "additionalProperties": {
-                            "type": "string"
-                        },
-                        "description": "Categories overrides the level per log category (the Node agent's\nlogging.categories / per-category winston loggers). Categories this\nagent emits: app (the default), api_requests, auth, tasks, machines,\nmonitoring, provisioning, assets.",
+                    "configs": {
+                        "additionalProperties": {},
                         "type": "object"
-                    },
-                    "compression": {
-                        "description": "Compression gzips rotated log files (the Node agent's\nlogging.enable_compression; lumberjack compresses at rotation time, so\nits compression_age_days delay has no analog here).",
-                        "type": "boolean"
-                    },
-                    "console": {
-                        "type": "boolean"
-                    },
-                    "file": {
-                        "type": "string"
-                    },
-                    "level": {
-                        "type": "string"
-                    },
-                    "max_backups": {
-                        "type": "integer"
-                    },
-                    "max_size_mb": {
-                        "type": "integer"
                     }
                 },
                 "type": "object"
             },
-            "config.MachinesConfig": {
+            "configengine.SetupPutRequest": {
                 "properties": {
-                    "auto_discovery": {
-                        "description": "AutoDiscovery enables the periodic discover tasks (Node:\nzones.auto_discovery). The startup discovery task always runs.",
-                        "type": "boolean"
-                    },
-                    "discovery_interval": {
-                        "description": "DiscoveryInterval is seconds between periodic discover tasks (Node:\nzones.discovery_interval). Discovery reconciles the registry against\nVirtualBox and vagrant — external-shutdown detection included.",
-                        "type": "integer"
-                    },
-                    "keep_running_on_exit": {
-                        "description": "KeepRunningOnExit keeps provisioned machines running when the agent\nexits (SHI's keepserversrunning, default true). false force-powers-off\nevery spec-carrying machine at shutdown — machines discovered from\nVirtualBox are never touched.",
-                        "type": "boolean"
-                    },
-                    "orchestration": {
-                        "$ref": "#/components/schemas/config.OrchestrationConfig"
-                    },
-                    "prefix_machine_names": {
-                        "description": "PrefixMachineNames derives created machines' names as\n\u003cserver_id\u003e--\u003chostname\u003e.\u003cdomain\u003e when no explicit name is given\n(zoneweaver's prefix_zone_names — Mark's partition-id convention).\nExplicit names always win: machine names stay free-form (design D-G).",
-                        "type": "boolean"
-                    },
-                    "provision_on_start": {
-                        "description": "ProvisionOnStart makes a machine's VERY FIRST start (a stored\nprovisioner document, never provisioned) run the full provision\npipeline instead of a bare boot — SHI's dormant provisionserversonstart\npreference, Mark's semantics 2026-07-07. Later starts, document-less\nmachines, restarts, and provision-chain boot children are never\naffected. Default false.",
-                        "type": "boolean"
-                    },
-                    "resource_validation": {
-                        "$ref": "#/components/schemas/config.ResourceValidationConfig"
-                    },
-                    "server_id_start": {
-                        "description": "ServerIDStart is the lowest auto-assigned server_id (Node:\nzones.server_id_start).",
-                        "type": "integer"
-                    },
-                    "shutdown_timeout": {
-                        "description": "ShutdownTimeout is how many seconds a graceful stop waits for the\nguest to power off after the ACPI signal before forcing poweroff\n(Node: zones.orchestration.timeouts.zone_shutdown).",
-                        "type": "integer"
-                    }
-                },
-                "type": "object"
-            },
-            "config.MonitoringConfig": {
-                "properties": {
-                    "collection_interval": {
-                        "description": "CollectionInterval is seconds between collector samples.",
-                        "type": "integer"
-                    },
-                    "retention_days": {
-                        "description": "RetentionDays: stored samples older than this are deleted by the\nperiodic cleanup.",
-                        "type": "integer"
-                    },
-                    "storage_enabled": {
-                        "description": "StorageEnabled turns the background collector on. Off (default) means\nrealtime-only: every request samples the OS live, history queries\nreturn just the current sample.",
-                        "type": "boolean"
-                    }
-                },
-                "type": "object"
-            },
-            "config.OrchestrationConfig": {
-                "description": "Orchestration is ordered startup/shutdown by settings.boot_priority.",
-                "properties": {
-                    "enabled": {
-                        "type": "boolean"
-                    },
-                    "priority_delay": {
-                        "description": "PriorityDelay is seconds between priority groups (staggered strategy,\nand the test plan's duration estimate).",
-                        "type": "integer"
-                    },
-                    "strategy": {
-                        "description": "Strategy shapes the shutdown/test plan: sequential |\nparallel_by_priority | staggered.",
-                        "type": "string"
-                    }
-                },
-                "type": "object"
-            },
-            "config.ProvisioningConfig": {
-                "properties": {
-                    "ansible_install_timeout_seconds": {
-                        "description": "AnsibleInstallTimeoutSeconds bounds the in-guest ansible/collection\ninstallation steps.",
-                        "type": "integer"
-                    },
-                    "default_network_interface": {
-                        "description": "DefaultNetworkInterface names the host bridge interface injected into\nthe template context (DEFAULT_NETWORK_INTERFACE) when the spec sets\nnone — SHI's defaultNetworkInterface fallback, fed by\n`VBoxManage list bridgedifs`.",
-                        "type": "string"
-                    },
-                    "default_sync_method": {
-                        "description": "DefaultSyncMethod is the sync method machines without an explicit\nspec.sync_method use (rsync | scp; SHI's global syncmethod preference).\nPlatform rules still apply on top.",
-                        "type": "string"
-                    },
-                    "host_hooks": {
-                        "description": "HostHooks allows sequence hooks (provisioning.pre[]/post[] in a\nmachine's document) with target: host to run scripts ON THE AGENT HOST\n(design §5, ruled 2026-07-16 — default ON for this agent; zoneweaver\ndefaults OFF, its hosts are shared). Guest-target hooks are always\nallowed. Non-seeded packages additionally confirm once per machine.",
-                        "type": "boolean"
-                    },
-                    "machines_dir": {
-                        "description": "MachinesDir holds the per-machine working directories: the\nmaterialized provisioner copy, the rendered Hosts.yml, id-files,\ninstallers, ssls trees, and the machine's media.",
-                        "type": "string"
-                    },
-                    "machines_paths": {
-                        "additionalProperties": {
-                            "$ref": "#/components/schemas/config.StoragePathConfig"
-                        },
+                    "configs": {
+                        "additionalProperties": {},
                         "type": "object"
-                    },
-                    "network": {
-                        "$ref": "#/components/schemas/config.ProvisioningNetworkConfig"
-                    },
-                    "playbook_timeout_seconds": {
-                        "description": "PlaybookTimeoutSeconds bounds one ansible-playbook run in the guest.",
-                        "type": "integer"
-                    },
-                    "provisioners_dir": {
-                        "description": "ProvisionersDir holds provisioner packages in SHI's on-disk format\n(\u003cname\u003e/provisioner-collection.yml with \u003cversion\u003e/provisioner.yml\ntrees beneath). Installer-bundled packages are extracted here on\nstartup without ever overwriting existing versions.",
-                        "type": "string"
-                    },
-                    "provisioners_paths": {
-                        "additionalProperties": {
-                            "$ref": "#/components/schemas/config.StoragePathConfig"
-                        },
+                    }
+                },
+                "type": "object"
+            },
+            "configengine.SetupSchemasResponse": {
+                "properties": {
+                    "schemas": {
+                        "additionalProperties": {},
                         "type": "object"
-                    },
-                    "ssh": {
-                        "$ref": "#/components/schemas/config.ProvisioningSSHConfig"
                     }
                 },
                 "type": "object"
             },
-            "config.ProvisioningNetworkConfig": {
-                "description": "Network is the dedicated provisioning network.",
+            "configengine.SetupStatusResponse": {
                 "properties": {
-                    "dhcp_range_end": {
-                        "type": "string"
-                    },
-                    "dhcp_range_start": {
-                        "description": "DHCPRangeStart/DHCPRangeEnd bound the assignable pool; fixed leases and\nthe clone allocator draw from it.",
-                        "type": "string"
-                    },
-                    "dhcp_server_ip": {
-                        "description": "DHCPServerIP is the VirtualBox DHCP server's OWN address (VirtualBox\nrequires one distinct from the interface's — the base's dhcpd binds the\nhost IP itself, which has no analog here).",
-                        "type": "string"
-                    },
-                    "enabled": {
-                        "type": "boolean"
-                    },
-                    "host_ip": {
-                        "description": "HostIP is the host's address on the network — the interface identity.",
-                        "type": "string"
-                    },
-                    "netmask": {
-                        "description": "Netmask is the network mask.",
-                        "type": "string"
-                    },
-                    "subnet": {
-                        "description": "Subnet is the provisioning network in CIDR form.",
-                        "type": "string"
-                    }
-                },
-                "type": "object"
-            },
-            "config.ProvisioningSSHConfig": {
-                "description": "SSH is the pipeline's guest-access configuration.",
-                "properties": {
-                    "key_path": {
-                        "description": "KeyPath is the agent's own provisioning private key (generated at\nstartup when absent — ed25519). Empty selects ssh/provision_key beside\nthe configuration file.",
-                        "type": "string"
-                    },
-                    "poll_interval_seconds": {
-                        "description": "PollIntervalSeconds is the wait between SSH availability checks.",
-                        "type": "integer"
-                    },
-                    "timeout_seconds": {
-                        "description": "TimeoutSeconds bounds the total wait for a guest's SSH to answer.",
-                        "type": "integer"
-                    }
-                },
-                "type": "object"
-            },
-            "config.ResourceCheckConfig": {
-                "properties": {
-                    "enabled": {
-                        "type": "boolean"
-                    },
-                    "strategy": {
-                        "type": "string"
-                    },
-                    "thresholds": {
-                        "$ref": "#/components/schemas/config.ResourceThresholdsConfig"
-                    }
-                },
-                "type": "object"
-            },
-            "config.ResourceThresholdsConfig": {
-                "properties": {
-                    "critical": {
-                        "type": "number"
-                    },
-                    "warning": {
-                        "type": "number"
-                    }
-                },
-                "type": "object"
-            },
-            "config.ResourceValidationConfig": {
-                "description": "ResourceValidation are the pre-flight resource checks on\ncreate/clone/modify.",
-                "properties": {
-                    "cpu": {
-                        "$ref": "#/components/schemas/config.CPUValidationConfig"
-                    },
-                    "enabled": {
-                        "type": "boolean"
-                    },
-                    "memory": {
-                        "$ref": "#/components/schemas/config.ResourceCheckConfig"
-                    },
-                    "storage": {
-                        "$ref": "#/components/schemas/config.ResourceCheckConfig"
-                    }
-                },
-                "type": "object"
-            },
-            "config.SQLiteOptionsConfig": {
-                "properties": {
-                    "busy_timeout_ms": {
-                        "type": "integer"
-                    },
-                    "cache_size_mb": {
-                        "type": "integer"
-                    },
-                    "journal_mode": {
-                        "type": "string"
-                    },
-                    "mmap_size_mb": {
-                        "type": "integer"
-                    },
-                    "optimize": {
-                        "type": "boolean"
-                    },
-                    "synchronous": {
-                        "type": "string"
-                    },
-                    "temp_store": {
-                        "type": "string"
-                    },
-                    "wal_autocheckpoint": {
-                        "type": "integer"
-                    }
-                },
-                "type": "object"
-            },
-            "config.SSLConfig": {
-                "properties": {
-                    "ca_cert_path": {
-                        "description": "CACertPath/CAKeyPath locate the operator-provided CA used to sign the\ngenerated server certificate. Empty selects \u003cconfig dir\u003e/ssl/ca.crt\nand \u003cconfig dir\u003e/ssl/ca.key. Absent files mean self-signed generation.",
-                        "type": "string"
-                    },
-                    "ca_key_path": {
-                        "type": "string"
-                    },
-                    "cert_path": {
-                        "type": "string"
-                    },
-                    "enabled": {
-                        "type": "boolean"
-                    },
-                    "force_secure": {
-                        "description": "ForceSecure (default true) makes the plain-HTTP port serve ONLY 308\nredirects once the TLS listener is up — SSL enabled means ALL traffic\nrides TLS. false is the escape valve (a runtime serving-mode toggle,\ncors.allow_all's species): the HTTP port keeps serving the full app\nalongside HTTPS for clients that cannot chase redirects.",
-                        "type": "boolean"
-                    },
-                    "generate_ssl": {
-                        "description": "GenerateSSL creates the server certificate at the paths below when\nnone exists (the Node agent's generateSSLCertificatesIfNeeded, done\nwith crypto/x509 instead of shelling out to openssl). When an\noperator-provided CA pair exists at the CA paths, the generated server\ncertificate is signed by that CA (Mark's model: ship a CA — wildcard\ncapable — and everything chains to it); otherwise it is self-signed.",
-                        "type": "boolean"
-                    },
-                    "key_path": {
-                        "description": "KeyPath/CertPath locate the server private key and certificate. Empty\nselects \u003cconfig dir\u003e/ssl/server.key and \u003cconfig dir\u003e/ssl/server.crt.",
-                        "type": "string"
-                    }
-                },
-                "type": "object"
-            },
-            "config.ServerConfig": {
-                "properties": {
-                    "bind_address": {
-                        "type": "string"
-                    },
-                    "https_port": {
-                        "description": "HTTPSPort is the TLS listener's port (the Node agent's\nserver.https_port); bound only when ssl.enabled.",
-                        "type": "integer"
-                    },
-                    "port": {
-                        "type": "integer"
-                    }
-                },
-                "type": "object"
-            },
-            "config.SnapshotPolicyConfig": {
-                "properties": {
-                    "keep": {
-                        "description": "Keep is simple's newest-N count.",
-                        "type": "integer"
-                    },
-                    "max_age_days": {
-                        "description": "MaxAgeDays is age's cutoff.",
-                        "type": "integer"
-                    },
-                    "quiesce": {
-                        "description": "Quiesce runs qga fsfreeze around each snapshot when the guest agent\nanswers (application-consistent; crash-consistent otherwise).",
-                        "type": "boolean"
-                    },
-                    "tiers": {
-                        "additionalProperties": {
-                            "$ref": "#/components/schemas/config.SnapshotTierConfig"
-                        },
-                        "description": "Tiers are rotation's per-tier keep counts (hourly/daily/weekly).",
-                        "type": "object"
-                    },
-                    "type": {
-                        "description": "Type: none | simple (keep newest N auto-*) | age (delete auto-* older\nthan max_age_days) | rotation (hourly/daily/weekly tiers, Snapshoter.sh\nschedule).",
-                        "type": "string"
-                    }
-                },
-                "type": "object"
-            },
-            "config.SnapshotTierConfig": {
-                "properties": {
-                    "keep": {
-                        "type": "integer"
-                    }
-                },
-                "type": "object"
-            },
-            "config.SnapshotsConfig": {
-                "properties": {
-                    "default_policy": {
-                        "$ref": "#/components/schemas/config.SnapshotPolicyConfig"
-                    },
-                    "enabled": {
-                        "type": "boolean"
-                    },
-                    "interval_minutes": {
-                        "description": "IntervalMinutes is the simple/age cadence (rotation rides the fixed\nhourly/daily/weekly wall-clock schedule).",
-                        "type": "integer"
-                    }
-                },
-                "type": "object"
-            },
-            "config.StartupConfig": {
-                "properties": {
-                    "start_at_login": {
-                        "description": "StartAtLogin registers the agent with the OS's native login-item\nmechanism (HKCU Run key / LaunchAgent plist / XDG autostart entry).\nConverged at every boot: false removes the registration.",
+                    "setup_complete": {
                         "type": "boolean"
                     }
                 },
                 "type": "object"
             },
-            "config.StatsConfig": {
+            "configengine.UploadResponse": {
                 "properties": {
-                    "public_access": {
-                        "description": "PublicAccess serves GET /stats without an API key.",
-                        "type": "boolean"
-                    }
-                },
-                "type": "object"
-            },
-            "config.StoragePathConfig": {
-                "properties": {
-                    "default": {
-                        "type": "boolean"
-                    },
-                    "display_name": {
-                        "type": "string"
-                    },
-                    "enabled": {
-                        "type": "boolean"
-                    },
                     "path": {
                         "type": "string"
                     }
                 },
                 "type": "object"
             },
-            "config.TaskOutputConfig": {
+            "configengine.VerifyTokenRequest": {
                 "properties": {
-                    "circular_max_lines": {
-                        "type": "integer"
-                    },
-                    "enabled": {
-                        "type": "boolean"
-                    },
-                    "flush_interval_seconds": {
-                        "type": "integer"
-                    },
-                    "log_directory": {
-                        "description": "LogDirectory receives per-task log files; empty means\n\u003cconfig dir\u003e/logs/tasks.",
+                    "token": {
                         "type": "string"
-                    },
-                    "mode": {
-                        "type": "string"
-                    },
-                    "persist_log_file": {
-                        "type": "boolean"
-                    }
-                },
-                "type": "object"
-            },
-            "config.TasksConfig": {
-                "properties": {
-                    "default_pagination_limit": {
-                        "description": "DefaultPaginationLimit is GET /tasks' default limit (Node:\nzones.default_pagination_limit).",
-                        "type": "integer"
-                    },
-                    "max_concurrent": {
-                        "description": "MaxConcurrent caps simultaneously running tasks (Node:\nzones.max_concurrent_tasks).",
-                        "type": "integer"
-                    },
-                    "output": {
-                        "$ref": "#/components/schemas/config.TaskOutputConfig"
-                    },
-                    "poll_interval_seconds": {
-                        "description": "PollIntervalSeconds is the queue tick (the Node agent hardcodes 2).",
-                        "type": "integer"
-                    },
-                    "resume_pending_on_start": {
-                        "description": "ResumePendingOnStart keeps pending tasks across an agent restart (the\nresumable queue). Default false: pending rows from a previous run are\nCANCELLED at boot — the base's startup clear (Mark's ruling 2026-07-07:\nyesterday's queued stop must never fire on today's start).",
-                        "type": "boolean"
-                    },
-                    "retention_days": {
-                        "description": "RetentionDays: finished tasks older than this are deleted by the\nperiodic cleanup (Node: host_monitoring.retention.tasks).",
-                        "type": "integer"
-                    }
-                },
-                "type": "object"
-            },
-            "config.TemplateSourceConfig": {
-                "properties": {
-                    "auth_token": {
-                        "description": "AuthToken is the registry API key — a BoxVault service-account token,\nsent raw as Bearer on every call (vagrant's own model; Mark's ruling\n2026-07-09: \"API keys, PERIOD\"). The ONLY credential: the base's\nusername/JWT signin ladder is deliberately dead.",
-                        "type": "string"
-                    },
-                    "ca_file": {
-                        "description": "CAFile adds a PEM CA bundle to the trust store for this registry —\nthe self-signed-registry answer. Verification always stays on (the\nbase's verify_ssl:false is deliberately not ported).",
-                        "type": "string"
-                    },
-                    "default": {
-                        "type": "boolean"
-                    },
-                    "enabled": {
-                        "type": "boolean"
-                    },
-                    "name": {
-                        "type": "string"
-                    },
-                    "url": {
-                        "type": "string"
-                    }
-                },
-                "type": "object"
-            },
-            "config.TemplateSourcesConfig": {
-                "properties": {
-                    "local_storage_path": {
-                        "description": "LocalStoragePath is the template storage root\n(\u003croot\u003e/\u003corg\u003e/\u003cbox\u003e/\u003cversion\u003e/). Empty selects templates under the\ndata root.",
-                        "type": "string"
-                    },
-                    "sources": {
-                        "description": "Sources are the configured registries; the entry flagged default\nserves requests that name no source (names are display-only).",
-                        "items": {
-                            "$ref": "#/components/schemas/config.TemplateSourceConfig"
-                        },
-                        "type": "array",
-                        "uniqueItems": false
-                    },
-                    "storage_paths": {
-                        "additionalProperties": {
-                            "$ref": "#/components/schemas/config.StoragePathConfig"
-                        },
-                        "type": "object"
-                    }
-                },
-                "type": "object"
-            },
-            "config.TicketSystemConfig": {
-                "properties": {
-                    "base_url": {
-                        "type": "string"
-                    },
-                    "context": {
-                        "type": "string"
-                    },
-                    "enabled": {
-                        "type": "boolean"
-                    },
-                    "fallback_customer_id": {
-                        "type": "string"
-                    },
-                    "req_type": {
-                        "type": "string"
-                    }
-                },
-                "type": "object"
-            },
-            "config.UIConfig": {
-                "properties": {
-                    "enabled": {
-                        "type": "boolean"
-                    },
-                    "path": {
-                        "description": "Path optionally serves the UI from a directory on disk instead of the\nartifact embedded in the binary (dev override, mirrors the Node agent).",
-                        "type": "string"
-                    },
-                    "shi_mode": {
-                        "description": "SHIMode turns on the \"I Can't Believe it's not Super.Human.Installer\"\npresentation (Mark's ruling 2026-07-07): the agent just carries and\nadvertises the flag (shi_mode on GET /api/status); the SPA renders the\nopinionated SHI-style theme/flow from it in Direct mode.",
-                        "type": "boolean"
-                    }
-                },
-                "type": "object"
-            },
-            "config.UpdatesConfig": {
-                "properties": {
-                    "versioninfo_url": {
-                        "description": "VersionInfoURL points at a JSON document {version, releaseUrl,\nreleaseDate, changelog}; empty disables update checking.",
-                        "type": "string"
-                    }
-                },
-                "type": "object"
-            },
-            "config.oidcConfig": {
-                "properties": {
-                    "allowed_users": {
-                        "items": {
-                            "type": "string"
-                        },
-                        "type": "array",
-                        "uniqueItems": false
-                    },
-                    "client_id": {
-                        "type": "string"
-                    },
-                    "enabled": {
-                        "type": "boolean"
-                    },
-                    "issuer": {
-                        "type": "string"
-                    },
-                    "scopes": {
-                        "items": {
-                            "type": "string"
-                        },
-                        "type": "array",
-                        "uniqueItems": false
-                    }
-                },
-                "type": "object"
-            },
-            "github_com_Makr91_hyperweaver-agent_internal_config.Config": {
-                "properties": {
-                    "api_docs": {
-                        "$ref": "#/components/schemas/config.APIDocsConfig"
-                    },
-                    "api_keys": {
-                        "$ref": "#/components/schemas/config.APIKeysConfig"
-                    },
-                    "applications": {
-                        "items": {
-                            "$ref": "#/components/schemas/config.ApplicationConfig"
-                        },
-                        "type": "array",
-                        "uniqueItems": false
-                    },
-                    "artifact_storage": {
-                        "$ref": "#/components/schemas/config.ArtifactStorageConfig"
-                    },
-                    "browser": {
-                        "$ref": "#/components/schemas/config.BrowserConfig"
-                    },
-                    "catalog_sources": {
-                        "$ref": "#/components/schemas/config.CatalogSourcesConfig"
-                    },
-                    "cleanup": {
-                        "$ref": "#/components/schemas/config.CleanupConfig"
-                    },
-                    "cors": {
-                        "$ref": "#/components/schemas/config.CORSConfig"
-                    },
-                    "data": {
-                        "$ref": "#/components/schemas/config.DataConfig"
-                    },
-                    "database": {
-                        "$ref": "#/components/schemas/config.DatabaseConfig"
-                    },
-                    "file_browser": {
-                        "$ref": "#/components/schemas/config.FileBrowserConfig"
-                    },
-                    "guest_agent": {
-                        "$ref": "#/components/schemas/config.GuestAgentConfig"
-                    },
-                    "host_power": {
-                        "$ref": "#/components/schemas/config.HostPowerConfig"
-                    },
-                    "logging": {
-                        "$ref": "#/components/schemas/config.LoggingConfig"
-                    },
-                    "machines": {
-                        "$ref": "#/components/schemas/config.MachinesConfig"
-                    },
-                    "monitoring": {
-                        "$ref": "#/components/schemas/config.MonitoringConfig"
-                    },
-                    "oidc": {
-                        "$ref": "#/components/schemas/config.oidcConfig"
-                    },
-                    "provisioning": {
-                        "$ref": "#/components/schemas/config.ProvisioningConfig"
-                    },
-                    "server": {
-                        "$ref": "#/components/schemas/config.ServerConfig"
-                    },
-                    "snapshots": {
-                        "$ref": "#/components/schemas/config.SnapshotsConfig"
-                    },
-                    "ssl": {
-                        "$ref": "#/components/schemas/config.SSLConfig"
-                    },
-                    "startup": {
-                        "$ref": "#/components/schemas/config.StartupConfig"
-                    },
-                    "stats": {
-                        "$ref": "#/components/schemas/config.StatsConfig"
-                    },
-                    "tasks": {
-                        "$ref": "#/components/schemas/config.TasksConfig"
-                    },
-                    "template_sources": {
-                        "$ref": "#/components/schemas/config.TemplateSourcesConfig"
-                    },
-                    "ticket_system": {
-                        "$ref": "#/components/schemas/config.TicketSystemConfig"
-                    },
-                    "ui": {
-                        "$ref": "#/components/schemas/config.UIConfig"
-                    },
-                    "updates": {
-                        "$ref": "#/components/schemas/config.UpdatesConfig"
                     }
                 },
                 "type": "object"
@@ -1541,6 +664,45 @@
                         "type": "string"
                     },
                     "version": {
+                        "type": "string"
+                    }
+                },
+                "type": "object"
+            },
+            "problem.Body": {
+                "properties": {
+                    "errors": {
+                        "items": {
+                            "$ref": "#/components/schemas/problem.Error"
+                        },
+                        "type": "array",
+                        "uniqueItems": false
+                    },
+                    "status": {
+                        "type": "integer"
+                    },
+                    "title": {
+                        "type": "string"
+                    },
+                    "type": {
+                        "type": "string"
+                    }
+                },
+                "type": "object"
+            },
+            "problem.Error": {
+                "properties": {
+                    "detail": {
+                        "type": "string"
+                    },
+                    "params": {
+                        "additionalProperties": {},
+                        "type": "object"
+                    },
+                    "pointer": {
+                        "type": "string"
+                    },
+                    "rule": {
                         "type": "string"
                     }
                 },
@@ -1947,6 +1109,9 @@
                     "exists": {
                         "type": "boolean"
                     },
+                    "id": {
+                        "type": "string"
+                    },
                     "name": {
                         "type": "string"
                     },
@@ -2311,6 +1476,9 @@
                     "default": {
                         "type": "boolean"
                     },
+                    "id": {
+                        "type": "string"
+                    },
                     "name": {
                         "type": "string"
                     },
@@ -2463,9 +1631,6 @@
                     },
                     "message": {
                         "type": "string"
-                    },
-                    "success": {
-                        "type": "boolean"
                     }
                 },
                 "type": "object"
@@ -2876,17 +2041,6 @@
                     },
                     "force": {
                         "description": "Force keeps going past individual file errors.",
-                        "type": "boolean"
-                    }
-                },
-                "type": "object"
-            },
-            "server.deleteBackupResponse": {
-                "properties": {
-                    "message": {
-                        "type": "string"
-                    },
-                    "success": {
                         "type": "boolean"
                     }
                 },
@@ -5696,17 +4850,6 @@
                 },
                 "type": "object"
             },
-            "server.restoreBackupResponse": {
-                "properties": {
-                    "message": {
-                        "type": "string"
-                    },
-                    "success": {
-                        "type": "boolean"
-                    }
-                },
-                "type": "object"
-            },
             "server.revokeKeyResponse": {
                 "properties": {
                     "entity_id": {
@@ -5811,17 +4954,6 @@
                         },
                         "type": "array",
                         "uniqueItems": false
-                    }
-                },
-                "type": "object"
-            },
-            "server.serverRestartResponse": {
-                "properties": {
-                    "message": {
-                        "type": "string"
-                    },
-                    "success": {
-                        "type": "boolean"
                     }
                 },
                 "type": "object"
@@ -6365,6 +5497,9 @@
                     "enabled": {
                         "type": "boolean"
                     },
+                    "id": {
+                        "type": "string"
+                    },
                     "name": {
                         "type": "string"
                     },
@@ -6615,17 +5750,6 @@
                         "type": "string"
                     },
                     "enabled": {
-                        "type": "boolean"
-                    }
-                },
-                "type": "object"
-            },
-            "server.updateSettingsResponse": {
-                "properties": {
-                    "message": {
-                        "type": "string"
-                    },
-                    "success": {
                         "type": "boolean"
                     }
                 },
@@ -7541,7 +6665,7 @@
         },
         "/api/applications": {
             "get": {
-                "description": "Minimum role: viewer (the host-launchers capability token). The configured applications[] registry — user-chosen desktop tools (PuTTY, WinSCP, mstsc, ...) the agent can launch on its OWN host against a machine (SHI's per-server app buttons, generalized from its single hardcoded FileZilla entry). Each entry carries name, path (the executable), args (the argument template with {host}/{port}/{user}/{password}/{machine} placeholders), and exists — whether the executable is actually present on the agent host, so the UI greys out what cannot launch. The list lives in config applications[]; edit it through PUT /api/settings.",
+                "description": "Minimum role: viewer (the host-launchers capability token). The configured applications map — user-chosen desktop tools (PuTTY, WinSCP, mstsc, ...) the agent can launch on its OWN host against a machine (SHI's per-server app buttons, generalized from its single hardcoded FileZilla entry). Each entry carries id (the key the launch route names), name, path (the executable), args (the argument template with {host}/{port}/{user}/{password}/{machine} placeholders), and exists — whether the executable is actually present on the agent host, so the UI greys out what cannot launch. The map lives in the app configuration file under applications; edit it through PUT /api/config/app.",
                 "responses": {
                     "200": {
                         "content": {
@@ -8041,7 +7165,7 @@
                 ]
             },
             "post": {
-                "description": "Minimum role: operator. Creates the directory (when absent), the location row, persists the entry into config.yaml artifact_storage.paths[] (so it survives restarts), and queues an initial scan.",
+                "description": "Minimum role: operator. Creates the directory (when absent), the location row, persists the entry into the storage configuration file under artifact_storage.paths keyed by an id derived from the name (so it survives restarts), and queues an initial scan.",
                 "requestBody": {
                     "content": {
                         "application/json": {
@@ -8149,7 +7273,7 @@
                 ]
             },
             "put": {
-                "description": "Minimum role: operator. name and enabled only (zoneweaver's contract — path/type are identity). Mirrored into the config.yaml entry.",
+                "description": "Minimum role: operator. name and enabled only (zoneweaver's contract — path/type are identity). Mirrored into the storage configuration file's entry.",
                 "parameters": [
                     {
                         "description": "Storage location id",
@@ -8766,6 +7890,195 @@
                 ]
             }
         },
+        "/api/config/backups": {
+            "get": {
+                "description": "Minimum role: admin. Newest first; each carries the files it holds.",
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "items": {
+                                        "$ref": "#/components/schemas/config.Backup"
+                                    },
+                                    "type": "array"
+                                }
+                            }
+                        },
+                        "description": "All backups"
+                    }
+                },
+                "summary": "List configuration backups",
+                "tags": [
+                    "Configuration"
+                ]
+            },
+            "post": {
+                "description": "Minimum role: admin. Copies the five configuration files into a new timestamped folder under backups beside them; the one .bak the engine writes on every save is separate from this history.",
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/server.createBackupResponse"
+                                }
+                            }
+                        },
+                        "description": "Backup created"
+                    },
+                    "500": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/problem.Body"
+                                }
+                            }
+                        },
+                        "description": "The files could not be copied"
+                    }
+                },
+                "summary": "Back up every configuration file",
+                "tags": [
+                    "Configuration"
+                ]
+            }
+        },
+        "/api/config/backups/{id}": {
+            "delete": {
+                "description": "Minimum role: admin.",
+                "parameters": [
+                    {
+                        "description": "Backup id, the timestamp folder name",
+                        "in": "path",
+                        "name": "id",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/configengine.MessageResponse"
+                                }
+                            }
+                        },
+                        "description": "Backup deleted"
+                    },
+                    "404": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/problem.Body"
+                                }
+                            }
+                        },
+                        "description": "Backup not found"
+                    }
+                },
+                "summary": "Delete a configuration backup",
+                "tags": [
+                    "Configuration"
+                ]
+            }
+        },
+        "/api/config/backups/{id}/restore": {
+            "post": {
+                "description": "Minimum role: admin. Every file of the backup is validated against its schema, the current files are backed up first, then each is written through the engine; the restart list records the changed values.",
+                "parameters": [
+                    {
+                        "description": "Backup id",
+                        "in": "path",
+                        "name": "id",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/configengine.MessageResponse"
+                                }
+                            }
+                        },
+                        "description": "Configuration restored"
+                    },
+                    "404": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/problem.Body"
+                                }
+                            }
+                        },
+                        "description": "Backup not found"
+                    },
+                    "422": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/problem.Body"
+                                }
+                            }
+                        },
+                        "description": "A backed-up value breaks its schema"
+                    }
+                },
+                "summary": "Restore the configuration files from a backup",
+                "tags": [
+                    "Configuration"
+                ]
+            }
+        },
+        "/api/config/restart": {
+            "post": {
+                "description": "Minimum role: admin. Clears the pending list, answers 202 and restarts the process after the answer: under systemd a clean exit and Restart=always, elsewhere the agent spawns its own successor.",
+                "responses": {
+                    "202": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/configengine.MessageResponse"
+                                }
+                            }
+                        },
+                        "description": "Restarting"
+                    }
+                },
+                "summary": "Restart the agent",
+                "tags": [
+                    "Configuration"
+                ]
+            }
+        },
+        "/api/config/restart-status": {
+            "get": {
+                "description": "Minimum role: admin. The union of every write's restart list since the last restart, with the last writer and time.",
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/configengine.RestartStatus"
+                                }
+                            }
+                        },
+                        "description": "The pending list"
+                    }
+                },
+                "summary": "The pending restart list",
+                "tags": [
+                    "Configuration"
+                ]
+            }
+        },
         "/api/config/ticket": {
             "get": {
                 "description": "The Help \u0026 Support link's config feed. No authentication. Every member of ticket_system is a plain value: enabled, base_url, req_type, fallback_customer_id and context. The UI renders the link only when enabled AND base_url are set, building base_url\u0026req=\u003creq_type\u003e\u0026customerId=\u0026user=\u0026email=\u0026context=\u003ccontext\u003e, customerId falling back to fallback_customer_id.",
@@ -8784,6 +8097,259 @@
                 "summary": "Ticket-system configuration (public)",
                 "tags": [
                     "Status"
+                ]
+            }
+        },
+        "/api/config/{name}": {
+            "get": {
+                "description": "Minimum role: admin. The raw file parsed to JSON and nothing else: no default filled, no value masked, no key added or removed.",
+                "parameters": [
+                    {
+                        "description": "app, auth, db, machines or storage",
+                        "in": "path",
+                        "name": "name",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "additionalProperties": {},
+                                    "type": "object"
+                                }
+                            }
+                        },
+                        "description": "The file"
+                    },
+                    "404": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/problem.Body"
+                                }
+                            }
+                        },
+                        "description": "Not a configuration file name"
+                    }
+                },
+                "summary": "Read one configuration file",
+                "tags": [
+                    "Configuration"
+                ]
+            },
+            "put": {
+                "description": "Minimum role: admin. The body is a JSON Merge Patch (RFC 7396) over the raw file: a sent key replaces the stored value, an omitted key is untouched, null removes a key, an array replaces whole. The filled merge is evaluated against the schema and the agent's own rules before anything is written; a 422 carries every failing value with its pointer into the body as sent. The 200 lists the changed values that need a restart.",
+                "parameters": [
+                    {
+                        "description": "app, auth, db, machines or storage",
+                        "in": "path",
+                        "name": "name",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "oneOf": [
+                                    {
+                                        "type": "object"
+                                    },
+                                    {
+                                        "additionalProperties": {},
+                                        "title": "body",
+                                        "type": "object"
+                                    }
+                                ]
+                            }
+                        }
+                    },
+                    "description": "The merge patch",
+                    "required": true
+                },
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/configengine.SavedResponse"
+                                }
+                            }
+                        },
+                        "description": "Written"
+                    },
+                    "400": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/problem.Body"
+                                }
+                            }
+                        },
+                        "description": "Unreadable body"
+                    },
+                    "404": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/problem.Body"
+                                }
+                            }
+                        },
+                        "description": "Not a configuration file name"
+                    },
+                    "422": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/problem.Body"
+                                }
+                            }
+                        },
+                        "description": "A value breaks a rule, or a readOnly key was sent"
+                    }
+                },
+                "summary": "Write one configuration file",
+                "tags": [
+                    "Configuration"
+                ]
+            }
+        },
+        "/api/config/{name}/schema": {
+            "get": {
+                "description": "Minimum role: admin. The JSON Schema 2020-12 document shipped inside the agent, verbatim: every rule and every title and description the editor draws.",
+                "parameters": [
+                    {
+                        "description": "app, auth, db, machines or storage",
+                        "in": "path",
+                        "name": "name",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "additionalProperties": {},
+                                    "type": "object"
+                                }
+                            }
+                        },
+                        "description": "The schema"
+                    },
+                    "404": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/problem.Body"
+                                }
+                            }
+                        },
+                        "description": "Not a configuration file name"
+                    }
+                },
+                "summary": "Read the schema of one configuration file",
+                "tags": [
+                    "Configuration"
+                ]
+            }
+        },
+        "/api/config/{name}/upload": {
+            "post": {
+                "description": "Admin session or setup token. Multipart with the parts file and pointer, the pointer naming a property whose action.kind is upload; the upload is written to the path that property holds, under the configuration directory, mode 0600.",
+                "parameters": [
+                    {
+                        "description": "app, auth, db, machines or storage",
+                        "in": "path",
+                        "name": "name",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "content": {
+                        "application/x-www-form-urlencoded": {
+                            "schema": {
+                                "oneOf": [
+                                    {
+                                        "title": "file",
+                                        "type": "file"
+                                    },
+                                    {
+                                        "title": "pointer",
+                                        "type": "string"
+                                    }
+                                ]
+                            }
+                        },
+                        "multipart/form-data": {
+                            "schema": {
+                                "type": "object"
+                            }
+                        }
+                    },
+                    "description": "The file | The property's JSON pointer",
+                    "required": true
+                },
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/configengine.UploadResponse"
+                                }
+                            }
+                        },
+                        "description": "Written"
+                    },
+                    "404": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/problem.Body"
+                                }
+                            }
+                        },
+                        "description": "Not a configuration file name"
+                    },
+                    "413": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/problem.Body"
+                                }
+                            }
+                        },
+                        "description": "Larger than the upload limit"
+                    },
+                    "422": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/problem.Body"
+                                }
+                            }
+                        },
+                        "description": "The pointer names no upload property, or the path is outside the configuration directory"
+                    }
+                },
+                "summary": "Upload the file a configuration property points at",
+                "tags": [
+                    "Configuration"
                 ]
             }
         },
@@ -10550,7 +10116,7 @@
                         }
                     },
                     {
-                        "description": "The applications[] entry name (GET /api/applications lists them)",
+                        "description": "The application's id (GET /api/applications lists them)",
                         "in": "path",
                         "name": "appName",
                         "required": true,
@@ -15154,7 +14720,7 @@
                 "description": "Minimum role: viewer. Fetches the source's catalog.json LIVE (?source= names a configured catalog; empty = the default), validates format_version 1, and relays the parsed document: {name, format_version, updated, provisioners: [{name, repo, description, versions: [{version, artifacts: [{url, checksum_type, checksum}]}]}]} — versions semver-DESC, artifact URLs OPAQUE (release tags carry slashes; never parse or construct them). Versions may disappear between fetches when an author deletes a release.",
                 "parameters": [
                     {
-                        "description": "A configured catalog source; empty = the default",
+                        "description": "A configured catalog source's id; empty = the default",
                         "in": "query",
                         "name": "source",
                         "schema": {
@@ -15235,7 +14801,7 @@
         },
         "/api/provisioning/catalog/sources": {
             "get": {
-                "description": "Minimum role: viewer. The enabled catalog_sources definitions (name, url, default) — the HACS model's registries; fork the catalog repo and add your own as another source. CA bundles are never returned.",
+                "description": "Minimum role: viewer. The enabled catalog_sources definitions (id, name, url, default) — the HACS model's registries; fork the catalog repo and add your own as another source. The id is what source_name and ?source= name. CA bundles are never returned.",
                 "responses": {
                     "200": {
                         "content": {
@@ -15769,7 +15335,7 @@
                 ]
             },
             "put": {
-                "description": "Minimum role: admin. Replaces the submitted categories whole (the same top-level shallow-merge shape as PUT /api/settings); omitted categories are untouched. Rejected whole on an unknown category or an invalid entry name — the store never half-applies. Persisted atomically to secrets.yaml (0600) beside the config.",
+                "description": "Minimum role: admin. Replaces the submitted categories whole; omitted categories are untouched. Rejected whole on an unknown category or an invalid entry name — the store never half-applies. Persisted atomically to secrets.yaml (0600) beside the config.",
                 "requestBody": {
                     "content": {
                         "application/json": {
@@ -15818,49 +15384,48 @@
                 ]
             }
         },
-        "/api/server/restart": {
-            "post": {
-                "description": "Minimum role: admin. Under systemd the unit's Restart=always brings the agent back after a clean exit; everywhere else the agent spawns its own successor before shutting down.",
-                "responses": {
-                    "200": {
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/server.serverRestartResponse"
-                                }
-                            }
-                        },
-                        "description": "Restart initiated"
-                    }
-                },
-                "summary": "Restart the agent",
-                "tags": [
-                    "Settings"
-                ]
-            }
-        },
-        "/api/settings": {
+        "/api/setup": {
             "get": {
-                "description": "Minimum role: admin. Returns the live configuration with the same section and key names as config.yaml.",
+                "description": "Under Authorization: Bearer with the setup token. The raw files under configs; 403 on a missing or mismatched token, 404 once setup is complete.",
                 "responses": {
                     "200": {
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "$ref": "#/components/schemas/github_com_Makr91_hyperweaver-agent_internal_config.Config"
+                                    "$ref": "#/components/schemas/configengine.SetupConfigsResponse"
                                 }
                             }
                         },
-                        "description": "The configuration document"
+                        "description": "The files"
+                    },
+                    "403": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/problem.Body"
+                                }
+                            }
+                        },
+                        "description": "Missing or mismatched token"
+                    },
+                    "404": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/problem.Body"
+                                }
+                            }
+                        },
+                        "description": "Setup is complete"
                     }
                 },
-                "summary": "Current agent configuration",
+                "summary": "Read every configuration file for the setup page",
                 "tags": [
-                    "Settings"
+                    "Setup"
                 ]
             },
             "put": {
-                "description": "Minimum role: admin. Shallow-merges the submitted top-level sections onto the on-disk YAML, validates the result, backs up the current file, and writes atomically. The running process keeps its loaded values — most changes apply on restart.",
+                "description": "Under the setup token. The body is {configs: {name: merge patch}}; every file is evaluated before any is written, the 422 carrying pointers as /configs/name/...; on success every file is written with the actor setup, the token is deleted and {message} is answered.",
                 "requestBody": {
                     "content": {
                         "application/json": {
@@ -15870,15 +15435,15 @@
                                         "type": "object"
                                     },
                                     {
-                                        "additionalProperties": {},
-                                        "title": "request",
-                                        "type": "object"
+                                        "$ref": "#/components/schemas/configengine.SetupPutRequest",
+                                        "summary": "body",
+                                        "description": "One merge patch per file"
                                     }
                                 ]
                             }
                         }
                     },
-                    "description": "Top-level configuration sections to replace",
+                    "description": "One merge patch per file",
                     "required": true
                 },
                 "responses": {
@@ -15886,187 +15451,172 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "$ref": "#/components/schemas/server.updateSettingsResponse"
+                                    "$ref": "#/components/schemas/configengine.MessageResponse"
                                 }
                             }
                         },
-                        "description": "Settings persisted"
+                        "description": "Setup complete"
                     },
                     "400": {
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "$ref": "#/components/schemas/server.wrappedError"
+                                    "$ref": "#/components/schemas/problem.Body"
                                 }
                             }
                         },
-                        "description": "Invalid JSON body"
+                        "description": "Unreadable body"
                     },
-                    "500": {
+                    "403": {
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "$ref": "#/components/schemas/server.wrappedError"
+                                    "$ref": "#/components/schemas/problem.Body"
                                 }
                             }
                         },
-                        "description": "Merged configuration invalid or write failure"
-                    }
-                },
-                "summary": "Update agent configuration",
-                "tags": [
-                    "Settings"
-                ]
-            }
-        },
-        "/api/settings/backup": {
-            "post": {
-                "description": "Minimum role: admin.",
-                "responses": {
-                    "200": {
+                        "description": "Missing or mismatched token"
+                    },
+                    "404": {
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "$ref": "#/components/schemas/server.createBackupResponse"
+                                    "$ref": "#/components/schemas/problem.Body"
                                 }
                             }
                         },
-                        "description": "Backup created"
+                        "description": "Setup is complete"
+                    },
+                    "422": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/problem.Body"
+                                }
+                            }
+                        },
+                        "description": "A value of one of the files breaks its schema"
                     }
                 },
-                "summary": "Create a configuration backup",
+                "summary": "Write every configuration file from the setup page",
                 "tags": [
-                    "Settings"
+                    "Setup"
                 ]
             }
         },
-        "/api/settings/backups": {
+        "/api/setup/schema": {
             "get": {
-                "description": "Minimum role: admin. Newest first.",
+                "description": "Under the setup token. Every schema under schemas; 403 and 404 as GET /api/setup.",
                 "responses": {
                     "200": {
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "items": {
-                                        "$ref": "#/components/schemas/config.Backup"
+                                    "$ref": "#/components/schemas/configengine.SetupSchemasResponse"
+                                }
+                            }
+                        },
+                        "description": "The schemas"
+                    },
+                    "403": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/problem.Body"
+                                }
+                            }
+                        },
+                        "description": "Missing or mismatched token"
+                    },
+                    "404": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/problem.Body"
+                                }
+                            }
+                        },
+                        "description": "Setup is complete"
+                    }
+                },
+                "summary": "Read every schema for the setup page",
+                "tags": [
+                    "Setup"
+                ]
+            }
+        },
+        "/api/setup/status": {
+            "get": {
+                "description": "No authentication. setup_complete is true exactly when the setup token file does not exist; on a desktop run it is always true.",
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/configengine.SetupStatusResponse"
+                                }
+                            }
+                        },
+                        "description": "The gate"
+                    }
+                },
+                "summary": "Whether setup is complete",
+                "tags": [
+                    "Setup"
+                ]
+            }
+        },
+        "/api/setup/verify-token": {
+            "post": {
+                "description": "No authentication. 204 on a constant-time match with the token file, 403 otherwise, 404 once setup is complete. The browser keeps the token it sent as the bearer of every later setup call.",
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "oneOf": [
+                                    {
+                                        "type": "object"
                                     },
-                                    "type": "array"
-                                }
+                                    {
+                                        "$ref": "#/components/schemas/configengine.VerifyTokenRequest",
+                                        "summary": "body",
+                                        "description": "The token"
+                                    }
+                                ]
                             }
-                        },
-                        "description": "All backups"
-                    }
-                },
-                "summary": "List configuration backups",
-                "tags": [
-                    "Settings"
-                ]
-            }
-        },
-        "/api/settings/backups/{filename}": {
-            "delete": {
-                "description": "Minimum role: admin. Only agent-generated backup names (config-\u003cunix-ms\u003e.yaml) are accepted.",
-                "parameters": [
-                    {
-                        "description": "Backup filename",
-                        "in": "path",
-                        "name": "filename",
-                        "required": true,
-                        "schema": {
-                            "type": "string"
                         }
-                    }
-                ],
+                    },
+                    "description": "The token",
+                    "required": true
+                },
                 "responses": {
-                    "200": {
+                    "204": {
+                        "description": "Matched"
+                    },
+                    "403": {
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "$ref": "#/components/schemas/server.deleteBackupResponse"
+                                    "$ref": "#/components/schemas/problem.Body"
                                 }
                             }
                         },
-                        "description": "Backup deleted"
+                        "description": "Mismatched"
                     },
                     "404": {
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "$ref": "#/components/schemas/server.wrappedError"
+                                    "$ref": "#/components/schemas/problem.Body"
                                 }
                             }
                         },
-                        "description": "Backup not found"
+                        "description": "Setup is complete"
                     }
                 },
-                "summary": "Delete a configuration backup",
+                "summary": "Verify the setup token",
                 "tags": [
-                    "Settings"
-                ]
-            }
-        },
-        "/api/settings/restore/{filename}": {
-            "post": {
-                "description": "Minimum role: admin. The backup is validated as a working configuration and the current file is backed up first.",
-                "parameters": [
-                    {
-                        "description": "Backup filename",
-                        "in": "path",
-                        "name": "filename",
-                        "required": true,
-                        "schema": {
-                            "type": "string"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/server.restoreBackupResponse"
-                                }
-                            }
-                        },
-                        "description": "Configuration restored"
-                    },
-                    "404": {
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/server.wrappedError"
-                                }
-                            }
-                        },
-                        "description": "Backup not found"
-                    }
-                },
-                "summary": "Restore configuration from a backup",
-                "tags": [
-                    "Settings"
-                ]
-            }
-        },
-        "/api/settings/schema": {
-            "get": {
-                "description": "Minimum role: admin. Section/field types, descriptions, defaults, ranges, and restart requirements — the document the settings UI renders its tabs from.",
-                "responses": {
-                    "200": {
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "additionalProperties": {},
-                                    "type": "object"
-                                }
-                            }
-                        },
-                        "description": "The schema document"
-                    }
-                },
-                "summary": "Settings schema",
-                "tags": [
-                    "Settings"
+                    "Setup"
                 ]
             }
         },
@@ -16254,7 +15804,7 @@
         },
         "/api/status": {
             "get": {
-                "description": "The public status probe. No authentication. role is the package name, hyperweaver-agent, the one member that tells the shared UI it is served by an agent directly. brand, collections, links, ticket and config are the shared status members: links.api is the path of this agent's API reference while api_docs.enabled is on, and ticket is null because GET /api/config/ticket serves the ticket system.",
+                "description": "The public status probe. No authentication. role is the package name, hyperweaver-agent, the one member that tells the shared UI it is served by an agent directly. brand, collections, links, ticket and config are the shared status members: links.api is the path of this agent's API reference while api_docs.enabled is on, ticket is null because GET /api/config/ticket serves the ticket system, and config lists the five configuration files (app, auth, db, machines, storage) the /api/config routes serve; the admin and setup tokens name the configuration pages.",
                 "responses": {
                     "200": {
                         "content": {
@@ -17915,7 +17465,7 @@
                             }
                         }
                     },
-                    "description": "{machine_name|box_path, source_name, organization, box_name, version, description, architecture}",
+                    "description": "{machine_name|box_path, source_name (the source's id), organization, box_name, version, description, architecture}",
                     "required": true
                 },
                 "responses": {
@@ -17962,7 +17512,7 @@
                             }
                         }
                     },
-                    "description": "{organization, box_name, version, source_name, provider, architecture}",
+                    "description": "{organization, box_name, version, source_name (the source's id), provider, architecture}",
                     "required": true
                 },
                 "responses": {
@@ -18002,7 +17552,7 @@
                 "description": "Minimum role: viewer. The registry's discovery catalog — the machine wizard's box-picker feed. ONE /api/discover call: public boxes for everyone, and when the source carries an API key (a BoxVault service-account token, sent as Bearer) the registry additionally answers the key's own organization's boxes. Sources WITHOUT their own auth_token fall back to the logged-in user's OIDC access token when one is held (the Direct-mode device login) — org-private BoxVault boxes then appear per the user's own claims. FILTERED to what this agent can consume: only versions carrying a provider in the host's set (virtualbox always; utm too on a UTM-capable macOS agent) in the host's architecture survive (foreign providers/architectures are pruned; boxes left with no versions are dropped) — a zone/docker/aws-only or foreign-arch box never reaches the picker. An x-registry-token request header overrides the source's configured key (never returned). The base's GET /api/templates/remote/{sourceName}.",
                 "parameters": [
                     {
-                        "description": "The configured template source",
+                        "description": "The configured template source's id",
                         "in": "path",
                         "name": "sourceName",
                         "required": true,
@@ -18041,7 +17591,7 @@
                 "description": "Minimum role: viewer. The registry's Vagrant-compatible /{org}/{box} metadata document: versions with providers and download URLs, FILTERED to what this agent can consume (the host's provider set — virtualbox always, utm on a UTM-capable macOS agent — in the host architecture). A box that exists upstream but carries nothing downloadable here answers 404, same as absent. The base's GET /api/templates/remote/{sourceName}/{org}/{boxName}.",
                 "parameters": [
                     {
-                        "description": "The configured template source",
+                        "description": "The configured template source's id",
                         "in": "path",
                         "name": "sourceName",
                         "required": true,
@@ -18095,7 +17645,7 @@
         },
         "/api/templates/sources": {
             "get": {
-                "description": "Minimum role: viewer. The enabled Vagrant/BoxVault-compatible registries (name, url, default) — credentials are never returned. The base's GET /api/templates/sources.",
+                "description": "Minimum role: viewer. The enabled Vagrant/BoxVault-compatible registries (id, name, url, default) — credentials are never returned. The id is what every source_name member and the {sourceName} path segment name. The base's GET /api/templates/sources.",
                 "responses": {
                     "200": {
                         "content": {
@@ -18524,8 +18074,12 @@
             "name": "Database Management"
         },
         {
-            "description": "Agent configuration over the API (admin only)",
-            "name": "Settings"
+            "description": "The five configuration files (app, auth, db, machines, storage) over the config contract's routes: the raw file, its JSON Schema, a merge-patch write refused with 422 and pointers, the pending restart list, the restart, uploads, and the timestamped backup history with restore. Admin only.",
+            "name": "Configuration"
+        },
+        {
+            "description": "First-run setup of a headless install under the setup token in setup.token beside the configuration files: every file and schema at once, one write that completes setup and deletes the token. A desktop install counts as set up.",
+            "name": "Setup"
         },
         {
             "description": "Global secrets store (the secrets capability token; admin only): SHI's six categories in secrets.yaml beside the config — kept OUT of /api/settings so that surface stays a pure configuration document. Values are plain text by design (it is the user's local machine; the generated Hosts.yml carries them as SECRETS_* template vars). Independently, Hosts.rb merges the working copy's secrets.yml/.secrets.yml at vagrant runtime — both mechanisms coexist.",

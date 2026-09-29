@@ -403,20 +403,14 @@ func (s *Server) registerRoutes(mux *http.ServeMux) error {
 	s.registerFilesystemExecutors()
 
 	// Global secrets store (architecture D-C, SHI's SecretsPage categories) —
-	// admin-only via the central role policy; separate from /settings so that
-	// surface keeps serving just the configuration document.
+	// admin-only via the central role policy; separate from /api/config so
+	// those routes keep serving just the configuration files.
 	mux.Handle("GET /api/secrets", requireKey(http.HandlerFunc(s.handleGetSecrets)))
 	mux.Handle("PUT /api/secrets", requireKey(http.HandlerFunc(s.handleUpdateSecrets)))
 
-	// Settings surface (Agent API v1) — admin-only via the central role policy.
-	mux.Handle("GET /api/settings", requireKey(http.HandlerFunc(s.handleGetSettings)))
-	mux.Handle("GET /api/settings/schema", requireKey(http.HandlerFunc(s.handleSettingsSchema)))
-	mux.Handle("PUT /api/settings", requireKey(http.HandlerFunc(s.handleUpdateSettings)))
-	mux.Handle("POST /api/settings/backup", requireKey(http.HandlerFunc(s.handleCreateBackup)))
-	mux.Handle("GET /api/settings/backups", requireKey(http.HandlerFunc(s.handleListBackups)))
-	mux.Handle("DELETE /api/settings/backups/{filename}", requireKey(http.HandlerFunc(s.handleDeleteBackup)))
-	mux.Handle("POST /api/settings/restore/{filename}", requireKey(http.HandlerFunc(s.handleRestoreBackup)))
-	mux.Handle("POST /api/server/restart", requireKey(http.HandlerFunc(s.handleServerRestart)))
+	// Configuration surface (the config contract): the engine's routes plus
+	// the backup history — admin-only via the central role policy.
+	s.mountConfigRoutes(mux, requireKey)
 
 	// Interactive Agent API documentation (Swagger UI), Node-agent parity:
 	// public /api-docs page + /api-docs/swagger.json, gated by configuration.

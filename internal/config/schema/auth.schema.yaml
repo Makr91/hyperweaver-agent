@@ -1,0 +1,105 @@
+$schema: https://json-schema.org/draft/2020-12/schema
+title: Authentication
+schemaVersion: 1
+sections:
+  authentication:
+    title: Authentication
+    order: 1
+properties:
+  schemaVersion:
+    type: integer
+    readOnly: true
+    default: 1
+    title: Schema version
+  api_keys:
+    type: object
+    section: authentication
+    subsection: apiKeys
+    title: API keys
+    order: 1
+    properties:
+      bootstrap_enabled:
+        type: boolean
+        default: true
+        title: Bootstrap endpoint
+        description: Allow POST /api/api-keys/bootstrap to create the first API key
+        order: 1
+      bootstrap_auto_disable:
+        type: boolean
+        default: true
+        title: Lock after the first key
+        order: 2
+      bootstrap_require_claim_token:
+        type: boolean
+        default: true
+        title: Require the setup token
+        description: The token in setup.token beside the configuration files, printed to the startup log, proves host ownership
+        order: 3
+      hash_rounds:
+        type: integer
+        minimum: 4
+        maximum: 20
+        default: 12
+        title: Hash rounds
+        description: bcrypt cost of stored key hashes
+        order: 4
+      key_length:
+        type: integer
+        minimum: 16
+        maximum: 256
+        default: 64
+        title: Key length
+        description: Random bytes of key material after the hw_ prefix
+        order: 5
+  oidc:
+    type: object
+    section: authentication
+    subsection: oidc
+    title: Federated login
+    description: Silent SSO on the loopback callback and the RFC 8628 device grant, each minting a local admin key; the first login binds the agent to that account
+    order: 2
+    properties:
+      enabled:
+        type: boolean
+        default: false
+        title: Federated login
+        description: Serve the OIDC login endpoints, accept the bound account's access token as a Bearer credential, and advertise oidc in auth[]
+        order: 1
+        requiresRestart: true
+        restartReason: the identity provider is discovered at boot
+      issuer:
+        type: string
+        format: uri
+        pattern: '^https://'
+        default: ''
+        title: Issuer
+        description: The identity provider's issuer origin; endpoints come from its discovery document
+        dependsOn: enabled
+        showWhen: [true]
+        order: 2
+        requiresRestart: true
+        restartReason: the identity provider is discovered at boot
+      client_id:
+        type: string
+        default: hyperweaver-agent
+        title: Client id
+        description: The public OIDC client registered for agent login
+        order: 3
+        requiresRestart: true
+        restartReason: the identity provider is discovered at boot
+      scopes:
+        type: array
+        items:
+          type: string
+        default: [openid, profile, email, organizations]
+        title: Scopes
+        description: openid is required; organizations carries the organization claim
+        order: 4
+      allowed_users:
+        type: array
+        items:
+          type: string
+        default: []
+        title: Allowed accounts
+        description: Emails, subjects or account ids allowed to log in after the first login bound the agent
+        order: 5

@@ -44,8 +44,9 @@ const (
 	catalogDownloadTimeout = 3600 * time.Second
 )
 
-// CatalogSource is one configured catalog (config catalog_sources[]).
+// CatalogSource is one configured catalog (config catalog_sources.sources, keyed by ID).
 type CatalogSource struct {
+	ID      string `json:"id"`
 	Name    string `json:"name"`
 	URL     string `json:"url"`
 	Enabled bool   `json:"enabled"`
@@ -82,22 +83,22 @@ type CatalogDocument struct {
 	Provisioners  []CatalogFamily `json:"provisioners"`
 }
 
-// FindCatalogSource picks a source by name, or the default when name is
-// empty. Disabled sources never match.
-func FindCatalogSource(sources []CatalogSource, name string) (*CatalogSource, error) {
+// FindCatalogSource picks a source by id, or the default when id is empty.
+// Disabled sources never match.
+func FindCatalogSource(sources []CatalogSource, id string) (*CatalogSource, error) {
 	for i := range sources {
 		if !sources[i].Enabled {
 			continue
 		}
-		if name != "" && sources[i].Name == name {
+		if id != "" && sources[i].ID == id {
 			return &sources[i], nil
 		}
-		if name == "" && sources[i].Default {
+		if id == "" && sources[i].Default {
 			return &sources[i], nil
 		}
 	}
-	if name != "" {
-		return nil, errors.New("no enabled catalog source named " + name)
+	if id != "" {
+		return nil, errors.New("no enabled catalog source with id " + id)
 	}
 	return nil, errors.New("no enabled default catalog source is configured")
 }

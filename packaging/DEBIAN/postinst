@@ -1,32 +1,39 @@
 #!/bin/bash
 set -e
 
-# Create system user and group for headless service mode
 if ! getent passwd hyperweaver-agent > /dev/null 2>&1; then
     adduser --system --group --home /var/lib/hyperweaver-agent \
             --no-create-home --shell /usr/sbin/nologin \
             --gecos "Hyperweaver Agent system user" hyperweaver-agent
 fi
 
-# Runtime directories
 mkdir -p /var/lib/hyperweaver-agent
 mkdir -p /var/log/hyperweaver-agent
 
-# Set ownership and permissions
 chown -R hyperweaver-agent:hyperweaver-agent /var/lib/hyperweaver-agent
 chown -R hyperweaver-agent:hyperweaver-agent /var/log/hyperweaver-agent
-chown -R hyperweaver-agent:hyperweaver-agent /etc/hyperweaver-agent
+chown hyperweaver-agent:hyperweaver-agent /etc/hyperweaver-agent
 chmod 750 /etc/hyperweaver-agent
+
+for name in app auth db machines storage; do
+    if [ ! -f "/etc/hyperweaver-agent/${name}.config.yaml" ]; then
+        cp "/usr/share/hyperweaver-agent/config/${name}.config.yaml" "/etc/hyperweaver-agent/${name}.config.yaml"
+        chown hyperweaver-agent:hyperweaver-agent "/etc/hyperweaver-agent/${name}.config.yaml"
+        chmod 600 "/etc/hyperweaver-agent/${name}.config.yaml"
+    fi
+done
+if [ ! -f /etc/hyperweaver-agent/setup.token ]; then
+    : > /etc/hyperweaver-agent/setup.token
+    chown hyperweaver-agent:hyperweaver-agent /etc/hyperweaver-agent/setup.token
+    chmod 600 /etc/hyperweaver-agent/setup.token
+fi
+
 if [ -d /etc/hyperweaver-agent/ssl ]; then
+    chown -R hyperweaver-agent:hyperweaver-agent /etc/hyperweaver-agent/ssl
     chmod 700 /etc/hyperweaver-agent/ssl
     [ -f /etc/hyperweaver-agent/ssl/ca.key ] && chmod 600 /etc/hyperweaver-agent/ssl/ca.key
 fi
 
-# Plant the STARTcloud trust anchor system-wide (Mark's shape-A ruling, sync
-# 2026-07-17): the OFFLINE root's certificate — yearly intermediate rotation
-# never re-breaks trust. The agent signs with the intermediate pair at
-# ssl/ca.{crt,key} and serves the full chain, so the root is the only anchor
-# Debian's store needs.
 if [ -f /etc/hyperweaver-agent/ssl/root-ca.crt ]; then
     mkdir -p /usr/local/share/ca-certificates/hyperweaver
     cp /etc/hyperweaver-agent/ssl/root-ca.crt /usr/local/share/ca-certificates/hyperweaver/root-ca.crt
@@ -34,7 +41,6 @@ if [ -f /etc/hyperweaver-agent/ssl/root-ca.crt ]; then
     update-ca-certificates || true
 fi
 
-# Reload systemd daemon
 systemctl daemon-reload || true
 
 echo ""
@@ -46,12 +52,11 @@ echo "  Launch 'Hyperweaver Agent' from your application menu."
 echo "  Note: stock GNOME needs the AppIndicator extension to show tray icons."
 echo ""
 echo "Headless service mode:"
-echo "1. Review configuration: /etc/hyperweaver-agent/config.yaml"
-echo "2. Start the service: systemctl enable --now hyperweaver-agent"
-echo "3. Check status: systemctl status hyperweaver-agent"
-echo "4. View logs: journalctl -u hyperweaver-agent -f"
-echo ""
-echo "Default access: http://127.0.0.1:9420/"
+echo "1. Start the service: systemctl enable --now hyperweaver-agent"
+echo "2. Read the setup token: cat /etc/hyperweaver-agent/setup.token"
+echo "3. Open http://127.0.0.1:9420/setup and enter the token"
+echo "4. Check status: systemctl status hyperweaver-agent"
+echo "5. View logs: journalctl -u hyperweaver-agent -f"
 echo "======================================================================"
 echo ""
 

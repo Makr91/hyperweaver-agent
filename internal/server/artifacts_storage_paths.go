@@ -6,6 +6,8 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"strconv"
+	"strings"
 
 	"github.com/Makr91/hyperweaver-agent/internal/assets"
 	"github.com/Makr91/hyperweaver-agent/internal/auth"
@@ -52,27 +54,37 @@ func (s *Server) handleListStoragePaths(w http.ResponseWriter, r *http.Request) 
 	})
 }
 
-// persistConfigPaths writes the runtime paths list back into config.yaml
-// (zoneweaver's updateConfigWithNewPath — the config stays the source of
-// truth across restarts). Failure only logs: the location exists in the
-// database either way.
+// persistConfigPaths writes the artifact_storage section back into the
+// storage configuration file (zoneweaver's updateConfigWithNewPath — the
+// file stays the source of truth across restarts). Failure only logs: the
+// location exists in the database either way.
 func (s *Server) persistConfigPaths() {
-	section := map[string]any{
-		"enabled":       s.cfg.ArtifactStorage.Enabled,
-		"dir":           s.cfg.ArtifactStorage.Dir,
-		"max_upload_gb": s.cfg.ArtifactStorage.MaxUploadGB,
-		"download": map[string]any{
-			"timeout_seconds": s.cfg.ArtifactStorage.Download.TimeoutSeconds,
-		},
-		"scanning": map[string]any{
-			"periodic_scan_interval": s.cfg.ArtifactStorage.Scanning.PeriodicScanInterval,
-			"supported_extensions":   s.cfg.ArtifactStorage.Scanning.SupportedExtensions,
-		},
-		"paths": s.cfg.ArtifactStorage.Paths,
-	}
-	if err := s.cfg.MergeAndSave(map[string]any{"artifact_storage": section}); err != nil {
+	if err := s.cfg.MergeAndSave(map[string]any{"artifact_storage": s.cfg.ArtifactStorage}); err != nil {
 		slog.Error("persist artifact_storage paths to config", "error", err)
 	}
+}
+
+func (s *Server) artifactPathID(name string) string {
+	id := strings.Trim(storagePathSlug.ReplaceAllString(strings.ToLower(name), "_"), "_")
+	if id == "" || !config.ValidStoragePathID(id) {
+		id = "path"
+	}
+	candidate := id
+	for n := 2; ; n++ {
+		if _, taken := s.cfg.ArtifactStorage.Paths[candidate]; !taken {
+			return candidate
+		}
+		candidate = id + "_" + strconv.Itoa(n)
+	}
+}
+
+func (s *Server) artifactPathIDByPath(path string) string {
+	for id, entry := range s.cfg.ArtifactStorage.Paths {
+		if entry.Path == path {
+			return id
+		}
+	}
+	return ""
 }
 
 // createStoragePathRequest is POST /artifacts/storage/paths's body.
@@ -94,7 +106,7 @@ type storageLocationResponse struct {
 // handleCreateStoragePath: POST /artifacts/storage/paths.
 //
 //	@Summary		Add a storage location
-//	@Description	Minimum role: operator. Creates the directory (when absent), the location row, persists the entry into config.yaml artifact_storage.paths[] (so it survives restarts), and queues an initial scan.
+//	@Description	Minimum role: operator. Creates the directory (when absent), the location row, persists the entry into the storage configuration file under artifact_storage.paths keyed by an id derived from the name (so it survives restarts), and queues an initial scan.
 //	@Tags			Artifacts
 //	@Accept			json
 //	@Produce		json
@@ -149,10 +161,12 @@ func (s *Server) handleCreateStoragePath(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	// Persist into config.yaml so the location survives restarts.
-	s.cfg.ArtifactStorage.Paths = append(s.cfg.ArtifactStorage.Paths, config.ArtifactPathConfig{
-		Name: body.Name, Path: clean, Type: body.Type, Enabled: enabled,
-	})
+	if s.cfg.ArtifactStorage.Paths == nil {
+		s.cfg.ArtifactStorage.Paths = map[string]config.ArtifactPathConfig{}
+	}
+	s.cfg.ArtifactStorage.Paths[s.artifactPathID(body.Name)] = config.ArtifactPathConfig{
+		DisplayName: body.Name, Path: clean, Type: body.Type, Enabled: enabled,
+	}
 	s.persistConfigPaths()
 
 	// Initial scan (background task — user-visible, zoneweaver's rule).
@@ -195,7 +209,7 @@ type updateStoragePathRequest struct {
 // handleUpdateStoragePath: PUT /artifacts/storage/paths/{id} (name, enabled).
 //
 //	@Summary		Update a storage location
-//	@Description	Minimum role: operator. name and enabled only (zoneweaver's contract — path/type are identity). Mirrored into the config.yaml entry.
+//	@Description	Minimum role: operator. name and enabled only (zoneweaver's contract — path/type are identity). Mirrored into the storage configuration file's entry.
 //	@Tags			Artifacts
 //	@Accept			json
 //	@Produce		json
@@ -223,13 +237,12 @@ func (s *Server) handleUpdateStoragePath(w http.ResponseWriter, r *http.Request)
 	}
 
 	// Mirror the change onto the config entry (matched by path).
-	for i := range s.cfg.ArtifactStorage.Paths {
-		if s.cfg.ArtifactStorage.Paths[i].Path == location.Path {
-			s.cfg.ArtifactStorage.Paths[i].Name = location.Name
-			s.cfg.ArtifactStorage.Paths[i].Enabled = location.Enabled
-			s.persistConfigPaths()
-			break
-		}
+	if id := s.artifactPathIDByPath(location.Path); id != "" {
+		entry := s.cfg.ArtifactStorage.Paths[id]
+		entry.DisplayName = location.Name
+		entry.Enabled = location.Enabled
+		s.cfg.ArtifactStorage.Paths[id] = entry
+		s.persistConfigPaths()
 	}
 
 	writeJSON(w, storageLocationResponse{
@@ -288,14 +301,8 @@ func (s *Server) handleDeleteStoragePath(w http.ResponseWriter, r *http.Request)
 	}
 
 	// Drop the config entry now — the executor removes rows and files.
-	kept := s.cfg.ArtifactStorage.Paths[:0]
-	for _, entry := range s.cfg.ArtifactStorage.Paths {
-		if entry.Path != location.Path {
-			kept = append(kept, entry)
-		}
-	}
-	if len(kept) != len(s.cfg.ArtifactStorage.Paths) {
-		s.cfg.ArtifactStorage.Paths = kept
+	if id := s.artifactPathIDByPath(location.Path); id != "" {
+		delete(s.cfg.ArtifactStorage.Paths, id)
 		s.persistConfigPaths()
 	}
 

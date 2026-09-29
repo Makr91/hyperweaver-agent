@@ -48,8 +48,10 @@
 //	@tag.description	System hosts-file and DNS control on all three platforms (the hosts-file and dns capability tokens — platform tokens, always advertised). Hosts file: Windows System32\drivers\etc\hosts, /etc/hosts elsewhere. DNS (/api/system/dns, the converged wire, sync 2026-07-17): one wire shape everywhere — nameservers/search_domains/domain/options — with per-OS mechanics: /etc/resolv.conf read/written on Unix; netsh per connected interface on Windows (nameservers only; raw and the resolv.conf-only fields answer 400, backup is ""); networksetup per enabled service on macOS (nameservers + search_domains; domain/options/raw answer 400, backup ""). Host network configuration (/api/network/hostname and /api/network/addresses, the hostname and ip-addresses capability tokens — the converged wire, sync 2026-07-17): zoneweaver's shipped network-controller family, BARE documents (no success/message/timestamp envelope; errors are {error, details?}). Hostname: GET is the live view (persisted name vs live system hostname), PUT queues the async set_hostname task. Addresses: GET is the real live listing over Go's stdlib interface enumeration; mutations (shipped 2026-07-19, Mark's build order) queue zoneweaver's create/delete/enable/disable_ip_address tasks with per-OS honesty — static creates everywhere, dhcp on Windows only, addrconf refused (SLAAC is automatic), enable/disable toggle the INTERFACE the addrobj names. Network spaces (/api/network/spaces*, the network-spaces token, minted 2026-07-19): enumerate and manage VirtualBox's network spaces — host-only interfaces (create/configure/delete + their DHCP servers — every host OS EXCEPT macOS, where VirtualBox 7 removed the family), host-only NETWORKS (VirtualBox's macOS-only vmnet family: create/modify/delete — Oracle's platform split, each side refusing the other's family with an honest 400), NAT networks (create/modify/delete/start/stop + port-forward and loopback rules), and the implicit internal networks (read-only: VirtualBox has no intnet verbs — they exist while a VM references them).
 //	@tag.name		Database Management
 //	@tag.description	SQLite statistics and maintenance across every open database file (tasks.sqlite, agent.sqlite, and the monitoring files when storage is enabled), plus the read-only explorer drill-down (tables with row counts and indexes, then paged rows — zoneweaver's contract, shared wire; no arbitrary SQL, every table and order_by column verified against the database's own catalog)
-//	@tag.name		Settings
-//	@tag.description	Agent configuration over the API (admin only)
+//	@tag.name		Configuration
+//	@tag.description	The five configuration files (app, auth, db, machines, storage) over the config contract's routes: the raw file, its JSON Schema, a merge-patch write refused with 422 and pointers, the pending restart list, the restart, uploads, and the timestamped backup history with restore. Admin only.
+//	@tag.name		Setup
+//	@tag.description	First-run setup of a headless install under the setup token in setup.token beside the configuration files: every file and schema at once, one write that completes setup and deletes the token. A desktop install counts as set up.
 //	@tag.name		Secrets
 //	@tag.description	Global secrets store (the secrets capability token; admin only): SHI's six categories in secrets.yaml beside the config — kept OUT of /api/settings so that surface stays a pure configuration document. Values are plain text by design (it is the user's local machine; the generated Hosts.yml carries them as SECRETS_* template vars). Independently, Hosts.rb merges the working copy's secrets.yml/.secrets.yml at vagrant runtime — both mechanisms coexist.
 package main
@@ -63,7 +65,6 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"sync"
 	"syscall"
 	"time"
@@ -95,7 +96,7 @@ func main() {
 }
 
 func run() error {
-	configPath := flag.String("config", "", "path to config.yaml (default: per-user config dir)")
+	configDir := flag.String("config", "", "configuration directory (default: CONFIG_DIR, else the per-user config dir)")
 	headless := flag.Bool("headless", false, "run without the system-tray icon")
 	showVersion := flag.Bool("version", false, "print version and exit")
 	flag.Parse()
@@ -105,10 +106,15 @@ func run() error {
 		return nil
 	}
 
-	cfg, resolvedPath, err := config.Load(*configPath)
+	options := config.Options{Dir: *configDir, Seed: !*headless}
+	if !*headless {
+		options.SetupComplete = func() bool { return true }
+	}
+	cfg, err := config.Load(options)
 	if err != nil {
 		return err
 	}
+	resolvedPath := cfg.Dir()
 
 	closeLog, err := logging.Setup(cfg)
 	if err != nil {
@@ -170,10 +176,12 @@ func run() error {
 		return err
 	}
 
-	// First-boot claim token: while the agent can still be bootstrapped (no
-	// keys yet), ensure the setup token exists and print it so a host admin
-	// can read it. It guards POST /api-keys/bootstrap. No-op once a key exists.
-	if cfg.APIKeys.BootstrapEnabled && cfg.APIKeys.BootstrapRequireClaimToken && keyStore.Count() == 0 {
+	// First-boot setup token on a headless install: while the agent can still
+	// be bootstrapped (no keys yet), ensure the token exists and print it so a
+	// host admin can read it. It opens the setup page and guards
+	// POST /api-keys/bootstrap; PUT /api/setup deletes it. A desktop install
+	// needs none: the tray Open and the hwa:// link sign the owner in.
+	if *headless && cfg.APIKeys.BootstrapEnabled && cfg.APIKeys.BootstrapRequireClaimToken && keyStore.Count() == 0 {
 		if token := auth.GetOrGenerateSetupToken(cfg.SetupTokenPath()); token != "" {
 			slog.Info("Setup token (required to create the first API key): " + token)
 		}
@@ -394,7 +402,7 @@ func run() error {
 		OnOpen:          openUI,
 		OnExit:          shutdown,
 		OnOpenLog:       func() { openbrowser.Open(logPath, "") },
-		OnOpenConfigDir: func() { openbrowser.Open(filepath.Dir(resolvedPath), "") },
+		OnOpenConfigDir: func() { openbrowser.Open(resolvedPath, "") },
 		OnOpenDataDir:   func() { openbrowser.Open(dataDir, "") },
 		OnRestart:       srv.Restart,
 	})

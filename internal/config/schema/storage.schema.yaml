@@ -1,0 +1,247 @@
+$schema: https://json-schema.org/draft/2020-12/schema
+title: Storage
+schemaVersion: 1
+sections:
+  templates:
+    title: Templates
+    order: 1
+  catalogs:
+    title: Catalogs
+    order: 2
+  artifacts:
+    title: Artifacts
+    order: 3
+properties:
+  schemaVersion:
+    type: integer
+    readOnly: true
+    default: 1
+    title: Schema version
+  template_sources:
+    type: object
+    section: templates
+    subsection: templates
+    title: Templates
+    order: 1
+    properties:
+      local_storage_path:
+        type: string
+        default: ''
+        title: Built-in templates path
+        description: Downloaded box images under <root>/<organization>/<box>/<version>; empty = templates under the data folder
+        order: 1
+      storage_paths:
+        type: object
+        subsection: templatePaths
+        title: Added templates paths
+        description: Downloads and exports land in the default path, the built-in when none is flagged; a template keeps the path it was placed in
+        default: {}
+        propertyNames:
+          pattern: '^[a-z0-9_]+$'
+        additionalProperties:
+          type: object
+          required: [display_name, path]
+          properties:
+            display_name:
+              type: string
+              title: Name
+              order: 1
+            path:
+              type: string
+              title: Folder
+              order: 2
+            enabled:
+              type: boolean
+              default: true
+              title: Enabled
+              order: 3
+            default:
+              type: boolean
+              default: false
+              title: Default
+              order: 4
+      sources:
+        type: object
+        subsection: templateSources
+        title: Registries
+        description: Vagrant and BoxVault compatible registries; the one flagged default serves requests that name none
+        default: {}
+        propertyNames:
+          pattern: '^[a-z0-9_]+$'
+        additionalProperties:
+          type: object
+          required: [display_name, url]
+          properties:
+            enabled:
+              type: boolean
+              default: true
+              title: Enabled
+              order: 1
+            display_name:
+              type: string
+              title: Name
+              order: 2
+            url:
+              type: string
+              format: uri
+              title: URL
+              order: 3
+            default:
+              type: boolean
+              default: false
+              title: Default
+              order: 4
+            auth_token:
+              type: string
+              writeOnly: true
+              default: ''
+              title: API key
+              description: A BoxVault service-account token, sent as Bearer on every call
+              order: 5
+            ca_file:
+              type: string
+              default: ''
+              title: CA bundle
+              description: A PEM bundle trusted for this registry; verification always stays on
+              order: 6
+  catalog_sources:
+    type: object
+    section: catalogs
+    subsection: catalogs
+    title: Provisioner catalogs
+    description: Agents fetch catalog.json, download the versioned asset, verify its sha256 and import it
+    order: 1
+    properties:
+      sources:
+        type: object
+        subsection: catalogSources
+        title: Catalogs
+        default: {}
+        propertyNames:
+          pattern: '^[a-z0-9_]+$'
+        additionalProperties:
+          type: object
+          required: [display_name, url]
+          properties:
+            enabled:
+              type: boolean
+              default: true
+              title: Enabled
+              order: 1
+            display_name:
+              type: string
+              title: Name
+              order: 2
+            url:
+              type: string
+              format: uri
+              title: URL
+              order: 3
+            default:
+              type: boolean
+              default: false
+              title: Default
+              order: 4
+            ca_file:
+              type: string
+              default: ''
+              title: CA bundle
+              order: 5
+  artifact_storage:
+    type: object
+    section: artifacts
+    subsection: artifacts
+    title: Artifacts
+    description: Typed storage locations for ISOs, images, installers, fixpacks and hotfixes with one SHA-256 checksum store
+    order: 1
+    properties:
+      enabled:
+        type: boolean
+        default: true
+        title: Artifact storage
+        description: Serve /api/artifacts and verify installer hashes at machine prepare; disabled skips both with a warning
+        order: 1
+        requiresRestart: true
+        restartReason: the artifact service and routes are built at boot
+      dir:
+        type: string
+        default: ''
+        title: Built-in locations root
+        description: Parent of isos, images, installers, fixpacks and hotfixes; empty = artifacts under the data folder
+        order: 2
+        requiresRestart: true
+        restartReason: the built-in locations are synced at boot
+      max_upload_gb:
+        type: integer
+        minimum: 1
+        maximum: 1024
+        default: 50
+        title: Upload limit (GiB)
+        order: 3
+      download:
+        type: object
+        subsection: artifactDownload
+        title: Downloads
+        properties:
+          timeout_seconds:
+            type: integer
+            minimum: 60
+            default: 3600
+            title: Download timeout (seconds)
+            order: 1
+      scanning:
+        type: object
+        subsection: artifactScanning
+        title: Scanning
+        properties:
+          periodic_scan_interval:
+            type: integer
+            minimum: 0
+            maximum: 86400
+            default: 300
+            title: Scan interval (seconds)
+            description: 0 disables; startup always scans once
+            order: 1
+            requiresRestart: true
+            restartReason: the scan schedule is started at boot
+          supported_extensions:
+            type: object
+            subsection: artifactExtensions
+            title: Extensions per type
+            description: Empty = iso .iso; image .vmdk .raw .vdi .qcow2 .img .ova .ovf
+            propertyNames:
+              pattern: '^(iso|image)$'
+            additionalProperties:
+              type: array
+              items:
+                type: string
+      paths:
+        type: object
+        subsection: artifactPaths
+        title: Added locations
+        description: Typed locations beyond the built-ins; the storage-path API writes its entries here
+        default: {}
+        propertyNames:
+          pattern: '^[a-z0-9_]+$'
+        additionalProperties:
+          type: object
+          required: [display_name, path, type]
+          properties:
+            display_name:
+              type: string
+              title: Name
+              order: 1
+            path:
+              type: string
+              title: Folder
+              order: 2
+            type:
+              type: string
+              enum: [iso, image, installer, fixpack, hotfix]
+              title: Type
+              order: 3
+            enabled:
+              type: boolean
+              default: true
+              title: Enabled
+              order: 4

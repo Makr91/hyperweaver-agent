@@ -1,0 +1,662 @@
+$schema: https://json-schema.org/draft/2020-12/schema
+title: Application
+schemaVersion: 1
+sections:
+  application:
+    title: Application
+    order: 1
+  logging:
+    title: Logging
+    order: 2
+  tasks:
+    title: Tasks
+    order: 3
+  host:
+    title: Host
+    order: 4
+  support:
+    title: Support
+    order: 5
+properties:
+  schemaVersion:
+    type: integer
+    readOnly: true
+    default: 1
+    title: Schema version
+  server:
+    type: object
+    section: application
+    subsection: server
+    title: Server
+    order: 1
+    properties:
+      bind_address:
+        type: string
+        default: 127.0.0.1
+        title: Bind address
+        description: Address the web server binds to; keep 127.0.0.1 for local-only access
+        order: 1
+        requiresRestart: true
+        restartReason: the listeners are bound at boot
+      port:
+        type: integer
+        minimum: 1
+        maximum: 65535
+        default: 9420
+        title: HTTP port
+        order: 2
+        requiresRestart: true
+        restartReason: the HTTP listener is bound at boot
+      https_port:
+        type: integer
+        minimum: 1
+        maximum: 65535
+        default: 9421
+        title: HTTPS port
+        description: Bound only when ssl.enabled
+        order: 3
+        requiresRestart: true
+        restartReason: the HTTPS listener is bound at boot
+  ssl:
+    type: object
+    section: application
+    subsection: ssl
+    title: SSL
+    order: 2
+    properties:
+      enabled:
+        type: boolean
+        default: true
+        title: HTTPS
+        description: Serve HTTPS on server.https_port; certificate problems leave the agent HTTP-only, never down
+        order: 1
+        requiresRestart: true
+        restartReason: the HTTPS listener is bound at boot
+      force_secure:
+        type: boolean
+        default: true
+        title: Redirect HTTP to HTTPS
+        description: With SSL enabled the plain port serves only redirects; false keeps it serving the full app for clients that cannot follow redirects
+        order: 2
+        requiresRestart: true
+        restartReason: the plain listener's handler is chosen at boot
+      generate_ssl:
+        type: boolean
+        default: true
+        title: Generate certificates
+        description: Generate the server certificate when none exists, signed by the CA below, itself generated when absent
+        order: 3
+        requiresRestart: true
+        restartReason: certificates are generated and read at boot
+      key_path:
+        type: string
+        default: ''
+        title: Server key path
+        description: Empty = ssl/server.key beside the configuration files
+        order: 4
+        requiresRestart: true
+        restartReason: the key is read when the HTTPS listener is bound at boot
+      cert_path:
+        type: string
+        default: ''
+        title: Server certificate path
+        description: Empty = ssl/server.crt beside the configuration files
+        order: 5
+        requiresRestart: true
+        restartReason: the certificate is read when the HTTPS listener is bound at boot
+      ca_cert_path:
+        type: string
+        default: ''
+        title: CA certificate path
+        description: The CA that signs the generated server certificate; empty = ssl/ca.crt beside the configuration files
+        order: 6
+        requiresRestart: true
+        restartReason: the CA is read at boot
+      ca_key_path:
+        type: string
+        default: ''
+        title: CA key path
+        description: Empty = ssl/ca.key beside the configuration files
+        order: 7
+        requiresRestart: true
+        restartReason: the CA is read at boot
+  cors:
+    type: object
+    section: application
+    subsection: cors
+    title: CORS
+    order: 3
+    properties:
+      allow_all:
+        type: boolean
+        default: true
+        title: Allow every origin
+        description: The API key, not the browser origin, is the access boundary; false falls back to the whitelist
+        order: 1
+        requiresRestart: true
+        restartReason: the CORS middleware is built at boot
+      whitelist:
+        type: array
+        items:
+          type: string
+        default: []
+        title: Allowed origins
+        description: scheme://host:port entries used when allow_all is false
+        order: 2
+        requiresRestart: true
+        restartReason: the CORS middleware is built at boot
+  ui:
+    type: object
+    section: application
+    subsection: ui
+    title: UI
+    order: 4
+    properties:
+      enabled:
+        type: boolean
+        default: true
+        title: Serve the UI
+        description: Serve the bundled UI at /
+        order: 1
+        requiresRestart: true
+        restartReason: the UI routes are mounted at boot
+      path:
+        type: string
+        default: ''
+        title: UI directory
+        description: Serve the UI from this directory instead of the copy embedded in the binary; empty = embedded
+        order: 2
+        requiresRestart: true
+        restartReason: the UI files are opened at boot
+      shi_mode:
+        type: boolean
+        default: false
+        title: Super.Human.Installer mode
+        description: The UI renders the SHI-style theme and flow in Direct mode; advertised as shi_mode on GET /api/status
+        order: 3
+  startup:
+    type: object
+    section: application
+    subsection: startup
+    title: Startup
+    order: 5
+    properties:
+      start_at_login:
+        type: boolean
+        default: false
+        title: Start at login
+        description: Register the agent with the OS login-item mechanism (Windows Run key, macOS LaunchAgent, XDG autostart); converged at every boot, false removes it
+        order: 1
+        requiresRestart: true
+        restartReason: the login item is converged at boot
+  browser:
+    type: object
+    section: application
+    subsection: browser
+    title: Browser
+    order: 6
+    properties:
+      path:
+        type: string
+        default: ''
+        title: Browser
+        description: Browser executable, or a macOS .app bundle, the tray Open action launches; empty = the system default
+        order: 1
+      open_on_start:
+        type: boolean
+        default: true
+        title: Open on start
+        description: Open the signed-in UI in the browser when the desktop agent starts; ignored in headless mode
+        order: 2
+  updates:
+    type: object
+    section: application
+    subsection: updates
+    title: Updates
+    order: 7
+    properties:
+      versioninfo_url:
+        type: string
+        default: https://github.com/Makr91/hyperweaver-agent/releases/latest/download/update-info.json
+        title: Version document URL
+        description: JSON document with version, releaseUrl, releaseDate and changelog; empty disables update checking
+        order: 1
+  api_docs:
+    type: object
+    section: application
+    subsection: apiDocs
+    title: API documentation
+    order: 8
+    properties:
+      enabled:
+        type: boolean
+        default: true
+        title: Serve API documentation
+        description: Serve the interactive Agent API documentation at /api-docs
+        order: 1
+        requiresRestart: true
+        restartReason: the documentation routes are mounted at boot
+  stats:
+    type: object
+    section: application
+    subsection: stats
+    title: Statistics
+    order: 9
+    properties:
+      public_access:
+        type: boolean
+        default: false
+        title: Public statistics
+        description: Serve GET /api/stats without an API key
+        order: 1
+        requiresRestart: true
+        restartReason: the route is registered public or keyed at boot
+  data:
+    type: object
+    section: application
+    subsection: data
+    title: Data
+    order: 10
+    properties:
+      dir:
+        type: string
+        default: ''
+        title: Data directory
+        description: Root for the databases, templates and artifacts, and on Windows the machines and provisioners when set; empty = the per-OS local app-data folder
+        order: 1
+        requiresRestart: true
+        restartReason: the databases are opened at boot
+  logging:
+    type: object
+    section: logging
+    subsection: logging
+    title: Logging
+    order: 1
+    properties:
+      level:
+        type: string
+        enum: [error, warn, info, debug]
+        default: info
+        title: Log level
+        order: 1
+        requiresRestart: true
+        restartReason: the logger takes its level at boot
+      console:
+        type: boolean
+        default: true
+        title: Console output
+        description: Also log human-readable output to the console; GUI builds on Windows have none
+        order: 2
+        requiresRestart: true
+        restartReason: the console handler is attached at boot
+      file:
+        type: string
+        default: ''
+        title: Log file
+        description: Empty = logs/agent.log beside the configuration files
+        order: 3
+        requiresRestart: true
+        restartReason: the log file is opened at boot
+      max_size_mb:
+        type: integer
+        minimum: 1
+        default: 20
+        title: Maximum size (MB)
+        description: Log file size before rotation
+        order: 4
+        requiresRestart: true
+        restartReason: the rotation is configured at boot
+      max_backups:
+        type: integer
+        minimum: 0
+        default: 5
+        title: Rotated files kept
+        order: 5
+        requiresRestart: true
+        restartReason: the rotation is configured at boot
+      compression:
+        type: boolean
+        default: true
+        title: Compress rotated files
+        order: 6
+        requiresRestart: true
+        restartReason: the rotation is configured at boot
+      categories:
+        type: object
+        subsection: loggingCategories
+        title: Category levels
+        description: Per-category levels overriding the global level; categories are app, api_requests, auth, tasks, machines, monitoring, provisioning, assets
+        propertyNames:
+          pattern: '^[a-z_]+$'
+        additionalProperties:
+          type: string
+          enum: [error, warn, info, debug]
+          requiresRestart: true
+          restartReason: each category logger takes its level at boot
+  tasks:
+    type: object
+    section: tasks
+    subsection: queue
+    title: Queue
+    order: 1
+    properties:
+      poll_interval_seconds:
+        type: integer
+        minimum: 1
+        maximum: 60
+        default: 2
+        title: Poll interval (seconds)
+        order: 1
+        requiresRestart: true
+        restartReason: the queue is built at boot
+      max_concurrent:
+        type: integer
+        minimum: 1
+        maximum: 64
+        default: 5
+        title: Maximum running tasks
+        order: 2
+        requiresRestart: true
+        restartReason: the queue is built at boot
+      default_pagination_limit:
+        type: integer
+        minimum: 1
+        maximum: 1000
+        default: 50
+        title: Default page size
+        description: GET /api/tasks limit when the request sends none
+        order: 3
+      retention_days:
+        type: integer
+        minimum: 1
+        maximum: 3650
+        default: 30
+        title: Retention (days)
+        description: Finished tasks older than this are deleted by the periodic cleanup
+        order: 4
+      resume_pending_on_start:
+        type: boolean
+        default: false
+        title: Resume pending tasks
+        description: Keep pending tasks across a restart; off, pending tasks from a previous run are cancelled at boot
+        order: 5
+        requiresRestart: true
+        restartReason: pending tasks are resumed or cancelled at boot
+      output:
+        type: object
+        subsection: taskOutput
+        title: Output
+        properties:
+          enabled:
+            type: boolean
+            default: true
+            title: Capture output
+            order: 1
+            requiresRestart: true
+            restartReason: the output manager is built at boot
+          mode:
+            type: string
+            enum: [full, circular]
+            default: full
+            title: Buffer mode
+            description: full keeps every line; circular caps the buffer at circular_max_lines, dropping the oldest
+            order: 2
+            requiresRestart: true
+            restartReason: the output manager is built at boot
+          circular_max_lines:
+            type: integer
+            minimum: 100
+            default: 10000
+            title: Circular buffer lines
+            order: 3
+            requiresRestart: true
+            restartReason: the output manager is built at boot
+          flush_interval_seconds:
+            type: integer
+            minimum: 1
+            maximum: 300
+            default: 10
+            title: Flush interval (seconds)
+            description: Seconds between database flushes of a running task's output
+            order: 4
+            requiresRestart: true
+            restartReason: the output manager is built at boot
+          persist_log_file:
+            type: boolean
+            default: true
+            title: Write task log files
+            order: 5
+            requiresRestart: true
+            restartReason: the output manager is built at boot
+          log_directory:
+            type: string
+            default: ''
+            title: Task log directory
+            description: Empty = logs/tasks beside the configuration files
+            order: 6
+            requiresRestart: true
+            restartReason: the output manager is built at boot
+  cleanup:
+    type: object
+    section: tasks
+    subsection: cleanup
+    title: Cleanup
+    order: 2
+    properties:
+      interval:
+        type: integer
+        minimum: 60
+        maximum: 86400
+        default: 300
+        title: Interval (seconds)
+        description: Seconds between periodic cleanup runs
+        order: 1
+        requiresRestart: true
+        restartReason: the queue is built at boot
+  monitoring:
+    type: object
+    section: host
+    subsection: monitoring
+    title: Monitoring
+    order: 1
+    properties:
+      storage_enabled:
+        type: boolean
+        default: false
+        title: Store telemetry
+        description: Write time series into per-datatype database files for history charts; off serves realtime samples only
+        order: 1
+        requiresRestart: true
+        restartReason: the telemetry databases are opened at boot
+      collection_interval:
+        type: integer
+        minimum: 5
+        maximum: 3600
+        default: 60
+        title: Collection interval (seconds)
+        order: 2
+        requiresRestart: true
+        restartReason: the collector is built at boot
+      retention_days:
+        type: integer
+        minimum: 1
+        maximum: 365
+        default: 7
+        title: Retention (days)
+        order: 3
+  host_power:
+    type: object
+    section: host
+    subsection: hostPower
+    title: Host power
+    order: 2
+    properties:
+      enabled:
+        type: boolean
+        default: true
+        title: Host power endpoints
+        description: Serve /api/system/host status, uptime and the admin-only shutdown, restart, poweroff and halt
+        order: 1
+      prevent_sleep:
+        type: boolean
+        default: false
+        title: Prevent sleep
+        description: Keep the host awake while the agent runs through the OS power API; the display may still sleep
+        order: 2
+        requiresRestart: true
+        restartReason: the sleep inhibitor is acquired at boot
+  file_browser:
+    type: object
+    section: host
+    subsection: fileBrowser
+    title: File browser
+    order: 3
+    properties:
+      enabled:
+        type: boolean
+        default: true
+        title: File browser
+        description: Serve /api/filesystem and advertise the file-browser token
+        order: 1
+      root:
+        type: string
+        default: ''
+        title: Browse root
+        description: Confine browsing to this directory; empty lists the host's drives or root
+        order: 2
+      upload_size_limit_gb:
+        type: integer
+        minimum: 1
+        maximum: 1024
+        default: 50
+        title: Upload limit (GiB)
+        order: 3
+      security:
+        type: object
+        subsection: fileBrowserSecurity
+        title: Security
+        properties:
+          prevent_traversal:
+            type: boolean
+            default: true
+            title: Reject traversal
+            description: Reject paths carrying .. or ~
+            order: 1
+          max_directory_entries:
+            type: integer
+            minimum: 1
+            maximum: 100000
+            default: 1000
+            title: Maximum directory entries
+            order: 2
+          max_edit_size_mb:
+            type: integer
+            minimum: 1
+            maximum: 10240
+            default: 100
+            title: Maximum editable size (MB)
+            order: 3
+          forbidden_paths:
+            type: array
+            items:
+              type: string
+            default: ['/dev', '/proc', '/sys']
+            title: Forbidden paths
+            order: 4
+          forbidden_patterns:
+            type: array
+            items:
+              type: string
+            default: []
+            title: Forbidden patterns
+            description: Glob-style patterns, * matches anything
+            order: 5
+      archive:
+        type: object
+        subsection: fileBrowserArchive
+        title: Archives
+        properties:
+          enabled:
+            type: boolean
+            default: true
+            title: Archive endpoints
+            order: 1
+          max_archive_size_mb:
+            type: integer
+            minimum: 1
+            default: 10240
+            title: Maximum archive size (MB)
+            order: 2
+          supported_formats:
+            type: array
+            items:
+              type: string
+              enum: [zip, tar, tar.gz]
+            default: [zip, tar, tar.gz]
+            title: Creation formats
+            description: Extraction also handles tar.bz2 and .gz
+            order: 3
+  ticket_system:
+    type: object
+    section: support
+    subsection: ticketSystem
+    title: Ticket system
+    order: 1
+    properties:
+      enabled:
+        type: boolean
+        default: true
+        title: Help link
+        description: The link renders only when enabled and base_url are set
+        order: 1
+      base_url:
+        type: string
+        default: https://xd.prominic.net/app/apprequest.nsf/router?openagent
+        title: Base URL
+        order: 2
+      req_type:
+        type: string
+        default: sso
+        title: Request type
+        order: 3
+      fallback_customer_id:
+        type: string
+        maxLength: 64
+        default: ''
+        title: Fallback customer id
+        description: Sent when the person and their organization carry none
+        order: 4
+      context:
+        type: string
+        default: https://github.com/Makr91/hyperweaver-agent
+        title: Context URL
+        order: 5
+  applications:
+    type: object
+    section: support
+    subsection: applications
+    title: Applications
+    description: Desktop tools the agent launches on its own host against a machine; args placeholders {host} {port} {user} {password} {machine}
+    order: 2
+    default: {}
+    propertyNames:
+      pattern: '^[a-z0-9_]+$'
+    additionalProperties:
+      type: object
+      required: [display_name, path]
+      properties:
+        display_name:
+          type: string
+          title: Name
+          order: 1
+        path:
+          type: string
+          title: Executable
+          order: 2
+        args:
+          type: array
+          items:
+            type: string
+          default: []
+          title: Arguments
+          order: 3

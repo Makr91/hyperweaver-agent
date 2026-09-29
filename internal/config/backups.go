@@ -1,6 +1,7 @@
 package config
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -9,131 +10,138 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/goccy/go-yaml"
+
 	"github.com/Makr91/hyperweaver-agent/internal/safepath"
 )
 
-// Config backups mirror the Node agent's BackupHelper: copies of config.yaml
-// named config-<unix-ms>.yaml in a backups/ directory beside the config file.
-
-// Backup describes one configuration backup on disk.
+// Backup describes one timestamped copy of the five configuration files.
 type Backup struct {
-	Filename  string `json:"filename"`
-	CreatedAt string `json:"createdAt"`
+	ID        string   `json:"id"`
+	CreatedAt string   `json:"created_at"`
+	Files     []string `json:"files"`
 }
 
-// backupNamePattern accepts only names the agent itself generates; combined
-// with safepath.Under containment, client-supplied names cannot traverse.
-var backupNamePattern = regexp.MustCompile(`^config-(\d+)\.yaml$`)
+var backupIDPattern = regexp.MustCompile(`^\d{13}$`)
 
-// BackupDir returns the backups directory beside the config file.
+// BackupDir answers the backups directory beside the configuration files.
 func (c *Config) BackupDir() string {
-	return filepath.Join(filepath.Dir(c.path), "backups")
+	return filepath.Join(c.dir, "backups")
 }
 
-// CreateBackup copies the current config file into the backups directory.
+// CreateBackup copies every configuration file into a new timestamped folder.
 func (c *Config) CreateBackup() (*Backup, error) {
-	dir := c.BackupDir()
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return nil, fmt.Errorf("create backup dir: %w", err)
-	}
-
-	timestamp := time.Now().UnixMilli()
-	filename := fmt.Sprintf("config-%d.yaml", timestamp)
-	target, err := safepath.Under(dir, filename)
+	id := strconv.FormatInt(time.Now().UnixMilli(), 10)
+	dir, err := safepath.Under(c.BackupDir(), id)
 	if err != nil {
 		return nil, err
 	}
-
-	raw, err := os.ReadFile(filepath.Clean(c.path))
-	if err != nil {
-		return nil, fmt.Errorf("read config for backup: %w", err)
+	if merr := os.MkdirAll(dir, 0o700); merr != nil {
+		return nil, fmt.Errorf("create backup dir: %w", merr)
 	}
-	if werr := safepath.WriteFile(target, raw, 0o600); werr != nil {
-		return nil, fmt.Errorf("write backup: %w", werr)
+	backup := &Backup{ID: id, CreatedAt: backupTime(id), Files: []string{}}
+	for _, name := range Names {
+		raw, rerr := os.ReadFile(filepath.Join(c.dir, name+".config.yaml"))
+		if rerr != nil {
+			return nil, fmt.Errorf("read %s for backup: %w", name, rerr)
+		}
+		if werr := safepath.WriteFile(filepath.Join(dir, name+".config.yaml"), raw, 0o600); werr != nil {
+			return nil, fmt.Errorf("write backup: %w", werr)
+		}
+		backup.Files = append(backup.Files, name)
 	}
-
-	return &Backup{
-		Filename:  filename,
-		CreatedAt: time.UnixMilli(timestamp).UTC().Format(time.RFC3339Nano),
-	}, nil
+	return backup, nil
 }
 
-// ListBackups returns all backups, newest first (Node-agent shape).
+func backupTime(id string) string {
+	millis, err := strconv.ParseInt(id, 10, 64)
+	if err != nil {
+		return ""
+	}
+	return time.UnixMilli(millis).UTC().Format(time.RFC3339)
+}
+
+// ListBackups answers every backup, newest first.
 func (c *Config) ListBackups() ([]Backup, error) {
-	dir := c.BackupDir()
-	if err := os.MkdirAll(dir, 0o700); err != nil {
+	if err := os.MkdirAll(c.BackupDir(), 0o700); err != nil {
 		return nil, err
 	}
-	entries, err := os.ReadDir(dir)
+	entries, err := os.ReadDir(c.BackupDir())
 	if err != nil {
 		return nil, err
 	}
-
-	backups := make([]Backup, 0, len(entries))
+	backups := []Backup{}
 	for _, entry := range entries {
-		match := backupNamePattern.FindStringSubmatch(entry.Name())
-		if match == nil {
+		if !entry.IsDir() || !backupIDPattern.MatchString(entry.Name()) {
 			continue
 		}
-		millis, perr := strconv.ParseInt(match[1], 10, 64)
-		if perr != nil {
-			continue
+		files := []string{}
+		for _, name := range Names {
+			if _, serr := os.Stat(filepath.Join(c.BackupDir(), entry.Name(), name+".config.yaml")); serr == nil {
+				files = append(files, name)
+			}
 		}
-		backups = append(backups, Backup{
-			Filename:  entry.Name(),
-			CreatedAt: time.UnixMilli(millis).UTC().Format(time.RFC3339Nano),
-		})
+		backups = append(backups, Backup{ID: entry.Name(), CreatedAt: backupTime(entry.Name()), Files: files})
 	}
-
-	sort.Slice(backups, func(i, j int) bool {
-		return backups[i].Filename > backups[j].Filename
-	})
+	sort.Slice(backups, func(i, j int) bool { return backups[i].ID > backups[j].ID })
 	return backups, nil
 }
 
-// resolveBackup validates a client-supplied backup name (agent-generated
-// shape only) and returns its containment-checked path.
-func (c *Config) resolveBackup(filename string) (string, error) {
-	if !backupNamePattern.MatchString(filename) {
-		return "", fmt.Errorf("invalid backup filename")
+func (c *Config) resolveBackup(id string) (string, error) {
+	if !backupIDPattern.MatchString(id) {
+		return "", errors.New("invalid backup id")
 	}
-	path, err := safepath.Under(c.BackupDir(), filename)
+	dir, err := safepath.Under(c.BackupDir(), id)
 	if err != nil {
 		return "", err
 	}
-	if _, serr := os.Stat(path); serr != nil {
+	if _, serr := os.Stat(dir); serr != nil {
 		return "", serr
 	}
-	return path, nil
+	return dir, nil
 }
 
-// DeleteBackup removes a backup file.
-func (c *Config) DeleteBackup(filename string) error {
-	path, err := c.resolveBackup(filename)
+// DeleteBackup removes one backup folder.
+func (c *Config) DeleteBackup(id string) error {
+	dir, err := c.resolveBackup(id)
 	if err != nil {
 		return err
 	}
-	return os.Remove(path)
+	return os.RemoveAll(dir)
 }
 
-// RestoreBackup replaces the config file with a backup's contents, after
-// validating the backup parses as a working configuration and backing up the
-// current file (mirroring the Node agent's restore flow).
-func (c *Config) RestoreBackup(filename string) error {
-	path, err := c.resolveBackup(filename)
+// RestoreBackup validates every file of a backup and writes them through the engine after backing up the current files.
+func (c *Config) RestoreBackup(id string) error {
+	dir, err := c.resolveBackup(id)
 	if err != nil {
 		return err
 	}
-	raw, err := os.ReadFile(filepath.Clean(path))
-	if err != nil {
-		return err
+	documents := map[string]map[string]any{}
+	for _, name := range Names {
+		raw, rerr := os.ReadFile(filepath.Join(dir, name+".config.yaml"))
+		if errors.Is(rerr, os.ErrNotExist) {
+			continue
+		}
+		if rerr != nil {
+			return rerr
+		}
+		document := map[string]any{}
+		if uerr := yaml.Unmarshal(raw, &document); uerr != nil {
+			return fmt.Errorf("backup %s is not valid YAML: %w", name, uerr)
+		}
+		documents[name] = document
 	}
-	if verr := validateConfigBytes(raw); verr != nil {
-		return fmt.Errorf("backup is not a valid configuration: %w", verr)
-	}
-
 	if _, berr := c.CreateBackup(); berr != nil {
 		return berr
 	}
-	return safepath.WriteFile(c.path, raw, 0o600)
+	for _, name := range Names {
+		document, present := documents[name]
+		if !present {
+			continue
+		}
+		if rerr := c.engine.Restore(name, document, "agent"); rerr != nil {
+			return rerr
+		}
+	}
+	return c.fill()
 }

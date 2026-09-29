@@ -1,0 +1,95 @@
+$schema: https://json-schema.org/draft/2020-12/schema
+title: Database
+schemaVersion: 1
+sections:
+  database:
+    title: Database
+    order: 1
+properties:
+  schemaVersion:
+    type: integer
+    readOnly: true
+    default: 1
+    title: Schema version
+  database:
+    type: object
+    section: database
+    subsection: sqlite
+    title: SQLite
+    description: Tuning applied to every agent database file
+    order: 1
+    properties:
+      sqlite_options:
+        type: object
+        subsection: sqliteOptions
+        title: Session pragmas
+        properties:
+          journal_mode:
+            type: string
+            enum: [DELETE, TRUNCATE, PERSIST, MEMORY, WAL, OFF]
+            default: WAL
+            title: Journal mode
+            order: 1
+            requiresRestart: true
+            restartReason: the databases are opened at boot
+          synchronous:
+            type: string
+            enum: [OFF, NORMAL, FULL, EXTRA]
+            default: NORMAL
+            title: Synchronous
+            order: 2
+            requiresRestart: true
+            restartReason: the databases are opened at boot
+          cache_size_mb:
+            type: integer
+            minimum: 1
+            maximum: 8192
+            default: 128
+            title: Cache size (MB)
+            order: 3
+            requiresRestart: true
+            restartReason: the databases are opened at boot
+          temp_store:
+            type: string
+            enum: [DEFAULT, FILE, MEMORY]
+            default: MEMORY
+            title: Temp store
+            order: 4
+            requiresRestart: true
+            restartReason: the databases are opened at boot
+          mmap_size_mb:
+            type: integer
+            minimum: 0
+            maximum: 16384
+            default: 512
+            title: Memory-mapped I/O (MB)
+            description: 0 disables
+            order: 5
+            requiresRestart: true
+            restartReason: the databases are opened at boot
+          busy_timeout_ms:
+            type: integer
+            minimum: 100
+            maximum: 600000
+            default: 30000
+            title: Busy timeout (ms)
+            order: 6
+            requiresRestart: true
+            restartReason: the databases are opened at boot
+          wal_autocheckpoint:
+            type: integer
+            minimum: 0
+            maximum: 1000000
+            default: 1000
+            title: WAL checkpoint (pages)
+            description: 0 disables automatic checkpoints
+            order: 7
+            requiresRestart: true
+            restartReason: the databases are opened at boot
+          optimize:
+            type: boolean
+            default: true
+            title: Optimize on open
+            order: 8
+            requiresRestart: true
+            restartReason: the databases are opened at boot

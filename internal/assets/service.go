@@ -15,8 +15,9 @@ import (
 	"github.com/Makr91/hyperweaver-agent/internal/safepath"
 )
 
-// PathConfig is one artifact_storage.paths[] entry.
+// PathConfig is one artifact_storage.paths entry, keyed by ID in the file.
 type PathConfig struct {
+	ID      string
 	Name    string
 	Path    string
 	Type    string

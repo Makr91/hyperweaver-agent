@@ -1,0 +1,488 @@
+$schema: https://json-schema.org/draft/2020-12/schema
+title: Machines
+schemaVersion: 1
+sections:
+  machines:
+    title: Machines
+    order: 1
+  provisioning:
+    title: Provisioning
+    order: 2
+  guests:
+    title: Guests
+    order: 3
+properties:
+  schemaVersion:
+    type: integer
+    readOnly: true
+    default: 1
+    title: Schema version
+  machines:
+    type: object
+    section: machines
+    subsection: registry
+    title: Registry
+    order: 1
+    properties:
+      auto_discovery:
+        type: boolean
+        default: true
+        title: Periodic discovery
+        description: Reconcile the registry against the hypervisor on a schedule; the startup discovery always runs
+        order: 1
+        requiresRestart: true
+        restartReason: the discovery schedule is started at boot
+      discovery_interval:
+        type: integer
+        minimum: 10
+        maximum: 86400
+        default: 300
+        title: Discovery interval (seconds)
+        order: 2
+        requiresRestart: true
+        restartReason: the discovery schedule is started at boot
+      server_id_start:
+        type: integer
+        minimum: 1
+        maximum: 99999999
+        default: 1
+        title: First server id
+        order: 3
+      prefix_machine_names:
+        type: boolean
+        default: true
+        title: Prefix machine names
+        description: Derive names as <server_id>--<hostname>.<domain> when no explicit name is given; settings.server_id is then required at create
+        order: 4
+      shutdown_timeout:
+        type: integer
+        minimum: 5
+        maximum: 3600
+        default: 120
+        title: Shutdown timeout (seconds)
+        description: Wait for the guest to power off after the graceful signal before forcing it
+        order: 5
+        requiresRestart: true
+        restartReason: the executors take the timeout at boot
+      keep_running_on_exit:
+        type: boolean
+        default: true
+        title: Keep machines running on exit
+        description: false powers off every machine this agent created when it exits; discovered machines are never touched
+        order: 6
+      provision_on_start:
+        type: boolean
+        default: false
+        title: Provision on first start
+        description: Run the full provision pipeline on a machine's very first start instead of a bare boot
+        order: 7
+      orchestration:
+        type: object
+        subsection: orchestration
+        title: Orchestration
+        description: Ordered startup and shutdown by settings.boot_priority
+        properties:
+          enabled:
+            type: boolean
+            default: false
+            title: Boot at startup
+            order: 1
+            requiresRestart: true
+            restartReason: startup orchestration runs at boot
+          strategy:
+            type: string
+            enum: [sequential, parallel_by_priority, staggered]
+            default: parallel_by_priority
+            title: Strategy
+            order: 2
+          priority_delay:
+            type: integer
+            minimum: 0
+            maximum: 300
+            default: 30
+            title: Priority delay (seconds)
+            order: 3
+      resource_validation:
+        type: object
+        subsection: resourceValidation
+        title: Resource validation
+        description: Pre-flight checks on create, clone and modify; failing checks answer 400, passing checks may warn
+        properties:
+          enabled:
+            type: boolean
+            default: true
+            title: Resource validation
+            order: 1
+          storage:
+            type: object
+            title: Storage
+            properties:
+              enabled:
+                type: boolean
+                default: true
+                title: Check disk space
+                order: 1
+              strategy:
+                type: string
+                enum: [actual, committed]
+                default: actual
+                title: Strategy
+                description: actual checks free space; committed sums every machine's configured disks
+                order: 2
+              thresholds:
+                type: object
+                title: Thresholds
+                properties:
+                  warning:
+                    type: number
+                    minimum: 0
+                    maximum: 100
+                    default: 70
+                    title: Warning (%)
+                    order: 1
+                  critical:
+                    type: number
+                    minimum: 0
+                    maximum: 100
+                    default: 80
+                    title: Critical (%)
+                    order: 2
+          memory:
+            type: object
+            title: Memory
+            properties:
+              enabled:
+                type: boolean
+                default: true
+                title: Check memory
+                order: 1
+              strategy:
+                type: string
+                enum: [committed, actual]
+                default: committed
+                title: Strategy
+                order: 2
+              thresholds:
+                type: object
+                title: Thresholds
+                properties:
+                  warning:
+                    type: number
+                    minimum: 0
+                    maximum: 100
+                    default: 80
+                    title: Warning (%)
+                    order: 1
+                  critical:
+                    type: number
+                    minimum: 0
+                    maximum: 100
+                    default: 90
+                    title: Critical (%)
+                    order: 2
+          cpu:
+            type: object
+            title: CPU
+            properties:
+              enabled:
+                type: boolean
+                default: true
+                title: Check vCPUs
+                order: 1
+              strategy:
+                type: string
+                enum: [committed, actual]
+                default: committed
+                title: Strategy
+                description: committed sums every machine's vCPUs; actual sums running machines only
+                order: 2
+              hard_limit:
+                type: number
+                minimum: 100
+                default: 400
+                title: Overcommit limit (%)
+                description: Requests projecting past this percentage of physical cores are refused
+                order: 3
+              thresholds:
+                type: object
+                title: Thresholds
+                properties:
+                  warning:
+                    type: number
+                    minimum: 0
+                    default: 150
+                    title: Warning (%)
+                    order: 1
+                  critical:
+                    type: number
+                    minimum: 0
+                    default: 300
+                    title: Critical (%)
+                    order: 2
+  provisioning:
+    type: object
+    section: provisioning
+    subsection: provisioning
+    title: Provisioning
+    order: 1
+    properties:
+      provisioners_dir:
+        type: string
+        default: ''
+        title: Built-in provisioners path
+        description: Provisioner packages in SHI's on-disk format; installer-bundled packages are extracted here without overwriting existing versions. Empty = provisioners under the configuration folder on Windows, under the data folder elsewhere or when data.dir is set
+        order: 1
+      provisioners_paths:
+        type: object
+        subsection: provisionersPaths
+        title: Added provisioners paths
+        description: Every enabled path is scanned; a family gains new versions where it lives, a new family lands in the default path, the built-in when none is flagged
+        default: {}
+        propertyNames:
+          pattern: '^[a-z0-9_]+$'
+        additionalProperties:
+          type: object
+          required: [display_name, path]
+          properties:
+            display_name:
+              type: string
+              title: Name
+              order: 1
+            path:
+              type: string
+              title: Folder
+              order: 2
+            enabled:
+              type: boolean
+              default: true
+              title: Enabled
+              order: 3
+            default:
+              type: boolean
+              default: false
+              title: Default
+              order: 4
+      machines_dir:
+        type: string
+        default: ''
+        title: Built-in machines path
+        description: Root of the per-machine folders holding the definition files, the hypervisor's files and the disks. Empty = machines under the configuration folder on Windows, under the data folder elsewhere or when data.dir is set
+        order: 3
+      machines_paths:
+        type: object
+        subsection: machinesPaths
+        title: Added machines paths
+        description: A new machine is created in the path the request names, else the default path; a machine keeps the path it was created in
+        default: {}
+        propertyNames:
+          pattern: '^[a-z0-9_]+$'
+        additionalProperties:
+          type: object
+          required: [display_name, path]
+          properties:
+            display_name:
+              type: string
+              title: Name
+              order: 1
+            path:
+              type: string
+              title: Folder
+              order: 2
+            enabled:
+              type: boolean
+              default: true
+              title: Enabled
+              order: 3
+            default:
+              type: boolean
+              default: false
+              title: Default
+              order: 4
+      default_sync_method:
+        type: string
+        enum: [rsync, scp]
+        default: rsync
+        title: Default sync method
+        description: For machines whose document sets none; platform rules still apply
+        order: 5
+      default_network_interface:
+        type: string
+        default: ''
+        title: Default bridge interface
+        description: Injected as DEFAULT_NETWORK_INTERFACE when the document sets none; values from GET /api/provisioning/bridged-interfaces
+        order: 6
+      playbook_timeout_seconds:
+        type: integer
+        minimum: 60
+        default: 21600
+        title: Playbook timeout (seconds)
+        order: 7
+      ansible_install_timeout_seconds:
+        type: integer
+        minimum: 60
+        default: 300
+        title: Ansible install timeout (seconds)
+        order: 8
+      host_hooks:
+        type: boolean
+        default: true
+        title: Host hooks
+        description: Allow a document's pre and post hooks with target host to run scripts on this host; packages the installer did not ship confirm once per machine
+        order: 9
+      ssh:
+        type: object
+        subsection: provisioningSSH
+        title: SSH
+        properties:
+          key_path:
+            type: string
+            default: ''
+            title: Provisioning key
+            description: The agent's own key, the auth fallback when the document supplies none; generated when absent. Empty = ssh/provision_key beside the configuration files
+            order: 1
+            requiresRestart: true
+            restartReason: the key is generated and read at boot
+          timeout_seconds:
+            type: integer
+            minimum: 10
+            default: 300
+            title: SSH wait (seconds)
+            description: The document's settings.setup_wait wins when larger
+            order: 2
+          poll_interval_seconds:
+            type: integer
+            minimum: 1
+            default: 10
+            title: SSH poll interval (seconds)
+            order: 3
+      network:
+        type: object
+        subsection: provisioningNetwork
+        title: Provisioning network
+        description: One host-only interface, identified by host_ip, plus its DHCP server; set up by POST /api/provisioning/network/setup
+        properties:
+          enabled:
+            type: boolean
+            default: true
+            title: Provisioning network
+            order: 1
+          subnet:
+            type: string
+            default: 10.190.190.0/24
+            title: Subnet (CIDR)
+            order: 2
+          host_ip:
+            type: string
+            format: ipv4
+            default: 10.190.190.1
+            title: Host address
+            order: 3
+          netmask:
+            type: string
+            format: ipv4
+            default: 255.255.255.0
+            title: Netmask
+            order: 4
+          dhcp_server_ip:
+            type: string
+            format: ipv4
+            default: 10.190.190.2
+            title: DHCP server address
+            description: Must differ from host_ip
+            order: 5
+          dhcp_range_start:
+            type: string
+            format: ipv4
+            default: 10.190.190.10
+            title: DHCP range start
+            order: 6
+          dhcp_range_end:
+            type: string
+            format: ipv4
+            default: 10.190.190.254
+            title: DHCP range end
+            order: 7
+  guest_agent:
+    type: object
+    section: guests
+    subsection: guestAgent
+    title: Guest agent
+    order: 1
+    properties:
+      enabled:
+        type: boolean
+        default: true
+        title: Guest agent channel
+        description: The master gate for the per-machine QEMU guest-agent UART and the /api/machines/{name}/guest surface
+        order: 1
+        requiresRestart: true
+        restartReason: the executors and routes take the gate at boot
+  snapshots:
+    type: object
+    section: guests
+    subsection: snapshots
+    title: Snapshot rotation
+    description: Scheduled snapshots with conservative defaults; pruning is a physical disk merge on VirtualBox
+    order: 2
+    properties:
+      enabled:
+        type: boolean
+        default: false
+        title: Snapshot rotation
+        order: 1
+        requiresRestart: true
+        restartReason: the rotation service is started at boot
+      interval_minutes:
+        type: integer
+        minimum: 5
+        maximum: 10080
+        default: 60
+        title: Interval (minutes)
+        description: For simple and age policies; rotation follows the fixed hourly, daily, weekly schedule
+        order: 2
+        requiresRestart: true
+        restartReason: the rotation service is started at boot
+      default_policy:
+        type: object
+        subsection: snapshotPolicy
+        title: Default policy
+        description: Applies to every machine unless the machine overrides it
+        properties:
+          type:
+            type: string
+            enum: [none, simple, age, rotation]
+            default: none
+            title: Type
+            order: 1
+          quiesce:
+            type: boolean
+            default: false
+            title: Quiesce
+            description: Run fsfreeze through the guest agent around each snapshot when it answers
+            order: 2
+          keep:
+            type: integer
+            minimum: 1
+            default: 3
+            title: Keep (simple)
+            order: 3
+          max_age_days:
+            type: integer
+            minimum: 1
+            default: 7
+            title: Maximum age (age)
+            order: 4
+          tiers:
+            type: object
+            title: Tiers (rotation)
+            propertyNames:
+              pattern: '^(hourly|daily|weekly)$'
+            additionalProperties:
+              type: object
+              properties:
+                keep:
+                  type: integer
+                  minimum: 1
+                  default: 2
+                  title: Keep
+                  order: 1

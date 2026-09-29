@@ -134,7 +134,7 @@ func (e *executors) templateDownload(ctx context.Context, task *tasks.Task, out 
 
 	e.taskProgress(task, 95, "saving_record")
 	if cerr := e.store.createTemplate(ctx, &Template{
-		SourceName:   source.Name,
+		SourceName:   source.ID,
 		Organization: meta.Organization,
 		BoxName:      meta.BoxName,
 		Version:      meta.Version,
@@ -154,24 +154,22 @@ func (e *executors) templateDownload(ctx context.Context, task *tasks.Task, out 
 	return nil
 }
 
-// findTemplateSource resolves a configured source by name (empty name = the
-// source flagged default — names are pure display, never behavior; the
-// "Default Registry" name-match fallback died with Mark's real-name ask,
-// 2026-07-09).
-func findTemplateSource(sources []TemplateSource, name string) (*TemplateSource, error) {
+// findTemplateSource resolves a configured source by id (empty id = the
+// source flagged default).
+func findTemplateSource(sources []TemplateSource, id string) (*TemplateSource, error) {
 	for i := range sources {
 		if !sources[i].Enabled {
 			continue
 		}
-		if name != "" && sources[i].Name == name {
+		if id != "" && sources[i].ID == id {
 			return &sources[i], nil
 		}
-		if name == "" && sources[i].Default {
+		if id == "" && sources[i].Default {
 			return &sources[i], nil
 		}
 	}
-	if name != "" {
-		return nil, errors.New("template source not found or disabled: " + name)
+	if id != "" {
+		return nil, errors.New("template source not found or disabled: " + id)
 	}
 	return nil, errors.New("no default template source configured")
 }

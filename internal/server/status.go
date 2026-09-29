@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Makr91/hyperweaver-agent/internal/config"
 	"github.com/Makr91/hyperweaver-agent/internal/machines"
 	"github.com/Makr91/hyperweaver-agent/internal/utm"
 	"github.com/Makr91/hyperweaver-agent/internal/version"
@@ -130,7 +131,7 @@ var platformFeatures = []string{
 	"provisioner-registry", "secrets", "ssh", "templates",
 	"host-launchers", "host-terminal", "hosts-file", "dns",
 	"hostname", "ip-addresses", "network-spaces",
-	"hosts", "footer", "health", "events",
+	"hosts", "footer", "health", "events", "admin", "setup",
 }
 
 // features derives the advertised token list: platform tokens plus the
@@ -214,7 +215,7 @@ func (s *Server) consoles(ctx context.Context) []string {
 }
 
 // @Summary		Public identity and capabilities
-// @Description	The public status probe. No authentication. role is the package name, hyperweaver-agent, the one member that tells the shared UI it is served by an agent directly. brand, collections, links, ticket and config are the shared status members: links.api is the path of this agent's API reference while api_docs.enabled is on, and ticket is null because GET /api/config/ticket serves the ticket system.
+// @Description	The public status probe. No authentication. role is the package name, hyperweaver-agent, the one member that tells the shared UI it is served by an agent directly. brand, collections, links, ticket and config are the shared status members: links.api is the path of this agent's API reference while api_docs.enabled is on, ticket is null because GET /api/config/ticket serves the ticket system, and config lists the five configuration files (app, auth, db, machines, storage) the /api/config routes serve; the admin and setup tokens name the configuration pages.
 // @Tags			Status
 // @Produce		json
 // @Success		200	{object}	statusPayload	"Agent identity and capabilities"
@@ -249,7 +250,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		},
 		Collections: []string{},
 		Links:       links,
-		Config:      []string{},
+		Config:      config.Names,
 		Events:      statusEvents{Path: "/api/events", Topics: eventTopics},
 		Agent:       "hyperweaver-agent",
 		Hypervisors: s.hypervisors(r.Context()),

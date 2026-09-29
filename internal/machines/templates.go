@@ -91,8 +91,9 @@ type Template struct {
 	DownloadedAt time.Time       `json:"downloaded_at"`
 }
 
-// TemplateSource is one configured registry (template_sources.sources[]).
+// TemplateSource is one configured registry (template_sources.sources, keyed by ID).
 type TemplateSource struct {
+	ID      string `json:"id"      yaml:"id"`
 	Name    string `json:"name"    yaml:"name"`
 	URL     string `json:"url"     yaml:"url"`
 	Enabled bool   `json:"enabled" yaml:"enabled"`
