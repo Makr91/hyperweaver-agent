@@ -14,7 +14,7 @@ type hostsYAMLResponse struct {
 	YAML string `json:"yaml"`
 }
 
-// GET/PUT /machines/{machineName}/hosts-yml — the raw-YAML document editor
+// GET/PUT /api/machines/{machineName}/hosts-yml — the raw-YAML document editor
 // surface (frozen cross-agent contract, sync 2026-07-19): the stored document
 // sections as YAML text, editable verbatim with key order preserved; the
 // converged document pre-flights still answer 400.

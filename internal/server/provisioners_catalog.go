@@ -34,7 +34,7 @@ func (s *Server) catalogSourceList() []provisioner.CatalogSource {
 	return sources
 }
 
-// catalogSourceRow is one entry of GET /provisioning/catalog/sources.
+// catalogSourceRow is one entry of GET /api/provisioning/catalog/sources.
 type catalogSourceRow struct {
 	ID      string `json:"id"`
 	Name    string `json:"name"`
@@ -42,7 +42,7 @@ type catalogSourceRow struct {
 	Default bool   `json:"default"`
 }
 
-// listCatalogSourcesResponse is GET /provisioning/catalog/sources's answer.
+// listCatalogSourcesResponse is GET /api/provisioning/catalog/sources's answer.
 type listCatalogSourcesResponse struct {
 	Enabled bool               `json:"enabled"`
 	Sources []catalogSourceRow `json:"sources"`
@@ -103,7 +103,7 @@ func (s *Server) handleGetCatalog(w http.ResponseWriter, r *http.Request) {
 	}
 	// Parsed relay, the shared wire (UI's 2026-07-17 flag — the wrap was a
 	// bug on BOTH agents once): the catalog document IS the response; the
-	// resolved source rides /provisioning/catalog/sources, never an envelope.
+	// resolved source rides /api/provisioning/catalog/sources, never an envelope.
 	writeJSON(w, document)
 }
 

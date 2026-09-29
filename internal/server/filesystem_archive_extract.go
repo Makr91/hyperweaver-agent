@@ -24,7 +24,7 @@ type archiveExtractMetadata struct {
 	ExtractPath string `json:"extract_path"`
 }
 
-// archiveExtractResponse is POST /filesystem/archive/extract's 202 answer.
+// archiveExtractResponse is POST /api/filesystem/archive/extract's 202 answer.
 type archiveExtractResponse struct {
 	Success     bool   `json:"success"`
 	Message     string `json:"message"`
@@ -33,7 +33,7 @@ type archiveExtractResponse struct {
 	ExtractPath string `json:"extract_path"`
 }
 
-// handleExtractArchive serves POST /filesystem/archive/extract → 202 task.
+// handleExtractArchive serves POST /api/filesystem/archive/extract → 202 task.
 //
 //	@Summary		Extract an archive (task)
 //	@Description	Minimum role: operator. {archive_path, extract_path} → 202 file_archive_extract task. Format by extension: .zip, .tar, .tar.gz, .tar.bz2, bare .gz. Entries escaping the extraction directory are rejected (zip-slip guard); links and specials are skipped, never materialized. Gated by file_browser.archive.enabled.

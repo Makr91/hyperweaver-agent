@@ -149,7 +149,7 @@ func (e *executors) createConfig(ctx context.Context, task *tasks.Task, out *tas
 	// shipped decision ported: zones.guest_agent === true, default OFF, under
 	// the guest_agent.enabled master gate — ConfigurationManager.js's
 	// buildExtraAttrCommand). A document claiming serial port 2 itself wins;
-	// QGA steps aside. Opt-in later via POST /machines/{name}/guest-agent/setup.
+	// QGA steps aside. Opt-in later via POST /api/machines/{name}/guest-agent/setup.
 	if e.env.GuestAgentEnabled && onOff(document.Section("vbox")["guest_agent"]) == "on" {
 		if serialPortClaimed(document.Section("vbox"), 2) {
 			out.Write("stderr", "Document claims serial port 2 — guest-agent UART skipped\n")

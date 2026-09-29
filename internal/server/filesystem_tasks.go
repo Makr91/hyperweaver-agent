@@ -32,8 +32,8 @@ type fileTransferMetadata struct {
 	Destination string `json:"destination"`
 }
 
-// transferTaskResponse is the 202 body of PUT /filesystem/move and
-// POST /filesystem/copy: the queued file_move / file_copy task's id alongside
+// transferTaskResponse is the 202 body of PUT /api/filesystem/move and
+// POST /api/filesystem/copy: the queued file_move / file_copy task's id alongside
 // the source and destination it will act on.
 type transferTaskResponse struct {
 	Success     bool   `json:"success"`
@@ -82,7 +82,7 @@ func (s *Server) queueFilesystemTask(r *http.Request, operation string, priority
 	})
 }
 
-// handleTransferItem serves PUT /filesystem/move and POST /filesystem/copy —
+// handleTransferItem serves PUT /api/filesystem/move and POST /api/filesystem/copy —
 // {source, destination} → 202 with the task id.
 //
 //	@Summary		Move an item (task)

@@ -1,5 +1,5 @@
 // Package hostpower implements the host power-management operations
-// (/system/host/*, the `host-power` capability token — the Node agent's
+// (/api/system/host/*, the `host-power` capability token — the Node agent's
 // System Host Management group made cross-platform): shutdown, restart,
 // poweroff, and halt of the machine the agent runs on, each executed as a
 // queued task through the platform's shutdown command. Remote power control

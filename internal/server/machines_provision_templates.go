@@ -65,7 +65,7 @@ func (s *Server) handleListTemplates(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleGetTemplate serves one local template row (the base's GET
-// /templates/local/{id}).
+// /api/templates/local/{id}).
 //
 //	@Summary		Local template details
 //	@Description	Minimum role: viewer. One local template registry row (the base's GET /api/templates/local/{id}).
@@ -95,7 +95,7 @@ func (s *Server) handleGetTemplate(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleDeleteTemplate queues a template_delete task (the base's DELETE
-// /templates/local/{id}: remove the stored artifact + the row, async).
+// /api/templates/local/{id}: remove the stored artifact + the row, async).
 //
 //	@Summary		Delete a local template
 //	@Description	Minimum role: operator. Queues template_delete: the disk image is released from VirtualBox's media registry and deleted, the version directory pruned, the row removed. Machines built with clone_strategy copy (the default) are untouched — they cloned their own media. THE CHILDREN GATE (frozen, sync 2026-07-19): a template whose clone-base (clone-base.vdi beside the disk image) still feeds differencing children is LIVE infrastructure — clone-strategy machines boot from it; the task refuses naming the holding machines (`template clone base is still linked by machine(s): <names> — delete those machines first`); orphaned children from failed creates are swept, and a child-free base is removed with the template.
@@ -149,7 +149,7 @@ type exportTemplateRequest struct {
 }
 
 // handleExportTemplate queues a template_export task (the base's POST
-// /templates/export: machine → local .box; here VBoxManage export + tar.gz →
+// /api/templates/export: machine → local .box; here VBoxManage export + tar.gz →
 // a standard Vagrant virtualbox box under <templates root>/exports).
 //
 //	@Summary		Export a machine to a local .box
@@ -216,7 +216,7 @@ type publishTemplateRequest struct {
 }
 
 // handlePublishTemplate queues a template_upload task (the base's POST
-// /templates/publish: machine export OR existing .box → chunked registry
+// /api/templates/publish: machine export OR existing .box → chunked registry
 // upload → release). Registry credentials live on the configured source only
 // — the base's per-request auth_token has no analog here (tokens never ride
 // task metadata).
@@ -292,7 +292,7 @@ type moveTemplateRequest struct {
 }
 
 // handleMoveTemplate queues a template_move task (the base's POST
-// /templates/local/{id}/move: relocate the stored artifact — file move here,
+// /api/templates/local/{id}/move: relocate the stored artifact — file move here,
 // zfs rename/send-recv there).
 //
 //	@Summary		Move a template's storage
@@ -357,7 +357,7 @@ func (s *Server) handleMoveTemplate(w http.ResponseWriter, r *http.Request) {
 }
 
 // handlePullTemplate queues a template_download task (the base's
-// /templates/pull): the caller names the source (or the default is used) and
+// /api/templates/pull): the caller names the source (or the default is used) and
 // the exact box tuple.
 //
 //	@Summary		Download a box template

@@ -326,11 +326,11 @@ func setupTasks(cfg *config.Config, secretsStore *secrets.Store) (*agentSystems,
 	// no handler queues them while the surface is disabled).
 	hostpower.RegisterExecutors(queue, hostpower.LookupCommand)
 
-	// set_hostname (the /network/hostname surface's async half — the
+	// set_hostname (the /api/network/hostname surface's async half — the
 	// converged wire, sync 2026-07-17).
 	hostname.RegisterExecutors(queue)
 
-	// The /network/addresses mutations (zoneweaver's address ops — Mark's
+	// The /api/network/addresses mutations (zoneweaver's address ops — Mark's
 	// build order 2026-07-19 replaced the 501 stubs).
 	netaddr.RegisterExecutors(queue)
 

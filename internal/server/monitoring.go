@@ -6,7 +6,7 @@ import (
 	"time"
 )
 
-// Host telemetry endpoints (/monitoring/*, the `monitoring` capability
+// Host telemetry endpoints (/api/monitoring/*, the `monitoring` capability
 // token) — the Node agent's Host Monitoring group, reshaped per Mark's
 // 2026-07-05 ruling: always-on REALTIME sampling; monitoring.storage_enabled
 // adds stored history (per-datatype database files) behind the same

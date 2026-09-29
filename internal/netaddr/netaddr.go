@@ -1,4 +1,4 @@
-// Package netaddr implements the /network/addresses mutation executors
+// Package netaddr implements the /api/network/addresses mutation executors
 // (zoneweaver's create/delete/enable/disable_ip_address ops).
 package netaddr
 

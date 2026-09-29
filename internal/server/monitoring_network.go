@@ -15,7 +15,7 @@ type monitoringPagination struct {
 	HasMore bool `json:"hasMore"`
 }
 
-// monitoringInterfacesResponse is GET /monitoring/network/interfaces' answer.
+// monitoringInterfacesResponse is GET /api/monitoring/network/interfaces' answer.
 type monitoringInterfacesResponse struct {
 	Interfaces []monitoring.Interface `json:"interfaces"`
 	TotalCount int                    `json:"totalCount"`
@@ -92,7 +92,7 @@ type networkUsageMetadata struct {
 	InterfaceList         []string `json:"interfaceList"`
 }
 
-// networkUsageResponse is GET /monitoring/network/usage's answer.
+// networkUsageResponse is GET /api/monitoring/network/usage's answer.
 type networkUsageResponse struct {
 	Usage         []monitoring.NetworkSample `json:"usage"`
 	TotalCount    int                        `json:"totalCount"`

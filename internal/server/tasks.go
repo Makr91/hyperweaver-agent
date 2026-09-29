@@ -15,7 +15,7 @@ import (
 // Task queue endpoints (Agent API v1). Paths, query parameters, payloads,
 // and error shapes mirror the Node agent's TaskQueue controllers — the
 // Hyperweaver UI's Tasks surface codes against that exact wire. The one
-// deliberate divergence (D-F): DELETE /tasks/{taskId} cancels running tasks
+// deliberate divergence (D-F): DELETE /api/tasks/{taskId} cancels running tasks
 // too, not just pending ones.
 
 // taskError writes a problem body of the status's registry type with message as its detail.
@@ -23,7 +23,7 @@ func taskError(w http.ResponseWriter, status int, message string) {
 	problem.Detail(w, status, message)
 }
 
-// listTasksResponse is GET /tasks's answer.
+// listTasksResponse is GET /api/tasks's answer.
 type listTasksResponse struct {
 	Tasks        []*tasks.Task `json:"tasks"`
 	RunningCount int           `json:"running_count"`
@@ -31,7 +31,7 @@ type listTasksResponse struct {
 	Total *int `json:"total,omitempty"`
 }
 
-// handleListTasks mirrors GET /tasks: filterable, sortable, limited, with
+// handleListTasks mirrors GET /api/tasks: filterable, sortable, limited, with
 // total included only on request (include_count=true).
 //
 //	@Summary		List tasks
@@ -102,7 +102,7 @@ func (s *Server) handleListTasks(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, response)
 }
 
-// taskStatsResponse is GET /tasks/stats's answer.
+// taskStatsResponse is GET /api/tasks/stats's answer.
 type taskStatsResponse struct {
 	PendingTasks         int  `json:"pending_tasks"`
 	RunningTasks         int  `json:"running_tasks"`
@@ -113,7 +113,7 @@ type taskStatsResponse struct {
 	TaskProcessorRunning bool `json:"task_processor_running"`
 }
 
-// handleTaskStats mirrors GET /tasks/stats.
+// handleTaskStats mirrors GET /api/tasks/stats.
 //
 //	@Summary		Task queue statistics
 //	@Description	Minimum role: viewer.
@@ -139,7 +139,7 @@ func (s *Server) handleTaskStats(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// handleTaskDetails mirrors GET /tasks/{taskId}.
+// handleTaskDetails mirrors GET /api/tasks/{taskId}.
 //
 //	@Summary		Task details
 //	@Description	Minimum role: viewer. The task document's output field is ALWAYS null (the converged task wire) — GET /api/tasks/{taskId}/output and the /api/tasks/{taskId}/stream WebSocket serve the output.
@@ -163,14 +163,14 @@ func (s *Server) handleTaskDetails(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, task)
 }
 
-// taskOutputResponse is GET /tasks/{taskId}/output's answer.
+// taskOutputResponse is GET /api/tasks/{taskId}/output's answer.
 type taskOutputResponse struct {
 	TaskID string              `json:"task_id"`
 	Status string              `json:"status"`
 	Output []tasks.OutputEntry `json:"output"`
 }
 
-// handleTaskOutput mirrors GET /tasks/{taskId}/output: the live in-memory
+// handleTaskOutput mirrors GET /api/tasks/{taskId}/output: the live in-memory
 // buffer while the task runs, the persisted output afterwards.
 //
 //	@Summary		Task output
@@ -207,14 +207,14 @@ func (s *Server) handleTaskOutput(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// cancelTaskResponse is DELETE /tasks/{taskId}'s success answer.
+// cancelTaskResponse is DELETE /api/tasks/{taskId}'s success answer.
 type cancelTaskResponse struct {
 	Success bool   `json:"success"`
 	TaskID  string `json:"task_id"`
 	Message string `json:"message"`
 }
 
-// handleCancelTask mirrors DELETE /tasks/{taskId}, extended per D-F: running
+// handleCancelTask mirrors DELETE /api/tasks/{taskId}, extended per D-F: running
 // tasks are cancellable too — the executor's children are killed and its
 // cleanup runs; the task lands in cancelled with output preserved.
 //
@@ -259,14 +259,14 @@ func (s *Server) handleCancelTask(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// clearCompletedTasksResponse is DELETE /tasks/completed's answer.
+// clearCompletedTasksResponse is DELETE /api/tasks/completed's answer.
 type clearCompletedTasksResponse struct {
 	Success      bool   `json:"success"`
 	Message      string `json:"message"`
 	DeletedCount int64  `json:"deleted_count"`
 }
 
-// handleClearCompletedTasks mirrors DELETE /tasks/completed: hard-deletes
+// handleClearCompletedTasks mirrors DELETE /api/tasks/completed: hard-deletes
 // every task in a terminal state.
 //
 //	@Summary		Clear finished tasks

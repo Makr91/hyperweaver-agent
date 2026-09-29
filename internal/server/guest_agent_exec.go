@@ -72,7 +72,7 @@ func decodeExecStatus(raw json.RawMessage) (guestExecStatusResponse, error) {
 	return result, nil
 }
 
-// guestExecRequest is POST /machines/{machineName}/guest/exec's body.
+// guestExecRequest is POST /api/machines/{machineName}/guest/exec's body.
 type guestExecRequest struct {
 	// The guest executable (absolute path; no shell)
 	Path string `json:"path"`
@@ -84,10 +84,10 @@ type guestExecRequest struct {
 	TimeoutSeconds int `json:"timeout_seconds"`
 }
 
-// handleGuestExec serves POST /machines/{name}/guest/exec: run a command in
+// handleGuestExec serves POST /api/machines/{name}/guest/exec: run a command in
 // the guest (guest-exec). wait (default true) polls guest-exec-status until
 // exit or timeout_seconds (default 30, max 600); wait:false answers the pid
-// for GET /machines/{name}/guest/exec/{pid}.
+// for GET /api/machines/{name}/guest/exec/{pid}.
 //
 //	@Summary		Run a command in the guest
 //	@Description	Minimum role: operator. guest-exec with capture-output: path is the guest executable (absolute; no shell — wrap in /bin/sh -c or cmd.exe /c yourself for shell syntax), args[] its arguments. wait (default true) polls guest-exec-status until exit or timeout_seconds (default 30, max 600) and answers {exitcode, stdout, stderr} (base64 decoded); wait:false answers {pid} immediately for GET /api/machines/{name}/guest/exec/{pid}. Credential-less by design — the channel itself is the authority (operator role + the machine's own host).
@@ -228,7 +228,7 @@ func (s *Server) handleGuestExec(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// handleGuestExecStatus serves GET /machines/{name}/guest/exec/{pid}.
+// handleGuestExecStatus serves GET /api/machines/{name}/guest/exec/{pid}.
 //
 //	@Summary		Poll a guest command
 //	@Description	Minimum role: viewer. guest-exec-status for a pid from POST /api/machines/{machineName}/guest/exec: {exited, exitcode?, stdout?, stderr?} — output arrives once the process exits.

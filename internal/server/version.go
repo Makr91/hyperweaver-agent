@@ -62,7 +62,7 @@ type versionResponse struct {
 	Host  hostinfo.Info  `json:"host"`
 }
 
-// handleVersion mirrors the Node agent's GET /version, with Go-flavored
+// handleVersion mirrors the Node agent's GET /api/version, with Go-flavored
 // runtime fields and the detected provisioning tools (SHI's footer info).
 //
 //	@Summary		Application version and host environment
@@ -108,7 +108,7 @@ func updateUnknown(reason string) updateCheckResponse {
 	}
 }
 
-// handleUpdateCheck mirrors the Node agent's GET /app/updates/check: fetch
+// handleUpdateCheck mirrors the Node agent's GET /api/app/updates/check: fetch
 // the configured versioninfo document and compare against the running build.
 //
 //	@Summary		Check for application updates
@@ -211,7 +211,7 @@ func (s *Server) handleUpdateApply(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// handleProvisioningStatus mirrors the Node agent's GET /provisioning/status:
+// handleProvisioningStatus mirrors the Node agent's GET /api/provisioning/status:
 // a bare tool-name -> installed map (this agent's tools are Vagrant,
 // VirtualBox, Git; the Node agent lists its OmniOS set — same endpoint,
 // platform-appropriate contents).

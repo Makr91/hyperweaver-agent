@@ -50,7 +50,7 @@ type provisioningNetworkStatus struct {
 // dormant-but-available for host-type networks[] entries. Setup and teardown
 // queue the base's exact operations; status answers its component-map shape.
 
-// handleProvisioningNetworkStatus mirrors GET /provisioning/network/status:
+// handleProvisioningNetworkStatus mirrors GET /api/provisioning/network/status:
 // the disabled branch is bare {enabled:false, message}; enabled answers
 // ready + per-component existence + the effective configuration.
 //
@@ -150,7 +150,7 @@ func (s *Server) handleProvisioningNetworkStatus(w http.ResponseWriter, r *http.
 }
 
 // networkTaskResponse is the 202 task-queued answer to POST
-// /provisioning/network/setup and DELETE /provisioning/network/teardown
+// /api/provisioning/network/setup and DELETE /api/provisioning/network/teardown
 // (the acceptedTask shape, typed).
 type networkTaskResponse struct {
 	Success bool   `json:"success"`
@@ -188,7 +188,7 @@ func (s *Server) queueNetworkTask(w http.ResponseWriter, r *http.Request, operat
 	})
 }
 
-// handleProvisioningNetworkSetup mirrors POST /provisioning/network/setup.
+// handleProvisioningNetworkSetup mirrors POST /api/provisioning/network/setup.
 //
 //	@Summary		Set up the provisioning network
 //	@Description	Minimum role: operator. Queues a provisioning_network_setup task (category-locked — one network mutation at a time), idempotent at every component: the host-only interface is created only when none carries the configured host_ip, its address always converges onto the configuration, and the DHCP server (subnet range, its own dhcp_server_ip) is added or modified to match. Machines with host-type networks[] entries then attach to this interface at create, and each entry's address pins as a per-VM-NIC DHCP fixed lease — the guest's ordinary DHCP request receives the document's own control IP, so wait_ssh dials a deterministic address. macOS hosts (Oracle's split — host-only adapters died with VirtualBox 7 there) create/converge ONE named host-only NETWORK instead: hyperweaver-provision, a hostonlynet whose embedded lower/upper range IS the DHCP (no dhcpserver verbs exist in that family; host_ip is vmnet's to assign, and per-VM fixed leases have no analog — pinned addresses narrate honestly and the networking role applies them in-guest; the pipeline's transport rides the NAT forward regardless). Host-type machines there attach via --nic hostonlynet + --host-only-net.
@@ -203,7 +203,7 @@ func (s *Server) handleProvisioningNetworkSetup(w http.ResponseWriter, r *http.R
 }
 
 // handleProvisioningNetworkTeardown mirrors DELETE
-// /provisioning/network/teardown.
+// /api/provisioning/network/teardown.
 //
 //	@Summary		Tear down the provisioning network
 //	@Description	Minimum role: operator. Queues a provisioning_network_teardown task: the DHCP server first, then the host-only interface (the base's reverse order); absent components are noted, never errors. macOS hosts remove the hyperweaver-provision host-only network instead.

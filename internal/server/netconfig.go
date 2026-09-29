@@ -16,7 +16,7 @@ import (
 	"github.com/Makr91/hyperweaver-agent/internal/tasks"
 )
 
-// Host network configuration (/network/hostname, /network/addresses — the
+// Host network configuration (/api/network/hostname, /api/network/addresses — the
 // converged wire, sync 2026-07-17): zoneweaver's shipped
 // NetworkQueryController/NetworkModificationController family, mirrored on
 // this agent. The controller family answers BARE documents — no
@@ -75,7 +75,7 @@ func persistedHostname(r *http.Request) (string, bool) {
 	}
 }
 
-// hostnameState is the bare GET /network/hostname document — no
+// hostnameState is the bare GET /api/network/hostname document — no
 // success/message/timestamp envelope (this controller family's shape).
 type hostnameState struct {
 	// The live system hostname
@@ -90,7 +90,7 @@ type hostnameState struct {
 	Warning *string `json:"warning"`
 }
 
-// handleGetHostname mirrors GET /network/hostname (zoneweaver's shipped
+// handleGetHostname mirrors GET /api/network/hostname (zoneweaver's shipped
 // wire, sync 2026-07-17): the BARE document {hostname, nodename_file,
 // system_hostname, matches, warning}. hostname is the SYSTEM hostname
 // (zoneweaver's semantics); nodename_file is null when no persisted name
@@ -172,7 +172,7 @@ type hostnameUpdateRequest struct {
 	ApplyImmediately bool `json:"apply_immediately"`
 }
 
-// hostnameChangeQueued is the 202 answer to PUT /network/hostname — the
+// hostnameChangeQueued is the 202 answer to PUT /api/network/hostname — the
 // converged task body.
 type hostnameChangeQueued struct {
 	Success          bool   `json:"success"`
@@ -188,7 +188,7 @@ type hostnameChangeQueued struct {
 	Note string `json:"note"`
 }
 
-// handleSetHostname mirrors PUT /network/hostname (zoneweaver's shipped
+// handleSetHostname mirrors PUT /api/network/hostname (zoneweaver's shipped
 // wire, sync 2026-07-17): queue the async set_hostname task (MachineName
 // "system", HIGH priority — zoneweaver's choice) and answer 202 with the
 // converged body. requires_reboot is PER-PLATFORM honest (the sync ruling:

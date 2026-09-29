@@ -21,8 +21,8 @@ import (
 // terms: VirtualBox's VRDE server IS the machine's remote display (no
 // separate session process to manage — the base's session lifecycle collapses
 // into the VM itself). With the VNC extpack (VRDE Module VBoxVNC) the VRDE
-// port speaks RFB, and /machines/{name}/vnc/websockify bridges a noVNC
-// browser client onto it (WebSocket ↔ TCP). GET /machines/{name}/vnc reports
+// port speaks RFB, and /api/machines/{name}/vnc/websockify bridges a noVNC
+// browser client onto it (WebSocket ↔ TCP). GET /api/machines/{name}/vnc reports
 // the live console state the UI needs before connecting.
 
 // vncCapability caches the extpack probe (extpack installs are rare; a probe
@@ -84,7 +84,7 @@ type videoDimensions struct {
 	Depth  int `json:"depth"`
 }
 
-// vncStateResponse is GET /machines/{name}/vnc's answer — the machine's live
+// vncStateResponse is GET /api/machines/{name}/vnc's answer — the machine's live
 // VRDE console state the UI reads before connecting.
 type vncStateResponse struct {
 	MachineName string `json:"machine_name"`
@@ -100,7 +100,7 @@ type vncStateResponse struct {
 	WebSocketURL      string           `json:"websocket_url"`
 }
 
-// handleVncInfo serves GET /machines/{name}/vnc: the live console state
+// handleVncInfo serves GET /api/machines/{name}/vnc: the live console state
 // (VRDE on/off, port, whether the host can actually speak VNC on it).
 //
 //	@Summary		VNC console state

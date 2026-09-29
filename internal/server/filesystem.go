@@ -16,7 +16,7 @@ import (
 )
 
 // The host file browser — zoneweaver's browse surface (BrowseController.js +
-// lib/filesystem FileSystemCore/FileSystemBrowse) ported: GET /filesystem
+// lib/filesystem FileSystemCore/FileSystemBrowse) ported: GET /api/filesystem
 // lists agent-host directories under the file_browser.security bounds. This
 // agent ships the BROWSE slice (the UI's path pickers and file manager);
 // the mutate/archive family stays zoneweaver's until scheduled. Divergence
@@ -318,7 +318,7 @@ func browseParent(normalized, root string) *string {
 	return &slash
 }
 
-// browseResponse is GET /filesystem's directory listing (the base's
+// browseResponse is GET /api/filesystem's directory listing (the base's
 // browseDirectory answer).
 type browseResponse struct {
 	Items []fileSystemItem `json:"items"`
@@ -330,7 +330,7 @@ type browseResponse struct {
 	HiddenItemsFiltered int     `json:"hidden_items_filtered"`
 }
 
-// handleBrowseFilesystem serves GET /filesystem — the base's browseDirectory:
+// handleBrowseFilesystem serves GET /api/filesystem — the base's browseDirectory:
 // list, hidden filter, user sort, parent path.
 //
 //	@Summary		Browse directory contents

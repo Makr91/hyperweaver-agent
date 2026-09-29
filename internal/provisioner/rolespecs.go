@@ -6,7 +6,7 @@ package provisioner
 // meta/argument_specs.yml folded into role-specs.yml BESIDE provisioner.yml
 // (rewriting provisioner.yml itself would re-serialize the package manifest
 // and destroy its comments/release stamp). Rebuilt at import and by POST
-// /provisioning/provisioners/refresh-specs; a missing cache self-heals at
+// /api/provisioning/provisioners/refresh-specs; a missing cache self-heals at
 // read (hand-dropped packages).
 
 import (

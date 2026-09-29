@@ -329,3 +329,29 @@ has no config routes (`config: []`, contract decision 31).
 | `last_modified_by` | the email the OIDC login minted the key with when the key has one, else the key's name, which for a tray key is the local OS account | `internal/server/settings.go:26-35`; `internal/oidc/binding.go:132-137` |
 | backups | the contract's one `<name>.config.yaml.bak` on every save, and beside it the timestamped history under `backups/` with restore, an extension Mark ruled stays and is to grow into the other backends | `internal/configengine/save.go:40-52`; `internal/config/backups.go` |
 | exit timing | the restart handler answers 202 and exits at once; the successor's spawn and the listener shutdown drain the answer, so no wait on the response's end is needed (BoxVault exits on `finish`, the authorization server after 500 ms) | `internal/configengine/routes.go:167-171`; `internal/server/settings.go:175-186` |
+
+## 14. What the shared UI asks of this agent for a person signed in through the identity provider
+
+Why: Mark signed into the live agent through SSO and found the user menu
+dead where the estate's other hosts make it live: the favorites are not
+read, and Profile leads nowhere, neither to the identity provider's
+profile page nor to a local one. Mark's words: "I expect that since i am
+signed into SSO that the favorits would be working, the user profile
+switcher isn't working, it doesnt' take me to theirt the idp or the users
+local profile".
+
+The shared UI draws the favorites while `features` lists `favorites` and
+reads them from `GET /api/user/favorites` on the serving origin, a
+`backend` host proxying that path to the issuer with the person's token
+(`universal-identity.md`, the `GET /api/user/favorites` row); it draws the
+Profile row to the local profile page, whose adapter reads `GET /api/user`,
+and to the issuer's profile page as the Manage at identity provider link
+while the record is the issuer's (`features/profile/api/account.js`,
+`manageUrl`). On an `apikey` host neither exists today, so the row leads
+to a stub.
+
+| What is | Required change | Deciding source |
+| --- | --- | --- |
+| `GET /api/api-keys/info` answers the key alone: `id`, `name`, `description`, `role`, `created_at`, `last_used` | add the identity the key is bound to when the OIDC login minted it: `issuer` (the identity provider's origin), `subject`, `email`, `name`, absent on a tray or typed key; the UI then draws the Profile row as the issuer's profile page, `<issuer>/user/profile`, and the person's name and email in the menu | `internal/oidc/binding.go:132-137` (the email the login minted the key with); `universal-session.md` |
+| no `favorites` token, no `/api/user/favorites` | while the key is OIDC-bound: list `favorites` in `features` and proxy `GET /api/user/favorites` and its writes to the issuer with the bound token, the way a `backend` host does; while the key is local, leave both out | `universal-navbar.md:1547`; `universal-identity.md` (`GET /api/user/favorites`) |
+| no `GET /api/user`, no `PATCH /api/user/preferences` | the local profile of a person whose key is local, as section 10 asked before it was closed: the record in the identity provider's shape and the preferences written beside it, `profile-updated` on the stream; a person whose key is OIDC-bound gets the issuer's record read-only, `manageUrl` the issuer's profile page | `preferences-and-branding.md` (Write path); `universal-session.md` (`load` reads `/api/user`) |

@@ -13,7 +13,7 @@ import (
 	"github.com/Makr91/hyperweaver-agent/internal/safepath"
 )
 
-// handleDownloadFile serves GET /filesystem/download — streams one file as an
+// handleDownloadFile serves GET /api/filesystem/download — streams one file as an
 // attachment (directories are refused: "use archive creation instead").
 //
 //	@Summary		Download a file
@@ -67,14 +67,14 @@ type uploadedFileInfo struct {
 	Size        int64  `json:"size"`
 }
 
-// uploadFileResponse is POST /filesystem/upload's answer.
+// uploadFileResponse is POST /api/filesystem/upload's answer.
 type uploadFileResponse struct {
 	Success bool             `json:"success"`
 	Message string           `json:"message"`
 	File    uploadedFileInfo `json:"file"`
 }
 
-// handleUploadFile serves POST /filesystem/upload — the base's uploadFile:
+// handleUploadFile serves POST /api/filesystem/upload — the base's uploadFile:
 // multipart with the metadata fields BEFORE the file part (uploadPath,
 // overwrite, mode), streamed to the destination through a temp file. Body
 // bounded by file_browser.upload_size_limit_gb.

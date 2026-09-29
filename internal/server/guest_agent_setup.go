@@ -12,7 +12,7 @@ import (
 	"github.com/Makr91/hyperweaver-agent/internal/vbox"
 )
 
-// handleGuestAgentSetup serves POST /machines/{machineName}/guest-agent/setup
+// handleGuestAgentSetup serves POST /api/machines/{machineName}/guest-agent/setup
 // — opt an existing machine into the guest-agent UART (creates wire it only
 // when the spec says zones.guest_agent: true): the COM2→pipe serial config
 // rides the ordinary modify machinery, queued against a powered-off machine,

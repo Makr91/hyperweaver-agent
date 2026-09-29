@@ -2,13 +2,13 @@ package server
 
 import "net/http"
 
-// monitoringCollectRequest is POST /monitoring/collect's optional body.
+// monitoringCollectRequest is POST /api/monitoring/collect's optional body.
 type monitoringCollectRequest struct {
 	// network | storage | all (default all) — echoed for contract parity
 	Type string `json:"type"`
 }
 
-// monitoringCollectResponse is POST /monitoring/collect's answer.
+// monitoringCollectResponse is POST /api/monitoring/collect's answer.
 type monitoringCollectResponse struct {
 	Success bool   `json:"success"`
 	Type    string `json:"type"`

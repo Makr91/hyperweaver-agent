@@ -19,7 +19,7 @@ import (
 // inspect provisioner packages, import new ones (task-queued: folder,
 // archive, or git clone), delete families or versions no machine references.
 
-// listProvisionersResponse is GET /provisioning/provisioners's answer.
+// listProvisionersResponse is GET /api/provisioning/provisioners's answer.
 type listProvisionersResponse struct {
 	Provisioners []*provisioner.Collection `json:"provisioners"`
 	Total        int                       `json:"total"`
@@ -103,7 +103,7 @@ func (s *Server) handleProvisionerVersion(w http.ResponseWriter, r *http.Request
 	writeJSON(w, version)
 }
 
-// refreshSpecsResponse is POST /provisioning/provisioners/refresh-specs's answer.
+// refreshSpecsResponse is POST /api/provisioning/provisioners/refresh-specs's answer.
 type refreshSpecsResponse struct {
 	Success   bool                         `json:"success"`
 	Refreshed []provisioner.RefreshedSpecs `json:"refreshed"`
@@ -111,7 +111,7 @@ type refreshSpecsResponse struct {
 }
 
 // handleRefreshProvisionerSpecs re-derives every version's role-specs cache
-// (POST /provisioning/provisioners/refresh-specs — the manual refresh for
+// (POST /api/provisioning/provisioners/refresh-specs — the manual refresh for
 // hand-dropped packages and updated specs; imports rebuild automatically).
 //
 //	@Summary		Re-derive every version's caches (role-specs + schema.json)
@@ -137,7 +137,7 @@ func (s *Server) handleRefreshProvisionerSpecs(w http.ResponseWriter, r *http.Re
 	})
 }
 
-// importProvisionerResponse is POST /provisioning/provisioners/import's 202 answer.
+// importProvisionerResponse is POST /api/provisioning/provisioners/import's 202 answer.
 type importProvisionerResponse struct {
 	Success    bool   `json:"success"`
 	TaskID     string `json:"task_id"`
@@ -204,7 +204,7 @@ func (s *Server) handleImportProvisioner(w http.ResponseWriter, r *http.Request)
 }
 
 // refreshFromSourceResponse is POST
-// /provisioning/provisioners/{name}/refresh-from-source's 202 answer.
+// /api/provisioning/provisioners/{name}/refresh-from-source's 202 answer.
 type refreshFromSourceResponse struct {
 	Success bool                `json:"success"`
 	TaskID  string              `json:"task_id"`
@@ -216,7 +216,7 @@ type refreshFromSourceResponse struct {
 
 // handleRefreshProvisionerFromSource queues the ORDINARY provisioner_import
 // task against a family's stored git provenance (POST
-// /provisioning/provisioners/{name}/refresh-from-source — converged with
+// /api/provisioning/provisioners/{name}/refresh-from-source — converged with
 // zoneweaver, sync 2026-07-17). Non-clobber is the import's own rule:
 // existing versions refuse, new versions land beside. Families without git
 // provenance answer 400 — catalog-installed families update through the

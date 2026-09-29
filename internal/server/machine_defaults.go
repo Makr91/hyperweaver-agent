@@ -8,7 +8,7 @@ import (
 	"github.com/Makr91/hyperweaver-agent/internal/vbox"
 )
 
-// GET /machines/defaults — the create-time defaults document (the UI AI's
+// GET /api/machines/defaults — the create-time defaults document (the UI AI's
 // create-defaults ask, Mark's go 2026-07-08): what a spec that OMITS each
 // field actually gets, so the wizard can label "(default: bios)" instead of
 // "(agent default)". Two default classes, both listed: values this agent
@@ -115,7 +115,7 @@ func (s *Server) handleMachineCreateDefaults(w http.ResponseWriter, _ *http.Requ
 }
 
 // handleMachineOSTypes serves VBoxManage's guest OS type vocabulary (GET
-// /machines/ostypes) — the wizard's settings.os_type dropdown feed (Mark's
+// /api/machines/ostypes) — the wizard's settings.os_type dropdown feed (Mark's
 // go 2026-07-09). Live enumeration: whatever THIS VirtualBox build
 // supports, never a baked-in list.
 //

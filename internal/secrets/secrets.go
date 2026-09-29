@@ -1,8 +1,8 @@
 // Package secrets implements the agent's global secrets store (architecture
 // D-C, SHI's SuperHumanSecrets model): six repeatable categories persisted
-// to secrets.yaml beside the config file, 0600, served by an admin-only
-// API — a store of its own purely so GET /settings keeps serving just the
-// configuration document. Values are plain text BY DESIGN (Mark's ruling):
+// to secrets.yaml beside the configuration files, 0600, served by an admin-only
+// API — a store of its own purely so the /api/config routes keep serving just
+// the configuration files. Values are plain text BY DESIGN (Mark's ruling):
 // it is the user's local machine, and the generated Hosts.yml carries them
 // as SECRETS_* template vars anyway. Independently of these vars, Hosts.rb
 // merges the working copy's secrets.yml/.secrets.yml at vagrant runtime —
@@ -152,8 +152,8 @@ func copyDocument(doc *Document) Document {
 	return out
 }
 
-// Replace overwrites the submitted categories (PUT /secrets semantics — the
-// same top-level shallow merge the settings surface uses) and persists the
+// Replace overwrites the submitted categories (PUT /api/secrets semantics, a
+// top-level shallow merge) and persists the
 // result. Unknown categories and invalid entry names are rejected whole; the
 // store never half-applies.
 func (s *Store) Replace(categories map[string]json.RawMessage) error {

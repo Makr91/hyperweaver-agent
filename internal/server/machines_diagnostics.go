@@ -12,14 +12,14 @@ import (
 	"github.com/Makr91/hyperweaver-agent/internal/vbox"
 )
 
-// injectNMIResponse is POST /machines/{machineName}/nmi's synchronous answer.
+// injectNMIResponse is POST /api/machines/{machineName}/nmi's synchronous answer.
 type injectNMIResponse struct {
 	Success     bool   `json:"success"`
 	MachineName string `json:"machine_name"`
 	Message     string `json:"message"`
 }
 
-// handleInjectNMI serves POST /machines/{machineName}/nmi — inject a
+// handleInjectNMI serves POST /api/machines/{machineName}/nmi — inject a
 // non-maskable interrupt into the running machine (VBoxManage debugvm
 // injectnmi): the diagnostic trigger for guest crash dumps / kernel
 // debuggers, zoneweaver's bhyvectl --inject-nmi mirror (Mark's parity go

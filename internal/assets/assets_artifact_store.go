@@ -47,7 +47,7 @@ func scanArtifact(row interface{ Scan(...any) error }) (*Artifact, error) {
 	return &a, nil
 }
 
-// ListFilter selects artifacts (GET /artifacts query parameters).
+// ListFilter selects artifacts (GET /api/artifacts query parameters).
 type ListFilter struct {
 	Kind       string
 	LocationID string

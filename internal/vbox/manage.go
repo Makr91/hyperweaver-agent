@@ -373,7 +373,7 @@ func GetMediumProperty(ctx context.Context, vboxManage, path, key string) (strin
 }
 
 // HDD is one `VBoxManage list hdds --long` block — the media inventory the
-// delete flow's stamp rule, the image attach pre-check, and GET /media read.
+// delete flow's stamp rule, the image attach pre-check, and GET /api/media read.
 type HDD struct {
 	// UUID is VirtualBox's registry identity for the medium — the
 	// registry-hygiene close targets it (closing a stale entry by PATH

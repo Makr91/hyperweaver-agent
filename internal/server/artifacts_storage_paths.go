@@ -19,13 +19,13 @@ import (
 
 // ---- storage paths ----
 
-// storagePathsResponse is GET /artifacts/storage/paths's answer.
+// storagePathsResponse is GET /api/artifacts/storage/paths's answer.
 type storagePathsResponse struct {
 	Paths      []*assets.Location `json:"paths"`
 	TotalPaths int                `json:"total_paths"`
 }
 
-// handleListStoragePaths: GET /artifacts/storage/paths (?type, ?enabled).
+// handleListStoragePaths: GET /api/artifacts/storage/paths (?type, ?enabled).
 //
 //	@Summary		List storage locations
 //	@Description	Minimum role: viewer. Every storage location — the five built-ins plus config/API-added paths. 503 when artifact_storage.enabled is false (every /api/artifacts endpoint shares this gate).
@@ -88,7 +88,7 @@ func (s *Server) artifactPathIDByPath(path string) string {
 	return ""
 }
 
-// createStoragePathRequest is POST /artifacts/storage/paths's body.
+// createStoragePathRequest is POST /api/artifacts/storage/paths's body.
 type createStoragePathRequest struct {
 	Name string `json:"name"`
 	Path string `json:"path"`
@@ -104,7 +104,7 @@ type storageLocationResponse struct {
 	StorageLocation *assets.Location `json:"storage_location"`
 }
 
-// handleCreateStoragePath: POST /artifacts/storage/paths.
+// handleCreateStoragePath: POST /api/artifacts/storage/paths.
 //
 //	@Summary		Add a storage location
 //	@Description	Minimum role: operator. Creates the directory (when absent), the location row, persists the entry into the storage configuration file under artifact_storage.paths keyed by an id derived from the name (so it survives restarts), and queues an initial scan.
@@ -208,14 +208,14 @@ func (s *Server) handleCreateStoragePath(w http.ResponseWriter, r *http.Request)
 	}
 }
 
-// updateStoragePathRequest is PUT /artifacts/storage/paths/{id}'s body
+// updateStoragePathRequest is PUT /api/artifacts/storage/paths/{id}'s body
 // (name and enabled only — path/type are identity).
 type updateStoragePathRequest struct {
 	Name    *string `json:"name"`
 	Enabled *bool   `json:"enabled"`
 }
 
-// handleUpdateStoragePath: PUT /artifacts/storage/paths/{id} (name, enabled).
+// handleUpdateStoragePath: PUT /api/artifacts/storage/paths/{id} (name, enabled).
 //
 //	@Summary		Update a storage location
 //	@Description	Minimum role: operator. name and enabled only (zoneweaver's contract — path/type are identity). Mirrored into the storage configuration file's entry.
@@ -261,7 +261,7 @@ func (s *Server) handleUpdateStoragePath(w http.ResponseWriter, r *http.Request)
 	})
 }
 
-// deleteStoragePathRequest is DELETE /artifacts/storage/paths/{id}'s optional body.
+// deleteStoragePathRequest is DELETE /api/artifacts/storage/paths/{id}'s optional body.
 type deleteStoragePathRequest struct {
 	// Recursive deletes the folder's contents (default true).
 	Recursive *bool `json:"recursive"`
@@ -271,7 +271,7 @@ type deleteStoragePathRequest struct {
 	Force bool `json:"force"`
 }
 
-// handleDeleteStoragePath: DELETE /artifacts/storage/paths/{id} — queues the
+// handleDeleteStoragePath: DELETE /api/artifacts/storage/paths/{id} — queues the
 // deletion task (contents + rows + the location row). Built-in locations
 // never delete: the startup sync would just recreate them.
 //

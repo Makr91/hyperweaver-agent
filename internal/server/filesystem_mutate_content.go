@@ -12,7 +12,7 @@ import (
 	"github.com/Makr91/hyperweaver-agent/internal/safepath"
 )
 
-// readFileContentResponse is GET /filesystem/content's answer.
+// readFileContentResponse is GET /api/filesystem/content's answer.
 type readFileContentResponse struct {
 	Content   string         `json:"content"`
 	FileInfo  fileSystemItem `json:"file_info"`
@@ -20,7 +20,7 @@ type readFileContentResponse struct {
 	SizeBytes int            `json:"size_bytes"`
 }
 
-// handleReadFileContent serves GET /filesystem/content — the base's readFile:
+// handleReadFileContent serves GET /api/filesystem/content — the base's readFile:
 // text files only, bounded by security.max_edit_size_mb.
 //
 //	@Summary		Read text file content
@@ -78,7 +78,7 @@ func (s *Server) handleReadFileContent(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// writeFileContentRequest is PUT /filesystem/content's body.
+// writeFileContentRequest is PUT /api/filesystem/content's body.
 type writeFileContentRequest struct {
 	Path    string  `json:"path"`
 	Content *string `json:"content"`
@@ -89,7 +89,7 @@ type writeFileContentRequest struct {
 	GID  *int   `json:"gid"`
 }
 
-// writeFileContentResponse is PUT /filesystem/content's answer.
+// writeFileContentResponse is PUT /api/filesystem/content's answer.
 type writeFileContentResponse struct {
 	Success     bool           `json:"success"`
 	Message     string         `json:"message"`
@@ -97,7 +97,7 @@ type writeFileContentResponse struct {
 	ContentSize int            `json:"content_size"`
 }
 
-// handleWriteFileContent serves PUT /filesystem/content — the base's
+// handleWriteFileContent serves PUT /api/filesystem/content — the base's
 // writeFile: {path, content, backup?, uid?, gid?, mode?}; backup copies the
 // existing file to <path>.backup.<unix-ms> first (failure narrates, never
 // blocks — the base's rule).

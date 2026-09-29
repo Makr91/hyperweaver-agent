@@ -368,7 +368,7 @@ func (s *Store) Ingest(ctx context.Context, location *Location, role, filename, 
 }
 
 // LandUpload streams a request body part to its final location path through
-// a temp file — the POST /artifacts/upload/{taskId} handler's write half;
+// a temp file — the POST /api/artifacts/upload/{taskId} handler's write half;
 // the artifact_upload executor hashes and registers afterwards.
 func LandUpload(location *Location, role, filename string, r io.Reader, overwrite bool) (path string, size int64, err error) {
 	target, err := PathFor(location, role, filename)

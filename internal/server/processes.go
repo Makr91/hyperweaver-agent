@@ -12,7 +12,7 @@ import (
 	"github.com/shirou/gopsutil/v4/process"
 )
 
-// Host process endpoints (/system/processes, the `processes` capability
+// Host process endpoints (/api/system/processes, the `processes` capability
 // token — architecture roadmap item 15, Mark's ruling 2026-07-05): the Node
 // agent's Processes group spoken in gopsutil instead of illumos ps/pgrep.
 // The zone concept does not exist on this host: the `zone` field is absent
@@ -20,8 +20,8 @@ import (
 // documented, never stubbed: /{pid}/stack and /{pid}/limits (pstack/plimit
 // are illumos tools with no cross-platform analog) and trace/start (DTrace).
 
-// processInfo is one process listing entry (GET /system/processes item and
-// GET /system/processes/{pid}). Every optional field is a pointer so a failed
+// processInfo is one process listing entry (GET /api/system/processes item and
+// GET /api/system/processes/{pid}). Every optional field is a pointer so a failed
 // gopsutil probe OMITS its key rather than emitting a zero value (the map
 // response this replaced added keys only when the probe succeeded).
 // detailed=false leaves the statistics block nil; open_files_sample is set
@@ -130,7 +130,7 @@ func matchProcesses(ctx context.Context, user string, command *regexp.Regexp) ([
 	return matched, nil
 }
 
-// handleListProcesses mirrors GET /system/processes: bare array response,
+// handleListProcesses mirrors GET /api/system/processes: bare array response,
 // user/command filters, detailed statistics on request.
 //
 //	@Summary		List processes
@@ -197,7 +197,7 @@ func (s *Server) findProcess(w http.ResponseWriter, r *http.Request) *process.Pr
 	return p
 }
 
-// handleProcessDetails mirrors GET /system/processes/{pid}.
+// handleProcessDetails mirrors GET /api/system/processes/{pid}.
 //
 //	@Summary		Process details
 //	@Description	Minimum role: viewer. Detailed statistics plus a sample of open files (empty on platforms where per-process file enumeration is unsupported).
@@ -227,13 +227,13 @@ func (s *Server) handleProcessDetails(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, row)
 }
 
-// processOpenFile is one entry in GET /system/processes/{pid}/files.
+// processOpenFile is one entry in GET /api/system/processes/{pid}/files.
 type processOpenFile struct {
 	Description string `json:"description"`
 	Fd          uint64 `json:"fd"`
 }
 
-// handleProcessFiles mirrors GET /system/processes/{pid}/files. Platforms
+// handleProcessFiles mirrors GET /api/system/processes/{pid}/files. Platforms
 // where gopsutil cannot enumerate per-process files degrade to an empty
 // list rather than failing the endpoint.
 //
@@ -262,14 +262,14 @@ func (s *Server) handleProcessFiles(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, entries)
 }
 
-// findProcessesResponse is GET /system/processes/find's answer.
+// findProcessesResponse is GET /api/system/processes/find's answer.
 type findProcessesResponse struct {
 	Count   int     `json:"count"`
 	Pattern string  `json:"pattern"`
 	Pids    []int32 `json:"pids"`
 }
 
-// handleFindProcesses mirrors GET /system/processes/find.
+// handleFindProcesses mirrors GET /api/system/processes/find.
 //
 //	@Summary		Find processes by pattern
 //	@Description	Minimum role: viewer.
@@ -309,7 +309,7 @@ func (s *Server) handleFindProcesses(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// processStatRow is one row in GET /system/processes/stats (the prstat view).
+// processStatRow is one row in GET /api/system/processes/stats (the prstat view).
 type processStatRow struct {
 	Command    string  `json:"command"`
 	CPUPercent float64 `json:"cpu_percent"`
@@ -321,7 +321,7 @@ type processStatRow struct {
 	Username string `json:"username"`
 }
 
-// handleProcessStats mirrors GET /system/processes/stats (the prstat view):
+// handleProcessStats mirrors GET /api/system/processes/stats (the prstat view):
 // processes ranked by CPU usage. One instant sample — gopsutil's process
 // CPU percentage is computed over the process lifetime, no sampling wait.
 //

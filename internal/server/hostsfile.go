@@ -14,12 +14,12 @@ import (
 	"github.com/Makr91/hyperweaver-agent/internal/safepath"
 )
 
-// Hosts-file endpoints (/system/hosts — the Node agent's Host Configuration
+// Hosts-file endpoints (/api/system/hosts — the Node agent's Host Configuration
 // group): read and replace the system hosts file on all three platforms, so
 // the platform can point names at its virtual machines (Mark's ruling,
 // 2026-07-05: "take control of the /etc/hosts file on mac, windows and
 // linux"). A timestamped backup lands beside the file before every write.
-// The /system/dns counterpart lives in dnsfile.go (the converged wire, sync
+// The /api/system/dns counterpart lives in dnsfile.go (the converged wire, sync
 // 2026-07-17): same wire on every platform, per-OS mechanics.
 
 // hostsFilePath returns the platform hosts file location.
@@ -70,7 +70,7 @@ type hostsFileResponse struct {
 	Path      string       `json:"path"`
 }
 
-// handleGetHostsFile mirrors GET /system/hosts — zoneweaver's shipped wire
+// handleGetHostsFile mirrors GET /api/system/hosts — zoneweaver's shipped wire
 // (Mark's ruling 2026-07-17: Go matches zoneweaver here): the standard
 // success envelope with entries/raw/path spread top-level.
 //
@@ -129,7 +129,7 @@ type hostsUpdateResponse struct {
 	Entries int    `json:"entries"`
 }
 
-// handleUpdateHostsFile mirrors PUT /system/hosts: timestamped backup beside
+// handleUpdateHostsFile mirrors PUT /api/system/hosts: timestamped backup beside
 // the file, then an atomic replace. Writing the file requires the same
 // privilege editing it by hand would (Administrator on Windows, root on
 // Unix) — a permission refusal fails honestly.

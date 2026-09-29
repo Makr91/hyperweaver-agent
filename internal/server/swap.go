@@ -13,7 +13,7 @@ import (
 // Swap endpoints (Agent API v1 Swap Management group) — Mark's ruling,
 // 2026-07-05: the Go agent serves the swap INFORMATION zoneweaver serves
 // ("zoneweaver has it, why can't the go agent have it?"). Read-only port of
-// SwapController.js: GET /system/swap/summary and GET /system/swap/areas,
+// SwapController.js: GET /api/system/swap/summary and GET /api/system/swap/areas,
 // response shapes mirrored. Deliberately NOT ported: POST add / DELETE
 // remove (OmniOS `swap -a`/`swap -d` semantics — Windows pagefiles and
 // macOS dynamic swap have no analog) and the low-swap monitoring endpoint
@@ -84,7 +84,7 @@ type swapRecommendation struct {
 // host — pools are a ZFS concept with no VirtualBox-host analog.
 type swapPoolDistribution struct{}
 
-// swapSummaryResponse is GET /system/swap/summary's answer. The swap size
+// swapSummaryResponse is GET /api/system/swap/summary's answer. The swap size
 // fields are plain numbers in BYTES (the converged wire — no formatted GB
 // strings, no unit division).
 type swapSummaryResponse struct {
@@ -101,7 +101,7 @@ type swapSummaryResponse struct {
 	MemoryStatsReference any                  `json:"memoryStatsReference"`
 }
 
-// handleSwapSummary mirrors GET /system/swap/summary: aggregate swap figures,
+// handleSwapSummary mirrors GET /api/system/swap/summary: aggregate swap figures,
 // the per-area breakdown, and the platform-neutral recommendation rule (the
 // >50% utilization alert). Pool analysis fields stay in the shape but empty —
 // pools are a ZFS concept with no VirtualBox-host analog.
@@ -182,14 +182,14 @@ type swapAreasPagination struct {
 	HasMore bool `json:"hasMore"`
 }
 
-// swapAreasResponse is GET /system/swap/areas' answer.
+// swapAreasResponse is GET /api/system/swap/areas' answer.
 type swapAreasResponse struct {
 	SwapAreas  []swapAreaRow       `json:"swapAreas"`
 	TotalCount int                 `json:"totalCount"`
 	Pagination swapAreasPagination `json:"pagination"`
 }
 
-// handleSwapAreas mirrors GET /system/swap/areas: the row-per-area listing
+// handleSwapAreas mirrors GET /api/system/swap/areas: the row-per-area listing
 // with the Node payload's pagination envelope. Rows are read live (this
 // agent has no collector table); the zvol pool filter has no meaning here
 // and is ignored.

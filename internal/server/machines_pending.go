@@ -10,7 +10,7 @@ import (
 	"github.com/Makr91/hyperweaver-agent/internal/tasks"
 )
 
-// clearPendingChangesResponse is DELETE /machines/{machineName}/pending-changes'
+// clearPendingChangesResponse is DELETE /api/machines/{machineName}/pending-changes'
 // answer: the top-level keys that were pending, now cleared.
 type clearPendingChangesResponse struct {
 	Success     bool     `json:"success"`

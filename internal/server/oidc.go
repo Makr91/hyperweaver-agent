@@ -53,7 +53,7 @@ func (l *startLimiter) allow(remoteAddr string) bool {
 }
 
 type deviceStartResponse struct {
-	// Opaque agent-side flow id for GET /auth/oidc/device-status (the device_code never leaves the agent)
+	// Opaque agent-side flow id for GET /api/auth/oidc/device-status (the device_code never leaves the agent)
 	Handle string `json:"handle"`
 	// Short code the user types (or confirms) at the identity provider
 	UserCode string `json:"user_code"`

@@ -67,7 +67,7 @@ func prioritized(ctx context.Context, store *Store) ([]PriorityEntry, error) {
 	return entries, nil
 }
 
-// Prioritized lists every machine with its priority (GET /machines/priorities).
+// Prioritized lists every machine with its priority (GET /api/machines/priorities).
 func Prioritized(ctx context.Context, store *Store) ([]PriorityEntry, error) {
 	return prioritized(ctx, store)
 }

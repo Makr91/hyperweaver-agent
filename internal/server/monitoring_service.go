@@ -8,7 +8,7 @@ import (
 	"github.com/Makr91/hyperweaver-agent/internal/version"
 )
 
-// monitoringHostResponse is GET /monitoring/host's answer.
+// monitoringHostResponse is GET /api/monitoring/host's answer.
 type monitoringHostResponse struct {
 	Host           string `json:"host"`
 	Hostname       string `json:"hostname"`
@@ -57,7 +57,7 @@ type monitoringSummaryFlags struct {
 	Collector      bool `json:"collector"`
 }
 
-// monitoringSummaryResponse is GET /monitoring/summary's answer.
+// monitoringSummaryResponse is GET /api/monitoring/summary's answer.
 type monitoringSummaryResponse struct {
 	Host    string                 `json:"host"`
 	Summary monitoringSummaryFlags `json:"summary"`
@@ -111,7 +111,7 @@ func (s *Server) handleMonitoringSummary(w http.ResponseWriter, r *http.Request)
 	writeJSON(w, response)
 }
 
-// monitoringStatusResponse is GET /monitoring/status's answer. config and
+// monitoringStatusResponse is GET /api/monitoring/status's answer. config and
 // stats are the service's own free-form documents.
 type monitoringStatusResponse struct {
 	IsRunning     bool           `json:"isRunning"`
@@ -152,7 +152,7 @@ type monitoringHealthService struct {
 	Stats          map[string]any `json:"stats"`
 }
 
-// monitoringHealthResponse is GET /monitoring/health's answer.
+// monitoringHealthResponse is GET /api/monitoring/health's answer.
 type monitoringHealthResponse struct {
 	// healthy | degraded (collector errors) | stopped (storage on, collector down)
 	Status  string                  `json:"status"`

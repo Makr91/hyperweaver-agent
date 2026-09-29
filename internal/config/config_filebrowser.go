@@ -25,7 +25,7 @@ type FileBrowserSecurityConfig struct {
 // tar).
 type FileBrowserArchiveConfig struct {
 	Enabled bool `yaml:"enabled" json:"enabled"`
-	// SupportedFormats limits what POST /filesystem/archive/create accepts.
+	// SupportedFormats limits what POST /api/filesystem/archive/create accepts.
 	SupportedFormats []string `yaml:"supported_formats" json:"supported_formats"`
 	// MaxArchiveSizeMB deletes a created archive that lands larger than this.
 	MaxArchiveSizeMB int `yaml:"max_archive_size_mb" json:"max_archive_size_mb"`
@@ -41,7 +41,7 @@ type FileBrowserConfig struct {
 	// drive letters on Windows and the real root elsewhere. (The base never
 	// needed this: its "/" IS the illumos root.)
 	Root string `yaml:"root" json:"root"`
-	// UploadSizeLimitGB caps one POST /filesystem/upload body.
+	// UploadSizeLimitGB caps one POST /api/filesystem/upload body.
 	UploadSizeLimitGB int                       `yaml:"upload_size_limit_gb" json:"upload_size_limit_gb"`
 	Security          FileBrowserSecurityConfig `yaml:"security" json:"security"`
 	Archive           FileBrowserArchiveConfig  `yaml:"archive"  json:"archive"`

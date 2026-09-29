@@ -1,5 +1,5 @@
 // Package hostname implements the set_hostname task executor (the
-// /network/hostname surface's async half — the converged wire, sync
+// /api/network/hostname surface's async half — the converged wire, sync
 // 2026-07-17: zoneweaver's exact op name, queued MachineName "system").
 // Per-platform apply with per-platform honesty (Mark's ruling: "surface
 // requires_restart honestly where the OS demands it"):

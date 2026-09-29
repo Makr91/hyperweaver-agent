@@ -9,13 +9,13 @@ import (
 	"time"
 )
 
-// processSignalRequest is POST /system/processes/{pid}/signal's body.
+// processSignalRequest is POST /api/system/processes/{pid}/signal's body.
 type processSignalRequest struct {
 	// TERM|KILL|HUP|INT|USR1|USR2|STOP|CONT (default TERM); Windows honors only TERM/KILL
 	Signal string `json:"signal"`
 }
 
-// processSignalResponse is POST /system/processes/{pid}/signal's answer.
+// processSignalResponse is POST /api/system/processes/{pid}/signal's answer.
 type processSignalResponse struct {
 	Message   string `json:"message"`
 	Pid       int32  `json:"pid"`
@@ -24,7 +24,7 @@ type processSignalResponse struct {
 	Timestamp string `json:"timestamp"`
 }
 
-// handleProcessSignal mirrors POST /system/processes/{pid}/signal. Signals
+// handleProcessSignal mirrors POST /api/system/processes/{pid}/signal. Signals
 // outside the platform's vocabulary answer 400 (Windows delivers only TERM
 // and KILL — there are no POSIX signals to send).
 //
@@ -72,13 +72,13 @@ func (s *Server) handleProcessSignal(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// processKillRequest is POST /system/processes/{pid}/kill's body.
+// processKillRequest is POST /api/system/processes/{pid}/kill's body.
 type processKillRequest struct {
 	// force=true kills immediately (SIGKILL-equivalent) instead of a graceful terminate
 	Force bool `json:"force"`
 }
 
-// processKillResponse is POST /system/processes/{pid}/kill's answer.
+// processKillResponse is POST /api/system/processes/{pid}/kill's answer.
 type processKillResponse struct {
 	Force     bool   `json:"force"`
 	Message   string `json:"message"`
@@ -87,7 +87,7 @@ type processKillResponse struct {
 	Timestamp string `json:"timestamp"`
 }
 
-// handleProcessKill mirrors POST /system/processes/{pid}/kill: graceful
+// handleProcessKill mirrors POST /api/system/processes/{pid}/kill: graceful
 // terminate, or SIGKILL-equivalent with force=true.
 //
 //	@Summary		Kill a process
@@ -132,7 +132,7 @@ func (s *Server) handleProcessKill(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// batchKillRequest is POST /system/processes/batch-kill's body.
+// batchKillRequest is POST /api/system/processes/batch-kill's body.
 type batchKillRequest struct {
 	Pattern string `json:"pattern"`
 	User    string `json:"user"`
@@ -146,7 +146,7 @@ type batchKillFailure struct {
 	Pid   int32  `json:"pid"`
 }
 
-// batchKillResponse is POST /system/processes/batch-kill's answer.
+// batchKillResponse is POST /api/system/processes/batch-kill's answer.
 type batchKillResponse struct {
 	Errors  []batchKillFailure `json:"errors"`
 	Killed  []int32            `json:"killed"`
@@ -155,7 +155,7 @@ type batchKillResponse struct {
 	Success bool               `json:"success"`
 }
 
-// handleBatchKillProcesses mirrors POST /system/processes/batch-kill. The
+// handleBatchKillProcesses mirrors POST /api/system/processes/batch-kill. The
 // agent's own process is refused — a batch pattern must not shoot the agent.
 //
 //	@Summary		Signal multiple processes by pattern

@@ -71,13 +71,13 @@ func (t *wsTickets) Lookup(ticket string) (machine string, ok bool) {
 	return entry.machine, true
 }
 
-// wsTicketResponse is GET /ws-ticket's answer.
+// wsTicketResponse is GET /api/ws-ticket's answer.
 type wsTicketResponse struct {
 	// 64 hex chars, valid 60 seconds
 	Ticket string `json:"ticket"`
 }
 
-// handleWsTicket mints a WebSocket upgrade ticket (the base's GET /ws-ticket
+// handleWsTicket mints a WebSocket upgrade ticket (the base's GET /api/ws-ticket
 // — operator role via the central policy's explicit /ws-ticket rule).
 //
 //	@Summary		Mint a WebSocket upgrade ticket
@@ -156,7 +156,7 @@ func writeFrame(ctx context.Context, conn *websocket.Conn, frame *outputFrame) e
 	return conn.Write(writeCtx, websocket.MessageText, raw)
 }
 
-// handleTaskStream serves GET /tasks/{taskId}/stream: replay the buffered (or
+// handleTaskStream serves GET /api/tasks/{taskId}/stream: replay the buffered (or
 // persisted) output, then live entries, then a final status frame and close —
 // the base's handleTaskStreamConnection.
 //

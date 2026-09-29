@@ -11,13 +11,13 @@ import (
 	"github.com/Makr91/hyperweaver-agent/internal/auth"
 )
 
-// renameItemRequest is PATCH /filesystem/rename's body.
+// renameItemRequest is PATCH /api/filesystem/rename's body.
 type renameItemRequest struct {
 	Path    string `json:"path"`
 	NewName string `json:"new_name"`
 }
 
-// renameItemResponse is PATCH /filesystem/rename's answer.
+// renameItemResponse is PATCH /api/filesystem/rename's answer.
 type renameItemResponse struct {
 	Success bool           `json:"success"`
 	Message string         `json:"message"`
@@ -26,7 +26,7 @@ type renameItemResponse struct {
 	NewPath string         `json:"new_path"`
 }
 
-// handleRenameItem serves PATCH /filesystem/rename — the base's renameItem:
+// handleRenameItem serves PATCH /api/filesystem/rename — the base's renameItem:
 // {path, new_name}, the name sanitized to [a-zA-Z0-9._-], same directory.
 //
 //	@Summary		Rename an item
@@ -85,7 +85,7 @@ func (s *Server) handleRenameItem(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// deleteFileItemRequest is DELETE /filesystem's body.
+// deleteFileItemRequest is DELETE /api/filesystem's body.
 type deleteFileItemRequest struct {
 	Path      string `json:"path"`
 	Recursive bool   `json:"recursive"`
@@ -101,7 +101,7 @@ type deletedItemInfo struct {
 	Size *int64 `json:"size,omitempty"`
 }
 
-// deleteFileItemResponse is DELETE /filesystem's answer.
+// deleteFileItemResponse is DELETE /api/filesystem's answer.
 type deleteFileItemResponse struct {
 	Success bool   `json:"success"`
 	Message string `json:"message"`
@@ -109,7 +109,7 @@ type deleteFileItemResponse struct {
 	DeletedItem *deletedItemInfo `json:"deleted_item,omitempty"`
 }
 
-// handleDeleteFileItem serves DELETE /filesystem — the base's deleteFileItem:
+// handleDeleteFileItem serves DELETE /api/filesystem — the base's deleteFileItem:
 // body {path, recursive?, force?}. Directories need recursive (a non-empty
 // directory without it fails honestly); force tolerates already-gone paths.
 //
@@ -186,7 +186,7 @@ func (s *Server) handleDeleteFileItem(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// changePermissionsRequest is PATCH /filesystem/permissions's body.
+// changePermissionsRequest is PATCH /api/filesystem/permissions's body.
 type changePermissionsRequest struct {
 	Path string `json:"path"`
 	UID  *int   `json:"uid"`
@@ -204,7 +204,7 @@ type permissionChanges struct {
 	Recursive bool   `json:"recursive"`
 }
 
-// changePermissionsResponse is PATCH /filesystem/permissions's answer.
+// changePermissionsResponse is PATCH /api/filesystem/permissions's answer.
 type changePermissionsResponse struct {
 	Success        bool              `json:"success"`
 	Message        string            `json:"message"`
@@ -212,7 +212,7 @@ type changePermissionsResponse struct {
 	ChangesApplied permissionChanges `json:"changes_applied"`
 }
 
-// handleChangePermissions serves PATCH /filesystem/permissions — the base's
+// handleChangePermissions serves PATCH /api/filesystem/permissions — the base's
 // changePermissions: {path, uid?, gid?, mode?, recursive?}. mode chmods (on
 // Windows that is the read-only attribute — Go's honest mapping); uid/gid
 // chown on Unix hosts and answer 400 on Windows.

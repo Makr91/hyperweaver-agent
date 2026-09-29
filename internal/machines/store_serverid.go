@@ -6,7 +6,7 @@ import (
 	"fmt"
 )
 
-// UsedServerID is one row of the GET /machines/ids listing.
+// UsedServerID is one row of the GET /api/machines/ids listing.
 type UsedServerID struct {
 	ServerID    string `json:"server_id"`
 	MachineName string `json:"machine_name"`

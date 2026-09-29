@@ -15,7 +15,7 @@ import (
 // controller on this platform), the priorities listing, and the dry-run test
 // plan. Priorities live in settings.boot_priority (Mark's ruling: the faithful
 // analog of the base's zonecfg attr) and update DB-immediately via PUT
-// /machines/{name} {boot_priority}.
+// /api/machines/{name} {boot_priority}.
 
 type orchestrationStatusResponse struct {
 	Controller           string `json:"controller"`
@@ -25,7 +25,7 @@ type orchestrationStatusResponse struct {
 	Success              bool   `json:"success"`
 }
 
-// handleOrchestrationStatus mirrors GET /machines/orchestration/status.
+// handleOrchestrationStatus mirrors GET /api/machines/orchestration/status.
 //
 //	@Summary		Orchestration status
 //	@Description	Minimum role: viewer. Whether ordered startup/shutdown is enabled (machines.orchestration.enabled) and the configured strategy. The base's SMF-controller handoff is illumos-only — this agent is the only lifecycle controller on its platform, so controller is hyperweaver-agent or none.
@@ -64,7 +64,7 @@ type orchestrationEnableResponse struct {
 	Success   bool   `json:"success"`
 }
 
-// handleOrchestrationEnable mirrors POST /machines/orchestration/enable
+// handleOrchestrationEnable mirrors POST /api/machines/orchestration/enable
 // (confirm required — the base's guard).
 //
 //	@Summary		Enable machine orchestration
@@ -106,7 +106,7 @@ type orchestrationDisableResponse struct {
 	Success    bool   `json:"success"`
 }
 
-// handleOrchestrationDisable mirrors POST /machines/orchestration/disable.
+// handleOrchestrationDisable mirrors POST /api/machines/orchestration/disable.
 //
 //	@Summary		Disable machine orchestration
 //	@Description	Minimum role: operator. Persists machines.orchestration.enabled: false.
@@ -144,7 +144,7 @@ type machinePrioritiesResponse struct {
 	TotalMachines  int                              `json:"total_machines"`
 }
 
-// handleMachinePriorities mirrors GET /machines/priorities: every machine
+// handleMachinePriorities mirrors GET /api/machines/priorities: every machine
 // with its priority, plus the tens-range grouping.
 //
 //	@Summary		Machine boot priorities
@@ -197,7 +197,7 @@ type orchestrationTestResponse struct {
 	TotalMachines     int                      `json:"total_machines"`
 }
 
-// handleOrchestrationTest mirrors POST /machines/orchestration/test: the
+// handleOrchestrationTest mirrors POST /api/machines/orchestration/test: the
 // dry-run SHUTDOWN plan (lowest priority first) over running machines —
 // nothing executes.
 //

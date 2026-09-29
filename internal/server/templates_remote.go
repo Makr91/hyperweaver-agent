@@ -17,9 +17,9 @@ import (
 
 // The remote-template discovery surface — zoneweaver's
 // TemplateSourceController mirrored (the base ALREADY served this; the Go
-// agent was the one missing it): GET /templates/sources lists the configured
-// registries, GET /templates/remote/{sourceName} serves the registry's
-// /api/discover catalog, and GET /templates/remote/{sourceName}/{org}/{boxName}
+// agent was the one missing it): GET /api/templates/sources lists the configured
+// registries, GET /api/templates/remote/{sourceName} serves the registry's
+// /api/discover catalog, and GET /api/templates/remote/{sourceName}/{org}/{boxName}
 // the Vagrant-compatible /{org}/{box} metadata document — BOTH filtered to
 // THIS host's provider set (virtualbox; utm when the capability probe
 // passes) AND the host's architecture
@@ -39,12 +39,12 @@ type templateSourceSummary struct {
 	Default bool   `json:"default"`
 }
 
-// templateSourcesResponse is GET /templates/sources' answer.
+// templateSourcesResponse is GET /api/templates/sources' answer.
 type templateSourcesResponse struct {
 	Sources []templateSourceSummary `json:"sources"`
 }
 
-// handleListTemplateSources mirrors GET /templates/sources: the enabled
+// handleListTemplateSources mirrors GET /api/templates/sources: the enabled
 // registries, credentials withheld.
 //
 //	@Summary		List configured template sources
@@ -222,7 +222,7 @@ func compatibleMetadataVersions(versions []any, providerSet map[string]bool) []a
 	return kept
 }
 
-// handleRemoteTemplates mirrors GET /templates/remote/{sourceName}: the
+// handleRemoteTemplates mirrors GET /api/templates/remote/{sourceName}: the
 // registry's discovery catalog — the wizard's box dropdown feed. ONE
 // discover call (BoxVault answers public boxes plus the API key's own
 // organization's — BoxVault-side change 2026-07-09; the agent-side
@@ -278,7 +278,7 @@ func (s *Server) handleRemoteTemplates(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleRemoteTemplateDetails mirrors GET
-// /templates/remote/{sourceName}/{org}/{boxName}: the Vagrant-compatible
+// /api/templates/remote/{sourceName}/{org}/{boxName}: the Vagrant-compatible
 // metadata document for one box (versions + providers + download URLs),
 // filtered to what THIS agent can consume — a box that exists upstream but
 // carries nothing downloadable here answers 404, same as absent.

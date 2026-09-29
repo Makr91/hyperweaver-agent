@@ -22,7 +22,7 @@ type monitoringIPPage struct {
 	Offset int `json:"offset"`
 }
 
-// monitoringIPAddressesResponse is GET /monitoring/network/ipaddresses'
+// monitoringIPAddressesResponse is GET /api/monitoring/network/ipaddresses'
 // answer.
 type monitoringIPAddressesResponse struct {
 	Addresses  []monitoringIPAddress `json:"addresses"`

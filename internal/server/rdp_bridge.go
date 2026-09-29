@@ -37,7 +37,7 @@ import (
 //   console (default) — the VRDE hypervisor console at 127.0.0.1:<vrde port>,
 //     verified against the AGENT CA (the vrde-tls setup mints from it).
 //     VirtualBox's VRDE defaults to Standard RDP Security, which no browser
-//     path can ride — POST /machines/{name}/vrde-tls is the turnkey fix.
+//     path can ride — POST /api/machines/{name}/vrde-tls is the turnkey fix.
 //   guest — a Windows guest's OWN RDP service at its host-reachable IP:3389
 //     (resolved by guestRDPAddress: guest agent → Additions → control IP).
 //     The guest presents its OWN cert (self-signed or domain-issued), so the
@@ -207,7 +207,7 @@ func x224ConfirmOutcome(confirm []byte) (selected uint32, failure, hasPayload bo
 	return 0, false, false
 }
 
-// handleRDPBridge serves GET /machines/{machineName}/rdp-bridge (WebSocket,
+// handleRDPBridge serves GET /api/machines/{machineName}/rdp-bridge (WebSocket,
 // ?ticket= auth like every upgrade): the IronRDP web client's transport.
 // The RDCleanPath destination field is advisory here — the ticket already
 // authorized THIS machine's bridge and both targets resolve server-side

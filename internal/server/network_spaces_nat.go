@@ -52,7 +52,7 @@ type natNetworkResponse struct {
 	Message string `json:"message"`
 }
 
-// natNetworkCreateRequest is POST /network/spaces/natnetwork's body.
+// natNetworkCreateRequest is POST /api/network/spaces/natnetwork's body.
 type natNetworkCreateRequest struct {
 	Name    string `json:"name"`
 	CIDR    string `json:"cidr"`
@@ -61,7 +61,7 @@ type natNetworkCreateRequest struct {
 	IPv6    *bool  `json:"ipv6"`
 }
 
-// handleCreateNATNetwork serves POST /network/spaces/natnetwork.
+// handleCreateNATNetwork serves POST /api/network/spaces/natnetwork.
 //
 //	@Summary		Create a NAT network
 //	@Description	Minimum role: operator. VBoxManage natnetwork add: name + cidr required; enabled defaults true; dhcp/ipv6 toggle the built-in DHCP server and IPv6 support.
@@ -128,7 +128,7 @@ func (s *Server) findNATNetwork(w http.ResponseWriter, r *http.Request, exe stri
 	return "", false
 }
 
-// natNetworkModifyRequest is PUT /network/spaces/natnetwork/{name}'s body —
+// natNetworkModifyRequest is PUT /api/network/spaces/natnetwork/{name}'s body —
 // knob changes plus port-forward and loopback rule add/remove lists.
 type natNetworkModifyRequest struct {
 	CIDR               string                 `json:"cidr"`
@@ -141,7 +141,7 @@ type natNetworkModifyRequest struct {
 	RemoveLoopbacks    []natLoopbackBody      `json:"remove_loopbacks"`
 }
 
-// handleModifyNATNetwork serves PUT /network/spaces/natnetwork/{name} —
+// handleModifyNATNetwork serves PUT /api/network/spaces/natnetwork/{name} —
 // converge the knobs and apply port-forward/loopback rule changes (removes
 // first, so a rule can be replaced in one call).
 //
@@ -263,7 +263,7 @@ func (s *Server) handleModifyNATNetwork(w http.ResponseWriter, r *http.Request) 
 	})
 }
 
-// handleDeleteNATNetwork serves DELETE /network/spaces/natnetwork/{name}.
+// handleDeleteNATNetwork serves DELETE /api/network/spaces/natnetwork/{name}.
 //
 //	@Summary		Remove a NAT network
 //	@Description	Minimum role: operator. VBoxManage natnetwork remove. Machines whose adapters name the network lose their uplink — VirtualBox does not refuse.
@@ -297,7 +297,7 @@ func (s *Server) handleDeleteNATNetwork(w http.ResponseWriter, r *http.Request) 
 }
 
 // handleStartNATNetwork / handleStopNATNetwork serve POST
-// /network/spaces/natnetwork/{name}/start|stop — the service process.
+// /api/network/spaces/natnetwork/{name}/start|stop — the service process.
 //
 //	@Summary		Start a NAT network's service
 //	@Description	Minimum role: operator. VBoxManage natnetwork start — the network's NAT service process (an enabled network normally starts with its first attached VM; this is the explicit control).

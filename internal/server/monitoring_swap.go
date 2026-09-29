@@ -17,14 +17,14 @@ type lowSwapHost struct {
 	LastChecked        time.Time `json:"last_checked"`
 }
 
-// lowSwapHostsResponse is GET /monitoring/hosts/low-swap's answer.
+// lowSwapHostsResponse is GET /api/monitoring/hosts/low-swap's answer.
 type lowSwapHostsResponse struct {
 	HostsWithLowSwap []lowSwapHost `json:"hostsWithLowSwap"`
 	TotalCount       int           `json:"totalCount"`
 	Threshold        float64       `json:"threshold"`
 }
 
-// handleLowSwapHosts mirrors GET /monitoring/hosts/low-swap for the
+// handleLowSwapHosts mirrors GET /api/monitoring/hosts/low-swap for the
 // single-host case: this host appears in the list when its live swap
 // utilization exceeds the threshold.
 //

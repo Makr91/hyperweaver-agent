@@ -96,7 +96,7 @@ func (s *termSessions) close(id string) bool {
 	return ok
 }
 
-// handleStartTermSession mints a host terminal session (POST /term/start);
+// handleStartTermSession mints a host terminal session (POST /api/term/start);
 // the shell itself opens when the WebSocket connects.
 //
 //	@Summary		Start a host terminal session
@@ -122,7 +122,7 @@ func (s *Server) handleStartTermSession(w http.ResponseWriter, _ *http.Request) 
 	writeJSON(w, session)
 }
 
-// handleListTermSessions mirrors GET /term/sessions.
+// handleListTermSessions mirrors GET /api/term/sessions.
 //
 //	@Summary		List host terminal sessions
 //	@Description	Minimum role: admin. Newest first.
@@ -134,7 +134,7 @@ func (s *Server) handleListTermSessions(w http.ResponseWriter, _ *http.Request) 
 	writeJSON(w, s.termSessions.snapshot())
 }
 
-// handleTermSessionInfo mirrors GET /term/sessions/{sessionId}.
+// handleTermSessionInfo mirrors GET /api/term/sessions/{sessionId}.
 //
 //	@Summary		Host terminal session information
 //	@Description	Minimum role: admin.
@@ -153,7 +153,7 @@ func (s *Server) handleTermSessionInfo(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, session)
 }
 
-// handleStopTermSession mirrors DELETE /term/sessions/{sessionId}/stop.
+// handleStopTermSession mirrors DELETE /api/term/sessions/{sessionId}/stop.
 //
 //	@Summary		Stop a host terminal session
 //	@Description	Minimum role: admin. Closes the shell and marks the session closed.
@@ -190,7 +190,7 @@ func parseResizeFrame(data []byte) (cols, rows int, ok bool) {
 	return control.Cols, control.Rows, true
 }
 
-// handleTermSocket serves the WebSocket at /term/{sessionId}: opens the host
+// handleTermSocket serves the WebSocket at /api/term/{sessionId}: opens the host
 // shell and pipes it — the SSH socket's exact wire.
 //
 //	@Summary		Host terminal (WebSocket)

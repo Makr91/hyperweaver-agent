@@ -8,7 +8,7 @@ import (
 	"github.com/Makr91/hyperweaver-agent/internal/machines"
 )
 
-// bridgedInterfaceRow is one row of GET /provisioning/bridged-interfaces.
+// bridgedInterfaceRow is one row of GET /api/provisioning/bridged-interfaces.
 type bridgedInterfaceRow struct {
 	Name  string `json:"name"`
 	Class string `json:"class"`
@@ -17,7 +17,7 @@ type bridgedInterfaceRow struct {
 	Wireless bool   `json:"wireless"`
 }
 
-// bridgedInterfacesResponse is GET /provisioning/bridged-interfaces's answer.
+// bridgedInterfacesResponse is GET /api/provisioning/bridged-interfaces's answer.
 type bridgedInterfacesResponse struct {
 	Interfaces []bridgedInterfaceRow `json:"interfaces"`
 	Default    string                `json:"default"`

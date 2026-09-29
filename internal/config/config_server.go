@@ -50,7 +50,7 @@ type CORSConfig struct {
 
 // StatsConfig controls the /stats endpoint (the Node agent's stats block).
 type StatsConfig struct {
-	// PublicAccess serves GET /stats without an API key.
+	// PublicAccess serves GET /api/stats without an API key.
 	PublicAccess bool `yaml:"public_access" json:"public_access"`
 }
 

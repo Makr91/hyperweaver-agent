@@ -117,14 +117,14 @@ func (s *Server) machineRDPTargets(w http.ResponseWriter, r *http.Request) (*mac
 	return machine, targets
 }
 
-// rdpInfoResponse is GET /machines/{machineName}/rdp's answer: the machine's
+// rdpInfoResponse is GET /api/machines/{machineName}/rdp's answer: the machine's
 // resolvable RDP targets.
 type rdpInfoResponse struct {
 	MachineName string      `json:"machine_name"`
 	Targets     []rdpTarget `json:"targets"`
 }
 
-// handleMachineRDPInfo serves GET /machines/{name}/rdp.
+// handleMachineRDPInfo serves GET /api/machines/{name}/rdp.
 //
 //	@Summary		RDP connection info
 //	@Description	Minimum role: viewer (the host-launchers capability token). The machine's resolvable RDP targets — TWO kinds (Mark's settled design 2026-07-09): `console` = the VRDE hypervisor console at 127.0.0.1:<vrde port> (base VRDP ships in VirtualBox 7.2, NO extpack needed; EFI/boot screens, any guest OS; set the port via settings.consoleport at create or hardware.vrde.port — avoid 3389, it collides with a Windows host's own Remote Desktop; resolves ON the agent host only), and `guest` = a guest's OWN RDP service (Windows guests) at a host-reachable IP — the QEMU guest agent's live view first (the QGA channel, no Guest Additions needed), the Guest Additions' /VirtualBox/GuestInfo/Net/*/V4/IP properties second (the provisioning NAT's 10.0.2.x excluded either way), the document's control IP as fallback, port 3389. NO port-forwards are created; a machine with neither target answers 400 — the capability is honestly absent. rdp_url uses the rdp://full%20address=s:<host>:<port> handler vocabulary.
@@ -171,13 +171,13 @@ func launchRDP(target *rdpTarget) {
 	}()
 }
 
-// openRDPRequest is POST /machines/{machineName}/open-rdp's optional body.
+// openRDPRequest is POST /api/machines/{machineName}/open-rdp's optional body.
 type openRDPRequest struct {
 	// Which resolved target to open (default: console if resolvable, else guest)
 	Target string `json:"target"`
 }
 
-// openRDPResponse is POST /machines/{machineName}/open-rdp's answer: the target
+// openRDPResponse is POST /api/machines/{machineName}/open-rdp's answer: the target
 // the agent host's RDP client was launched at.
 type openRDPResponse struct {
 	Success     bool       `json:"success"`
@@ -186,7 +186,7 @@ type openRDPResponse struct {
 	Message     string     `json:"message"`
 }
 
-// handleOpenMachineRDP serves POST /machines/{name}/open-rdp: body optionally
+// handleOpenMachineRDP serves POST /api/machines/{name}/open-rdp: body optionally
 // picks {target: "console" | "guest"}; default = console when VRDE is live,
 // else the guest target.
 //

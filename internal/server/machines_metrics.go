@@ -19,7 +19,7 @@ import (
 // debugger's cumulative byte counters, diffed into rates between polls exactly
 // like the GUI. Realtime only — one live sample per RUNNING machine; stopped
 // machines have no VM process and are absent. The wire mirrors zoneweaver's
-// GET /monitoring/zones/usage answer ({usage, totalCount, returnedCount}) with
+// GET /api/monitoring/zones/usage answer ({usage, totalCount, returnedCount}) with
 // this agent's machine_name filter and sampling block.
 
 type machineUsageSample struct {
@@ -56,9 +56,9 @@ type machineNicUsage struct {
 	TxTotalBytes int64  `json:"tx_total_bytes"`
 }
 
-// machineUsageResponse is GET /monitoring/machines/usage's answer — the
+// machineUsageResponse is GET /api/monitoring/machines/usage's answer — the
 // zoneweaver-shaped envelope (the usage rows plus counts and this agent's
-// sampling block), mirroring zoneweaver's GET /monitoring/zones/usage.
+// sampling block), mirroring zoneweaver's GET /api/monitoring/zones/usage.
 type machineUsageResponse struct {
 	Usage         []*machineUsageSample `json:"usage"`
 	TotalCount    int                   `json:"totalCount"`
@@ -98,7 +98,7 @@ func newMachineMetricsState() *machineMetricsState {
 	}
 }
 
-// handleMachineUsageMetrics serves GET /monitoring/machines/usage.
+// handleMachineUsageMetrics serves GET /api/monitoring/machines/usage.
 //
 //	@Summary		Per-machine usage metrics
 //	@Description	Minimum role: viewer. Per-machine CPU/RAM/network/disk usage from VirtualBox's OWN telemetry (Mark's ruling, sync 2026-07-19 — never host-OS process tracking): CPU and RAM from the metrics subsystem the Manager GUI's Resource Use tab reads (VBoxManage metrics — the agent runs `metrics setup --period 1 --samples 1` lazily per machine, so the FIRST answer after an agent or machine start can carry null CPU/RAM while collection warms up for a second), network and disk from the VM debugger's cumulative byte counters (VBoxManage debugvm statistics — ReceiveBytes/TransmitBytes/ReadBytes/WrittenBytes summed across devices), diffed into per-second rates between polls exactly like the GUI (rates are null on the first observation and across a VM restart's counter reset; totals are since the VM process started). REALTIME ONLY — one live sample per RUNNING machine, newest state every call; stopped machines have no VM process and are ABSENT from the answer (poll the list — presence = running). RAM'S GUEST-ADDITIONS DEPENDENCY (the GUI's "requires guest additions" banner): rss_bytes/ram_total_bytes/ram_free_bytes are null when the guest reports nothing, and guest_additions says whether any Guest/* metric answered — the UI renders the same honest blank the GUI does. The answer mirrors zoneweaver's GET /api/monitoring/zones/usage envelope ({usage, totalCount, returnedCount} + this agent's sampling block); the sample vocabulary matches where the platforms overlap (host, machine_name for zone_name, cpu_pct = percent of TOTAL host CPU, rss_bytes) and speaks VirtualBox where they differ (guest-vs-VMM CPU split, net/disk rates — zoneweaver's disk I/O is per-ZVOL on its own endpoint).

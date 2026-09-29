@@ -106,7 +106,7 @@ func (s *Service) Running() bool {
 	return s.running
 }
 
-// Stats returns the collector's bookkeeping for /monitoring/status.
+// Stats returns the collector's bookkeeping for /api/monitoring/status.
 func (s *Service) Stats() map[string]any {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -163,7 +163,7 @@ func (s *Service) loop() {
 }
 
 // CollectOnce takes one sample of every family and stores it — the collector
-// tick, also invoked directly by POST /monitoring/collect. Returns the
+// tick, also invoked directly by POST /api/monitoring/collect. Returns the
 // per-family outcomes.
 func (s *Service) CollectOnce(ctx context.Context) map[string]string {
 	results := map[string]string{}

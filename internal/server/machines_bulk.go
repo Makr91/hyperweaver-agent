@@ -15,7 +15,7 @@ import (
 
 // Bulk machine operations and server-id endpoints (Agent API v1 machines
 // surface). Bulk start/stop queue tasks across many machines at once;
-// /machines/ids serves the server_id registry.
+// /api/machines/ids serves the server_id registry.
 
 // bulkRequest is the bulk body: "all" or a name array.
 type bulkRequest struct {
@@ -29,8 +29,8 @@ type bulkSkip struct {
 	Reason  string `json:"reason"`
 }
 
-// bulkResponse is the 200 body of POST /machines/bulk/start and
-// /machines/bulk/stop.
+// bulkResponse is the 200 body of POST /api/machines/bulk/start and
+// /api/machines/bulk/stop.
 type bulkResponse struct {
 	Success bool `json:"success"`
 	// bulk_start or bulk_stop
@@ -220,7 +220,7 @@ func formatBulkMessage(operation string, created, skipped int) string {
 	return fmt.Sprintf("%d %s tasks queued, %d skipped", created, operation, skipped)
 }
 
-// serverIDConstraints is GET /machines/ids' constraints block — the
+// serverIDConstraints is GET /api/machines/ids' constraints block — the
 // server_id vocabulary (numeric, 4-8 digits).
 type serverIDConstraints struct {
 	Format    string `json:"format"`
@@ -230,7 +230,7 @@ type serverIDConstraints struct {
 	MaxValue  int    `json:"max_value"`
 }
 
-// serverIDsResponse is GET /machines/ids's answer.
+// serverIDsResponse is GET /api/machines/ids's answer.
 type serverIDsResponse struct {
 	Used          []machines.UsedServerID `json:"used"`
 	Constraints   serverIDConstraints     `json:"constraints"`
@@ -273,7 +273,7 @@ func (s *Server) handleServerIDs(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// nextServerIDResponse is GET /machines/ids/next's answer.
+// nextServerIDResponse is GET /api/machines/ids/next's answer.
 type nextServerIDResponse struct {
 	ServerID string `json:"server_id"`
 }

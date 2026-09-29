@@ -21,7 +21,7 @@ type artifactPagination struct {
 	HasMore bool `json:"has_more"`
 }
 
-// artifactListResponse is GET /artifacts's answer. Each row keeps the
+// artifactListResponse is GET /api/artifacts's answer. Each row keeps the
 // artifactJSON document shape (the zoneweaver Artifact fields plus the
 // computed extension/mime_type/checksum_verified/verified/storage_location).
 type artifactListResponse struct {
@@ -66,7 +66,7 @@ type artifactStatsResponse struct {
 	RecentActivity   artifactStatsActivity         `json:"recent_activity"`
 }
 
-// handleListArtifacts: GET /artifacts (?type, ?storage_path_id, ?role,
+// handleListArtifacts: GET /api/artifacts (?type, ?storage_path_id, ?role,
 // ?search, ?limit, ?offset, ?sort_by, ?sort_order).
 //
 //	@Summary		List artifacts
@@ -168,7 +168,7 @@ func (s *Server) handleListImageArtifacts(w http.ResponseWriter, r *http.Request
 	s.handleListArtifacts(w, r)
 }
 
-// handleArtifactDetails: GET /artifacts/{id}.
+// handleArtifactDetails: GET /api/artifacts/{id}.
 //
 //	@Summary		Artifact details
 //	@Description	Minimum role: viewer.
@@ -201,7 +201,7 @@ func (s *Server) handleArtifactDetails(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, artifactJSON(artifact, location))
 }
 
-// handleArtifactStats: GET /artifacts/stats.
+// handleArtifactStats: GET /api/artifacts/stats.
 //
 //	@Summary		Artifact statistics
 //	@Description	Minimum role: viewer. Totals per type, per-location summaries, and 24h task activity.
@@ -271,7 +271,7 @@ func (s *Server) handleArtifactStats(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// handleArtifactServiceStatus: GET /artifacts/service/status.
+// handleArtifactServiceStatus: GET /api/artifacts/service/status.
 //
 //	@Summary		Storage service status
 //	@Description	Minimum role: viewer. The scan service's state (zoneweaver's getStatus shape): running/initialized/scanning flags, config summary, scan-run stats, active intervals.

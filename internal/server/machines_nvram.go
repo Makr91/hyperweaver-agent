@@ -28,7 +28,7 @@ type secureBootResponse struct {
 	Message     string   `json:"message"`
 }
 
-// handleSecureBoot serves POST /machines/{machineName}/nvram/secureboot —
+// handleSecureBoot serves POST /api/machines/{machineName}/nvram/secureboot —
 // the Secure Boot lifecycle on an EFI-firmware machine, powered off:
 // optionally (re)initialize the UEFI variable store (DESTRUCTIVE — wipes
 // enrolled keys and boot entries), optionally enroll the standard keys
@@ -128,7 +128,7 @@ type guestControlRunResponse struct {
 	Stderr      string `json:"stderr"`
 }
 
-// handleGuestControlRun serves POST /machines/{machineName}/guestcontrol/run
+// handleGuestControlRun serves POST /api/machines/{machineName}/guestcontrol/run
 // — execute a program in a running guest through Guest Additions
 // (guestcontrol run): the credentialed sibling of the QGA exec channel.
 // Guest Additions take password auth ONLY; credentials default from the

@@ -31,7 +31,7 @@ type SnapshotPolicyConfig struct {
 // SnapshotsConfig controls the scheduled snapshot rotation service —
 // zoneweaver's snapshots block (its Snapshoter.sh replacement) on this
 // hypervisor's VBoxManage snapshot family. Per-machine override: the PUT
-// /machines/{name} `snapshots` field (configuration.snapshots; type none
+// /api/machines/{name} `snapshots` field (configuration.snapshots; type none
 // disables per machine, null clears back to this default).
 type SnapshotsConfig struct {
 	Enabled bool `yaml:"enabled" json:"enabled"`

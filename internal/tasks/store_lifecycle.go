@@ -50,7 +50,7 @@ func (s *Store) CancelDependents(ctx context.Context) ([]string, error) {
 	return parents, nil
 }
 
-// CancelPending cancels a still-pending task (the DELETE /tasks/{id} fast
+// CancelPending cancels a still-pending task (the DELETE /api/tasks/{id} fast
 // path). False when the task was no longer pending by the time of the update.
 func (s *Store) CancelPending(ctx context.Context, id string) (bool, error) {
 	now := formatTime(time.Now())
@@ -68,7 +68,7 @@ func (s *Store) CancelPending(ctx context.Context, id string) (bool, error) {
 }
 
 // DeleteFinished hard-deletes all completed, failed, and cancelled tasks
-// (DELETE /tasks/completed) and returns how many were removed.
+// (DELETE /api/tasks/completed) and returns how many were removed.
 func (s *Store) DeleteFinished(ctx context.Context) (int64, error) {
 	res, err := s.db.ExecContext(ctx, `DELETE FROM tasks
 		WHERE status IN ('completed', 'completed_with_errors', 'failed', 'cancelled')`)

@@ -1,7 +1,7 @@
 // Package config loads and provides the agent's YAML configuration.
 package config
 
-// MonitoringConfig controls the host telemetry surface (/monitoring/*, the
+// MonitoringConfig controls the host telemetry surface (/api/monitoring/*, the
 // `monitoring` capability token — the Node agent's host_monitoring block,
 // reshaped per Mark's 2026-07-05 ruling): the endpoints always serve REALTIME
 // samples; enabling storage adds a background collector writing time series
@@ -21,7 +21,7 @@ type MonitoringConfig struct {
 	RetentionDays int `yaml:"retention_days" json:"retention_days"`
 }
 
-// HostPowerConfig gates the host power-management surface (/system/host/*,
+// HostPowerConfig gates the host power-management surface (/api/system/host/*,
 // the `host-power` capability token): remote shutdown/restart of the machine
 // the agent runs on — half the point of a headless datacenter host, an
 // obvious kill-switch candidate on a desktop.

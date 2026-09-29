@@ -8,7 +8,7 @@ import (
 	"github.com/Makr91/hyperweaver-agent/internal/vbox"
 )
 
-// mediaEntry is one medium row in GET /media's inventory.
+// mediaEntry is one medium row in GET /api/media's inventory.
 type mediaEntry struct {
 	// The medium file's agent-host location
 	Path   string `json:"path"`
@@ -21,13 +21,13 @@ type mediaEntry struct {
 	InUseBy []string `json:"in_use_by"`
 }
 
-// mediaListResponse is GET /media's answer.
+// mediaListResponse is GET /api/media's answer.
 type mediaListResponse struct {
 	Media []mediaEntry `json:"media"`
 	Total int          `json:"total"`
 }
 
-// GET /media — the host's disk-medium inventory (typed disk spec, converged
+// GET /api/media — the host's disk-medium inventory (typed disk spec, converged
 // sync 2026-07-17): every medium VirtualBox's media registry knows, with its
 // provenance stamp (the hyperweaver:source property, .hw-source sidecar
 // fallback; null = unstamped/foreign — the agent never created it and delete

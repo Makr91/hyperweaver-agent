@@ -14,7 +14,7 @@ import (
 // The syncback executor — folders[].syncback (Mark's ruling 2026-07-12,
 // replacing his Hosts.rb results hack): flagged folders pull guest→host as
 // the document walk's CLOSING BRACKET by document structure (after the post
-// hooks), and ad-hoc via POST /machines/{name}/sync {"syncback": true}. One folder
+// hooks), and ad-hoc via POST /api/machines/{name}/sync {"syncback": true}. One folder
 // per task, the exact reverse of machine_sync: guest folder.to → host
 // folder.map, transport per the folder's own ladder. Two deliberate
 // asymmetries against the push: folder.delete is NEVER honored (a pull must

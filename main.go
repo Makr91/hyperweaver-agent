@@ -188,7 +188,7 @@ func run() error {
 	// First-boot setup token on a headless install: while the agent can still
 	// be bootstrapped (no keys yet), ensure the token exists and print it so a
 	// host admin can read it. It opens the setup page and guards
-	// POST /api-keys/bootstrap; PUT /api/setup deletes it. A desktop install
+	// POST /api/api-keys/bootstrap; PUT /api/setup deletes it. A desktop install
 	// needs none: the tray Open and the hwa:// link sign the owner in.
 	if *headless && cfg.APIKeys.BootstrapEnabled && cfg.APIKeys.BootstrapRequireClaimToken && keyStore.Count() == 0 {
 		if token := auth.GetOrGenerateSetupToken(cfg.SetupTokenPath()); token != "" {
@@ -210,7 +210,7 @@ func run() error {
 	}
 
 	// openUI is the one signed-in-browser action shared by every entry point:
-	// the tray Open click, the hwa:// protocol handler (POST /protocol/open
+	// the tray Open click, the hwa:// protocol handler (POST /api/protocol/open
 	// on Windows/Linux, the in-process Apple Event on macOS), and a
 	// cold-start protocol invocation. Local presence is the credential: a
 	// single-use token in the URL fragment signs the SPA in without a login

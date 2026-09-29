@@ -36,7 +36,7 @@ func (s *Server) cpuSamples(r *http.Request, q monitoringQuery) ([]monitoring.CP
 	return []monitoring.CPUSample{*sample}, "realtime", nil
 }
 
-// cpuStatsResponse is GET /monitoring/system/cpu's answer.
+// cpuStatsResponse is GET /api/monitoring/system/cpu's answer.
 type cpuStatsResponse struct {
 	CPU           []monitoring.CPUSample `json:"cpu"`
 	TotalCount    int                    `json:"totalCount"`
@@ -83,7 +83,7 @@ func (s *Server) handleMonitoringCPU(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, response)
 }
 
-// memoryStatsResponse is GET /monitoring/system/memory's answer.
+// memoryStatsResponse is GET /api/monitoring/system/memory's answer.
 type memoryStatsResponse struct {
 	Memory        []monitoring.MemorySample `json:"memory"`
 	TotalCount    int                       `json:"totalCount"`
@@ -169,7 +169,7 @@ type loadMetricsMetadata struct {
 	MetricsIncluded []string `json:"metrics_included"`
 }
 
-// loadMetricsResponse is GET /monitoring/system/load's answer.
+// loadMetricsResponse is GET /api/monitoring/system/load's answer.
 type loadMetricsResponse struct {
 	Load       []loadMetricsEntry  `json:"load"`
 	TotalCount int                 `json:"totalCount"`
@@ -179,7 +179,7 @@ type loadMetricsResponse struct {
 }
 
 // loadEntry reshapes a CPU sample into the load-metrics chart shape (the
-// Node agent's /monitoring/system/load items). Activity counters the
+// Node agent's /api/monitoring/system/load items). Activity counters the
 // platform does not report stay zero.
 func loadEntry(sample *monitoring.CPUSample) loadMetricsEntry {
 	return loadMetricsEntry{

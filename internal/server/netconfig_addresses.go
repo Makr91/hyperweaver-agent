@@ -7,7 +7,7 @@ import (
 	"strings"
 )
 
-// networkAddress is one GET /network/addresses entry — zoneweaver's shipped
+// networkAddress is one GET /api/network/addresses entry — zoneweaver's shipped
 // shape {addrobj, interface, type, state, addr, ip_version, source}.
 type networkAddress struct {
 	AddrObj   string `json:"addrobj"`
@@ -19,7 +19,7 @@ type networkAddress struct {
 	Source    string `json:"source"`
 }
 
-// networkAddressList is the bare GET /network/addresses document
+// networkAddressList is the bare GET /api/network/addresses document
 // {addresses, total, source} — always the live view on this agent.
 type networkAddressList struct {
 	Addresses []networkAddress `json:"addresses"`
@@ -29,7 +29,7 @@ type networkAddressList struct {
 	Source string `json:"source"`
 }
 
-// handleListNetworkAddresses mirrors GET /network/addresses (zoneweaver's
+// handleListNetworkAddresses mirrors GET /api/network/addresses (zoneweaver's
 // shipped wire, sync 2026-07-17) over Go's stdlib interface enumeration —
 // always LIVE (?live is ignored: this agent has no collector database).
 // Honest vocabulary limits of a Go host, documented on the spec too:

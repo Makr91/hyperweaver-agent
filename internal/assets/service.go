@@ -332,7 +332,7 @@ type ServiceStatusIntervals struct {
 	PeriodicScan bool `json:"periodicScan"`
 }
 
-// ServiceStatus is GET /artifacts/service/status's answer.
+// ServiceStatus is GET /api/artifacts/service/status's answer.
 type ServiceStatus struct {
 	IsRunning       bool                   `json:"isRunning"`
 	IsInitialized   bool                   `json:"isInitialized"`
@@ -342,7 +342,7 @@ type ServiceStatus struct {
 	ActiveIntervals ServiceStatusIntervals `json:"activeIntervals"`
 }
 
-// Status answers GET /artifacts/service/status (zoneweaver's getStatus
+// Status answers GET /api/artifacts/service/status (zoneweaver's getStatus
 // shape).
 func (s *Service) Status() ServiceStatus {
 	s.mu.Lock()

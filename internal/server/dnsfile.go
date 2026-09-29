@@ -10,7 +10,7 @@ import (
 	"time"
 )
 
-// DNS endpoints (/system/dns — the Host Configuration group's second surface,
+// DNS endpoints (/api/system/dns — the Host Configuration group's second surface,
 // the converged wire, sync 2026-07-17): zoneweaver's shipped resolv.conf
 // editor, answered identically here. The WIRE is one shape everywhere — the
 // standard envelope with nameservers/search_domains/domain/options (+raw on
@@ -96,7 +96,7 @@ func renderResolvConf(view *dnsView) string {
 	return b.String()
 }
 
-// dnsGetResponse is the GET /system/dns answer: the converged success
+// dnsGetResponse is the GET /api/system/dns answer: the converged success
 // envelope spread with the parsed DNS view plus raw.
 type dnsGetResponse struct {
 	Success       bool     `json:"success"`
@@ -111,7 +111,7 @@ type dnsGetResponse struct {
 	Raw string `json:"raw"`
 }
 
-// handleGetDNS mirrors GET /system/dns — zoneweaver's shipped wire (the
+// handleGetDNS mirrors GET /api/system/dns — zoneweaver's shipped wire (the
 // converged wire, sync 2026-07-17): the standard success envelope with
 // nameservers/search_domains/domain/options/raw spread top-level.
 //
@@ -200,7 +200,7 @@ func validateDNSTokens(kind string, values []string) error {
 	return nil
 }
 
-// dnsUpdateResponse is the PUT /system/dns answer: the converged success
+// dnsUpdateResponse is the PUT /api/system/dns answer: the converged success
 // envelope with backup plus the parsed-back view (no raw).
 type dnsUpdateResponse struct {
 	Success   bool   `json:"success"`
@@ -214,7 +214,7 @@ type dnsUpdateResponse struct {
 	Options       []string `json:"options"`
 }
 
-// handleUpdateDNS mirrors PUT /system/dns (the converged wire, sync
+// handleUpdateDNS mirrors PUT /api/system/dns (the converged wire, sync
 // 2026-07-17): raw wins when present; Unix writes resolv.conf, Windows/macOS
 // take the structured fields their tooling can honor and answer 400 naming
 // anything they cannot — never a silent no-op.

@@ -27,7 +27,7 @@ type multiHostCreateResponse struct {
 	ResourceWarnings map[string][]resourceIssue `json:"resource_warnings,omitempty"`
 }
 
-// createMultiHostMachines executes the multi-host branch of POST /machines
+// createMultiHostMachines executes the multi-host branch of POST /api/machines
 // (multi-host converged wire, sync 2026-07-17: M-Q1 — zoneweaver's shipped
 // wire, matched exactly): ONE request whose RENDER produced hosts[] with N>1
 // entries makes N coordinated machines. The DOCUMENT is the program — every

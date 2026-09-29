@@ -26,7 +26,7 @@ func (s *Server) handleGetSecrets(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, s.secrets.Get())
 }
 
-// secretsUpdateResponse is PUT /secrets's answer.
+// secretsUpdateResponse is PUT /api/secrets's answer.
 type secretsUpdateResponse struct {
 	// Always true on success
 	Success bool `json:"success"`

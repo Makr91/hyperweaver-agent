@@ -105,8 +105,8 @@ func (s *Server) registerRoutes(mux *http.ServeMux) error {
 	mux.Handle("PUT /api/system/dns", requireKey(http.HandlerFunc(s.handleUpdateDNS)))
 
 	// Host network configuration (converged wire, sync 2026-07-17):
-	// /network/hostname (GET live view, PUT queues set_hostname) and the
-	// /network/addresses family (GET is the live listing; mutations queue
+	// /api/network/hostname (GET live view, PUT queues set_hostname) and the
+	// /api/network/addresses family (GET is the live listing; mutations queue
 	// zoneweaver's create/delete/enable/disable_ip_address tasks — Mark's
 	// build order 2026-07-19 replaced the 501 stubs). addrobj values carry
 	// slashes, so DELETE takes a {addrobj...} wildcard; Go 1.22 ServeMux
@@ -160,22 +160,22 @@ func (s *Server) registerRoutes(mux *http.ServeMux) error {
 	}
 
 	// Task queue (Agent API v1 Task Management group). Literal patterns
-	// (/tasks/stats, /tasks/completed) win over the {taskId} wildcards in
+	// (/api/tasks/stats, /api/tasks/completed) win over the {taskId} wildcards in
 	// ServeMux precedence.
 	// WebSocket plane (the base's model): the authenticated /ws-ticket mints
 	// a 60s ticket; upgrades authenticate by ?ticket= (browser WebSocket
-	// clients cannot send the API-key headers). /tasks/{id}/stream is the
+	// clients cannot send the API-key headers). /api/tasks/{id}/stream is the
 	// live task-output push.
 	mux.Handle("GET /api/ws-ticket", requireKey(http.HandlerFunc(s.handleWsTicket)))
 	mux.HandleFunc("GET /api/tasks/{taskId}/stream", s.handleTaskStream)
 
 	// SSH terminal sessions (the base's SSHTerminal family): REST lifecycle
-	// behind the key; the /ssh/{sessionId} WebSocket authenticates by ticket.
+	// behind the key; the /api/ssh/{sessionId} WebSocket authenticates by ticket.
 	// Host terminal sessions (zoneweaver's /term family — a shell on the
 	// agent host as the agent's own user): REST lifecycle admin-only (the
-	// auth policy's /term prefix); the /term/{sessionId} WebSocket
+	// auth policy's /term prefix); the /api/term/{sessionId} WebSocket
 	// authenticates by ticket, its session id mintable only by an admin.
-	// Literal /term/start and /term/sessions win over {sessionId}.
+	// Literal /api/term/start and /api/term/sessions win over {sessionId}.
 	mux.Handle("POST /api/term/start", requireKey(http.HandlerFunc(s.handleStartTermSession)))
 	mux.Handle("GET /api/term/sessions", requireKey(http.HandlerFunc(s.handleListTermSessions)))
 	mux.Handle("GET /api/term/sessions/{sessionId}", requireKey(http.HandlerFunc(s.handleTermSessionInfo)))
@@ -195,7 +195,7 @@ func (s *Server) registerRoutes(mux *http.ServeMux) error {
 	mux.Handle("DELETE /api/tasks/completed", requireKey(http.HandlerFunc(s.handleClearCompletedTasks)))
 	mux.Handle("DELETE /api/tasks/{taskId}", requireKey(http.HandlerFunc(s.handleCancelTask)))
 
-	// Machines (Agent API v1, canonical /machines/* noun only — design D-E).
+	// Machines (Agent API v1, canonical /api/machines/* noun only — design D-E).
 	// Literal segments (ids, bulk) win over {machineName} in ServeMux
 	// precedence.
 	mux.Handle("GET /api/machines", requireKey(http.HandlerFunc(s.handleListMachines)))
@@ -375,8 +375,8 @@ func (s *Server) registerRoutes(mux *http.ServeMux) error {
 	mux.Handle("GET /api/artifacts/service/status", requireKey(s.assetsGate(s.handleArtifactServiceStatus)))
 	mux.Handle("GET /api/artifacts/{id}", requireKey(s.assetsGate(s.handleArtifactDetails)))
 	mux.Handle("GET /api/artifacts/{id}/download", requireKey(s.assetsGate(s.handleDownloadArtifactFile)))
-	// move/copy share one {action} pattern: separate /artifacts/{id}/move and
-	// /artifacts/{id}/copy patterns CONFLICT with /artifacts/upload/{taskId}
+	// move/copy share one {action} pattern: separate /api/artifacts/{id}/move and
+	// /api/artifacts/{id}/copy patterns CONFLICT with /api/artifacts/upload/{taskId}
 	// (neither is more specific — ServeMux panics at registration); the
 	// {id}/{action} shape is a strict superset the upload pattern wins over.
 	mux.Handle("POST /api/artifacts/{id}/{action}", requireKey(s.assetsGate(s.handleArtifactAction)))

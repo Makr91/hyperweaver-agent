@@ -96,7 +96,7 @@ type databaseStats struct {
 	TotalRows   int64             `json:"total_rows"`
 }
 
-// handleDatabaseStats mirrors GET /database/stats across every open
+// handleDatabaseStats mirrors GET /api/database/stats across every open
 // database file.
 //
 //	@Summary		Database statistics
@@ -180,7 +180,7 @@ type databaseVacuumResponse struct {
 	SpaceReclaimed int64                  `json:"space_reclaimed"`
 }
 
-// handleDatabaseVacuum mirrors POST /database/vacuum across every open
+// handleDatabaseVacuum mirrors POST /api/database/vacuum across every open
 // database file.
 //
 //	@Summary		Run VACUUM
@@ -224,7 +224,7 @@ func (s *Server) handleDatabaseVacuum(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// handleDatabaseAnalyze mirrors POST /database/analyze across every open
+// handleDatabaseAnalyze mirrors POST /api/database/analyze across every open
 // database file.
 //
 //	@Summary		Run ANALYZE
@@ -263,7 +263,7 @@ type databaseCleanupResponse struct {
 	CleanupStatus databaseCleanupStatus `json:"cleanup_status"`
 }
 
-// handleDatabaseCleanup mirrors POST /database/cleanup: the same retention
+// handleDatabaseCleanup mirrors POST /api/database/cleanup: the same retention
 // pass the periodic cleanup runs — finished tasks past tasks.retention_days,
 // plus stored telemetry past monitoring.retention_days.
 //

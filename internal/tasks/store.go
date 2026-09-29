@@ -77,8 +77,8 @@ func NewStore(database *sql.DB) *Store {
 // taskColumns deliberately EXCLUDES the output column: task rows never carry
 // output on the wire — Task.Output is ALWAYS null on the list AND the detail
 // (Mark's 2026-07-07 list ruling extended whole by the converged task wire; a
-// provision run's output is hundreds of KB per row). GET /tasks/{taskId}/output,
-// the /tasks/{taskId}/stream WebSocket, and the OutputManager are the output
+// provision run's output is hundreds of KB per row). GET /api/tasks/{taskId}/output,
+// the /api/tasks/{taskId}/stream WebSocket, and the OutputManager are the output
 // channels; Store.GetOutput reads the column directly.
 const taskColumns = `id, machine_name, operation, status, priority, created_by,
 	depends_on, parent_task_id, error_message, created_at, started_at,
@@ -175,7 +175,7 @@ func (s *Store) Get(ctx context.Context, id string) (*Task, error) {
 	return t, err
 }
 
-// ListFilter selects and orders tasks (the Node agent's GET /tasks query
+// ListFilter selects and orders tasks (the Node agent's GET /api/tasks query
 // parameters).
 type ListFilter struct {
 	Status       string
@@ -289,7 +289,7 @@ func (s *Store) List(ctx context.Context, f *ListFilter) ([]*Task, error) {
 	return list, rows.Err()
 }
 
-// Count returns how many tasks match the filter (GET /tasks include_count).
+// Count returns how many tasks match the filter (GET /api/tasks include_count).
 func (s *Store) Count(ctx context.Context, f *ListFilter) (int, error) {
 	var query strings.Builder
 	query.WriteString("SELECT COUNT(*) FROM tasks")
@@ -299,7 +299,7 @@ func (s *Store) Count(ctx context.Context, f *ListFilter) (int, error) {
 	return n, err
 }
 
-// StatusCounts returns per-status task totals (GET /tasks/stats).
+// StatusCounts returns per-status task totals (GET /api/tasks/stats).
 func (s *Store) StatusCounts(ctx context.Context) (map[string]int, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT status, COUNT(*) FROM tasks GROUP BY status`)
 	if err != nil {

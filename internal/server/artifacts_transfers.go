@@ -19,14 +19,14 @@ import (
 
 // ---- transfers, downloads, uploads ----
 
-// transferArtifactRequest is the POST /artifacts/{id}/move and
-// /artifacts/{id}/copy body.
+// transferArtifactRequest is the POST /api/artifacts/{id}/move and
+// /api/artifacts/{id}/copy body.
 type transferArtifactRequest struct {
 	DestinationID string `json:"destination_storage_location_id"`
 }
 
-// handleArtifactAction: POST /artifacts/{id}/{action} — move and copy share
-// one pattern (separate literal patterns conflict with /artifacts/upload/
+// handleArtifactAction: POST /api/artifacts/{id}/{action} — move and copy share
+// one pattern (separate literal patterns conflict with /api/artifacts/upload/
 // {taskId} and panic ServeMux at registration).
 //
 //	@Summary		Move an artifact to another location
@@ -95,7 +95,7 @@ func (s *Server) queueTransfer(w http.ResponseWriter, r *http.Request, operation
 		assets.TransferMetadata{ArtifactID: id, DestinationID: body.DestinationID}, message)
 }
 
-// downloadArtifactRequest is POST /artifacts/download's body.
+// downloadArtifactRequest is POST /api/artifacts/download's body.
 type downloadArtifactRequest struct {
 	URL           string `json:"url"`
 	StoragePathID string `json:"storage_path_id"`
@@ -110,7 +110,7 @@ type downloadArtifactRequest struct {
 	ResourceName string `json:"resource_name"`
 }
 
-// handleArtifactDownloadFromURL: POST /artifacts/download (async task).
+// handleArtifactDownloadFromURL: POST /api/artifacts/download (async task).
 //
 //	@Summary		Download a URL into a storage location
 //	@Description	Minimum role: operator. Queues artifact_download: streamed with live progress ({downloaded_mb, total_mb, speed_mbps, eta_seconds} in progress_info), hashed DURING the stream, verified against checksum when given (mismatch discards the file — never promoted, no auto-retry). role is REQUIRED when the destination is an installer-family location. resource_name names a custom_resource_url secret whose Basic-auth pair authenticates the fetch.
@@ -163,7 +163,7 @@ func (s *Server) handleArtifactDownloadFromURL(w http.ResponseWriter, r *http.Re
 		"Download task created for '"+meta.Filename+"'")
 }
 
-// prepareUploadRequest is POST /artifacts/upload/prepare's body.
+// prepareUploadRequest is POST /api/artifacts/upload/prepare's body.
 type prepareUploadRequest struct {
 	Filename      string `json:"filename"`
 	Size          int64  `json:"size"`
@@ -182,7 +182,7 @@ type prepareUploadLocation struct {
 	Path string `json:"path"`
 }
 
-// prepareUploadResponse is POST /artifacts/upload/prepare's answer.
+// prepareUploadResponse is POST /api/artifacts/upload/prepare's answer.
 type prepareUploadResponse struct {
 	Success         bool                  `json:"success"`
 	TaskID          string                `json:"task_id"`
@@ -191,7 +191,7 @@ type prepareUploadResponse struct {
 	StorageLocation prepareUploadLocation `json:"storage_location"`
 }
 
-// handlePrepareArtifactUpload: POST /artifacts/upload/prepare — mints the
+// handlePrepareArtifactUpload: POST /api/artifacts/upload/prepare — mints the
 // prepared task and the upload URL (zoneweaver's two-step upload).
 //
 //	@Summary		Prepare an artifact upload
@@ -287,7 +287,7 @@ type uploadCompleteFile struct {
 	FinalLocation string `json:"final_location"`
 }
 
-// uploadCompleteResponse is POST /artifacts/upload/{taskId}'s answer.
+// uploadCompleteResponse is POST /api/artifacts/upload/{taskId}'s answer.
 type uploadCompleteResponse struct {
 	Success bool               `json:"success"`
 	Message string             `json:"message"`
@@ -295,7 +295,7 @@ type uploadCompleteResponse struct {
 	File    uploadCompleteFile `json:"file"`
 }
 
-// handleUploadArtifactToTask: POST /artifacts/upload/{taskId} — streams the
+// handleUploadArtifactToTask: POST /api/artifacts/upload/{taskId} — streams the
 // multipart file to its final location and flips the prepared task to
 // pending; the artifact_upload executor hashes and registers it.
 //
@@ -414,7 +414,7 @@ func (s *Server) handleUploadArtifactToTask(w http.ResponseWriter, r *http.Reque
 	}
 }
 
-// handleDownloadArtifactFile: GET /artifacts/{id}/download — streams the
+// handleDownloadArtifactFile: GET /api/artifacts/{id}/download — streams the
 // file to the client.
 //
 //	@Summary		Download an artifact file

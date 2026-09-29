@@ -18,7 +18,7 @@ import (
 )
 
 // The guest-agent surface (Mark's go 2026-07-10, spike-proven the same day):
-// /machines/{name}/guest/* speaks the QEMU Guest Agent protocol over the
+// /api/machines/{name}/guest/* speaks the QEMU Guest Agent protocol over the
 // machine's COM2→pipe UART — credential-less guest control (live IPs, exec,
 // clean shutdown, osinfo) with no SSH and no Guest Additions. The UART is a
 // PER-MACHINE create option (zones.guest_agent, default off, under the
@@ -146,14 +146,14 @@ func (s *Server) utmGuestExec(w http.ResponseWriter, r *http.Request,
 	return output, true
 }
 
-// guestPingResponse is GET /machines/{machineName}/guest/ping's answer.
+// guestPingResponse is GET /api/machines/{machineName}/guest/ping's answer.
 type guestPingResponse struct {
 	Success     bool   `json:"success"`
 	MachineName string `json:"machine_name"`
 	Message     string `json:"message"`
 }
 
-// handleGuestPing serves GET /machines/{name}/guest/ping.
+// handleGuestPing serves GET /api/machines/{name}/guest/ping.
 //
 //	@Summary		Probe the guest agent
 //	@Description	Minimum role: viewer. guest-ping over the machine's QGA channel — the readiness probe (UI gates the guest panel on it per machine). 502 with guidance when the channel or qemu-ga is absent.
@@ -198,7 +198,7 @@ type guestOSInfoResponse struct {
 	OSInfo      json.RawMessage `json:"osinfo"`
 }
 
-// handleGuestOSInfo serves GET /machines/{name}/guest/osinfo — the guest's
+// handleGuestOSInfo serves GET /api/machines/{name}/guest/osinfo — the guest's
 // own identity (guest-get-osinfo).
 //
 //	@Summary		Guest OS identity
@@ -241,7 +241,7 @@ type guestNetworkUTMResponse struct {
 	IPs         []string `json:"ips"`
 }
 
-// handleGuestNetwork serves GET /machines/{name}/guest/network — the guest's
+// handleGuestNetwork serves GET /api/machines/{name}/guest/network — the guest's
 // live interfaces (guest-network-get-interfaces): real addresses with no
 // Guest Additions. utm answers a flat ips[] — utmctl ip-address reports bare
 // addresses, never the QGA interface shape.
@@ -297,13 +297,13 @@ func (s *Server) handleGuestNetwork(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// guestShutdownRequest is POST /machines/{machineName}/guest/shutdown's body.
+// guestShutdownRequest is POST /api/machines/{machineName}/guest/shutdown's body.
 type guestShutdownRequest struct {
 	// powerdown (default), reboot, or halt
 	Mode string `json:"mode"`
 }
 
-// guestShutdownResponse is POST /machines/{machineName}/guest/shutdown's answer.
+// guestShutdownResponse is POST /api/machines/{machineName}/guest/shutdown's answer.
 type guestShutdownResponse struct {
 	Success     bool   `json:"success"`
 	MachineName string `json:"machine_name"`
@@ -311,7 +311,7 @@ type guestShutdownResponse struct {
 	Message     string `json:"message"`
 }
 
-// handleGuestShutdown serves POST /machines/{name}/guest/shutdown — a CLEAN
+// handleGuestShutdown serves POST /api/machines/{name}/guest/shutdown — a CLEAN
 // in-guest shutdown/reboot/halt (guest-shutdown). The guest may power off
 // before replying, so silence after delivery is success.
 //

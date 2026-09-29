@@ -124,7 +124,7 @@ func scanMachine(row interface{ Scan(...any) error }) (*Machine, error) {
 	return &m, nil
 }
 
-// ListFilter selects machines (the GET /machines query parameters).
+// ListFilter selects machines (the GET /api/machines query parameters).
 type ListFilter struct {
 	Status   string
 	Orphaned *bool
@@ -283,7 +283,7 @@ func (s *Store) SetConfiguration(ctx context.Context, name string, configuration
 	return requireRow(res)
 }
 
-// NewMachine is a machine-create request row (POST /machines): a registry
+// NewMachine is a machine-create request row (POST /api/machines): a registry
 // entry with the user's spec and working directory — no VM until first
 // start (SHI's clone model).
 type NewMachine struct {
@@ -316,7 +316,7 @@ func (s *Store) Create(ctx context.Context, nm *NewMachine) (*Machine, error) {
 	return s.Get(ctx, nm.Name)
 }
 
-// SetSpec replaces a machine's creation spec (PUT /machines/{name} — the
+// SetSpec replaces a machine's creation spec (PUT /api/machines/{name} — the
 // change materializes on the next start). The server_id column follows the
 // spec's resolved settings.server_id so the row and the document can never
 // drift; the column's UNIQUE constraint referees collisions.

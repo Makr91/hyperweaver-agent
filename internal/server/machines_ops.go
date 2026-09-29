@@ -18,7 +18,7 @@ import (
 	"github.com/Makr91/hyperweaver-agent/internal/vbox"
 )
 
-// applianceImportResponse is POST /machines/import's queued answer (202).
+// applianceImportResponse is POST /api/machines/import's queued answer (202).
 type applianceImportResponse struct {
 	Success   bool   `json:"success"`
 	TaskID    string `json:"task_id"`
@@ -28,7 +28,7 @@ type applianceImportResponse struct {
 	Message   string `json:"message"`
 }
 
-// handleImportMachine serves POST /machines/import — queue a machine_import
+// handleImportMachine serves POST /api/machines/import — queue a machine_import
 // task: VBoxManage import of an agent-host .ova/.ovf into the machines root;
 // the reconciliation sweep lands the registry row afterwards.
 //
@@ -118,7 +118,7 @@ type queuedOperation struct {
 	Message     string `json:"message"`
 }
 
-// handleMoveMachine serves POST /machines/{machineName}/move — queue a
+// handleMoveMachine serves POST /api/machines/{machineName}/move — queue a
 // machine_move task (VBoxManage movevm; powered-off machines only).
 //
 //	@Summary		Relocate a machine's VirtualBox files
@@ -162,7 +162,7 @@ func (s *Server) handleMoveMachine(w http.ResponseWriter, r *http.Request) {
 		"Move task queued successfully")
 }
 
-// unattendedDetectResponse is GET /machines/unattended/detect's answer: the
+// unattendedDetectResponse is GET /api/machines/unattended/detect's answer: the
 // probed ISO path and VBoxManage's snake-cased detection fields — os_languages
 // is a string array (split from VBoxManage's comma-joined value), every other
 // value a string.
@@ -171,7 +171,7 @@ type unattendedDetectResponse struct {
 	Detected map[string]any `json:"detected"`
 }
 
-// handleUnattendedDetect serves GET /machines/unattended/detect?iso= —
+// handleUnattendedDetect serves GET /api/machines/unattended/detect?iso= —
 // synchronous VBoxManage unattended detect: what an installer ISO contains
 // and whether unattended installation supports it (the wizard's probe).
 //
@@ -224,7 +224,7 @@ func (s *Server) handleUnattendedDetect(w http.ResponseWriter, r *http.Request) 
 	writeJSON(w, unattendedDetectResponse{Iso: iso, Detected: fields})
 }
 
-// unattendedInstallRequest is POST /machines/{machineName}/unattended's body:
+// unattendedInstallRequest is POST /api/machines/{machineName}/unattended's body:
 // the UnattendedMetadata document with the created account flattened to
 // top-level user/password (the handler's wire shape).
 type unattendedInstallRequest struct {
@@ -233,7 +233,7 @@ type unattendedInstallRequest struct {
 	Password string `json:"password"`
 }
 
-// handleUnattendedInstall serves POST /machines/{machineName}/unattended —
+// handleUnattendedInstall serves POST /api/machines/{machineName}/unattended —
 // queue machine_unattended_install (VBoxManage's answer-file install onto an
 // existing powered-off machine). The flat wire body maps onto the metadata
 // document with the account nested (the provision chain's credentials shape).
@@ -285,7 +285,7 @@ func (s *Server) handleUnattendedInstall(w http.ResponseWriter, r *http.Request)
 		"Unattended install task queued successfully")
 }
 
-// displayHintRequest is POST /machines/{machineName}/display's body — the
+// displayHintRequest is POST /api/machines/{machineName}/display's body — the
 // target video mode hint.
 type displayHintRequest struct {
 	Width   int `json:"width"`
@@ -294,14 +294,14 @@ type displayHintRequest struct {
 	Display int `json:"display"`
 }
 
-// displayHintResponse is POST /machines/{machineName}/display's answer.
+// displayHintResponse is POST /api/machines/{machineName}/display's answer.
 type displayHintResponse struct {
 	Success     bool   `json:"success"`
 	MachineName string `json:"machine_name"`
 	Message     string `json:"message"`
 }
 
-// handleSetDisplay serves POST /machines/{machineName}/display — synchronous
+// handleSetDisplay serves POST /api/machines/{machineName}/display — synchronous
 // controlvm setvideomodehint (honored by guests running Guest Additions).
 //
 //	@Summary		Resize the guest display

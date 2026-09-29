@@ -10,7 +10,7 @@ import (
 // ported 1:1 (Mark's ruling: the Go agent recreates zoneweaver's mechanisms
 // exactly). A machine's configuration carries the Hosts.yml document sections
 // (settings/zones/networks/disks/metadata — stored by create's finalize child)
-// plus `provisioner` (stored verbatim by PUT /machines/{name}) and
+// plus `provisioner` (stored verbatim by PUT /api/machines/{name}) and
 // `provisioner_state` (stamped by successful provision runs).
 //
 // Every Store configuration write here is SURGICAL (rawdoc.go): the untouched
@@ -63,7 +63,7 @@ func (c MachineConfig) List(key string) []any {
 	return nil
 }
 
-// Provisioner returns the stored provisioner document (PUT /machines/{name}).
+// Provisioner returns the stored provisioner document (PUT /api/machines/{name}).
 func (c MachineConfig) Provisioner() map[string]any {
 	return c.Section("provisioner")
 }

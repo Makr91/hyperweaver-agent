@@ -11,18 +11,18 @@ import (
 	"github.com/Makr91/hyperweaver-agent/internal/tasks"
 )
 
-// The /network/addresses mutation surface — zoneweaver's task wire;
+// The /api/network/addresses mutation surface — zoneweaver's task wire;
 // impossible-for-this-platform shapes refuse at the HTTP layer.
 
 // addressTaskResponse is the bare 202 task-queued document every
-// /network/addresses mutation answers (creation adds type+interface,
+// /api/network/addresses mutation answers (creation adds type+interface,
 // deletion adds release, enable/disable add note).
 type addressTaskResponse struct {
 	// Always true on a queued mutation.
 	Success bool `json:"success"`
 	// Human-readable confirmation naming the addrobj.
 	Message string `json:"message"`
-	// The queued task's id — poll it via GET /tasks/{taskId}.
+	// The queued task's id — poll it via GET /api/tasks/{taskId}.
 	TaskID string `json:"task_id"`
 	// The address object the task targets (the synthetic <interface>/v4|v6).
 	AddrObj string `json:"addrobj"`
@@ -36,7 +36,7 @@ type addressTaskResponse struct {
 	Note string `json:"note,omitempty"`
 }
 
-// createNetworkAddressRequest is POST /network/addresses' JSON body.
+// createNetworkAddressRequest is POST /api/network/addresses' JSON body.
 type createNetworkAddressRequest struct {
 	// The host interface the address lives on.
 	Interface string `json:"interface"`
@@ -85,7 +85,7 @@ func (s *Server) queueAddressTask(w http.ResponseWriter, r *http.Request,
 	writeJSONStatus(w, http.StatusAccepted, resp)
 }
 
-// handleCreateNetworkAddress serves POST /network/addresses.
+// handleCreateNetworkAddress serves POST /api/network/addresses.
 //
 //	@Summary		Create an IP address (task)
 //	@Description	Minimum role: operator. Queues create_ip_address (zoneweaver's op, machine_name "system" — Mark's build order 2026-07-19 replaced the 501 stub). PER-OS HONESTY, refused at the POST so no doomed task queues: type static works everywhere (Windows netsh, Linux `ip addr add`, macOS ifconfig alias — the macOS apply is LIVE and does not persist across reboot, narrated in the task output); type dhcp is Windows-only (netsh source=dhcp — Linux/macOS have no cross-distro verb → 400); type addrconf always 400 (IPv6 SLAAC configures itself). address must be CIDR for static. primary/wait/temporary/down are ipadm vocabulary with no analog here — accepted for wire parity, narrated as skipped.
@@ -142,7 +142,7 @@ func (s *Server) handleCreateNetworkAddress(w http.ResponseWriter, r *http.Reque
 	})
 }
 
-// handleDeleteNetworkAddress serves DELETE /network/addresses/{addrobj...}.
+// handleDeleteNetworkAddress serves DELETE /api/network/addresses/{addrobj...}.
 //
 //	@Summary		Delete an IP address (task)
 //	@Description	Minimum role: operator. Queues delete_ip_address (netsh / `ip addr del` / ifconfig -alias). The synthetic <interface>/<version> addrobj can cover SEVERAL live addresses — ?address= disambiguates (this agent's extension; without it, exactly one live address of that version must exist or the request answers 400 listing the candidates). ?release=true releases the DHCP lease first on Windows (ipconfig /release; narrated skip elsewhere). A missing interface or an addrobj with no live address answers 404.
@@ -191,7 +191,7 @@ func (s *Server) handleDeleteNetworkAddress(w http.ResponseWriter, r *http.Reque
 	})
 }
 
-// handleNetworkAddressAction serves PUT /network/addresses/{rest...} — the
+// handleNetworkAddressAction serves PUT /api/network/addresses/{rest...} — the
 // enable/disable verbs split from the one wildcard here.
 //
 //	@Summary		Enable an address's interface (task)

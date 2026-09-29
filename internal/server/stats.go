@@ -15,7 +15,7 @@ import (
 	"github.com/Makr91/hyperweaver-agent/internal/vbox"
 )
 
-// statsPayload is the GET /stats document (the shared v1 stats shape):
+// statsPayload is the GET /api/stats document (the shared v1 stats shape):
 // host-OS numbers in Node's os-module vocabulary plus machine name lists.
 type statsPayload struct {
 	Hostname string `json:"hostname"`
@@ -146,7 +146,7 @@ func vboxManagePath(ctx context.Context) string {
 	return ""
 }
 
-// handleStats mirrors the Node agent's GET /stats. Machine-list failures
+// handleStats mirrors the Node agent's GET /api/stats. Machine-list failures
 // degrade to empty arrays (Node parity): a broken VBoxManage never 500s the
 // host stats. The `version` field carries the OS marketing name (what Node's
 // os.version() reports on Windows) rather than a raw kernel build string —

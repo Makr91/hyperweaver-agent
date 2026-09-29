@@ -98,7 +98,7 @@ type MachinesConfig struct {
 // GuestAgentConfig gates the QEMU guest-agent channel (the `guest-agent`
 // capability token — Mark's go 2026-07-10): the MASTER gate over the
 // per-machine UART option (zones.guest_agent at create, the PUT toggle, the
-// setup endpoint) and the /machines/{name}/guest/* surface — credential-less
+// setup endpoint) and the /api/machines/{name}/guest/* surface — credential-less
 // live IPs, exec, clean shutdown with no SSH and no Guest Additions.
 type GuestAgentConfig struct {
 	Enabled bool `yaml:"enabled" json:"enabled"`

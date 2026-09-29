@@ -77,7 +77,7 @@ type Collection struct {
 	Metadata map[string]any `json:"metadata"`
 	// Newest first
 	Versions []*Version `json:"versions"`
-	// Stored git provenance — recorded at git import, NEVER inside package files: {source_type: "git", url, branch?}. null for folder/archive imports and catalog installs (catalog families update through the catalog). Feeds POST /provisioning/provisioners/{name}/refresh-from-source.
+	// Stored git provenance — recorded at git import, NEVER inside package files: {source_type: "git", url, branch?}. null for folder/archive imports and catalog installs (catalog families update through the catalog). Feeds POST /api/provisioning/provisioners/{name}/refresh-from-source.
 	Source *Source `json:"source"`
 }
 
@@ -94,7 +94,7 @@ type Collection struct {
 // role_specs.roles[<name>] = {collection, short_description, options} —
 // derived into a role-specs.yml cache beside provisioner.yml at import
 // (self-healing at read for hand-dropped packages; POST
-// /provisioning/provisioners/refresh-specs re-derives everything). The UI
+// /api/provisioning/provisioners/refresh-specs re-derives everything). The UI
 // builds its per-role knob FORMS from options; absent when the package ships
 // no specs.
 type Version struct {

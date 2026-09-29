@@ -69,7 +69,7 @@ type Server struct {
 
 	// openUI opens the signed-in UI in the user's browser — the same action a
 	// tray Open click performs, injected by main so the hwa:// protocol
-	// handoff (POST /protocol/open) shares it exactly.
+	// handoff (POST /api/protocol/open) shares it exactly.
 	openUI func(query string)
 }
 

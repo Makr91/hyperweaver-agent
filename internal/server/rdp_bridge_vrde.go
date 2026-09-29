@@ -76,7 +76,7 @@ func (s *Server) healVRDETLS(ctx context.Context, vboxExe string, machine *machi
 	return nil
 }
 
-// handleVRDETLSSetup serves POST /machines/{machineName}/vrde-tls — turnkey
+// handleVRDETLSSetup serves POST /api/machines/{machineName}/vrde-tls — turnkey
 // Enhanced-security VRDE (the browser-RDP path's floor): mints the machine's
 // VRDE certificate from the agent CA and pushes the VRDE TLS properties —
 // plus VRDE itself when off — RUNNING machines get the security properties

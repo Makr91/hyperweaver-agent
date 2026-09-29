@@ -11,7 +11,7 @@ import (
 	"github.com/Makr91/hyperweaver-agent/internal/tasks"
 )
 
-// The provisioning surface — POST /machines/{name}/provision runs the ONE
+// The provisioning surface — POST /api/machines/{name}/provision runs the ONE
 // document walk (Mark's ruling 2026-07-17: THERE ARE NO PHASES — the stored
 // provisioner document is the program, executed AS WRITTEN): extract → boot
 // → wait_ssh → folder sync → pre[] hooks → the provisioning: methods in

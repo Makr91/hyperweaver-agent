@@ -18,13 +18,13 @@ import (
 	"github.com/Makr91/hyperweaver-agent/internal/vbox"
 )
 
-// hostUSBResponse is GET /system/usb's answer: the host's USB device list.
+// hostUSBResponse is GET /api/system/usb's answer: the host's USB device list.
 type hostUSBResponse struct {
 	Devices []vbox.USBDevice `json:"devices"`
 	Total   int              `json:"total"`
 }
 
-// handleListHostUSB serves GET /system/usb — the host's USB devices
+// handleListHostUSB serves GET /api/system/usb — the host's USB devices
 // (VBoxManage list usbhost), the attach/filter pickers' feed.
 //
 //	@Summary		List the host's USB devices
@@ -63,7 +63,7 @@ type usbActionResponse struct {
 	Success     bool   `json:"success"`
 }
 
-// handleUSBAttach serves POST /machines/{machineName}/usb/attach — hot-plug
+// handleUSBAttach serves POST /api/machines/{machineName}/usb/attach — hot-plug
 // a host device (by UUID or address) into the running machine. The machine
 // needs a USB controller (hardware.usb at create/modify).
 //
@@ -83,7 +83,7 @@ func (s *Server) handleUSBAttach(w http.ResponseWriter, r *http.Request) {
 	s.runUSBVerb(w, r, vbox.USBAttach, "attach")
 }
 
-// handleUSBDetach serves POST /machines/{machineName}/usb/detach.
+// handleUSBDetach serves POST /api/machines/{machineName}/usb/detach.
 //
 //	@Summary		Detach a USB device
 //	@Description	Minimum role: operator. Synchronous controlvm usbdetach from the running machine.
@@ -206,14 +206,14 @@ func (s *Server) machineUSBFilters(ctx context.Context, exe string, machine *mac
 	return filters, nil
 }
 
-// usbFiltersResponse is GET /machines/{machineName}/usb/filters's answer.
+// usbFiltersResponse is GET /api/machines/{machineName}/usb/filters's answer.
 type usbFiltersResponse struct {
 	Filters     []usbFilterEntry `json:"filters"`
 	MachineName string           `json:"machine_name"`
 	Total       int              `json:"total"`
 }
 
-// handleListUSBFilters serves GET /machines/{machineName}/usb/filters.
+// handleListUSBFilters serves GET /api/machines/{machineName}/usb/filters.
 //
 //	@Summary		List USB capture filters
 //	@Description	Minimum role: viewer. The machine's persistent filters from the live machinereadable view. index is usbfilter remove's 0-based position.
@@ -251,7 +251,7 @@ func (s *Server) handleListUSBFilters(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// usbFilterAddResponse is POST /machines/{machineName}/usb/filters's answer.
+// usbFilterAddResponse is POST /api/machines/{machineName}/usb/filters's answer.
 type usbFilterAddResponse struct {
 	Index       int    `json:"index"`
 	MachineName string `json:"machine_name"`
@@ -260,7 +260,7 @@ type usbFilterAddResponse struct {
 	Success     bool   `json:"success"`
 }
 
-// handleAddUSBFilter serves POST /machines/{machineName}/usb/filters —
+// handleAddUSBFilter serves POST /api/machines/{machineName}/usb/filters —
 // append a persistent capture filter (empty match fields match anything).
 //
 //	@Summary		Add a USB capture filter
@@ -330,7 +330,7 @@ type usbFilterRemoveResponse struct {
 }
 
 // handleRemoveUSBFilter serves DELETE
-// /machines/{machineName}/usb/filters/{filterIndex}.
+// /api/machines/{machineName}/usb/filters/{filterIndex}.
 //
 //	@Summary		Remove a USB capture filter
 //	@Description	Minimum role: operator. usbfilter remove by 0-based index (GET /api/machines/{machineName}/usb/filters reports it).

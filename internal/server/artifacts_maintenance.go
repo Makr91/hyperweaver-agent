@@ -9,7 +9,7 @@ import (
 	"github.com/Makr91/hyperweaver-agent/internal/tasks"
 )
 
-// handleScanArtifacts: POST /artifacts/scan (async task).
+// handleScanArtifacts: POST /api/artifacts/scan (async task).
 //
 //	@Summary		Scan storage locations
 //	@Description	Minimum role: operator. Queues artifact_scan over one location (storage_path_id), one type, or every enabled location: new files hashed and registered, vanished files marked missing (expectation rows always survive as file_exists:false; remove_orphaned deletes expectation-less rows), verify_checksums re-hashes every present file — the task FAILS when any file mismatches its expectation. Automatic startup/periodic scans run agent-side without task rows.
@@ -52,7 +52,7 @@ func (s *Server) handleScanArtifacts(w http.ResponseWriter, r *http.Request) {
 	s.queueArtifactTask(w, r, assets.OpScan, tasks.PriorityBackground, meta, message)
 }
 
-// deleteArtifactFilesRequest is DELETE /artifacts/files's body.
+// deleteArtifactFilesRequest is DELETE /api/artifacts/files's body.
 type deleteArtifactFilesRequest struct {
 	ArtifactIDs []int64 `json:"artifact_ids"`
 	// DeleteFiles also removes the files from disk (default true).
@@ -61,7 +61,7 @@ type deleteArtifactFilesRequest struct {
 	Force bool `json:"force"`
 }
 
-// handleDeleteArtifactFiles: DELETE /artifacts/files (batch, async task).
+// handleDeleteArtifactFiles: DELETE /api/artifacts/files (batch, async task).
 //
 //	@Summary		Delete artifacts (batch)
 //	@Description	Minimum role: operator. Queues artifact_delete_file over the named rows; delete_files (default true) removes the files from disk too; force keeps going past individual file errors. Location stats refresh.

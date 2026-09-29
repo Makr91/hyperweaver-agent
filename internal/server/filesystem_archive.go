@@ -36,7 +36,7 @@ func (s *Server) archiveGate(w http.ResponseWriter) bool {
 	return true
 }
 
-// archiveCreateResponse is POST /filesystem/archive/create's 202 answer.
+// archiveCreateResponse is POST /api/filesystem/archive/create's 202 answer.
 type archiveCreateResponse struct {
 	Success     bool     `json:"success"`
 	Message     string   `json:"message"`
@@ -46,7 +46,7 @@ type archiveCreateResponse struct {
 	Format      string   `json:"format"`
 }
 
-// handleCreateArchive serves POST /filesystem/archive/create → 202 task.
+// handleCreateArchive serves POST /api/filesystem/archive/create → 202 task.
 //
 //	@Summary		Create an archive (task)
 //	@Description	Minimum role: operator. {sources[], archive_path, format} → 202 file_archive_create task. format must sit in file_browser.archive.supported_formats — this agent CREATES zip, tar, and tar.gz (Go's bzip2 is decompress-only; the base's shell tar also spoke tar.bz2). Entries are rooted at each source's basename. An archive landing over max_archive_size_mb is deleted and the task fails. Gated by file_browser.archive.enabled.

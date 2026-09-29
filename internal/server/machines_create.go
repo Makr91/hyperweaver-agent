@@ -16,7 +16,7 @@ import (
 	"github.com/Makr91/hyperweaver-agent/internal/vbox"
 )
 
-// Machine creation — zoneweaver's createZone mechanism: POST /machines
+// Machine creation — zoneweaver's createZone mechanism: POST /api/machines
 // validates, resolves the name (server_id prefix rule), 409s against the DB
 // AND the hypervisor, resolves the box against the template registry
 // (missing template auto-chains its download), then queues a create
@@ -29,14 +29,14 @@ import (
 // provisioning is optional, never a gate on existence); without one the
 // chain builds straight from the spec and provisioning attaches later via
 // PUT's provisioner store + /provision, the base's exact model.
-// PUT /machines/{name} is the modify mechanism (machines_modify.go) — create
+// PUT /api/machines/{name} is the modify mechanism (machines_modify.go) — create
 // DROPS any provisioner config in its body beyond the package reference;
 // provisioning config arrives via PUT's provisioner store or the render.
 
 // serverIDPattern is the numeric server_id vocabulary.
 var serverIDPattern = regexp.MustCompile(`^\d{1,8}$`)
 
-// createMachineRequest is the POST /machines body: an optional explicit name
+// createMachineRequest is the POST /api/machines body: an optional explicit name
 // plus the creation spec (an OPTIONAL package reference + the document
 // inputs — with a package they feed the render, without one they ARE the
 // document).
@@ -63,7 +63,7 @@ type createMachineResponse struct {
 // resolveMachineName settles the machine's name — the base's resolveZoneName:
 // base = hostname.(machine_domain || domain); with machines.prefix_machine_names
 // the server_id is REQUIRED (numeric, padded to 4, uniqueness-checked — never
-// auto-assigned; GET /machines/ids/next feeds the caller) and the final name
+// auto-assigned; GET /api/machines/ids/next feeds the caller) and the final name
 // is <id>--<base>. An explicit name always wins (free-form, D-G).
 func (s *Server) resolveMachineName(ctx context.Context, explicit string, spec *machines.Spec) (name string, status int, problem string) {
 	if explicit != "" {

@@ -32,7 +32,7 @@ import (
 // with {host}/{port}/{user}/{password}/{machine} resolved through the SSH
 // transport ladder and stored credentials.
 
-// ftpInfo is the GET /machines/{name}/ftp answer: the SFTP target built from
+// ftpInfo is the GET /api/machines/{name}/ftp answer: the SFTP target built from
 // the stored credentials and the pipeline's transport ladder (NAT ssh
 // port-forward first, control IP fallback — the ssh-terminal's exact rules).
 type ftpInfo struct {
@@ -83,7 +83,7 @@ func (s *Server) machineFTPInfo(w http.ResponseWriter, r *http.Request) *ftpInfo
 	}
 }
 
-// handleMachineFTPInfo serves GET /machines/{name}/ftp.
+// handleMachineFTPInfo serves GET /api/machines/{name}/ftp.
 //
 //	@Summary		SFTP connection info
 //	@Description	Minimum role: viewer (the host-launchers capability token). The machine's SFTP target built from the stored credentials (settings.vagrant_user) and the SSH transport ladder (NAT ssh port-forward at 127.0.0.1 first, control IP fallback). A remote-mode UI hands sftp_url to the USER'S own OS handler (window.open) — the FileZilla-style flow without an agent-side launch; note a NAT-forward target (127.0.0.1) only resolves ON the agent host.
@@ -102,7 +102,7 @@ func (s *Server) handleMachineFTPInfo(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, info)
 }
 
-// openMachineFTPResponse is POST /machines/{name}/open-ftp's answer.
+// openMachineFTPResponse is POST /api/machines/{name}/open-ftp's answer.
 type openMachineFTPResponse struct {
 	Success     bool   `json:"success"`
 	MachineName string `json:"machine_name"`
@@ -110,7 +110,7 @@ type openMachineFTPResponse struct {
 	Message     string `json:"message"`
 }
 
-// handleOpenMachineFTP serves POST /machines/{name}/open-ftp: hands the sftp
+// handleOpenMachineFTP serves POST /api/machines/{name}/open-ftp: hands the sftp
 // URL to the agent host's default handler (FileZilla and friends register
 // sftp://). Fire-and-forget like the tray's browser open — a missing handler
 // surfaces on the host's own desktop, not here.
@@ -138,7 +138,7 @@ func (s *Server) handleOpenMachineFTP(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// applicationInfo is one GET /applications entry: the configured tool plus
+// applicationInfo is one GET /api/applications entry: the configured tool plus
 // whether its executable actually exists on this host (SHI's ApplicationData
 // .exists — a launch against a missing binary is refused, never spawned).
 type applicationInfo struct {
@@ -149,14 +149,14 @@ type applicationInfo struct {
 	Exists bool     `json:"exists"`
 }
 
-// applicationListResponse is GET /applications's answer: the configured
+// applicationListResponse is GET /api/applications's answer: the configured
 // applications[] with their live existence check, plus the count.
 type applicationListResponse struct {
 	Applications []applicationInfo `json:"applications"`
 	Total        int               `json:"total"`
 }
 
-// handleListApplications serves GET /applications — the configured external
+// handleListApplications serves GET /api/applications — the configured external
 // applications (config applications[]) with a live existence check, feeding
 // the UI's per-machine launch menu and its applications settings page.
 //
@@ -208,7 +208,7 @@ func resolveAppArgs(args []string, replacements *strings.Replacer) []string {
 }
 
 // launchApplicationResponse is POST
-// /machines/{name}/applications/{appName}/launch's answer.
+// /api/machines/{name}/applications/{appName}/launch's answer.
 type launchApplicationResponse struct {
 	Success     bool   `json:"success"`
 	MachineName string `json:"machine_name"`
@@ -219,7 +219,7 @@ type launchApplicationResponse struct {
 }
 
 // handleLaunchApplication serves POST
-// /machines/{machineName}/applications/{appName}/launch — SHI's openFtpClient
+// /api/machines/{machineName}/applications/{appName}/launch — SHI's openFtpClient
 // generalized (Mark's go 2026-07-12): spawn the configured tool on the AGENT
 // host with the machine's live connection details substituted into its
 // argument template. Fire-and-forget like every launcher; a missing
@@ -302,7 +302,7 @@ func (s *Server) handleLaunchApplication(w http.ResponseWriter, r *http.Request)
 	})
 }
 
-// openMachineDirectoryResponse is POST /machines/{name}/open-directory's answer.
+// openMachineDirectoryResponse is POST /api/machines/{name}/open-directory's answer.
 type openMachineDirectoryResponse struct {
 	Success     bool   `json:"success"`
 	MachineName string `json:"machine_name"`
@@ -310,7 +310,7 @@ type openMachineDirectoryResponse struct {
 	Message     string `json:"message"`
 }
 
-// handleOpenMachineDirectory serves POST /machines/{name}/open-directory:
+// handleOpenMachineDirectory serves POST /api/machines/{name}/open-directory:
 // opens the machine's working directory in the agent host's file manager
 // (Explorer / Finder / the xdg default).
 //

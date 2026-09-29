@@ -21,7 +21,7 @@ func requireHostOnlyNetPlatform(w http.ResponseWriter) bool {
 	return false
 }
 
-// hostOnlyNetCreateRequest is POST /network/spaces/hostonlynet's body.
+// hostOnlyNetCreateRequest is POST /api/network/spaces/hostonlynet's body.
 type hostOnlyNetCreateRequest struct {
 	Name    string `json:"name"`
 	Netmask string `json:"netmask"`
@@ -30,7 +30,7 @@ type hostOnlyNetCreateRequest struct {
 	Enabled *bool  `json:"enabled"`
 }
 
-// handleCreateHostOnlyNet serves POST /network/spaces/hostonlynet — create a
+// handleCreateHostOnlyNet serves POST /api/network/spaces/hostonlynet — create a
 // host-only NETWORK (VirtualBox 7's vmnet-backed family; the caller names
 // it, unlike interfaces).
 //
@@ -102,7 +102,7 @@ func (s *Server) findHostOnlyNet(w http.ResponseWriter, r *http.Request, exe str
 	return "", false
 }
 
-// hostOnlyNetModifyRequest is PUT /network/spaces/hostonlynet/{name}'s body.
+// hostOnlyNetModifyRequest is PUT /api/network/spaces/hostonlynet/{name}'s body.
 type hostOnlyNetModifyRequest struct {
 	Netmask string `json:"netmask"`
 	LowerIP string `json:"lower_ip"`
@@ -110,7 +110,7 @@ type hostOnlyNetModifyRequest struct {
 	Enabled *bool  `json:"enabled"`
 }
 
-// handleModifyHostOnlyNet serves PUT /network/spaces/hostonlynet/{name}.
+// handleModifyHostOnlyNet serves PUT /api/network/spaces/hostonlynet/{name}.
 //
 //	@Summary		Modify a host-only network
 //	@Description	Minimum role: operator. Converges the sent knobs (netmask, lower_ip, upper_ip, enabled — hostonlynet modify). At least one is required.
@@ -163,7 +163,7 @@ func (s *Server) handleModifyHostOnlyNet(w http.ResponseWriter, r *http.Request)
 	})
 }
 
-// handleDeleteHostOnlyNet serves DELETE /network/spaces/hostonlynet/{name}.
+// handleDeleteHostOnlyNet serves DELETE /api/network/spaces/hostonlynet/{name}.
 //
 //	@Summary		Remove a host-only network
 //	@Description	Minimum role: operator. VBoxManage hostonlynet remove. Machines whose adapters name the network lose their uplink — VirtualBox does not refuse.

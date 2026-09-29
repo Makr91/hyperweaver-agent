@@ -187,7 +187,7 @@ var hardwareEnumValues = map[string]map[string][]string{
 }
 
 // KnobValues publishes the machine-readable value vocabularies of every
-// closed-vocabulary knob (GET /machines/defaults knob_values — the UI's
+// closed-vocabulary knob (GET /api/machines/defaults knob_values — the UI's
 // dropdown feed, Mark's enum ruling 2026-07-09). Keys are FLAT DOTTED, one
 // wire shape with zoneweaver (the 2026-07-12 one-wire ruling): literal
 // hardware.<section>.<key> derived from the modifyvm vocabulary (on|off knobs
@@ -222,7 +222,7 @@ func KnobValues() map[string][]string {
 }
 
 // MachineKnobDefaults publishes the value an UNSET knob effectively runs with
-// (GET /machines/defaults knob_defaults — the companion to knob_current the UI
+// (GET /api/machines/defaults knob_defaults — the companion to knob_current the UI
 // AI asked for 2026-07-12: knob_current shows what is SET, knob_defaults shows
 // what an unset knob runs with, so a blank Edit field can read the effective
 // value instead of "(agent default)"). FLAT DOTTED, one wire shape with

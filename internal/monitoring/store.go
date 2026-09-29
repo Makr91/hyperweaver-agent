@@ -309,7 +309,7 @@ func (s *Store) NetworkHistory(ctx context.Context, f *HistoryFilter) ([]Network
 }
 
 // Counts reports per-table row counts and each table's latest sample time —
-// GET /monitoring/summary's recordCounts/latestData.
+// GET /api/monitoring/summary's recordCounts/latestData.
 func (s *Store) Counts(ctx context.Context) (counts map[string]int64, latest map[string]*time.Time, err error) {
 	counts = map[string]int64{}
 	latest = map[string]*time.Time{}

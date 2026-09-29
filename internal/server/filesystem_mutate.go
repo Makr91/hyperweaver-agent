@@ -138,7 +138,7 @@ func parseOctalMode(raw string) (os.FileMode, error) {
 	return os.FileMode(value), nil
 }
 
-// createFolderRequest is POST /filesystem/folder's body.
+// createFolderRequest is POST /api/filesystem/folder's body.
 type createFolderRequest struct {
 	Path string `json:"path"`
 	Name string `json:"name"`
@@ -148,14 +148,14 @@ type createFolderRequest struct {
 	GID  *int   `json:"gid"`
 }
 
-// createFolderResponse is POST /filesystem/folder's answer.
+// createFolderResponse is POST /api/filesystem/folder's answer.
 type createFolderResponse struct {
 	Success bool           `json:"success"`
 	Message string         `json:"message"`
 	Item    fileSystemItem `json:"item"`
 }
 
-// handleCreateFolder serves POST /filesystem/folder — the base's createFolder:
+// handleCreateFolder serves POST /api/filesystem/folder — the base's createFolder:
 // {path, name, mode?, uid?, gid?} → 201 with the new directory's item.
 //
 //	@Summary		Create a directory

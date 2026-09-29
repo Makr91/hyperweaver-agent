@@ -114,7 +114,7 @@ func RegisterExecutors(queue *tasks.Queue, store *Store, reconciler *Reconciler,
 	queue.Register(OpHook, tasks.Executor{Run: e.runHook})
 	// Syncback (folders[].syncback — guest→host pulls, the walk's closing
 	// bracket by document structure, and ad-hoc via POST
-	// /machines/{name}/sync {"syncback": true}).
+	// /api/machines/{name}/sync {"syncback": true}).
 	queue.Register(OpSyncbackParent, tasks.Executor{Run: e.parentAnchor})
 	queue.Register(OpSyncbackFolder, tasks.Executor{Run: e.syncbackFolder})
 	// Key rotation (machine_key_rotate — key_rotate proposal, sync

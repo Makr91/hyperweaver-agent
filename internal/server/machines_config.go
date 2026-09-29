@@ -106,7 +106,7 @@ func detailConfiguration(machine *machines.Machine, liveRaw map[string]string) j
 }
 
 // natForwardRule is one parsed NAT port-forward rule — GET
-// /machines/{machineName}/config's nat_forwards row, derived from the
+// /api/machines/{machineName}/config's nat_forwards row, derived from the
 // machinereadable Forwarding(N) keys.
 type natForwardRule struct {
 	Name     string `json:"name"`

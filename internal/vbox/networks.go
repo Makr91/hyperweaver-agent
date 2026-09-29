@@ -12,7 +12,7 @@ import (
 
 // Network-space enumeration + NAT-network management beyond the provisioning
 // host-only machinery (hostonly.go): `list intnets`, `list natnetworks`, and
-// the `natnetwork add|modify|remove|start|stop` family — the /network/spaces
+// the `natnetwork add|modify|remove|start|stop` family — the /api/network/spaces
 // surface's hypervisor layer. Internal networks are IMPLICIT: they exist
 // while a VM references them, carry no attributes, and have no verbs.
 

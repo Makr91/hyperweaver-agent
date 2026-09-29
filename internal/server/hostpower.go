@@ -16,11 +16,11 @@ import (
 	"github.com/Makr91/hyperweaver-agent/internal/tasks"
 )
 
-// Host power-management endpoints (/system/host/*, the `host-power`
+// Host power-management endpoints (/api/system/host/*, the `host-power`
 // capability token, config-gated by host_power.enabled — Mark's ruling
 // 2026-07-05: remote power control is half the point of a headless
 // datacenter host). Mutations are admin-only via the central role policy
-// (/system/host is an admin-write prefix) and require confirm:true. Actions
+// (/api/system/host is an admin-write prefix) and require confirm:true. Actions
 // run as queued tasks through the platform shutdown command.
 
 // disabled503 answers the config-gated-503 convention: a killed surface
@@ -79,7 +79,7 @@ type hostStatusResponse struct {
 	Memory      hostStatusMemory `json:"memory"`
 }
 
-// handleHostStatus mirrors GET /system/host/status (the platform-feasible
+// handleHostStatus mirrors GET /api/system/host/status (the platform-feasible
 // subset: no runlevel, no reboot-required tracking — init concepts absent
 // here).
 //
@@ -128,7 +128,7 @@ type hostUptimeResponse struct {
 	LoadAverages    hostUptimeLoadAverages `json:"load_averages"`
 }
 
-// handleHostUptime mirrors GET /system/host/uptime.
+// handleHostUptime mirrors GET /api/system/host/uptime.
 //
 //	@Summary		Host uptime
 //	@Description	Minimum role: viewer. 503 when host_power.enabled is false.

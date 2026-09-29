@@ -11,10 +11,10 @@ import (
 	"time"
 )
 
-// Read-only database explorer (GET /database/{db}/tables and
+// Read-only database explorer (GET /api/database/{db}/tables and
 // /database/{db}/tables/{table}/rows) — zoneweaver's explorer drill-down on
 // the same wire contract, so the UI calls one path family on every agent.
-// {db} names a GET /database/stats databases[].name value. No arbitrary SQL:
+// {db} names a GET /api/database/stats databases[].name value. No arbitrary SQL:
 // {table} and order_by are looked up in the database's OWN catalog first and
 // quoted as identifiers; limit/offset ride as bind parameters.
 
@@ -137,7 +137,7 @@ type databaseTablesResponse struct {
 	Timestamp string          `json:"timestamp"`
 }
 
-// handleListDatabaseTables serves GET /database/{db}/tables.
+// handleListDatabaseTables serves GET /api/database/{db}/tables.
 //
 //	@Summary		List a database's tables
 //	@Description	Minimum role: viewer. The read-only explorer drill-down (zoneweaver's contract, same wire on both agents): one open database's tables with row counts and index names. {db} is a GET /api/database/stats databases[].name value. SQLite internals (sqlite_*) and auto-indexes are excluded.

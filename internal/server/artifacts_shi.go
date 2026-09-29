@@ -15,7 +15,7 @@ import (
 
 // ---- SHI extras ----
 
-// handleHCLDownload: POST /artifacts/hcl-download — the SHI download-portal
+// handleHCLDownload: POST /api/artifacts/hcl-download — the SHI download-portal
 // flow (token exchange with rotation persisted, catalog lookup, verified
 // streamed download into the kind's default location).
 //
@@ -43,7 +43,7 @@ func (s *Server) handleHCLDownload(w http.ResponseWriter, r *http.Request) {
 		"HCL download task queued successfully")
 }
 
-// registerArtifactRequest is POST /artifacts/register's body.
+// registerArtifactRequest is POST /api/artifacts/register's body.
 type registerArtifactRequest struct {
 	Path string `json:"path"`
 	// StoragePathID or a valid Type selects the destination location.
@@ -55,7 +55,7 @@ type registerArtifactRequest struct {
 	Move     bool   `json:"move"`
 }
 
-// handleRegisterArtifact: POST /artifacts/register — copies (or moves) an
+// handleRegisterArtifact: POST /api/artifacts/register — copies (or moves) an
 // agent-host file into a location and hashes it (SHI's add-file picker for
 // Direct mode).
 //

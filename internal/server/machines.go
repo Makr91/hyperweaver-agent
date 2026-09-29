@@ -16,7 +16,7 @@ import (
 	"github.com/Makr91/hyperweaver-agent/internal/vbox"
 )
 
-// Machine endpoints (Agent API v1 machines surface, /machines/* — the only
+// Machine endpoints (Agent API v1 machines surface, /api/machines/* — the only
 // machine path, per Mark's 2026-07-05 ruling in hyperweaver-ai-sync.md, with
 // the de-zoned wire vocabulary agreed there). Lifecycle operations are
 // task-queued, idempotency-checked, and dedup-checked exactly like the Node
@@ -80,7 +80,7 @@ func (s *Server) findMachine(w http.ResponseWriter, r *http.Request) *machines.M
 	return machine
 }
 
-// machineListResponse is GET /machines' answer: the filtered rows and their
+// machineListResponse is GET /api/machines' answer: the filtered rows and their
 // total count.
 type machineListResponse struct {
 	Machines []*machines.Machine `json:"machines"`

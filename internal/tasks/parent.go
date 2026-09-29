@@ -21,7 +21,7 @@ func (e *NotCancellableError) Error() string {
 	return "task is " + e.Status
 }
 
-// Cancel cancels a task (DELETE /tasks/{id}). Pending tasks flip to
+// Cancel cancels a task (DELETE /api/tasks/{id}). Pending tasks flip to
 // cancelled immediately; running tasks get their context cancelled — the
 // executor's children die, its OnCancel cleanup runs, and the task lands in
 // cancelled with its output preserved (D-F). Returns true when the task was

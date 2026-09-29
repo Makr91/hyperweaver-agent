@@ -43,7 +43,7 @@ func scanLocation(row interface{ Scan(...any) error }) (*Location, error) {
 	return &l, nil
 }
 
-// LocationFilter selects locations (GET /artifacts/storage/paths).
+// LocationFilter selects locations (GET /api/artifacts/storage/paths).
 type LocationFilter struct {
 	Type    string
 	Enabled *bool
@@ -153,7 +153,7 @@ func (s *Store) CreateLocation(ctx context.Context, nl *NewLocation) (*Location,
 	return s.GetLocation(ctx, id)
 }
 
-// UpdateLocation applies the mutable fields (PUT /artifacts/storage/paths/:id
+// UpdateLocation applies the mutable fields (PUT /api/artifacts/storage/paths/:id
 // — zoneweaver updates name and enabled only). Nil fields keep their value
 // (COALESCE against the NULL the nil pointer binds).
 func (s *Store) UpdateLocation(ctx context.Context, id string, name *string, enabled *bool) (*Location, error) {

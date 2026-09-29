@@ -9,7 +9,7 @@ import (
 	"github.com/elastic/go-sysinfo/types"
 )
 
-// The GET /stats probes are backed by elastic/go-sysinfo — a maintained,
+// The GET /api/stats probes are backed by elastic/go-sysinfo — a maintained,
 // cross-OS host-introspection library — instead of hand-rolled syscalls, so
 // the Linux and macOS paths ship tested (the darwin sysctl parsing in
 // particular is not testable in this project's dev environment). The handle

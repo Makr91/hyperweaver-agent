@@ -18,8 +18,8 @@ import (
 // firmware logo family + pxe_debug, platform tpm/system_uuid_le/icon_file/
 // vm_execution_engine.
 
-// KnobCurrent presents a machine's CURRENT values in PUT /machines/{name}'s
-// exact vocabulary (GET /machines/{name} knob_current — the Edit-surface
+// KnobCurrent presents a machine's CURRENT values in PUT /api/machines/{name}'s
+// exact vocabulary (GET /api/machines/{name} knob_current — the Edit-surface
 // prefill): top-level zones-vocabulary fields, hardware.<section>.<key>,
 // hardware.serial[]/parallel[], per-adapter nics[], plus the DB-held
 // boot_priority and SSH credentials. raw may be nil (no VM behind the

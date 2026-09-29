@@ -17,8 +17,8 @@ import (
 )
 
 // SSH terminal sessions — the base's SSHTerminal family on this agent's
-// transport: POST /machines/{name}/ssh/start mints a session, the WebSocket
-// at /ssh/{sessionId}?ticket=... opens the interactive shell. The shell
+// transport: POST /api/machines/{name}/ssh/start mints a session, the WebSocket
+// at /api/ssh/{sessionId}?ticket=... opens the interactive shell. The shell
 // prefers the provisioning NAT ssh port-forward (the pipeline's transport,
 // immune to guest network reconfiguration) and falls back to the document's
 // control IP — resolveTransport's exact ladder. Sessions are in-memory:
@@ -132,7 +132,7 @@ func (s *Server) sshTransport(ctx context.Context, machine *machines.Machine,
 }
 
 // handleStartSSHSession mints an SSH terminal session (the base's POST
-// /machines/{name}/ssh/start — each call is an independent session).
+// /api/machines/{name}/ssh/start — each call is an independent session).
 //
 //	@Summary		Start an SSH terminal session
 //	@Description	Minimum role: operator. Mints an SSH terminal session for a RUNNING machine; connect the terminal at the /api/ssh/{sessionId} WebSocket. Each call is an independent session. Credentials come from the stored configuration (settings.vagrant_user/vagrant_user_pass/vagrant_user_private_key_path; the agent's provisioning key is the last-resort fallback). Transport = the pipeline's ladder: the provisioning NAT ssh port-forward first (immune to guest network reconfiguration), the document's control IP as fallback.
@@ -187,7 +187,7 @@ func (s *Server) handleStartSSHSession(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, session)
 }
 
-// handleListSSHSessions mirrors GET /ssh/sessions.
+// handleListSSHSessions mirrors GET /api/ssh/sessions.
 //
 //	@Summary		List SSH terminal sessions
 //	@Description	Minimum role: viewer. Newest first. Sessions are in-memory — an agent restart closes them all (shells cannot survive it).
@@ -199,7 +199,7 @@ func (s *Server) handleListSSHSessions(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, s.sshSessions.snapshot())
 }
 
-// handleSSHSessionInfo mirrors GET /ssh/sessions/{sessionId}.
+// handleSSHSessionInfo mirrors GET /api/ssh/sessions/{sessionId}.
 //
 //	@Summary		SSH session information
 //	@Description	Minimum role: viewer.
@@ -218,7 +218,7 @@ func (s *Server) handleSSHSessionInfo(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, session)
 }
 
-// handleStopSSHSession mirrors DELETE /ssh/sessions/{sessionId}/stop.
+// handleStopSSHSession mirrors DELETE /api/ssh/sessions/{sessionId}/stop.
 //
 //	@Summary		Stop an SSH session
 //	@Description	Minimum role: operator. Closes the shell and marks the session closed.
@@ -249,7 +249,7 @@ type terminalControl struct {
 	Rows int    `json:"rows"`
 }
 
-// handleSSHSocket serves the WebSocket at /ssh/{sessionId}: dial, shell,
+// handleSSHSocket serves the WebSocket at /api/ssh/{sessionId}: dial, shell,
 // bidirectional piping, resize control frames — the base's
 // handleSSHConnection + setupSSHPiping.
 //

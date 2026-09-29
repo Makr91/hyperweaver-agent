@@ -1,5 +1,5 @@
 // Package monitoring implements the agent's host telemetry surface
-// (/monitoring/*, the `monitoring` capability token) — the Node
+// (/api/monitoring/*, the `monitoring` capability token) — the Node
 // zoneweaver-agent's HostMonitoringService reshaped per Mark's 2026-07-05
 // ruling: the endpoints ALWAYS serve realtime samples read live through
 // gopsutil; enabling monitoring.storage_enabled adds a background collector

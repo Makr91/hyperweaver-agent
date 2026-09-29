@@ -247,7 +247,7 @@ const (
 // MediumSourceStamp reads a medium's provenance stamp — the VirtualBox
 // medium property first, the <disk>.hw-source sidecar second ("" =
 // unstamped: a foreign medium the agent never created). The delete flow's
-// destroy-vs-preserve decision and GET /media both read through it.
+// destroy-vs-preserve decision and GET /api/media both read through it.
 func MediumSourceStamp(ctx context.Context, vboxExe, path string) string {
 	if vboxExe != "" {
 		if value, gerr := vbox.GetMediumProperty(ctx, vboxExe, path, mediumSourceProperty); gerr == nil && value != "" {

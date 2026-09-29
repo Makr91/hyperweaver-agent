@@ -22,7 +22,7 @@ type TasksConfig struct {
 	// MaxConcurrent caps simultaneously running tasks (Node:
 	// zones.max_concurrent_tasks).
 	MaxConcurrent int `yaml:"max_concurrent" json:"max_concurrent"`
-	// DefaultPaginationLimit is GET /tasks' default limit (Node:
+	// DefaultPaginationLimit is GET /api/tasks' default limit (Node:
 	// zones.default_pagination_limit).
 	DefaultPaginationLimit int `yaml:"default_pagination_limit" json:"default_pagination_limit"`
 	// RetentionDays: finished tasks older than this are deleted by the

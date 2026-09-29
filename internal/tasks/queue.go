@@ -180,21 +180,21 @@ func (q *Queue) Stop() {
 	tlog().Info("task processor stopped")
 }
 
-// ProcessorRunning reports whether the poll loop is active (GET /tasks/stats).
+// ProcessorRunning reports whether the poll loop is active (GET /api/tasks/stats).
 func (q *Queue) ProcessorRunning() bool {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	return q.processing
 }
 
-// RunningCount is the number of in-flight tasks (GET /tasks running_count).
+// RunningCount is the number of in-flight tasks (GET /api/tasks running_count).
 func (q *Queue) RunningCount() int {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	return len(q.running)
 }
 
-// MaxConcurrent is the configured concurrency cap (GET /tasks/stats).
+// MaxConcurrent is the configured concurrency cap (GET /api/tasks/stats).
 func (q *Queue) MaxConcurrent() int {
 	return q.cfg.MaxConcurrent
 }
@@ -223,7 +223,7 @@ func (q *Queue) loop() {
 
 // CleanupNow deletes finished tasks past the retention window and returns
 // how many were removed — the retention cleanup's work, shared by the
-// periodic tick and POST /database/cleanup.
+// periodic tick and POST /api/database/cleanup.
 func (q *Queue) CleanupNow(ctx context.Context) (int64, error) {
 	cutoff := time.Now().AddDate(0, 0, -q.cfg.RetentionDays)
 	return q.store.DeleteFinishedBefore(ctx, cutoff)

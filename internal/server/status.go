@@ -60,9 +60,9 @@ type statusPayload struct {
 	Hostname           string   `json:"hostname"`
 	Auth               []string `json:"auth"`
 	BootstrapAvailable bool     `json:"bootstrapAvailable"`
-	// EMERGENCY consoles only (Mark's placement ruling 2026-07-12 — hypervisor-level surfaces that work with zero guest cooperation): rdp always (base VRDP ships in VirtualBox 7.2 — the IronRDP web client rides the /machines/{name}/rdp-bridge RDCleanPath WebSocket); vnc only when a USABLE VBoxVNC VRDE module is installed (the websockify bridge needs RFB on the VRDE port). The machine SSH terminal is guest-network access and advertises as features 'ssh' instead.
+	// EMERGENCY consoles only (Mark's placement ruling 2026-07-12 — hypervisor-level surfaces that work with zero guest cooperation): rdp always (base VRDP ships in VirtualBox 7.2 — the IronRDP web client rides the /api/machines/{name}/rdp-bridge RDCleanPath WebSocket); vnc only when a USABLE VBoxVNC VRDE module is installed (the websockify bridge needs RFB on the VRDE port). The machine SSH terminal is guest-network access and advertises as features 'ssh' instead.
 	Console []string `json:"console"`
-	// Capability tokens (platform support ∧ config state): host-power is absent when host_power.enabled is false, artifacts when artifact_storage.enabled is false, file-browser when file_browser.enabled is false, guest-agent when guest_agent.enabled is false. provisioner-registry names the SHI-format package registry surface and secrets the global secrets store — finer than the cross-agent provisioning/machine-create tokens, which are true on every provisioning-capable agent regardless of wire shape (Mark's gating ruling, 2026-07-06). machine-modify names PUT's infrastructure-modify surface (the base's zone_modify contract). ssh names the machine SSH-terminal family (POST /machines/{name}/ssh/start + the /ssh/{id} WebSocket) — a FEATURE, not a console, per Mark's placement ruling 2026-07-12: console[] carries emergency consoles only. hosts-file names the /system/hosts editor surface (the converged wire, minted 2026-07-17) — a platform token, always advertised on both agents. dns names the /system/dns surface beside it (minted 2026-07-17, same converged wire — per-OS mechanics, wire identical; the UI's Network-tab DNS section gates on it). hostname names the /network/hostname surface (minted 2026-07-17, the converged wire): GET is the live view, PUT queues the async set_hostname task. ip-addresses names the /network/addresses surface (minted 2026-07-17; mutations shipped 2026-07-19 per Mark's build order): the live listing plus the zoneweaver-converged task mutations — create (static everywhere, dhcp Windows-only, addrconf refused), delete (?address= disambiguator), and the INTERFACE-level enable/disable toggles. network-spaces names the /network/spaces surface (minted 2026-07-19): enumerate + manage VirtualBox's network spaces (host-only interfaces with DHCP, NAT networks with port forwards, read-only internal networks) — the UI topology mapper gates its network-space fetch on it.
+	// Capability tokens (platform support ∧ config state): host-power is absent when host_power.enabled is false, artifacts when artifact_storage.enabled is false, file-browser when file_browser.enabled is false, guest-agent when guest_agent.enabled is false. provisioner-registry names the SHI-format package registry surface and secrets the global secrets store — finer than the cross-agent provisioning/machine-create tokens, which are true on every provisioning-capable agent regardless of wire shape (Mark's gating ruling, 2026-07-06). machine-modify names PUT's infrastructure-modify surface (the base's zone_modify contract). ssh names the machine SSH-terminal family (POST /api/machines/{name}/ssh/start + the /api/ssh/{id} WebSocket) — a FEATURE, not a console, per Mark's placement ruling 2026-07-12: console[] carries emergency consoles only. hosts-file names the /api/system/hosts editor surface (the converged wire, minted 2026-07-17) — a platform token, always advertised on both agents. dns names the /api/system/dns surface beside it (minted 2026-07-17, same converged wire — per-OS mechanics, wire identical; the UI's Network-tab DNS section gates on it). hostname names the /api/network/hostname surface (minted 2026-07-17, the converged wire): GET is the live view, PUT queues the async set_hostname task. ip-addresses names the /api/network/addresses surface (minted 2026-07-17; mutations shipped 2026-07-19 per Mark's build order): the live listing plus the zoneweaver-converged task mutations — create (static everywhere, dhcp Windows-only, addrconf refused), delete (?address= disambiguator), and the INTERFACE-level enable/disable toggles. network-spaces names the /api/network/spaces surface (minted 2026-07-19): enumerate + manage VirtualBox's network spaces (host-only interfaces with DHCP, NAT networks with port forwards, read-only internal networks) — the UI topology mapper gates its network-space fetch on it.
 	Features []string `json:"features"`
 	// "I Can't Believe it's not Super.Human.Installer" presentation toggle (ui.shi_mode): the SPA renders the opinionated SHI-style theme/flow in Direct mode when true. Absent/false on agents without the concept.
 	SHIMode bool `json:"shi_mode"`
@@ -76,14 +76,14 @@ type statusPayload struct {
 // the UI shows Suspend wherever it appears — VirtualBox suspends, bhyve does
 // not, and no UI code ever branches on hypervisor values. monitoring and
 // processes shipped with the spec-matching pass (arch items 15/16): the
-// /monitoring/* endpoints serve realtime samples regardless of the storage
+// /api/monitoring/* endpoints serve realtime samples regardless of the storage
 // setting, so the token is unconditional. provisioning shipped with the
-// provisioner package registry (/provisioning/provisioners); machine-create
-// shipped with the create orchestration (POST /machines → native VBoxManage build through the
+// provisioner package registry (/api/provisioning/provisioners); machine-create
+// shipped with the create orchestration (POST /api/machines → native VBoxManage build through the
 // queue; the zoneweaver mechanism, no vagrant). provisioner-registry and secrets are the finer tokens of Mark's
 // gating ruling (2026-07-06): zoneweaver's provisioning/machine-create are
 // equally TRUE but name different wire shapes, so the SHI-format registry
-// surface (/provisioning/provisioners*) and the global secrets store
+// surface (/api/provisioning/provisioners*) and the global secrets store
 // (/secrets) advertise their own tokens — zoneweaver gains each when its
 // parity lands, and the UI's Installer Files gate is artifacts ∧
 // provisioner-registry. templates shipped with the box-template registry
@@ -92,9 +92,9 @@ type statusPayload struct {
 // shipped with the machine_modify port of zoneweaver's PUT modify (the UI's
 // Edit modal gates on it; zoneweaver adds it in its own session).
 // machine-snapshots shipped with the VBoxManage snapshot family
-// (/machines/{name}/snapshots — list/take/restore/delete + clone
+// (/api/machines/{name}/snapshots — list/take/restore/delete + clone
 // source=current); machine-screenshot with the no-session framebuffer PNG
-// (GET /machines/{name}/vnc/screenshot — zoneweaver serves the same endpoint
+// (GET /api/machines/{name}/vnc/screenshot — zoneweaver serves the same endpoint
 // from the bhyve framebuffer and gains the token in its own session).
 // host-launchers shipped with the SHI open-directory/open-FTP parity (Mark's
 // both-ways ruling 2026-07-07): agent-host launch endpoints + the /ftp info
@@ -108,20 +108,20 @@ type statusPayload struct {
 // machine SSH terminal rides the guest's own network and credentials, so it
 // advertises as features:ssh — zoneweaver's home, now shared.
 // hosts-file minted 2026-07-17 (Mark's pick on the UI's gating open): the
-// /system/hosts editor ships on BOTH agents with the converged wire, so it
+// /api/system/hosts editor ships on BOTH agents with the converged wire, so it
 // advertises as a platform token — the UI gates the Host tab on it (D14's
 // gate-on-tokens-only rule).
-// dns minted 2026-07-17: the /system/dns surface with the converged wire —
+// dns minted 2026-07-17: the /api/system/dns surface with the converged wire —
 // per-OS mechanics (resolv.conf on Unix, netsh on Windows, networksetup on
 // macOS), wire identical; the UI's Network-tab DNS section gates on it.
-// hostname minted 2026-07-17: the /network/hostname surface (GET live view
+// hostname minted 2026-07-17: the /api/network/hostname surface (GET live view
 // + PUT queuing set_hostname) with the converged wire.
-// ip-addresses minted 2026-07-17: the /network/addresses surface — the live
+// ip-addresses minted 2026-07-17: the /api/network/addresses surface — the live
 // listing plus (Mark's build order 2026-07-19, replacing the 501 stubs) the
 // zoneweaver-converged mutations: create (static everywhere, dhcp on
 // Windows), delete, and the interface-level enable/disable toggles.
 // network-spaces minted 2026-07-19 (the UI topology ask): the
-// /network/spaces surface — enumerate + manage VirtualBox's host-only
+// /api/network/spaces surface — enumerate + manage VirtualBox's host-only
 // interfaces, NAT networks, and internal networks; the topology mapper
 // gates its network-space fetch on this token (D14: tokens, never
 // hypervisors[]).

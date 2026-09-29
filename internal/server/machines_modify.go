@@ -13,7 +13,7 @@ import (
 	"github.com/Makr91/hyperweaver-agent/internal/vbox"
 )
 
-// PUT /machines/{machineName} — zoneweaver's modifyZone ported whole
+// PUT /api/machines/{machineName} — zoneweaver's modifyZone ported whole
 // (ZoneModificationController.js): one endpoint, three change classes.
 // notes/tags apply immediately (registry-only); the provisioner document
 // stores immediately (configuration.provisioner — the next /provision

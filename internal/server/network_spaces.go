@@ -16,7 +16,7 @@ import (
 // line per process — the listing is polled by the UI topology page.
 var hostOnlyNetsNarrated sync.Once
 
-// The network-space surface (/network/spaces*, the network-spaces capability
+// The network-space surface (/api/network/spaces*, the network-spaces capability
 // token — the UI topology ask, sync 2026-07-19): enumerate and manage
 // VirtualBox's network spaces. This file holds the listing and the host-only
 // families (interfaces with their DHCP servers, plus the 7.x vmnet host-only
@@ -68,7 +68,7 @@ type networkSpacesResponse struct {
 	Total  int            `json:"total"`
 }
 
-// handleListNetworkSpaces serves GET /network/spaces — every network space
+// handleListNetworkSpaces serves GET /api/network/spaces — every network space
 // as one typed row (the topology mapper's network-card feed).
 //
 //	@Summary		List the host's VirtualBox network spaces
@@ -267,7 +267,7 @@ type hostOnlySpaceResponse struct {
 	Message string `json:"message"`
 }
 
-// hostOnlySpaceCreateRequest is POST /network/spaces/hostonly's body.
+// hostOnlySpaceCreateRequest is POST /api/network/spaces/hostonly's body.
 type hostOnlySpaceCreateRequest struct {
 	IP      string `json:"ip"`
 	Netmask string `json:"netmask"`
@@ -275,7 +275,7 @@ type hostOnlySpaceCreateRequest struct {
 	DHCP *hostOnlyDHCPBody `json:"dhcp"`
 }
 
-// handleCreateHostOnlySpace serves POST /network/spaces/hostonly — create a
+// handleCreateHostOnlySpace serves POST /api/network/spaces/hostonly — create a
 // host-only interface (VirtualBox assigns its name), optionally configure
 // its static IP and add its DHCP server in one call. A failed follow-up step
 // names the already-created interface — it is NOT rolled back.
@@ -345,7 +345,7 @@ func (s *Server) handleCreateHostOnlySpace(w http.ResponseWriter, r *http.Reques
 	})
 }
 
-// hostOnlySpaceModifyRequest is PUT /network/spaces/hostonly/{name}'s body.
+// hostOnlySpaceModifyRequest is PUT /api/network/spaces/hostonly/{name}'s body.
 type hostOnlySpaceModifyRequest struct {
 	IP      string `json:"ip"`
 	Netmask string `json:"netmask"`
@@ -353,7 +353,7 @@ type hostOnlySpaceModifyRequest struct {
 	DHCP json.RawMessage `json:"dhcp"`
 }
 
-// handleModifyHostOnlySpace serves PUT /network/spaces/hostonly/{name} —
+// handleModifyHostOnlySpace serves PUT /api/network/spaces/hostonly/{name} —
 // reconfigure the static IP and/or the DHCP server (dhcp: null REMOVES the
 // server; an absent dhcp key leaves it alone).
 //
@@ -454,7 +454,7 @@ func (s *Server) handleModifyHostOnlySpace(w http.ResponseWriter, r *http.Reques
 	})
 }
 
-// handleDeleteHostOnlySpace serves DELETE /network/spaces/hostonly/{name} —
+// handleDeleteHostOnlySpace serves DELETE /api/network/spaces/hostonly/{name} —
 // DHCP server first (tolerantly), then the interface (the teardown order).
 //
 //	@Summary		Remove a host-only interface

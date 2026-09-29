@@ -290,7 +290,7 @@ func (s *Server) documentAddresses(ctx context.Context) []net.IP {
 	return ips
 }
 
-// ipSuggestions is the bare GET /network/ip-suggestions document
+// ipSuggestions is the bare GET /api/network/ip-suggestions document
 // {interface, subnet, gateway, used, suggestions, total_used} — advisory,
 // never a reservation.
 type ipSuggestions struct {
@@ -306,7 +306,7 @@ type ipSuggestions struct {
 	TotalUsed   int      `json:"total_used"`
 }
 
-// handleIPSuggestions serves GET /network/ip-suggestions (the converged
+// handleIPSuggestions serves GET /api/network/ip-suggestions (the converged
 // cross-agent wire, sync 2026-07-18): {interface, subnet, gateway, used,
 // suggestions, total_used}. interface = the default-route link, used =
 // ARP/NDP neighbors + document-pinned machine addresses + the gateway and the
