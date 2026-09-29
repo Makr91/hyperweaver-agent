@@ -83,6 +83,8 @@ var NotableOperations = map[string]bool{
 	"machine_clone_current":           true,
 	"machine_unattended_install":      true,
 	"delete":                          true,
+	"snapshot_take":                   true,
+	"snapshot_delete":                 true,
 	"snapshot_restore":                true,
 	"template_download":               true,
 	"template_upload":                 true,
