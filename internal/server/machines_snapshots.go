@@ -13,6 +13,22 @@ import (
 	"github.com/Makr91/hyperweaver-agent/internal/vbox"
 )
 
+type snapshotListResponse struct {
+	MachineName string          `json:"machine_name"`
+	Snapshots   []vbox.Snapshot `json:"snapshots"`
+	Total       int             `json:"total"`
+}
+
+type snapshotName struct {
+	Name string `json:"name"`
+}
+
+type snapshotNameListResponse struct {
+	MachineName string         `json:"machine_name"`
+	Snapshots   []snapshotName `json:"snapshots"`
+	Total       int            `json:"total"`
+}
+
 // handleListSnapshots serves the machine's snapshot tree (read-only,
 // synchronous — VBoxManage snapshot list; qemu-img snapshot -l on utm, where
 // even the list needs the stopped machine's qcow2 write lock).
@@ -22,7 +38,7 @@ import (
 //	@Tags			Machine Management
 //	@Produce		json
 //	@Param			machineName	path	string	true	"Machine name"
-//	@Success		200	{object}	map[string]interface{}	"The snapshot tree (empty array when none)"
+//	@Success		200	{object}	snapshotListResponse	"The snapshot tree (empty array when none)"
 //	@Failure		404	"Machine not found, or no VM exists behind it yet"
 //	@Failure		503	"VirtualBox is not installed"
 //	@Router			/api/machines/{machineName}/snapshots [get]
@@ -56,14 +72,14 @@ func (s *Server) handleListSnapshots(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		// qemu-img knows only names — uuid/description/node/current stay absent.
-		rows := make([]map[string]any, 0, len(names))
+		rows := make([]snapshotName, 0, len(names))
 		for _, name := range names {
-			rows = append(rows, map[string]any{"name": name})
+			rows = append(rows, snapshotName{Name: name})
 		}
-		writeJSON(w, map[string]any{
-			"machine_name": machine.Name,
-			"snapshots":    rows,
-			"total":        len(rows),
+		writeJSON(w, snapshotNameListResponse{
+			MachineName: machine.Name,
+			Snapshots:   rows,
+			Total:       len(rows),
 		})
 		return
 	}
@@ -82,10 +98,10 @@ func (s *Server) handleListSnapshots(w http.ResponseWriter, r *http.Request) {
 		taskError(w, http.StatusInternalServerError, "Failed to list snapshots")
 		return
 	}
-	writeJSON(w, map[string]any{
-		"machine_name": machine.Name,
-		"snapshots":    list,
-		"total":        len(list),
+	writeJSON(w, snapshotListResponse{
+		MachineName: machine.Name,
+		Snapshots:   list,
+		Total:       len(list),
 	})
 }
 

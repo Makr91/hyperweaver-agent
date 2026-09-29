@@ -10,6 +10,27 @@ import (
 	"github.com/Makr91/hyperweaver-agent/internal/tasks"
 )
 
+type provisionRequest struct {
+	SkipBoot         bool `json:"skip_boot"`
+	ConfirmHostHooks bool `json:"confirm_host_hooks"`
+}
+
+type provisionResponse struct {
+	Success        bool             `json:"success"`
+	Message        string           `json:"message"`
+	MachineName    string           `json:"machine_name"`
+	ParentTaskID   string           `json:"parent_task_id"`
+	Steps          int              `json:"steps"`
+	TaskChain      []taskChainEntry `json:"task_chain"`
+	SkippedMethods []string         `json:"skipped_methods,omitempty"`
+}
+
+type hostHooksConfirmation struct {
+	NeedsConfirmation bool   `json:"needs_confirmation"`
+	Reason            string `json:"reason"`
+	ConfirmWith       string `json:"confirm_with"`
+}
+
 // handleProvisionMachine starts the provisioning pipeline (provisionZone).
 //
 //	@Summary		Start the provisioning pipeline
@@ -18,23 +39,18 @@ import (
 //	@Accept			json
 //	@Produce		json
 //	@Param			machineName	path	string	true	"Machine name"
-//	@Param			request		body	map[string]interface{}	false	"Optional {skip_boot, confirm_host_hooks}"
-//	@Success		200	{object}	map[string]interface{}	"Provisioning pipeline started"
+//	@Param			request		body	provisionRequest	false	"Optional {skip_boot, confirm_host_hooks}"
+//	@Success		200	{object}	provisionResponse	"Provisioning pipeline started"
 //	@Failure		400	"No provisioner config stored, missing settings.vagrant_user, no control IP in networks[], or host-target hooks while provisioning.host_hooks is false"
 //	@Failure		404	"Machine not found"
-//	@Failure		409	{object}	map[string]interface{}	"Host-target hooks need the one-time confirmation — STRICTLY pre-flight, never a mid-sequence failure"
+//	@Failure		409	{object}	hostHooksConfirmation	"Host-target hooks need the one-time confirmation — STRICTLY pre-flight, never a mid-sequence failure"
 //	@Router			/api/machines/{machineName}/provision [post]
 func (s *Server) handleProvisionMachine(w http.ResponseWriter, r *http.Request) {
 	machine := s.findMachine(w, r)
 	if machine == nil {
 		return
 	}
-	var body struct {
-		SkipBoot bool `json:"skip_boot"`
-		// ConfirmHostHooks answers the one-time host-hooks confirmation
-		// (design §5): true on the retry records it per machine and proceeds.
-		ConfirmHostHooks bool `json:"confirm_host_hooks"`
-	}
+	var body provisionRequest
 	if r.ContentLength > 0 {
 		if err := decodeBody(r, &body); err != nil {
 			taskError(w, http.StatusBadRequest, "Invalid JSON body")
@@ -57,10 +73,10 @@ func (s *Server) handleProvisionMachine(w http.ResponseWriter, r *http.Request) 
 		taskError(w, http.StatusBadRequest, problem)
 		return
 	} else if needsConfirmation {
-		writeJSONStatus(w, http.StatusConflict, map[string]any{
-			"needs_confirmation": true,
-			"reason":             "This machine's document carries host-target sequence hooks from a NON-SEEDED package — they run scripts on the agent host itself",
-			"confirm_with":       `re-POST with {"confirm_host_hooks": true} (recorded once per machine)`,
+		writeJSONStatus(w, http.StatusConflict, hostHooksConfirmation{
+			NeedsConfirmation: true,
+			Reason:            "This machine's document carries host-target sequence hooks from a NON-SEEDED package — they run scripts on the agent host itself",
+			ConfirmWith:       `re-POST with {"confirm_host_hooks": true} (recorded once per machine)`,
 		})
 		return
 	}
@@ -74,20 +90,32 @@ func (s *Server) handleProvisionMachine(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	response := map[string]any{
-		"success":        true,
-		"message":        "Provisioning pipeline started for " + machine.Name,
-		"machine_name":   machine.Name,
-		"parent_task_id": parentID,
-		"steps":          len(chain),
-		"task_chain":     chain,
+	response := provisionResponse{
+		Success:      true,
+		Message:      "Provisioning pipeline started for " + machine.Name,
+		MachineName:  machine.Name,
+		ParentTaskID: parentID,
+		Steps:        len(chain),
+		TaskChain:    chain,
 	}
 	// The QG2 narrate-skip: unknown provisioning: method keys are named
 	// loudly, never a failure.
 	if len(skippedMethods) > 0 {
-		response["skipped_methods"] = skippedMethods
+		response.SkippedMethods = skippedMethods
 	}
 	writeJSON(w, response)
+}
+
+type syncRequest struct {
+	Syncback bool `json:"syncback"`
+}
+
+type syncResponse struct {
+	Success      bool   `json:"success"`
+	Message      string `json:"message"`
+	MachineName  string `json:"machine_name"`
+	ParentTaskID string `json:"parent_task_id"`
+	FolderCount  int    `json:"folder_count"`
 }
 
 // handleSyncMachine creates the ad-hoc parentless sync chain (syncZone).
@@ -101,8 +129,8 @@ func (s *Server) handleProvisionMachine(w http.ResponseWriter, r *http.Request) 
 //	@Accept			json
 //	@Produce		json
 //	@Param			machineName	path	string	true	"Machine name"
-//	@Param			request		body	map[string]interface{}	false	"Optional {syncback}"
-//	@Success		200	{object}	map[string]interface{}	"Sync (or syncback) chain created"
+//	@Param			request		body	syncRequest	false	"Optional {syncback}"
+//	@Success		200	{object}	syncResponse	"Sync (or syncback) chain created"
 //	@Failure		400	"No provisioner config, no folders configured, (syncback) no folders flagged syncback: true, or the machine uses the winrm communicator (folder sync needs ssh)"
 //	@Failure		404	"Machine not found"
 //	@Router			/api/machines/{machineName}/sync [post]
@@ -111,9 +139,7 @@ func (s *Server) handleSyncMachine(w http.ResponseWriter, r *http.Request) {
 	if machine == nil {
 		return
 	}
-	var body struct {
-		Syncback bool `json:"syncback"`
-	}
+	var body syncRequest
 	if r.ContentLength > 0 {
 		if err := decodeBody(r, &body); err != nil {
 			taskError(w, http.StatusBadRequest, "Invalid JSON body")
@@ -155,12 +181,12 @@ func (s *Server) handleSyncMachine(w http.ResponseWriter, r *http.Request) {
 				"No folders are flagged syncback: true in provisioner metadata")
 			return
 		}
-		writeJSON(w, map[string]any{
-			"success":        true,
-			"message":        "Machine syncback task chain created for " + machine.Name,
-			"machine_name":   machine.Name,
-			"parent_task_id": chain[0]["task_id"],
-			"folder_count":   chain[0]["folder_count"],
+		writeJSON(w, syncResponse{
+			Success:      true,
+			Message:      "Machine syncback task chain created for " + machine.Name,
+			MachineName:  machine.Name,
+			ParentTaskID: chain[0].TaskID,
+			FolderCount:  chain[0].FolderCount,
 		})
 		return
 	}
@@ -201,13 +227,24 @@ func (s *Server) handleSyncMachine(w http.ResponseWriter, r *http.Request) {
 		previous = &child.ID
 	}
 
-	writeJSON(w, map[string]any{
-		"success":        true,
-		"message":        "Machine sync task chain created for " + machine.Name,
-		"machine_name":   machine.Name,
-		"parent_task_id": syncParent.ID,
-		"folder_count":   len(folders),
+	writeJSON(w, syncResponse{
+		Success:      true,
+		Message:      "Machine sync task chain created for " + machine.Name,
+		MachineName:  machine.Name,
+		ParentTaskID: syncParent.ID,
+		FolderCount:  len(folders),
 	})
+}
+
+type runProvisionersResponse struct {
+	Success          bool                       `json:"success"`
+	MachineName      string                     `json:"machine_name"`
+	Message          string                     `json:"message,omitempty"`
+	ParentTaskID     string                     `json:"parent_task_id,omitempty"`
+	PlaybookCount    *int                       `json:"playbook_count,omitempty"`
+	PlaybooksSkipped []machines.SkippedPlaybook `json:"playbooks_skipped"`
+	TaskChain        []taskChainEntry           `json:"task_chain,omitempty"`
+	SkippedMethods   []string                   `json:"skipped_methods,omitempty"`
 }
 
 // handleRunProvisioners runs the SAME document walk ad-hoc — minus
@@ -222,7 +259,7 @@ func (s *Server) handleSyncMachine(w http.ResponseWriter, r *http.Request) {
 //	@Tags			Machine Management
 //	@Produce		json
 //	@Param			machineName	path	string	true	"Machine name"
-//	@Success		200	{object}	map[string]interface{}	"Provisioner tasks created (or the all-skipped no-op)"
+//	@Success		200	{object}	runProvisionersResponse	"Provisioner tasks created (or the all-skipped no-op)"
 //	@Failure		400	"No provisioner config, no playbooks configured, missing credentials, or no control IP"
 //	@Failure		404	"Machine not found"
 //	@Router			/api/machines/{machineName}/run-provisioners [post]
@@ -246,12 +283,12 @@ func (s *Server) handleRunProvisioners(w http.ResponseWriter, r *http.Request) {
 	// task_chain[] mirrors the provision response's channel (W-Q1..W-Q5):
 	// shadowed-key narration first, then the labeled/skip entries as the
 	// walk lands them.
-	taskChain := []map[string]any{}
+	taskChain := []taskChainEntry{}
 	if len(validation.shadowedKeys) > 0 {
 		slog.Warn("communicator keys shadowed by their new spellings",
 			"machine", machine.Name, "keys", validation.shadowedKeys)
-		taskChain = append(taskChain, map[string]any{
-			"step": "communicator_keys_shadowed", "keys": validation.shadowedKeys,
+		taskChain = append(taskChain, taskChainEntry{
+			Step: "communicator_keys_shadowed", Keys: validation.shadowedKeys,
 		})
 	}
 	lastRealWalk := -1
@@ -265,27 +302,25 @@ func (s *Server) handleRunProvisioners(w http.ResponseWriter, r *http.Request) {
 		// answer a 200 no-op with the narration; the run-directive no-op and
 		// the plain 400 keep their existing branches.
 		for i := range walk {
-			entry := map[string]any{"step": walk[i].step}
-			for key, value := range walk[i].stepInfo {
-				entry[key] = value
-			}
+			entry := walk[i].stepInfo
+			entry.Step = walk[i].step
 			taskChain = append(taskChain, entry)
 		}
 		if len(skippedPlaybooks) > 0 || len(walk) > 0 {
-			response := map[string]any{
-				"success":           true,
-				"machine_name":      machine.Name,
-				"message":           "All configured playbooks were skipped by their run directives",
-				"playbooks_skipped": skippedPlaybooks,
+			response := runProvisionersResponse{
+				Success:          true,
+				MachineName:      machine.Name,
+				Message:          "All configured playbooks were skipped by their run directives",
+				PlaybooksSkipped: skippedPlaybooks,
 			}
 			if len(walk) > 0 {
-				response["message"] = "Nothing is executable on this machine's communicator — see task_chain"
+				response.Message = "Nothing is executable on this machine's communicator — see task_chain"
 			}
 			if len(taskChain) > 0 {
-				response["task_chain"] = taskChain
+				response.TaskChain = taskChain
 			}
 			if len(skippedMethods) > 0 {
-				response["skipped_methods"] = skippedMethods
+				response.SkippedMethods = skippedMethods
 			}
 			writeJSON(w, response)
 			return
@@ -320,10 +355,8 @@ func (s *Server) handleRunProvisioners(w http.ResponseWriter, r *http.Request) {
 		if walk[i].operation == "" {
 			// Response-only entries (winrm skips, method_not_executable) —
 			// task_chain[] at document position, never tasks.
-			entry := map[string]any{"step": walk[i].step}
-			for key, value := range walk[i].stepInfo {
-				entry[key] = value
-			}
+			entry := walk[i].stepInfo
+			entry.Step = walk[i].step
 			taskChain = append(taskChain, entry)
 			continue
 		}
@@ -346,29 +379,37 @@ func (s *Server) handleRunProvisioners(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if walk[i].step != "" {
-			entry := map[string]any{"step": walk[i].step, "task_id": child.ID}
-			for key, value := range walk[i].stepInfo {
-				entry[key] = value
-			}
+			entry := walk[i].stepInfo
+			entry.Step = walk[i].step
+			entry.TaskID = child.ID
 			taskChain = append(taskChain, entry)
 		}
 		previous = &child.ID
 	}
 
-	response := map[string]any{
-		"success":           true,
-		"machine_name":      machine.Name,
-		"parent_task_id":    provisionParent.ID,
-		"playbook_count":    playbookCount,
-		"playbooks_skipped": skippedPlaybooks,
+	response := runProvisionersResponse{
+		Success:          true,
+		MachineName:      machine.Name,
+		ParentTaskID:     provisionParent.ID,
+		PlaybookCount:    &playbookCount,
+		PlaybooksSkipped: skippedPlaybooks,
 	}
 	if len(taskChain) > 0 {
-		response["task_chain"] = taskChain
+		response.TaskChain = taskChain
 	}
 	if len(skippedMethods) > 0 {
-		response["skipped_methods"] = skippedMethods
+		response.SkippedMethods = skippedMethods
 	}
 	writeJSON(w, response)
+}
+
+type provisionStatusResponse struct {
+	Success                bool          `json:"success"`
+	MachineName            string        `json:"machine_name"`
+	ProvisioningConfigured bool          `json:"provisioning_configured"`
+	ProvisioningStatus     string        `json:"provisioning_status"`
+	LastProvisionedAt      *string       `json:"last_provisioned_at"`
+	RecentTasks            []*tasks.Task `json:"recent_tasks"`
 }
 
 // handleProvisionStatus reports the pipeline state (getProvisioningStatus):
@@ -380,7 +421,7 @@ func (s *Server) handleRunProvisioners(w http.ResponseWriter, r *http.Request) {
 //	@Tags			Machine Management
 //	@Produce		json
 //	@Param			machineName	path	string	true	"Machine name"
-//	@Success		200	{object}	map[string]interface{}	"Provisioning status"
+//	@Success		200	{object}	provisionStatusResponse	"Provisioning status"
 //	@Failure		404	"Machine not found"
 //	@Router			/api/machines/{machineName}/provision/status [get]
 func (s *Server) handleProvisionStatus(w http.ResponseWriter, r *http.Request) {
@@ -418,19 +459,19 @@ func (s *Server) handleProvisionStatus(w http.ResponseWriter, r *http.Request) {
 	if lastProvisioned != "" {
 		status = "provisioned"
 	}
-	writeJSON(w, map[string]any{
-		"success":                 true,
-		"machine_name":            machine.Name,
-		"provisioning_configured": len(config.Provisioner()) > 0,
-		"provisioning_status":     status,
-		"last_provisioned_at":     nullableString(lastProvisioned),
-		"recent_tasks":            recent,
+	writeJSON(w, provisionStatusResponse{
+		Success:                true,
+		MachineName:            machine.Name,
+		ProvisioningConfigured: len(config.Provisioner()) > 0,
+		ProvisioningStatus:     status,
+		LastProvisionedAt:      nullableString(lastProvisioned),
+		RecentTasks:            recent,
 	})
 }
 
-func nullableString(s string) any {
+func nullableString(s string) *string {
 	if s == "" {
 		return nil
 	}
-	return s
+	return &s
 }

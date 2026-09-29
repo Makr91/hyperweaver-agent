@@ -25,6 +25,49 @@ var hostOnlyNetsNarrated sync.Once
 // a VM references them. GET is viewer, mutations operator (the central
 // policy's defaults). VirtualBox-only: utm machines join no spaces.
 
+type networkSpaceDHCP struct {
+	Exists   bool   `json:"exists"`
+	Enabled  bool   `json:"enabled"`
+	ServerIP string `json:"server_ip,omitempty"`
+	LowerIP  string `json:"lower_ip,omitempty"`
+	UpperIP  string `json:"upper_ip,omitempty"`
+}
+
+type natNetworkForwardRow struct {
+	Name      string `json:"name"`
+	Protocol  string `json:"protocol"`
+	HostIP    string `json:"host_ip"`
+	HostPort  int    `json:"host_port"`
+	GuestIP   string `json:"guest_ip"`
+	GuestPort int    `json:"guest_port"`
+	IPv6      bool   `json:"ipv6"`
+}
+
+type networkSpace struct {
+	Type             string                    `json:"type"`
+	Name             string                    `json:"name"`
+	IPAddress        string                    `json:"ip_address,omitempty"`
+	NetworkMask      string                    `json:"network_mask,omitempty"`
+	VBoxNetworkName  string                    `json:"vbox_network_name,omitempty"`
+	DHCP             *networkSpaceDHCP         `json:"dhcp,omitempty"`
+	LowerIP          string                    `json:"lower_ip,omitempty"`
+	UpperIP          string                    `json:"upper_ip,omitempty"`
+	Enabled          *bool                     `json:"enabled,omitempty"`
+	GUID             string                    `json:"guid,omitempty"`
+	CIDR             string                    `json:"cidr,omitempty"`
+	Gateway          string                    `json:"gateway,omitempty"`
+	DHCPEnabled      *bool                     `json:"dhcp_enabled,omitempty"`
+	IPv6             *bool                     `json:"ipv6,omitempty"`
+	IPv6Prefix       string                    `json:"ipv6_prefix,omitempty"`
+	PortForwards     []natNetworkForwardRow    `json:"port_forwards,omitempty"`
+	LoopbackMappings []vbox.NATNetworkLoopback `json:"loopback_mappings,omitempty"`
+}
+
+type networkSpacesResponse struct {
+	Spaces []networkSpace `json:"spaces"`
+	Total  int            `json:"total"`
+}
+
 // handleListNetworkSpaces serves GET /network/spaces — every network space
 // as one typed row (the topology mapper's network-card feed).
 //
@@ -32,7 +75,7 @@ var hostOnlyNetsNarrated sync.Once
 //	@Description	Minimum role: viewer (the network-spaces capability token, minted 2026-07-19 — the UI topology mapper's network-card feed; devices.nics rows join here by their network field). One typed row per space: hostonly = a host-only INTERFACE (VBoxManage list hostonlyifs; VirtualBox assigns names itself) with its DHCP server joined by VBoxNetworkName (best-effort — a failed dhcpservers read degrades to {exists:false} rows, narrated in the log); hostonlynet = a host-only NETWORK (list hostonlynets — VirtualBox's macOS-ONLY vmnet family; Oracle's platform split: VirtualBox 7 on macOS REMOVED host-only adapters while every other host OS lacks the hostonlynet verb entirely, so darwin agents carry hostonlynet rows, every other host carries hostonly rows, and off darwin the verb is never even probed); intnet = an implicit internal network (list intnets — exists while a VM references it, no other attributes); natnetwork = a NAT network (list natnetworks) with its port-forward rules (IPv4 + IPv6 folded into one port_forwards[] with an ipv6 flag) and loopback mappings (structured rows — the listing's "address=offset" rules parsed into {address, offset, ipv6}; the cross-agent structured-JSON convergence). VirtualBox-only — utm machines join no spaces.
 //	@Tags			Host Configuration
 //	@Produce		json
-//	@Success		200	{object}	map[string]interface{}	"The network spaces"
+//	@Success		200	{object}	networkSpacesResponse	"The network spaces"
 //	@Failure		500	"A VBoxManage listing failed"
 //	@Failure		503	"VirtualBox is not installed"
 //	@Router			/api/network/spaces [get]
@@ -82,90 +125,86 @@ func (s *Server) handleListNetworkSpaces(w http.ResponseWriter, r *http.Request)
 		}
 	}
 
-	spaces := []map[string]any{}
+	spaces := []networkSpace{}
 	for i := range hostonly {
 		iface := &hostonly[i]
-		dhcp := map[string]any{"exists": false, "enabled": false}
+		dhcp := &networkSpaceDHCP{Exists: false, Enabled: false}
 		for j := range dhcpServers {
 			if dhcpServers[j].NetworkName == iface.VBoxNetworkName {
-				dhcp = map[string]any{
-					"exists":    true,
-					"enabled":   dhcpServers[j].Enabled,
-					"server_ip": dhcpServers[j].ServerIP,
-					"lower_ip":  dhcpServers[j].LowerIP,
-					"upper_ip":  dhcpServers[j].UpperIP,
+				dhcp = &networkSpaceDHCP{
+					Exists:   true,
+					Enabled:  dhcpServers[j].Enabled,
+					ServerIP: dhcpServers[j].ServerIP,
+					LowerIP:  dhcpServers[j].LowerIP,
+					UpperIP:  dhcpServers[j].UpperIP,
 				}
 				break
 			}
 		}
-		spaces = append(spaces, map[string]any{
-			"type":              "hostonly",
-			"name":              iface.Name,
-			"ip_address":        iface.IPAddress,
-			"network_mask":      iface.NetworkMask,
-			"vbox_network_name": iface.VBoxNetworkName,
-			"dhcp":              dhcp,
+		spaces = append(spaces, networkSpace{
+			Type:            "hostonly",
+			Name:            iface.Name,
+			IPAddress:       iface.IPAddress,
+			NetworkMask:     iface.NetworkMask,
+			VBoxNetworkName: iface.VBoxNetworkName,
+			DHCP:            dhcp,
 		})
 	}
 	for i := range hostonlyNets {
 		net := &hostonlyNets[i]
-		row := map[string]any{
-			"type":              "hostonlynet",
-			"name":              net.Name,
-			"network_mask":      net.NetworkMask,
-			"lower_ip":          net.LowerIP,
-			"upper_ip":          net.UpperIP,
-			"vbox_network_name": net.VBoxNetworkName,
-			"enabled":           net.Enabled,
-		}
-		if net.GUID != "" {
-			row["guid"] = net.GUID
-		}
-		spaces = append(spaces, row)
+		enabled := net.Enabled
+		spaces = append(spaces, networkSpace{
+			Type:            "hostonlynet",
+			Name:            net.Name,
+			NetworkMask:     net.NetworkMask,
+			LowerIP:         net.LowerIP,
+			UpperIP:         net.UpperIP,
+			VBoxNetworkName: net.VBoxNetworkName,
+			Enabled:         &enabled,
+			GUID:            net.GUID,
+		})
 	}
 	for _, name := range intnets {
-		spaces = append(spaces, map[string]any{"type": "intnet", "name": name})
+		spaces = append(spaces, networkSpace{Type: "intnet", Name: name})
 	}
 	for i := range natnets {
 		nat := &natnets[i]
-		forwards := []map[string]any{}
+		forwards := []natNetworkForwardRow{}
 		for j := range nat.PortForwards4 {
 			forwards = append(forwards, natForwardRow(&nat.PortForwards4[j], false))
 		}
 		for j := range nat.PortForwards6 {
 			forwards = append(forwards, natForwardRow(&nat.PortForwards6[j], true))
 		}
-		row := map[string]any{
-			"type":          "natnetwork",
-			"name":          nat.Name,
-			"cidr":          nat.CIDR,
-			"gateway":       nat.Gateway,
-			"enabled":       nat.Enabled,
-			"dhcp_enabled":  nat.DHCPEnabled,
-			"ipv6":          nat.IPv6,
-			"port_forwards": forwards,
-		}
-		if nat.IPv6Prefix != "" {
-			row["ipv6_prefix"] = nat.IPv6Prefix
-		}
-		if len(nat.LoopbackMappings) > 0 {
-			row["loopback_mappings"] = nat.LoopbackMappings
-		}
-		spaces = append(spaces, row)
+		enabled := nat.Enabled
+		dhcpEnabled := nat.DHCPEnabled
+		ipv6 := nat.IPv6
+		spaces = append(spaces, networkSpace{
+			Type:             "natnetwork",
+			Name:             nat.Name,
+			CIDR:             nat.CIDR,
+			Gateway:          nat.Gateway,
+			Enabled:          &enabled,
+			DHCPEnabled:      &dhcpEnabled,
+			IPv6:             &ipv6,
+			PortForwards:     forwards,
+			IPv6Prefix:       nat.IPv6Prefix,
+			LoopbackMappings: nat.LoopbackMappings,
+		})
 	}
 
-	writeJSON(w, map[string]any{"spaces": spaces, "total": len(spaces)})
+	writeJSON(w, networkSpacesResponse{Spaces: spaces, Total: len(spaces)})
 }
 
-func natForwardRow(fw *vbox.NATNetworkForward, ipv6 bool) map[string]any {
-	return map[string]any{
-		"name":       fw.Name,
-		"protocol":   fw.Protocol,
-		"host_ip":    fw.HostIP,
-		"host_port":  fw.HostPort,
-		"guest_ip":   fw.GuestIP,
-		"guest_port": fw.GuestPort,
-		"ipv6":       ipv6,
+func natForwardRow(fw *vbox.NATNetworkForward, ipv6 bool) natNetworkForwardRow {
+	return natNetworkForwardRow{
+		Name:      fw.Name,
+		Protocol:  fw.Protocol,
+		HostIP:    fw.HostIP,
+		HostPort:  fw.HostPort,
+		GuestIP:   fw.GuestIP,
+		GuestPort: fw.GuestPort,
+		IPv6:      ipv6,
 	}
 }
 

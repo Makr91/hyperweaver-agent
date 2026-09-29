@@ -312,35 +312,66 @@ func (s *Service) runScanAll(source string) {
 	s.statsMu.Unlock()
 }
 
+// ServiceStatusConfig is the config summary of the service status.
+type ServiceStatusConfig struct {
+	Enabled          bool `json:"enabled"`
+	ScanningInterval int  `json:"scanning_interval"`
+	PathsConfigured  int  `json:"paths_configured"`
+}
+
+// ServiceStatusStats is the scan-run block of the service status.
+type ServiceStatusStats struct {
+	ScanRuns         int     `json:"scanRuns"`
+	LastScanSuccess  *string `json:"lastScanSuccess"`
+	TotalScanErrors  int     `json:"totalScanErrors"`
+	LocationsManaged int     `json:"locationsManaged"`
+}
+
+// ServiceStatusIntervals is the active-intervals block of the service status.
+type ServiceStatusIntervals struct {
+	PeriodicScan bool `json:"periodicScan"`
+}
+
+// ServiceStatus is GET /artifacts/service/status's answer.
+type ServiceStatus struct {
+	IsRunning       bool                   `json:"isRunning"`
+	IsInitialized   bool                   `json:"isInitialized"`
+	IsScanning      bool                   `json:"isScanning"`
+	Config          ServiceStatusConfig    `json:"config"`
+	Stats           ServiceStatusStats     `json:"stats"`
+	ActiveIntervals ServiceStatusIntervals `json:"activeIntervals"`
+}
+
 // Status answers GET /artifacts/service/status (zoneweaver's getStatus
 // shape).
-func (s *Service) Status() map[string]any {
+func (s *Service) Status() ServiceStatus {
 	s.mu.Lock()
 	running, initialized, scanning := s.running, s.initialized, s.scanning
 	s.mu.Unlock()
 	s.statsMu.Lock()
 	defer s.statsMu.Unlock()
-	var lastScan any
+	var lastScan *string
 	if s.lastScanOK != nil {
-		lastScan = s.lastScanOK.UTC().Format(time.RFC3339)
+		formatted := s.lastScanOK.UTC().Format(time.RFC3339)
+		lastScan = &formatted
 	}
-	return map[string]any{
-		"isRunning":     running,
-		"isInitialized": initialized,
-		"isScanning":    scanning,
-		"config": map[string]any{
-			"enabled":           s.cfg.Enabled,
-			"scanning_interval": s.cfg.ScanInterval,
-			"paths_configured":  len(s.cfg.Paths),
+	return ServiceStatus{
+		IsRunning:     running,
+		IsInitialized: initialized,
+		IsScanning:    scanning,
+		Config: ServiceStatusConfig{
+			Enabled:          s.cfg.Enabled,
+			ScanningInterval: s.cfg.ScanInterval,
+			PathsConfigured:  len(s.cfg.Paths),
 		},
-		"stats": map[string]any{
-			"scanRuns":         s.scanRuns,
-			"lastScanSuccess":  lastScan,
-			"totalScanErrors":  s.scanErrors,
-			"locationsManaged": s.locationsCount,
+		Stats: ServiceStatusStats{
+			ScanRuns:         s.scanRuns,
+			LastScanSuccess:  lastScan,
+			TotalScanErrors:  s.scanErrors,
+			LocationsManaged: s.locationsCount,
 		},
-		"activeIntervals": map[string]any{
-			"periodicScan": running && s.cfg.ScanInterval > 0,
+		ActiveIntervals: ServiceStatusIntervals{
+			PeriodicScan: running && s.cfg.ScanInterval > 0,
 		},
 	}
 }

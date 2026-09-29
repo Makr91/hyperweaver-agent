@@ -235,7 +235,7 @@ func compatibleMetadataVersions(versions []any, providerSet map[string]bool) []a
 //	@Tags			Machine Management
 //	@Produce		json
 //	@Param			sourceName	path	string	true	"The configured template source's id"
-//	@Success		200	{object}	map[string]interface{}	"The registry's catalog document, relayed verbatim"
+//	@Success		200	{array}	map[string]interface{}	"The registry's catalog document, relayed verbatim"
 //	@Failure		404	"Source not found or disabled"
 //	@Failure		502	"Remote source unreachable or answered an error"
 //	@Router			/api/templates/remote/{sourceName} [get]

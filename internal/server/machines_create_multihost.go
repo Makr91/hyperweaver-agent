@@ -12,6 +12,21 @@ import (
 	"github.com/Makr91/hyperweaver-agent/internal/vbox"
 )
 
+type multiHostMachine struct {
+	MachineName  string            `json:"machine_name"`
+	ParentTaskID string            `json:"parent_task_id"`
+	SubTasks     map[string]string `json:"sub_tasks"`
+}
+
+type multiHostCreateResponse struct {
+	Success          bool                       `json:"success"`
+	MultiHost        bool                       `json:"multi_host"`
+	Count            int                        `json:"count"`
+	Message          string                     `json:"message"`
+	Machines         []multiHostMachine         `json:"machines"`
+	ResourceWarnings map[string][]resourceIssue `json:"resource_warnings,omitempty"`
+}
+
 // createMultiHostMachines executes the multi-host branch of POST /machines
 // (multi-host converged wire, sync 2026-07-17: M-Q1 — zoneweaver's shipped
 // wire, matched exactly): ONE request whose RENDER produced hosts[] with N>1
@@ -75,7 +90,7 @@ func (s *Server) createMultiHostMachines(w http.ResponseWriter, r *http.Request,
 	seenNames := map[string]bool{}
 	seenIDs := map[string]bool{}
 	seenHomes := map[string]bool{}
-	warningsByMachine := map[string]any{}
+	warningsByMachine := map[string][]resourceIssue{}
 	for k, document := range hosts {
 		settings := machines.MachineConfig(document).Section("settings")
 		hostname := machines.DocString(settings["hostname"], "")
@@ -274,7 +289,7 @@ func (s *Server) createMultiHostMachines(w http.ResponseWriter, r *http.Request,
 			}
 		}
 	}
-	machinesOut := make([]map[string]any, 0, len(plans))
+	machinesOut := make([]multiHostMachine, 0, len(plans))
 	var dependsOn *string
 	for k := range plans {
 		plan := &plans[k]
@@ -288,25 +303,25 @@ func (s *Server) createMultiHostMachines(w http.ResponseWriter, r *http.Request,
 		queued = append(queued, parentID)
 		last := lastTaskID
 		dependsOn = &last
-		machinesOut = append(machinesOut, map[string]any{
-			"machine_name":   plan.name,
-			"parent_task_id": parentID,
-			"sub_tasks":      subTasks,
+		machinesOut = append(machinesOut, multiHostMachine{
+			MachineName:  plan.name,
+			ParentTaskID: parentID,
+			SubTasks:     subTasks,
 		})
 	}
 
 	slog.Info("multi-host machine creation queued", "count", len(plans),
 		"provisioner", body.Provisioner.Name+"/"+body.Provisioner.Version, "by", createdBy)
-	response := map[string]any{
-		"success":    true,
-		"multi_host": true,
-		"count":      len(plans),
-		"message": "Machine creation queued for " + strconv.Itoa(len(plans)) +
+	response := multiHostCreateResponse{
+		Success:   true,
+		MultiHost: true,
+		Count:     len(plans),
+		Message: "Machine creation queued for " + strconv.Itoa(len(plans)) +
 			" machines (multi-host document)",
-		"machines": machinesOut,
+		Machines: machinesOut,
 	}
 	if len(warningsByMachine) > 0 {
-		response["resource_warnings"] = warningsByMachine
+		response.ResourceWarnings = warningsByMachine
 	}
 	writeJSON(w, response)
 }

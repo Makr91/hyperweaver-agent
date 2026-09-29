@@ -176,6 +176,20 @@ func stopMetadataJSON(force bool) (*string, error) {
 	return &s, nil
 }
 
+type restartTasks struct {
+	StopTaskID  string `json:"stop_task_id"`
+	StartTaskID string `json:"start_task_id"`
+}
+
+type restartMachineResponse struct {
+	Success      bool         `json:"success"`
+	RestartTasks restartTasks `json:"restart_tasks"`
+	MachineName  string       `json:"machine_name"`
+	Operation    string       `json:"operation"`
+	Status       string       `json:"status"`
+	Message      string       `json:"message"`
+}
+
 // handleRestartMachine queues a HIGH-priority stop and a MEDIUM-priority
 // start chained on it.
 //
@@ -184,7 +198,7 @@ func stopMetadataJSON(force bool) (*string, error) {
 //	@Tags			Machine Management
 //	@Produce		json
 //	@Param			machineName	path	string	true	"Machine name"
-//	@Success		200	{object}	map[string]interface{}	"Restart tasks queued"
+//	@Success		200	{object}	restartMachineResponse	"Restart tasks queued"
 //	@Failure		404	"Machine not found"
 //	@Router			/api/machines/{machineName}/restart [post]
 func (s *Server) handleRestartMachine(w http.ResponseWriter, r *http.Request) {
@@ -230,16 +244,16 @@ func (s *Server) handleRestartMachine(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, map[string]any{
-		"success": true,
-		"restart_tasks": map[string]any{
-			"stop_task_id":  stopTask.ID,
-			"start_task_id": startTask.ID,
+	writeJSON(w, restartMachineResponse{
+		Success: true,
+		RestartTasks: restartTasks{
+			StopTaskID:  stopTask.ID,
+			StartTaskID: startTask.ID,
 		},
-		"machine_name": machine.Name,
-		"operation":    "restart",
-		"status":       tasks.StatusPending,
-		"message":      "Restart tasks queued successfully",
+		MachineName: machine.Name,
+		Operation:   "restart",
+		Status:      tasks.StatusPending,
+		Message:     "Restart tasks queued successfully",
 	})
 }
 
@@ -365,6 +379,17 @@ func (s *Server) handleResumeMachine(w http.ResponseWriter, r *http.Request) {
 		"Resume task queued successfully")
 }
 
+type deleteMachineResponse struct {
+	Success      bool     `json:"success"`
+	DeleteTasks  []string `json:"delete_tasks"`
+	MachineName  string   `json:"machine_name"`
+	Operation    string   `json:"operation"`
+	Status       string   `json:"status"`
+	Message      string   `json:"message"`
+	Force        bool     `json:"force"`
+	CleanupDisks bool     `json:"cleanup_disks"`
+}
+
 // handleDeleteMachine: running machines need force=true, which chains a
 // CRITICAL stop before the CRITICAL delete.
 //
@@ -374,7 +399,7 @@ func (s *Server) handleResumeMachine(w http.ResponseWriter, r *http.Request) {
 //	@Produce		json
 //	@Param			machineName	path	string	true	"Machine name"
 //	@Param			cleanup_disks	query	boolean	false	"false preserves every medium file and the working directory (the base's keep-datasets default, as an explicit flag)"
-//	@Success		200	{object}	map[string]interface{}	"Delete tasks queued"
+//	@Success		200	{object}	deleteMachineResponse	"Delete tasks queued"
 //	@Failure		409	{object}	problem.Body	"Machine is running and force is not set; current_status carries the state"
 //	@Failure		404	{object}	problem.Body	"Machine not found"
 //	@Router			/api/machines/{machineName} [delete]
@@ -445,14 +470,14 @@ func (s *Server) handleDeleteMachine(w http.ResponseWriter, r *http.Request) {
 	}
 	taskIDs = append(taskIDs, deleteTask.ID)
 
-	writeJSON(w, map[string]any{
-		"success":       true,
-		"delete_tasks":  taskIDs,
-		"machine_name":  machine.Name,
-		"operation":     machines.OpDelete,
-		"status":        tasks.StatusPending,
-		"message":       "Delete tasks queued successfully",
-		"force":         force,
-		"cleanup_disks": cleanupDisks,
+	writeJSON(w, deleteMachineResponse{
+		Success:      true,
+		DeleteTasks:  taskIDs,
+		MachineName:  machine.Name,
+		Operation:    machines.OpDelete,
+		Status:       tasks.StatusPending,
+		Message:      "Delete tasks queued successfully",
+		Force:        force,
+		CleanupDisks: cleanupDisks,
 	})
 }

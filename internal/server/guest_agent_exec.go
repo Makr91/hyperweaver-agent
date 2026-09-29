@@ -24,27 +24,49 @@ type guestExecStatus struct {
 	ErrData  string `json:"err-data,omitempty"`
 }
 
+type guestExecStatusResponse struct {
+	MachineName string  `json:"machine_name"`
+	PID         int     `json:"pid"`
+	Exited      bool    `json:"exited"`
+	ExitCode    *int    `json:"exitcode,omitempty"`
+	Signal      *int    `json:"signal,omitempty"`
+	Stdout      *string `json:"stdout,omitempty"`
+	Stderr      *string `json:"stderr,omitempty"`
+}
+
+type guestExecResponse struct {
+	Success     bool    `json:"success"`
+	MachineName string  `json:"machine_name"`
+	PID         int     `json:"pid,omitempty"`
+	Exited      *bool   `json:"exited,omitempty"`
+	ExitCode    *int    `json:"exitcode,omitempty"`
+	Signal      *int    `json:"signal,omitempty"`
+	Stdout      *string `json:"stdout,omitempty"`
+	Stderr      *string `json:"stderr,omitempty"`
+	Message     string  `json:"message,omitempty"`
+}
+
 // decodeExecStatus parses guest-exec-status and decodes its base64 halves.
-func decodeExecStatus(raw json.RawMessage) (map[string]any, error) {
+func decodeExecStatus(raw json.RawMessage) (guestExecStatusResponse, error) {
 	var status guestExecStatus
 	if err := json.Unmarshal(raw, &status); err != nil {
-		return nil, err
+		return guestExecStatusResponse{}, err
 	}
-	result := map[string]any{"exited": status.Exited}
-	if status.ExitCode != nil {
-		result["exitcode"] = *status.ExitCode
-	}
-	if status.Signal != nil {
-		result["signal"] = *status.Signal
+	result := guestExecStatusResponse{
+		Exited:   status.Exited,
+		ExitCode: status.ExitCode,
+		Signal:   status.Signal,
 	}
 	if status.OutData != "" {
 		if decoded, err := base64.StdEncoding.DecodeString(status.OutData); err == nil {
-			result["stdout"] = string(decoded)
+			text := string(decoded)
+			result.Stdout = &text
 		}
 	}
 	if status.ErrData != "" {
 		if decoded, err := base64.StdEncoding.DecodeString(status.ErrData); err == nil {
-			result["stderr"] = string(decoded)
+			text := string(decoded)
+			result.Stderr = &text
 		}
 	}
 	return result, nil
@@ -74,7 +96,7 @@ type guestExecRequest struct {
 //	@Produce		json
 //	@Param			machineName	path		string				true	"Machine name"
 //	@Param			request		body		guestExecRequest	true	"Command to run in the guest"
-//	@Success		200			{object}	map[string]interface{}	"Exit status with decoded output (wait), the pid (wait:false), or a still-running notice past the timeout"
+//	@Success		200			{object}	guestExecResponse	"Exit status with decoded output (wait), the pid (wait:false), or a still-running notice past the timeout"
 //	@Failure		400			{object}	problem.Body		"Missing path, or machine is not running"
 //	@Failure		404			{object}	problem.Body		"Machine not found"
 //	@Failure		502			{object}	problem.Body		"Guest agent did not answer"
@@ -110,11 +132,12 @@ func (s *Server) handleGuestExec(w http.ResponseWriter, r *http.Request) {
 		}
 		slog.Info("guest exec", "machine", machine.Name, "path", body.Path,
 			"by", auth.FromContext(r.Context()).Name)
-		writeJSON(w, map[string]any{
-			"success":      true,
-			"machine_name": machine.Name,
-			"exited":       true,
-			"stdout":       output,
+		exited := true
+		writeJSON(w, guestExecResponse{
+			Success:     true,
+			MachineName: machine.Name,
+			Exited:      &exited,
+			Stdout:      &output,
 		})
 		return
 	}
@@ -137,11 +160,11 @@ func (s *Server) handleGuestExec(w http.ResponseWriter, r *http.Request) {
 		"pid", started.PID, "by", auth.FromContext(r.Context()).Name)
 
 	if body.Wait != nil && !*body.Wait {
-		writeJSON(w, map[string]any{
-			"success":      true,
-			"machine_name": machine.Name,
-			"pid":          started.PID,
-			"message":      "Command started — poll GET /api/machines/{name}/guest/exec/" + strconv.Itoa(started.PID),
+		writeJSON(w, guestExecResponse{
+			Success:     true,
+			MachineName: machine.Name,
+			PID:         started.PID,
+			Message:     "Command started — poll GET /api/machines/{name}/guest/exec/" + strconv.Itoa(started.PID),
 		})
 		return
 	}
@@ -172,20 +195,28 @@ func (s *Server) handleGuestExec(w http.ResponseWriter, r *http.Request) {
 			taskError(w, http.StatusBadGateway, "Guest agent answered an unexpected status shape")
 			return
 		}
-		if exited, _ := status["exited"].(bool); exited {
-			status["success"] = true
-			status["machine_name"] = machine.Name
-			status["pid"] = started.PID
-			writeJSON(w, status)
+		if status.Exited {
+			exited := true
+			writeJSON(w, guestExecResponse{
+				Success:     true,
+				MachineName: machine.Name,
+				PID:         started.PID,
+				Exited:      &exited,
+				ExitCode:    status.ExitCode,
+				Signal:      status.Signal,
+				Stdout:      status.Stdout,
+				Stderr:      status.Stderr,
+			})
 			return
 		}
 		if time.Now().After(deadline) {
-			writeJSON(w, map[string]any{
-				"success":      true,
-				"machine_name": machine.Name,
-				"pid":          started.PID,
-				"exited":       false,
-				"message":      "Still running after " + strconv.Itoa(timeout) + "s — poll GET /api/machines/{name}/guest/exec/" + strconv.Itoa(started.PID),
+			exited := false
+			writeJSON(w, guestExecResponse{
+				Success:     true,
+				MachineName: machine.Name,
+				PID:         started.PID,
+				Exited:      &exited,
+				Message:     "Still running after " + strconv.Itoa(timeout) + "s — poll GET /api/machines/{name}/guest/exec/" + strconv.Itoa(started.PID),
 			})
 			return
 		}
@@ -205,7 +236,7 @@ func (s *Server) handleGuestExec(w http.ResponseWriter, r *http.Request) {
 //	@Produce		json
 //	@Param			machineName	path		string					true	"Machine name"
 //	@Param			pid			path		int						true	"Guest process id"
-//	@Success		200			{object}	map[string]interface{}	"Process status"
+//	@Success		200			{object}	guestExecStatusResponse	"Process status"
 //	@Failure		400			{object}	problem.Body			"Invalid pid, or machine is not running"
 //	@Failure		404			{object}	problem.Body			"Machine not found"
 //	@Failure		502			{object}	problem.Body			"Guest agent did not answer"
@@ -234,7 +265,7 @@ func (s *Server) handleGuestExecStatus(w http.ResponseWriter, r *http.Request) {
 		taskError(w, http.StatusBadGateway, "Guest agent answered an unexpected status shape")
 		return
 	}
-	status["machine_name"] = machine.Name
-	status["pid"] = pid
+	status.MachineName = machine.Name
+	status.PID = pid
 	writeJSON(w, status)
 }

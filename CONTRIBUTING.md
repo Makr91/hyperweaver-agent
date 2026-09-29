@@ -15,7 +15,7 @@ Before creating an issue, please:
 1. **Search existing issues** to avoid duplicates
 2. **Use the appropriate issue template** (bug report, feature request, etc.)
 3. **Provide detailed information** to help us understand and prioritize the issue
-4. **Include system information** (OS and version, agent version, VirtualBox/Vagrant versions)
+4. **Include system information** (OS and version, agent version, VirtualBox version)
 
 ### Submitting Pull Requests
 
@@ -58,7 +58,7 @@ Platform notes:
 
 **Feature Contributions:**
 
-- Provisioning engine features (Vagrant/VirtualBox orchestration)
+- Provisioning engine features (VBoxManage orchestration)
 - Platform integration improvements (Windows/macOS/Linux quirks)
 - API improvements
 - Better error handling

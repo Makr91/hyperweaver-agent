@@ -92,7 +92,7 @@ func (s *Server) healVRDETLS(ctx context.Context, vboxExe string, machine *machi
 //	@Tags			Console
 //	@Produce		json
 //	@Param			machineName	path	string	true	"Machine name"
-//	@Success		200	{object}	map[string]interface{}	"TLS applied live (running), setup queued (powered off), or accrued (live apply failed)"
+//	@Success		200	{object}	machineModifyResponse	"TLS applied live (running), setup queued (powered off), or accrued (live apply failed)"
 //	@Failure		404	"Machine not found, or no VM exists behind it yet"
 //	@Failure		503	"VirtualBox is not installed"
 //	@Router			/api/machines/{machineName}/vrde-tls [post]
@@ -178,15 +178,15 @@ func (s *Server) handleVRDETLSSetup(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			slog.Info("vrde tls applied live", "machine", machine.Name, "by", auth.FromContext(r.Context()).Name)
-			writeJSON(w, map[string]any{
-				"success":          true,
-				"machine_name":     machine.Name,
-				"operation":        machines.OpModify,
-				"status":           "applied_live",
-				"requires_restart": false,
-				"pending_changes":  merged,
-				"certificate":      certPath,
-				"message":          "VRDE TLS applied LIVE — the next connect negotiates Enhanced security. Console input/clipboard extras accrued for the next power cycle.",
+			writeJSON(w, machineModifyResponse{
+				Success:         true,
+				MachineName:     machine.Name,
+				Operation:       machines.OpModify,
+				Status:          "applied_live",
+				RequiresRestart: false,
+				PendingChanges:  merged,
+				Certificate:     certPath,
+				Message:         "VRDE TLS applied LIVE — the next connect negotiates Enhanced security. Console input/clipboard extras accrued for the next power cycle.",
 			})
 			return
 		}
@@ -213,15 +213,15 @@ func (s *Server) handleVRDETLSSetup(w http.ResponseWriter, r *http.Request) {
 			taskError(w, http.StatusInternalServerError, "Failed to queue the VRDE TLS setup")
 			return
 		}
-		writeJSON(w, map[string]any{
-			"success":          true,
-			"task_id":          task.ID,
-			"machine_name":     machine.Name,
-			"operation":        machines.OpModify,
-			"status":           tasks.StatusPending,
-			"requires_restart": true,
-			"certificate":      certPath,
-			"message":          "VRDE TLS setup queued — the certificate is minted and the VRDE properties apply now (machine is powered off).",
+		writeJSON(w, machineModifyResponse{
+			Success:         true,
+			TaskID:          task.ID,
+			MachineName:     machine.Name,
+			Operation:       machines.OpModify,
+			Status:          tasks.StatusPending,
+			RequiresRestart: true,
+			Certificate:     certPath,
+			Message:         "VRDE TLS setup queued — the certificate is minted and the VRDE properties apply now (machine is powered off).",
 		})
 	default:
 		merged, merr := s.machines.MergePendingChanges(r.Context(), machine.Name, doc)
@@ -230,15 +230,15 @@ func (s *Server) handleVRDETLSSetup(w http.ResponseWriter, r *http.Request) {
 			taskError(w, http.StatusInternalServerError, "Failed to store the VRDE TLS setup")
 			return
 		}
-		writeJSON(w, map[string]any{
-			"success":          true,
-			"machine_name":     machine.Name,
-			"operation":        machines.OpModify,
-			"status":           "pending_power_cycle",
-			"requires_restart": true,
-			"pending_changes":  merged,
-			"certificate":      certPath,
-			"message":          "VRDE TLS setup accrued — the certificate is minted; the VRDE properties apply at the next agent-driven power cycle (stop, start, or restart).",
+		writeJSON(w, machineModifyResponse{
+			Success:         true,
+			MachineName:     machine.Name,
+			Operation:       machines.OpModify,
+			Status:          "pending_power_cycle",
+			RequiresRestart: true,
+			PendingChanges:  merged,
+			Certificate:     certPath,
+			Message:         "VRDE TLS setup accrued — the certificate is minted; the VRDE properties apply at the next agent-driven power cycle (stop, start, or restart).",
 		})
 	}
 }

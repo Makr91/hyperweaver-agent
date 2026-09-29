@@ -38,13 +38,18 @@ func (s *Server) templateSources() []machines.TemplateSource {
 	return sources
 }
 
+type templateListResponse struct {
+	Templates []*machines.Template `json:"templates"`
+	Total     int                  `json:"total"`
+}
+
 // handleListTemplates lists the local box-template registry.
 //
 //	@Summary		List box templates
 //	@Description	Minimum role: viewer. The local box-template registry: downloaded box disk images machines clone from (organization/box_name/version/architecture tuples; stale rows whose disk image vanished self-delete on resolution).
 //	@Tags			Machine Management
 //	@Produce		json
-//	@Success		200	{object}	map[string]interface{}	"Templates retrieved"
+//	@Success		200	{object}	templateListResponse	"Templates retrieved"
 //	@Router			/api/templates [get]
 func (s *Server) handleListTemplates(w http.ResponseWriter, r *http.Request) {
 	list, err := s.machines.ListTemplates(r.Context())
@@ -53,9 +58,9 @@ func (s *Server) handleListTemplates(w http.ResponseWriter, r *http.Request) {
 		taskError(w, http.StatusInternalServerError, "Failed to retrieve templates")
 		return
 	}
-	writeJSON(w, map[string]any{
-		"templates": list,
-		"total":     len(list),
+	writeJSON(w, templateListResponse{
+		Templates: list,
+		Total:     len(list),
 	})
 }
 
@@ -138,6 +143,11 @@ func (s *Server) handleDeleteTemplate(w http.ResponseWriter, r *http.Request) {
 	acceptedTask(w, task.ID, "Delete task created for template "+template.BoxName)
 }
 
+type exportTemplateRequest struct {
+	MachineName string `json:"machine_name"`
+	Filename    string `json:"filename"`
+}
+
 // handleExportTemplate queues a template_export task (the base's POST
 // /templates/export: machine → local .box; here VBoxManage export + tar.gz →
 // a standard Vagrant virtualbox box under <templates root>/exports).
@@ -147,16 +157,13 @@ func (s *Server) handleDeleteTemplate(w http.ResponseWriter, r *http.Request) {
 //	@Tags			Machine Management
 //	@Accept			json
 //	@Produce		json
-//	@Param			request	body	map[string]interface{}	true	"{machine_name, filename}"
+//	@Param			request	body	exportTemplateRequest	true	"{machine_name, filename}"
 //	@Success		202	"Export task created"
 //	@Failure		400	"Missing machine_name"
 //	@Failure		404	"Machine not found"
 //	@Router			/api/templates/export [post]
 func (s *Server) handleExportTemplate(w http.ResponseWriter, r *http.Request) {
-	var body struct {
-		MachineName string `json:"machine_name"`
-		Filename    string `json:"filename"`
-	}
+	var body exportTemplateRequest
 	if err := decodeBody(r, &body); err != nil {
 		taskError(w, http.StatusBadRequest, "Invalid JSON body")
 		return
@@ -197,6 +204,17 @@ func (s *Server) handleExportTemplate(w http.ResponseWriter, r *http.Request) {
 	acceptedTask(w, task.ID, "Export task created for machine "+machine.Name)
 }
 
+type publishTemplateRequest struct {
+	MachineName  string `json:"machine_name"`
+	BoxPath      string `json:"box_path"`
+	SourceName   string `json:"source_name"`
+	Organization string `json:"organization"`
+	BoxName      string `json:"box_name"`
+	Version      string `json:"version"`
+	Description  string `json:"description"`
+	Architecture string `json:"architecture"`
+}
+
 // handlePublishTemplate queues a template_upload task (the base's POST
 // /templates/publish: machine export OR existing .box → chunked registry
 // upload → release). Registry credentials live on the configured source only
@@ -208,22 +226,13 @@ func (s *Server) handleExportTemplate(w http.ResponseWriter, r *http.Request) {
 //	@Tags			Machine Management
 //	@Accept			json
 //	@Produce		json
-//	@Param			request	body	map[string]interface{}	true	"{machine_name|box_path, source_name (the source's id), organization, box_name, version, description, architecture}"
+//	@Param			request	body	publishTemplateRequest	true	"{machine_name|box_path, source_name (the source's id), organization, box_name, version, description, architecture}"
 //	@Success		202	"Publish task created"
 //	@Failure		400	"Missing required fields"
 //	@Failure		404	"Machine not found"
 //	@Router			/api/templates/publish [post]
 func (s *Server) handlePublishTemplate(w http.ResponseWriter, r *http.Request) {
-	var body struct {
-		MachineName  string `json:"machine_name"`
-		BoxPath      string `json:"box_path"`
-		SourceName   string `json:"source_name"`
-		Organization string `json:"organization"`
-		BoxName      string `json:"box_name"`
-		Version      string `json:"version"`
-		Description  string `json:"description"`
-		Architecture string `json:"architecture"`
-	}
+	var body publishTemplateRequest
 	if err := decodeBody(r, &body); err != nil {
 		taskError(w, http.StatusBadRequest, "Invalid JSON body")
 		return
@@ -278,6 +287,10 @@ func (s *Server) handlePublishTemplate(w http.ResponseWriter, r *http.Request) {
 	acceptedTask(w, task.ID, "Publish task created for "+body.Organization+"/"+body.BoxName)
 }
 
+type moveTemplateRequest struct {
+	TargetPath string `json:"target_path"`
+}
+
 // handleMoveTemplate queues a template_move task (the base's POST
 // /templates/local/{id}/move: relocate the stored artifact — file move here,
 // zfs rename/send-recv there).
@@ -288,7 +301,7 @@ func (s *Server) handlePublishTemplate(w http.ResponseWriter, r *http.Request) {
 //	@Accept			json
 //	@Produce		json
 //	@Param			templateId	path	int	true	"Template ID"
-//	@Param			request		body	map[string]interface{}	true	"{target_path}"
+//	@Param			request		body	moveTemplateRequest	true	"{target_path}"
 //	@Success		202	"Move task created"
 //	@Failure		400	"Missing target_path"
 //	@Failure		404	"Template not found"
@@ -299,9 +312,7 @@ func (s *Server) handleMoveTemplate(w http.ResponseWriter, r *http.Request) {
 		taskError(w, http.StatusNotFound, "Template not found")
 		return
 	}
-	var body struct {
-		TargetPath string `json:"target_path"`
-	}
+	var body moveTemplateRequest
 	if derr := decodeBody(r, &body); derr != nil {
 		taskError(w, http.StatusBadRequest, "Invalid JSON body")
 		return
@@ -354,7 +365,7 @@ func (s *Server) handleMoveTemplate(w http.ResponseWriter, r *http.Request) {
 //	@Tags			Machine Management
 //	@Accept			json
 //	@Produce		json
-//	@Param			request	body	map[string]interface{}	true	"{organization, box_name, version, source_name (the source's id), provider, architecture}"
+//	@Param			request	body	machines.TemplateDownloadMetadata	true	"{organization, box_name, version, source_name (the source's id), provider, architecture}"
 //	@Success		202	"Template download task queued"
 //	@Failure		400	{object}	problem.Body	"Unreadable body, an invalid provider, or no usable source"
 //	@Failure		422	{object}	problem.Body	"organization, box_name or version missing, or version latest (not at /version)"

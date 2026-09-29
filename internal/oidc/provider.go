@@ -8,10 +8,92 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 )
 
 var httpClient = &http.Client{Timeout: 15 * time.Second}
+
+const (
+	cacheFreshFor      = 15 * time.Minute
+	unknownKidCooldown = 5 * time.Minute
+)
+
+type provider struct {
+	mu               sync.Mutex
+	issuer           string
+	ctx              context.Context
+	endpointsCache   *providerEndpoints
+	endpointsFetched time.Time
+	jwksCache        *jwksDocument
+	jwksFetched      time.Time
+	unknownKids      map[string]time.Time
+}
+
+func (p *provider) endpoints(ctx context.Context) (*providerEndpoints, error) {
+	p.mu.Lock()
+	cached := p.endpointsCache
+	fresh := time.Since(p.endpointsFetched) < cacheFreshFor
+	p.mu.Unlock()
+	if cached != nil && fresh {
+		return cached, nil
+	}
+	fetched, err := discover(ctx, p.issuer)
+	if err != nil {
+		if cached != nil {
+			return cached, nil
+		}
+		return nil, err
+	}
+	p.mu.Lock()
+	p.endpointsCache = fetched
+	p.endpointsFetched = time.Now()
+	p.mu.Unlock()
+	return fetched, nil
+}
+
+func (p *provider) jwks(force bool) (*jwksDocument, error) {
+	p.mu.Lock()
+	cached := p.jwksCache
+	fresh := time.Since(p.jwksFetched) < cacheFreshFor
+	p.mu.Unlock()
+	if cached != nil && fresh && !force {
+		return cached, nil
+	}
+	endpoints, err := p.endpoints(p.ctx)
+	if err != nil {
+		return nil, err
+	}
+	return p.refreshJWKS(endpoints.JWKSURI)
+}
+
+func (p *provider) refreshJWKS(uri string) (*jwksDocument, error) {
+	fetched, err := fetchJWKS(p.ctx, uri)
+	if err != nil {
+		return nil, err
+	}
+	p.mu.Lock()
+	p.jwksCache = fetched
+	p.jwksFetched = time.Now()
+	p.mu.Unlock()
+	return fetched, nil
+}
+
+func (p *provider) kidRefetchAllowed(kid string) bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	now := time.Now()
+	for known, seen := range p.unknownKids {
+		if now.Sub(seen) > unknownKidCooldown {
+			delete(p.unknownKids, known)
+		}
+	}
+	if _, cooling := p.unknownKids[kid]; cooling {
+		return false
+	}
+	p.unknownKids[kid] = now
+	return true
+}
 
 type providerEndpoints struct {
 	Issuer              string `json:"issuer"`

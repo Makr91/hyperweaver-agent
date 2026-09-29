@@ -160,7 +160,7 @@ func (s *Server) handleTermSessionInfo(w http.ResponseWriter, r *http.Request) {
 //	@Tags			Console
 //	@Produce		json
 //	@Param			sessionId	path	string	true	"Terminal session ID"
-//	@Success		200	{object}	map[string]interface{}	"Session stopped"
+//	@Success		200	{object}	successMessageResponse	"Session stopped"
 //	@Failure		404	"Terminal session not found"
 //	@Router			/api/term/sessions/{sessionId}/stop [delete]
 func (s *Server) handleStopTermSession(w http.ResponseWriter, r *http.Request) {
@@ -168,7 +168,7 @@ func (s *Server) handleStopTermSession(w http.ResponseWriter, r *http.Request) {
 		taskError(w, http.StatusNotFound, "Terminal session not found")
 		return
 	}
-	writeJSON(w, map[string]any{"success": true, "message": "Terminal session stopped."})
+	writeJSON(w, successMessageResponse{Success: true, Message: "Terminal session stopped."})
 }
 
 // parseResizeFrame recognizes a terminal resize control frame: bare JSON

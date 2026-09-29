@@ -25,8 +25,45 @@ type artifactPagination struct {
 // artifactJSON document shape (the zoneweaver Artifact fields plus the
 // computed extension/mime_type/checksum_verified/verified/storage_location).
 type artifactListResponse struct {
-	Artifacts  []map[string]interface{} `json:"artifacts"`
-	Pagination artifactPagination       `json:"pagination"`
+	Artifacts  []artifactDocument `json:"artifacts"`
+	Pagination artifactPagination `json:"pagination"`
+}
+
+type artifactTypeTotals struct {
+	Count     int64 `json:"count"`
+	TotalSize int64 `json:"total_size"`
+	Locations int   `json:"locations"`
+}
+
+type artifactStatsLocation struct {
+	ID        string     `json:"id"`
+	Name      string     `json:"name"`
+	Path      string     `json:"path"`
+	Type      string     `json:"type"`
+	Enabled   bool       `json:"enabled"`
+	FileCount int64      `json:"file_count"`
+	TotalSize int64      `json:"total_size"`
+	LastScan  *time.Time `json:"last_scan"`
+}
+
+type artifactStatsTotals struct {
+	Locations        int   `json:"locations"`
+	EnabledLocations int   `json:"enabled_locations"`
+	TotalArtifacts   int64 `json:"total_artifacts"`
+	TotalSize        int64 `json:"total_size"`
+}
+
+type artifactStatsActivity struct {
+	DownloadsLast24h        int `json:"downloads_last_24h"`
+	UploadsLast24h          int `json:"uploads_last_24h"`
+	FailedOperationsLast24h int `json:"failed_operations_last_24h"`
+}
+
+type artifactStatsResponse struct {
+	ByType           map[string]artifactTypeTotals `json:"by_type"`
+	StorageLocations []artifactStatsLocation       `json:"storage_locations"`
+	Totals           artifactStatsTotals           `json:"totals"`
+	RecentActivity   artifactStatsActivity         `json:"recent_activity"`
 }
 
 // handleListArtifacts: GET /artifacts (?type, ?storage_path_id, ?role,
@@ -84,7 +121,7 @@ func (s *Server) handleListArtifacts(w http.ResponseWriter, r *http.Request) {
 	}
 
 	index := s.locationIndex(r)
-	documents := make([]map[string]any, 0, len(list))
+	documents := make([]artifactDocument, 0, len(list))
 	for _, artifact := range list {
 		documents = append(documents, artifactJSON(artifact, index[artifact.LocationID]))
 	}
@@ -170,7 +207,7 @@ func (s *Server) handleArtifactDetails(w http.ResponseWriter, r *http.Request) {
 //	@Description	Minimum role: viewer. Totals per type, per-location summaries, and 24h task activity.
 //	@Tags			Artifacts
 //	@Produce		json
-//	@Success		200	{object}	map[string]interface{}	"Statistics"
+//	@Success		200	{object}	artifactStatsResponse	"Statistics"
 //	@Failure		503	"Artifact storage is disabled"
 //	@Router			/api/artifacts/stats [get]
 func (s *Server) handleArtifactStats(w http.ResponseWriter, r *http.Request) {
@@ -180,9 +217,8 @@ func (s *Server) handleArtifactStats(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	byType := map[string]map[string]any{}
-	storageLocations := make([]map[string]any, 0, len(locations))
-	totals := map[string]any{}
+	byType := map[string]artifactTypeTotals{}
+	storageLocations := make([]artifactStatsLocation, 0, len(locations))
 	totalArtifacts, totalSize, enabledCount := int64(0), int64(0), 0
 	for _, location := range locations {
 		if location.Enabled {
@@ -191,24 +227,23 @@ func (s *Server) handleArtifactStats(w http.ResponseWriter, r *http.Request) {
 		totalArtifacts += location.FileCount
 		totalSize += location.TotalSize
 		entry := byType[location.Type]
-		if entry == nil {
-			entry = map[string]any{"count": int64(0), "total_size": int64(0), "locations": 0}
-			byType[location.Type] = entry
-		}
-		entry["count"] = entry["count"].(int64) + location.FileCount
-		entry["total_size"] = entry["total_size"].(int64) + location.TotalSize
-		entry["locations"] = entry["locations"].(int) + 1
-		storageLocations = append(storageLocations, map[string]any{
-			"id": location.ID, "name": location.Name, "path": location.Path,
-			"type": location.Type, "enabled": location.Enabled,
-			"file_count": location.FileCount, "total_size": location.TotalSize,
-			"last_scan": location.LastScanAt,
+		entry.Count += location.FileCount
+		entry.TotalSize += location.TotalSize
+		entry.Locations++
+		byType[location.Type] = entry
+		storageLocations = append(storageLocations, artifactStatsLocation{
+			ID: location.ID, Name: location.Name, Path: location.Path,
+			Type: location.Type, Enabled: location.Enabled,
+			FileCount: location.FileCount, TotalSize: location.TotalSize,
+			LastScan: location.LastScanAt,
 		})
 	}
-	totals["locations"] = len(locations)
-	totals["enabled_locations"] = enabledCount
-	totals["total_artifacts"] = totalArtifacts
-	totals["total_size"] = totalSize
+	totals := artifactStatsTotals{
+		Locations:        len(locations),
+		EnabledLocations: enabledCount,
+		TotalArtifacts:   totalArtifacts,
+		TotalSize:        totalSize,
+	}
 
 	// Recent activity from the task queue (zoneweaver's 24h window).
 	since := time.Now().Add(-24 * time.Hour)
@@ -221,18 +256,18 @@ func (s *Server) handleArtifactStats(w http.ResponseWriter, r *http.Request) {
 		}
 		return n
 	}
-	activity := map[string]any{
-		"downloads_last_24h": countTasks(assets.OpDownload, tasks.StatusCompleted),
-		"uploads_last_24h":   countTasks(assets.OpUpload, tasks.StatusCompleted),
-		"failed_operations_last_24h": countTasks(assets.OpDownload, tasks.StatusFailed) +
+	activity := artifactStatsActivity{
+		DownloadsLast24h: countTasks(assets.OpDownload, tasks.StatusCompleted),
+		UploadsLast24h:   countTasks(assets.OpUpload, tasks.StatusCompleted),
+		FailedOperationsLast24h: countTasks(assets.OpDownload, tasks.StatusFailed) +
 			countTasks(assets.OpUpload, tasks.StatusFailed),
 	}
 
-	writeJSON(w, map[string]any{
-		"by_type":           byType,
-		"storage_locations": storageLocations,
-		"totals":            totals,
-		"recent_activity":   activity,
+	writeJSON(w, artifactStatsResponse{
+		ByType:           byType,
+		StorageLocations: storageLocations,
+		Totals:           totals,
+		RecentActivity:   activity,
 	})
 }
 
@@ -242,7 +277,7 @@ func (s *Server) handleArtifactStats(w http.ResponseWriter, r *http.Request) {
 //	@Description	Minimum role: viewer. The scan service's state (zoneweaver's getStatus shape): running/initialized/scanning flags, config summary, scan-run stats, active intervals.
 //	@Tags			Artifacts
 //	@Produce		json
-//	@Success		200	{object}	map[string]interface{}	"Service status"
+//	@Success		200	{object}	assets.ServiceStatus	"Service status"
 //	@Failure		503	"Artifact storage is disabled"
 //	@Router			/api/artifacts/service/status [get]
 func (s *Server) handleArtifactServiceStatus(w http.ResponseWriter, _ *http.Request) {

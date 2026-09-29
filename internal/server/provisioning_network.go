@@ -5,9 +5,41 @@ import (
 	"net/http"
 
 	"github.com/Makr91/hyperweaver-agent/internal/auth"
+	"github.com/Makr91/hyperweaver-agent/internal/config"
 	"github.com/Makr91/hyperweaver-agent/internal/machines"
 	"github.com/Makr91/hyperweaver-agent/internal/tasks"
 )
+
+type namedExistence struct {
+	Name   string `json:"name"`
+	Exists bool   `json:"exists"`
+}
+
+type provisioningIPAddress struct {
+	Address    string `json:"address"`
+	Configured bool   `json:"configured"`
+}
+
+type provisioningDHCP struct {
+	Exists   bool  `json:"exists"`
+	Enabled  bool  `json:"enabled"`
+	Embedded *bool `json:"embedded,omitempty"`
+}
+
+type provisioningNetworkComponents struct {
+	Network   *namedExistence        `json:"network,omitempty"`
+	Interface *namedExistence        `json:"interface,omitempty"`
+	IPAddress *provisioningIPAddress `json:"ip_address,omitempty"`
+	DHCP      *provisioningDHCP      `json:"dhcp,omitempty"`
+}
+
+type provisioningNetworkStatus struct {
+	Enabled    bool                              `json:"enabled"`
+	Message    string                            `json:"message,omitempty"`
+	Ready      *bool                             `json:"ready,omitempty"`
+	Components *provisioningNetworkComponents    `json:"components,omitempty"`
+	Config     *config.ProvisioningNetworkConfig `json:"config,omitempty"`
+}
 
 // The provisioning-network surface — zoneweaver's
 // ProvisioningNetworkController (status / setup / teardown) on VirtualBox:
@@ -26,15 +58,15 @@ import (
 //	@Description	Minimum role: viewer. The dedicated provisioning network (the zoneweaver mechanism's etherstub+dhcpd, as ONE VirtualBox host-only interface — identified by provisioning.network.host_ip, since VirtualBox assigns interface names itself — plus its DHCP server). Disabled answers just {enabled:false, message}; enabled answers ready + per-component existence + the effective configuration. macOS hosts (Oracle's split) answer components.network ({name: "hyperweaver-provision", exists}) instead of interface/ip_address, with dhcp {exists, enabled, embedded: true} — the hostonlynet's own embedded range serves DHCP. The base's NAT/forwarding components translate to the create-time NAT adapter + ssh port-forward transport (the provisioning NIC); this host-only machinery stays dormant-but-available for host-type networks[] entries and build-it-yourself setups.
 //	@Tags			Provisioning
 //	@Produce		json
-//	@Success		200	{object}	map[string]interface{}	"Provisioning network status"
+//	@Success		200	{object}	provisioningNetworkStatus	"Provisioning network status"
 //	@Failure		503	"VirtualBox is not installed"
 //	@Router			/api/provisioning/network/status [get]
 func (s *Server) handleProvisioningNetworkStatus(w http.ResponseWriter, r *http.Request) {
 	network := s.cfg.Provisioning.Network
 	if !network.Enabled {
-		writeJSON(w, map[string]any{
-			"enabled": false,
-			"message": "Provisioning network is disabled in configuration",
+		writeJSON(w, provisioningNetworkStatus{
+			Enabled: false,
+			Message: "Provisioning network is disabled in configuration",
 		})
 		return
 	}
@@ -52,21 +84,23 @@ func (s *Server) handleProvisioningNetworkStatus(w http.ResponseWriter, r *http.
 			taskError(w, http.StatusInternalServerError, "Failed to check provisioning network status")
 			return
 		}
-		writeJSON(w, map[string]any{
-			"enabled": true,
-			"ready":   net != nil && net.Enabled,
-			"components": map[string]any{
-				"network": map[string]any{
-					"name":   machines.ProvisioningNetName,
-					"exists": net != nil,
+		ready := net != nil && net.Enabled
+		embedded := true
+		writeJSON(w, provisioningNetworkStatus{
+			Enabled: true,
+			Ready:   &ready,
+			Components: &provisioningNetworkComponents{
+				Network: &namedExistence{
+					Name:   machines.ProvisioningNetName,
+					Exists: net != nil,
 				},
-				"dhcp": map[string]any{
-					"exists":   net != nil,
-					"enabled":  net != nil && net.Enabled,
-					"embedded": true,
+				DHCP: &provisioningDHCP{
+					Exists:   net != nil,
+					Enabled:  net != nil && net.Enabled,
+					Embedded: &embedded,
 				},
 			},
-			"config": network,
+			Config: &network,
 		})
 		return
 	}
@@ -93,24 +127,25 @@ func (s *Server) handleProvisioningNetworkStatus(w http.ResponseWriter, r *http.
 		}
 	}
 
-	writeJSON(w, map[string]any{
-		"enabled": true,
-		"ready":   iface != nil && dhcpEnabled,
-		"components": map[string]any{
-			"interface": map[string]any{
-				"name":   ifaceName,
-				"exists": iface != nil,
+	ready := iface != nil && dhcpEnabled
+	writeJSON(w, provisioningNetworkStatus{
+		Enabled: true,
+		Ready:   &ready,
+		Components: &provisioningNetworkComponents{
+			Interface: &namedExistence{
+				Name:   ifaceName,
+				Exists: iface != nil,
 			},
-			"ip_address": map[string]any{
-				"address":    network.HostIP,
-				"configured": iface != nil,
+			IPAddress: &provisioningIPAddress{
+				Address:    network.HostIP,
+				Configured: iface != nil,
 			},
-			"dhcp": map[string]any{
-				"exists":  dhcpExists,
-				"enabled": dhcpEnabled,
+			DHCP: &provisioningDHCP{
+				Exists:  dhcpExists,
+				Enabled: dhcpEnabled,
 			},
 		},
-		"config": network,
+		Config: &network,
 	})
 }
 

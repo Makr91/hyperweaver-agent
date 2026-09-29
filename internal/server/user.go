@@ -121,6 +121,14 @@ func validatePreference(name, value string) *problem.Error {
 	return &failure
 }
 
+type preferencePatchRequest struct {
+	Language *string `json:"language"`
+	Mode     *string `json:"mode"`
+	Theme    *string `json:"theme"`
+	Motion   *string `json:"motion"`
+	Timezone *string `json:"timezone"`
+}
+
 func decodePreferencePatch(r *http.Request) (map[string]*string, []problem.Error, bool) {
 	var body map[string]json.RawMessage
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body == nil {
@@ -166,7 +174,7 @@ func decodePreferencePatch(r *http.Request) (map[string]*string, []problem.Error
 // @Tags			Local Login
 // @Accept			json
 // @Produce		json
-// @Param			body	body		map[string]interface{}	true	"The members to change"
+// @Param			body	body		preferencePatchRequest	true	"The members to change"
 // @Success		200		{object}	prefs.Preferences		"The preferences as stored"
 // @Failure		400		{object}	problem.Body			"Unreadable body"
 // @Failure		401		{object}	problem.Body			"Missing credential"

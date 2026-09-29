@@ -19,8 +19,8 @@ import (
 // the base's one-task-per-zone rule.
 func (s *Server) buildProvisionChain(ctx context.Context, machine *machines.Machine,
 	v *provisionValidation, skipBoot bool, parentID, createdBy string,
-) (chain []map[string]any, skippedMethods []string, err error) {
-	chain = []map[string]any{}
+) (chain []taskChainEntry, skippedMethods []string, err error) {
+	chain = []taskChainEntry{}
 	var previous *string
 
 	// Shadowed communicator keys narrate onto the response task_chain[]
@@ -29,8 +29,8 @@ func (s *Server) buildProvisionChain(ctx context.Context, machine *machines.Mach
 	if len(v.shadowedKeys) > 0 {
 		slog.Warn("communicator keys shadowed by their new spellings",
 			"machine", machine.Name, "keys", v.shadowedKeys)
-		chain = append(chain, map[string]any{
-			"step": "communicator_keys_shadowed", "keys": v.shadowedKeys,
+		chain = append(chain, taskChainEntry{
+			Step: "communicator_keys_shadowed", Keys: v.shadowedKeys,
 		})
 	}
 
@@ -50,7 +50,7 @@ func (s *Server) buildProvisionChain(ctx context.Context, machine *machines.Mach
 		if terr != nil {
 			return nil, nil, terr
 		}
-		chain = append(chain, map[string]any{"step": "extract", "task_id": task.ID})
+		chain = append(chain, taskChainEntry{Step: "extract", TaskID: task.ID})
 		previous = &task.ID
 	}
 
@@ -61,7 +61,7 @@ func (s *Server) buildProvisionChain(ctx context.Context, machine *machines.Mach
 		if terr != nil {
 			return nil, nil, terr
 		}
-		chain = append(chain, map[string]any{"step": "boot", "task_id": task.ID})
+		chain = append(chain, taskChainEntry{Step: "boot", TaskID: task.ID})
 		previous = &task.ID
 	}
 
@@ -75,7 +75,7 @@ func (s *Server) buildProvisionChain(ctx context.Context, machine *machines.Mach
 	if err != nil {
 		return nil, nil, err
 	}
-	chain = append(chain, map[string]any{"step": "wait_ssh", "task_id": sshTask.ID})
+	chain = append(chain, taskChainEntry{Step: "wait_ssh", TaskID: sshTask.ID})
 	previous = &sshTask.ID
 
 	// The walk, PLANNED before any of its tasks exist.
@@ -118,8 +118,8 @@ func (s *Server) buildProvisionChain(ctx context.Context, machine *machines.Mach
 	// guests skip the bracket whole — a RESPONSE-ONLY task_chain[] entry
 	// (zoneweaver's exact named shape), never a task.
 	if isWinRM && len(folders) > 0 {
-		chain = append(chain, map[string]any{
-			"step": "sync_skipped_winrm", "folder_count": len(folders),
+		chain = append(chain, taskChainEntry{
+			Step: "sync_skipped_winrm", FolderCount: len(folders),
 		})
 	}
 	if !isWinRM && len(folders) > 0 {
@@ -133,8 +133,8 @@ func (s *Server) buildProvisionChain(ctx context.Context, machine *machines.Mach
 		if serr != nil {
 			return nil, nil, serr
 		}
-		chain = append(chain, map[string]any{
-			"step": "sync_parent", "task_id": syncParent.ID, "folder_count": len(folders),
+		chain = append(chain, taskChainEntry{
+			Step: "sync_parent", TaskID: syncParent.ID, FolderCount: len(folders),
 		})
 		childPrevious := &syncParent.ID
 		for i := range folders {
@@ -168,10 +168,8 @@ func (s *Server) buildProvisionChain(ctx context.Context, machine *machines.Mach
 	// their document position and never become tasks.
 	for i := range walk {
 		if walk[i].operation == "" {
-			entry := map[string]any{"step": walk[i].step}
-			for key, value := range walk[i].stepInfo {
-				entry[key] = value
-			}
+			entry := walk[i].stepInfo
+			entry.Step = walk[i].step
 			chain = append(chain, entry)
 			continue
 		}
@@ -189,10 +187,9 @@ func (s *Server) buildProvisionChain(ctx context.Context, machine *machines.Mach
 			return nil, nil, cerr
 		}
 		if walk[i].step != "" {
-			entry := map[string]any{"step": walk[i].step, "task_id": child.ID}
-			for key, value := range walk[i].stepInfo {
-				entry[key] = value
-			}
+			entry := walk[i].stepInfo
+			entry.Step = walk[i].step
+			entry.TaskID = child.ID
 			chain = append(chain, entry)
 		}
 		previous = &child.ID
@@ -204,8 +201,8 @@ func (s *Server) buildProvisionChain(ctx context.Context, machine *machines.Mach
 	// sub-parent, gated on the previous chain element. winrm guests skip the
 	// bracket whole — response-only, like the opening one.
 	if isWinRM && len(syncbackFolders) > 0 {
-		chain = append(chain, map[string]any{
-			"step": "syncback_skipped_winrm", "folder_count": len(syncbackFolders),
+		chain = append(chain, taskChainEntry{
+			Step: "syncback_skipped_winrm", FolderCount: len(syncbackFolders),
 		})
 	}
 	if !isWinRM {
@@ -218,7 +215,7 @@ func (s *Server) buildProvisionChain(ctx context.Context, machine *machines.Mach
 			// the bracket's true tail; the parent anchor completes instantly)
 			// so the key-rotation child below genuinely follows the closing
 			// bracket instead of racing it.
-			if last, ok := syncbackChain[0]["last_task_id"].(string); ok && last != "" {
+			if last := syncbackChain[0].LastTaskID; last != "" {
 				lastID := last
 				previous = &lastID
 			}
@@ -238,7 +235,7 @@ func (s *Server) buildProvisionChain(ctx context.Context, machine *machines.Mach
 	settings := v.config.Section("settings")
 	if docEnabled(settings["vagrant_ssh_insert_key"]) {
 		if isWinRM {
-			chain = append(chain, map[string]any{"step": "key_rotate_skipped_winrm"})
+			chain = append(chain, taskChainEntry{Step: "key_rotate_skipped_winrm"})
 		} else {
 			rotateKeyPath, _ := settings["vagrant_user_private_key_path"].(string)
 			rotateMeta, merr := childMetadata(v, map[string]any{"key_path": rotateKeyPath})
@@ -250,7 +247,7 @@ func (s *Server) buildProvisionChain(ctx context.Context, machine *machines.Mach
 			if terr != nil {
 				return nil, nil, terr
 			}
-			chain = append(chain, map[string]any{"step": "key_rotate", "task_id": rotateTask.ID})
+			chain = append(chain, taskChainEntry{Step: "key_rotate", TaskID: rotateTask.ID})
 			previous = &rotateTask.ID
 		}
 	}
@@ -275,7 +272,7 @@ func (s *Server) buildProvisionChain(ctx context.Context, machine *machines.Mach
 		if terr != nil {
 			return nil, nil, terr
 		}
-		chain = append(chain, map[string]any{"step": "post_provision_stop", "task_id": stopTask.ID})
+		chain = append(chain, taskChainEntry{Step: "post_provision_stop", TaskID: stopTask.ID})
 		previous = &stopTask.ID
 		if removalFlagged {
 			removeTask, rerr := s.createChainTask(ctx, machine.Name, machines.OpTransportRemove,
@@ -283,7 +280,7 @@ func (s *Server) buildProvisionChain(ctx context.Context, machine *machines.Mach
 			if rerr != nil {
 				return nil, nil, rerr
 			}
-			chain = append(chain, map[string]any{"step": "transport_remove", "task_id": removeTask.ID})
+			chain = append(chain, taskChainEntry{Step: "transport_remove", TaskID: removeTask.ID})
 			previous = &removeTask.ID
 		}
 		bootTask, berr := s.createChainTask(ctx, machine.Name, machines.OpStart,
@@ -291,7 +288,7 @@ func (s *Server) buildProvisionChain(ctx context.Context, machine *machines.Mach
 		if berr != nil {
 			return nil, nil, berr
 		}
-		chain = append(chain, map[string]any{"step": "post_provision_boot", "task_id": bootTask.ID})
+		chain = append(chain, taskChainEntry{Step: "post_provision_boot", TaskID: bootTask.ID})
 	}
 
 	// The narrate-skip and run-directive records land on the orchestration
@@ -323,7 +320,7 @@ func (s *Server) buildProvisionChain(ctx context.Context, machine *machines.Mach
 // syncback closes a provision walk; the ad-hoc handler never stamps.
 func (s *Server) buildSyncbackChain(ctx context.Context, machineName string,
 	v *provisionValidation, previous *string, parentID, createdBy string, stampFinal bool,
-) ([]map[string]any, error) {
+) ([]taskChainEntry, error) {
 	syncbackFolders := machines.SyncbackFolders(machines.ProvisionerFolders(v.provisioner))
 	if len(syncbackFolders) == 0 {
 		return nil, nil
@@ -357,9 +354,9 @@ func (s *Server) buildSyncbackChain(ctx context.Context, machineName string,
 	}
 	// last_task_id = the LAST child — the chain's true tail (the parent
 	// anchor completes instantly); the response reports it.
-	return []map[string]any{{
-		"step": "syncback_parent", "task_id": syncbackParent.ID,
-		"folder_count": len(syncbackFolders), "last_task_id": *childPrevious,
+	return []taskChainEntry{{
+		Step: "syncback_parent", TaskID: syncbackParent.ID,
+		FolderCount: len(syncbackFolders), LastTaskID: *childPrevious,
 	}}, nil
 }
 
@@ -369,7 +366,7 @@ func (s *Server) buildSyncbackChain(ctx context.Context, machineName string,
 // half-built parent before the error returns.
 func (s *Server) startProvisionPipeline(ctx context.Context, machine *machines.Machine,
 	validation *provisionValidation, skipBoot bool, createdBy string,
-) (parentID string, chain []map[string]any, skippedMethods []string, err error) {
+) (parentID string, chain []taskChainEntry, skippedMethods []string, err error) {
 	metadata, err := json.Marshal(map[string]any{
 		"ip": validation.ip, "port": validation.port,
 	})

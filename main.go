@@ -1,4 +1,4 @@
-// Hyperweaver Agent — VirtualBox/Vagrant host-agent for the Hyperweaver
+// Hyperweaver Agent — VirtualBox host-agent for the Hyperweaver
 // control plane. Runs a local web server serving the Hyperweaver UI plus the
 // Agent API, with a native system-tray icon (LedFx model: manage it from your
 // own browser).

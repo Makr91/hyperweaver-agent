@@ -3,24 +3,32 @@
 .Os
 .Sh NAME
 .Nm hyperweaver-agent.yaml
-.Nd configuration file for the Hyperweaver Agent
+.Nd configuration files for the Hyperweaver Agent
 .Sh DESCRIPTION
-The
-.Nm
-file is the configuration file for
-.Xr hyperweaver-agent 8 .
-It is written in YAML format.
+The configuration of
+.Xr hyperweaver-agent 8
+is a directory of five YAML files:
+.Pa app.config.yaml ,
+.Pa auth.config.yaml ,
+.Pa db.config.yaml ,
+.Pa machines.config.yaml
+and
+.Pa storage.config.yaml .
+Each carries
+.Cm schemaVersion
+and the sections listed below that belong to it; a key absent from a file
+takes the default its schema declares.
 .Pp
 Locations:
 .Bl -bullet -offset indent
 .It
 Desktop (tray) mode:
-.Pa ~/.config/hyperweaver-agent/config.yaml
-(created with commented defaults on first run)
+.Pa ~/.config/hyperweaver-agent/
+(missing files are seeded on first run)
 .It
 Headless service mode:
-.Pa /etc/hyperweaver-agent/config.yaml
-(installed by the package, passed via
+.Pa /etc/hyperweaver-agent/
+(seeded by the package's postinst, passed via
 .Fl -config )
 .El
 .Sh CONFIGURATION SECTIONS
@@ -61,14 +69,12 @@ signed by the CA at the CA paths — the CA itself is generated (RSA 4096,
 10 years, CA:TRUE) when absent (default: true)
 .It Cm key_path
 Server TLS private key location. Empty uses
-.Pa <config dir>/ssl/server.key ;
-the packaged service sets
-.Pa /etc/hyperweaver-agent/ssl/server.key .
+.Pa ssl/server.key
+beside the configuration files (default: empty).
 .It Cm cert_path
 Server TLS certificate location. Empty uses
-.Pa <config dir>/ssl/server.crt ;
-the packaged service sets
-.Pa /etc/hyperweaver-agent/ssl/server.crt .
+.Pa ssl/server.crt
+beside the configuration files (default: empty).
 .It Cm ca_cert_path
 CA certificate that signs the generated server certificate. Provide your own
 CA pair (wildcard-capable) and everything chains to it; import this
@@ -124,10 +130,9 @@ Boolean enabling human-readable logging on standard error (default: true).
 Under systemd this output is captured by the journal. The Windows GUI build
 has no console; the log file is authoritative there.
 .It Cm file
-Log file path. Empty uses the default location
-.Pa <config dir>/logs/agent.log ;
-the packaged service sets
-.Pa /var/log/hyperweaver-agent/agent.log .
+Log file path. Empty uses
+.Pa logs/agent.log
+beside the configuration files (default: empty).
 .It Cm max_size_mb
 Maximum log file size in megabytes before rotation (default: 20)
 .It Cm max_backups
@@ -151,8 +156,8 @@ Boolean locking the bootstrap endpoint once any key exists (default: true)
 .It Cm bootstrap_require_claim_token
 Boolean requiring the setup (claim) token — written to
 .Pa setup.token
-beside this file and printed to the startup log — as proof of host
-ownership (default: true)
+beside the configuration files and printed to the startup log — as proof of
+host ownership (default: true)
 .It Cm hash_rounds
 Bcrypt cost for stored key hashes, 4-20 (default: 12)
 .It Cm key_length
@@ -184,18 +189,9 @@ Boolean serving GET /api/stats without an API key (default: false)
 Data storage locations.
 .Bl -tag -width "dir"
 .It Cm dir
-Root directory for agent data: the SQLite databases
-.Pa ( tasks.sqlite ,
-.Pa agent.sqlite )
-today; machine directories, provisioners, and the file cache in later
-releases. Empty selects the per-OS local app-data default
-.Pa ( %LOCALAPPDATA%\ehyperweaver-agent
-on Windows,
-.Pa ~/Library/Application Support/hyperweaver-agent
-on macOS,
-.Pa ~/.local/share/hyperweaver-agent
-on Linux); the packaged service sets
-.Pa /var/lib/hyperweaver-agent .
+Root directory for agent data: the databases, templates and artifacts, and
+on Windows the machines and provisioners when set. Empty selects the per-OS
+local app-data folder (default: empty).
 .El
 .Ss database
 SQLite tuning applied to both agent databases
@@ -253,17 +249,16 @@ Boolean also writing a plain-text per-task log file when a task finishes
 (default: true)
 .It Cm output.log_directory
 Directory for those log files. Empty uses
-.Pa <config dir>/logs/tasks ;
-the packaged service sets
-.Pa /var/log/hyperweaver-agent/tasks .
+.Pa logs/tasks
+beside the configuration files (default: empty).
 .El
 .Ss machines
 Machine registry configuration.
 .Bl -tag -width "discovery_interval"
 .It Cm auto_discovery
 Boolean creating a periodic background discover task that reconciles the
-registry against VirtualBox and vagrant — importing machines built outside
-the agent, refreshing every machine's live state, and detecting external
+registry against the hypervisor — importing machines built outside the
+agent, refreshing every machine's live state, and detecting external
 shutdowns (default: true). The startup discovery task always runs.
 .It Cm discovery_interval
 Seconds between periodic discover tasks, 10-86400 (default: 300)
@@ -341,7 +336,7 @@ The agent's own provisioning private key — the SSH-auth fallback when the
 machine's document supplies neither a key nor a password; generated
 (ed25519) at startup when absent. Empty selects
 .Pa ssh/provision_key
-beside the configuration file.
+beside the configuration files.
 .It Cm ssh.timeout_seconds
 Total wait for a guest's SSH to become available; the document's
 settings.setup_wait wins when larger. Minimum 10 (default: 300).
@@ -387,9 +382,9 @@ Empty selects
 under
 .Cm data.dir .
 .It Cm sources
-List of registries: name, url, enabled, default, auth_token, ca_file. The
-entry flagged default serves requests that name no source; names are
-display-only. auth_token is the registry API key (a BoxVault
+Map of registries keyed by an id matching ^[a-z0-9_]+$, each entry carrying
+display_name, url, enabled, default, auth_token, ca_file. The entry flagged
+default serves requests that name no source. auth_token is the registry API key (a BoxVault
 service-account token, sent as Bearer on every call) — the only credential;
 it authenticates private boxes and never enters task metadata. ca_file adds
 a PEM CA bundle to the trust store for self-signed registries; certificate
@@ -404,8 +399,9 @@ asset, verifies its sha256, and imports it into the local registry
 template to run your own and add it as another source.
 .Bl -tag -width "sources"
 .It Cm sources
-List of catalogs: name, url, enabled, default, ca_file. The entry flagged
-default serves requests that name no source. ca_file adds a PEM CA bundle to
+Map of catalogs keyed by an id matching ^[a-z0-9_]+$, each entry carrying
+display_name, url, enabled, default, ca_file. The entry flagged default
+serves requests that name no source. ca_file adds a PEM CA bundle to
 the trust store for self-hosted forks; certificate verification always stays
 on (default: the STARTcloud Provisioner Catalog).
 .El
@@ -547,9 +543,9 @@ capability token): user-chosen desktop tools the agent launches on its own
 host against a machine (SHI's per-server app buttons, generalized).
 .Bl -tag -width "applications"
 .It Cm applications
-List of entries, each
-.Cm name
-(display + the URL path segment; no slashes),
+Map of entries keyed by an id matching ^[a-z0-9_]+$ (the URL path segment),
+each carrying
+.Cm display_name ,
 .Cm path
 (the executable on the agent host), and
 .Cm args
@@ -628,18 +624,20 @@ macOS. System sleep only — the display may still sleep and lock
 (default: false).
 .El
 .Sh FILES
-.Bl -tag -width ".Pa /var/log/hyperweaver-agent/"
-.It Pa /etc/hyperweaver-agent/config.yaml
-Service-mode configuration
-.It Pa ~/.config/hyperweaver-agent/config.yaml
-Per-user configuration
+.Bl -tag -width ".Pa /etc/hyperweaver-agent/<name>.config.yaml"
+.It Pa /etc/hyperweaver-agent/<name>.config.yaml
+Service-mode configuration files (app, auth, db, machines, storage)
+.It Pa ~/.config/hyperweaver-agent/<name>.config.yaml
+Per-user configuration files
+.It Pa /usr/share/hyperweaver-agent/config/<name>.config.yaml
+The seed files the package installs and postinst copies into place
 .It Pa /var/log/hyperweaver-agent/
 Service log directory
 .It Pa /var/lib/hyperweaver-agent/
 Service data directory (SQLite databases)
 .El
 .Pp
-Beside the configuration file the agent also keeps
+Beside the configuration files the agent also keeps
 .Pa setup.token
 (first-key claim token, 0600),
 .Pa keys.json
@@ -726,8 +724,9 @@ Log directory not writable by the service user
 .Xr systemctl 1 ,
 .Xr journalctl 1
 .Sh STANDARDS
-The configuration file uses YAML 1.2 format as defined by the YAML
-specification.
+The configuration files use YAML 1.2 format as defined by the YAML
+specification; each file's schema is JSON Schema 2020-12, served at
+GET /api/config/<name>/schema.
 .Sh SECURITY CONSIDERATIONS
 Keep restrictive filesystem permissions on the configuration directory; it
 will hold credentials in future releases. Leave

@@ -13,6 +13,12 @@ import (
 	"github.com/Makr91/hyperweaver-agent/internal/vbox"
 )
 
+type machineConfigResponse struct {
+	MachineName   string           `json:"machine_name"`
+	Configuration json.RawMessage  `json:"configuration"`
+	NATForwards   []natForwardRule `json:"nat_forwards"`
+}
+
 // handleMachineConfig: the live configuration document (VirtualBox's
 // machinereadable view on this agent) plus nat_forwards — the configuration's
 // Forwarding(N) rules parsed into structured rows.
@@ -22,7 +28,7 @@ import (
 //	@Tags			Machine Management
 //	@Produce		json
 //	@Param			machineName	path	string	true	"Machine name"
-//	@Success		200	{object}	map[string]interface{}	"Machine configuration"
+//	@Success		200	{object}	machineConfigResponse	"Machine configuration"
 //	@Failure		404	"Machine not found"
 //	@Router			/api/machines/{machineName}/config [get]
 func (s *Server) handleMachineConfig(w http.ResponseWriter, r *http.Request) {
@@ -34,10 +40,16 @@ func (s *Server) handleMachineConfig(w http.ResponseWriter, r *http.Request) {
 	exe := machines.VBoxManagePath(r.Context())
 	if exe != "" {
 		if info, err := vbox.ShowVMInfo(r.Context(), exe, machine.VBoxTarget()); err == nil {
-			writeJSON(w, map[string]any{
-				"machine_name":  machine.Name,
-				"configuration": info.Raw,
-				"nat_forwards":  parseNATForwards(info.Raw),
+			live, merr := json.Marshal(info.Raw)
+			if merr != nil {
+				slog.Error("serialize live configuration", "machine", machine.Name, "error", merr)
+				taskError(w, http.StatusInternalServerError, "Failed to retrieve machine configuration")
+				return
+			}
+			writeJSON(w, machineConfigResponse{
+				MachineName:   machine.Name,
+				Configuration: live,
+				NATForwards:   parseNATForwards(info.Raw),
 			})
 			return
 		}
@@ -57,10 +69,10 @@ func (s *Server) handleMachineConfig(w http.ResponseWriter, r *http.Request) {
 			flat[key] = text
 		}
 	}
-	writeJSON(w, map[string]any{
-		"machine_name":  machine.Name,
-		"configuration": configuration,
-		"nat_forwards":  parseNATForwards(flat),
+	writeJSON(w, machineConfigResponse{
+		MachineName:   machine.Name,
+		Configuration: configuration,
+		NATForwards:   parseNATForwards(flat),
 	})
 }
 

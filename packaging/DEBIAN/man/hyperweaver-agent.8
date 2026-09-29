@@ -3,16 +3,16 @@
 .Os
 .Sh NAME
 .Nm hyperweaver-agent
-.Nd VirtualBox/Vagrant host-agent with a system-tray web UI
+.Nd VirtualBox host-agent with a system-tray web UI
 .Sh SYNOPSIS
 .Nm
-.Op Fl -config Ar path
+.Op Fl -config Ar dir
 .Op Fl -headless
 .Op Fl -version
 .Sh DESCRIPTION
 The
 .Nm
-utility is the VirtualBox/Vagrant host-agent of the Hyperweaver hypervisor
+utility is the VirtualBox host-agent of the Hyperweaver hypervisor
 management platform. It is a single Go binary that runs a local web server
 serving the Hyperweaver web UI to the user's own browser, and exposes the
 shared Agent API so a Hyperweaver Server can aggregate it alongside
@@ -23,32 +23,48 @@ runs in one of two modes:
 .Bl -bullet -offset indent
 .It
 Desktop (tray) mode: the default. A native system-tray icon offers Open
-(launch the web UI in the default or configured browser) and Quit.
+(launch the web UI in the default or configured browser), a Troubleshooting
+submenu (Open Log File, Open Config Folder, Open Data Folder, Restart
+Agent) and Quit. The three custom URL schemes
+.Ql hwa:// ,
+.Ql hyperweaver-agent://
+and
+.Ql com.startcloud.hyperweaver-agent://
+open the signed-in UI the same way.
 .It
 Headless service mode
 .Pq Fl -headless :
 no tray icon; intended for running under systemd with a shared
-configuration file.
+configuration directory.
 .El
 .Sh OPTIONS
-.Bl -tag -width ".Fl -config Ar path"
-.It Fl -config Ar path
-Read the configuration from
-.Ar path
-instead of the per-user default location.
+.Bl -tag -width ".Fl -config Ar dir"
+.It Fl -config Ar dir
+Read the configuration files from the directory
+.Ar dir
+instead of
+.Ev CONFIG_DIR
+or the per-user default location.
 .It Fl -headless
 Run without the system-tray icon.
 .It Fl -version
 Print the application version and exit.
 .El
 .Sh CONFIGURATION
+The configuration is a directory of five files:
+.Pa app.config.yaml ,
+.Pa auth.config.yaml ,
+.Pa db.config.yaml ,
+.Pa machines.config.yaml
+and
+.Pa storage.config.yaml .
 In desktop mode
 .Nm
-reads (and on first run creates) a per-user configuration file, typically
-.Pa ~/.config/hyperweaver-agent/config.yaml
+reads (and on first run seeds) them in the per-user directory, typically
+.Pa ~/.config/hyperweaver-agent/
 on Linux. The packaged systemd service uses
-.Pa /etc/hyperweaver-agent/config.yaml
-instead.
+.Pa /etc/hyperweaver-agent/
+instead, where the package's postinst seeds them.
 .Pp
 See
 .Xr hyperweaver-agent.yaml 5
@@ -104,13 +120,15 @@ The public identity and capability probe of the Agent API contract:
 It reports the agent's role, hypervisor, platform, architecture, version,
 hostname, and capability tokens.
 .Sh FILES
-.Bl -tag -width ".Pa /etc/hyperweaver-agent/config.yaml"
+.Bl -tag -width ".Pa /etc/hyperweaver-agent/<name>.config.yaml"
 .It Pa /usr/bin/hyperweaver-agent
 The agent binary
-.It Pa /etc/hyperweaver-agent/config.yaml
-Service-mode configuration file
-.It Pa ~/.config/hyperweaver-agent/config.yaml
-Per-user (desktop mode) configuration file
+.It Pa /etc/hyperweaver-agent/<name>.config.yaml
+Service-mode configuration files (app, auth, db, machines, storage)
+.It Pa ~/.config/hyperweaver-agent/<name>.config.yaml
+Per-user (desktop mode) configuration files
+.It Pa /usr/share/hyperweaver-agent/config/<name>.config.yaml
+The seed files the package installs and postinst copies into place
 .It Pa /var/log/hyperweaver-agent/
 Service log directory
 .It Pa /var/lib/hyperweaver-agent/
@@ -123,7 +141,7 @@ Systemd service unit
 .Sh EXAMPLES
 Run headless in the foreground for testing:
 .Bd -literal -offset indent
-$ hyperweaver-agent --headless --config /etc/hyperweaver-agent/config.yaml
+$ hyperweaver-agent --headless --config /etc/hyperweaver-agent
 .Ed
 .Pp
 Check the agent is up:

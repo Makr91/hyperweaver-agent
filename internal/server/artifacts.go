@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"time"
 
 	"github.com/Makr91/hyperweaver-agent/internal/assets"
 	"github.com/Makr91/hyperweaver-agent/internal/auth"
@@ -27,46 +28,69 @@ func (s *Server) assetsGate(next http.HandlerFunc) http.Handler {
 	})
 }
 
+type artifactStorageLocation struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+	Path string `json:"path"`
+	Type string `json:"type"`
+}
+
+type artifactDocument struct {
+	ID                int64                    `json:"id"`
+	StorageLocationID string                   `json:"storage_location_id"`
+	Filename          string                   `json:"filename"`
+	Path              string                   `json:"path"`
+	Size              int64                    `json:"size"`
+	FileType          string                   `json:"file_type"`
+	Extension         string                   `json:"extension"`
+	MimeType          string                   `json:"mime_type"`
+	Checksum          string                   `json:"checksum"`
+	ChecksumAlgorithm string                   `json:"checksum_algorithm"`
+	ChecksumVerified  *bool                    `json:"checksum_verified"`
+	FileExists        bool                     `json:"file_exists"`
+	Verified          bool                     `json:"verified"`
+	DiscoveredAt      time.Time                `json:"discovered_at"`
+	LastVerified      *time.Time               `json:"last_verified"`
+	UpdatedAt         time.Time                `json:"updatedAt"`
+	Role              string                   `json:"role,omitempty"`
+	ExpectedSHA256    string                   `json:"expected_sha256,omitempty"`
+	Version           string                   `json:"version,omitempty"`
+	SourceURL         string                   `json:"source_url,omitempty"`
+	StorageLocation   *artifactStorageLocation `json:"storage_location,omitempty"`
+}
+
 // artifactJSON is the wire artifact document: zoneweaver's Artifact schema
 // (checksum/file_type/extension/mime_type/checksum_verified/storage_location)
 // merged with the SHI extras the struct itself carries.
-func artifactJSON(a *assets.Artifact, location *assets.Location) map[string]any {
-	doc := map[string]any{
-		"id":                  a.ID,
-		"storage_location_id": a.LocationID,
-		"filename":            a.Filename,
-		"path":                a.Path,
-		"size":                a.Size,
-		"file_type":           a.Kind,
-		"extension":           a.Extension(),
-		"mime_type":           a.MimeType(),
-		"checksum":            a.SHA256,
-		"checksum_algorithm":  "sha256",
-		"checksum_verified":   a.ChecksumVerified(),
-		"file_exists":         a.Exists,
-		"verified":            a.Verified(),
-		"discovered_at":       a.CreatedAt,
-		"last_verified":       a.VerifiedAt,
-		"updatedAt":           a.UpdatedAt,
-	}
-	if a.Role != "" {
-		doc["role"] = a.Role
-	}
-	if a.ExpectedSHA256 != "" {
-		doc["expected_sha256"] = a.ExpectedSHA256
-	}
-	if a.Version != "" {
-		doc["version"] = a.Version
-	}
-	if a.SourceURL != "" {
-		doc["source_url"] = a.SourceURL
+func artifactJSON(a *assets.Artifact, location *assets.Location) artifactDocument {
+	doc := artifactDocument{
+		ID:                a.ID,
+		StorageLocationID: a.LocationID,
+		Filename:          a.Filename,
+		Path:              a.Path,
+		Size:              a.Size,
+		FileType:          a.Kind,
+		Extension:         a.Extension(),
+		MimeType:          a.MimeType(),
+		Checksum:          a.SHA256,
+		ChecksumAlgorithm: "sha256",
+		ChecksumVerified:  a.ChecksumVerified(),
+		FileExists:        a.Exists,
+		Verified:          a.Verified(),
+		DiscoveredAt:      a.CreatedAt,
+		LastVerified:      a.VerifiedAt,
+		UpdatedAt:         a.UpdatedAt,
+		Role:              a.Role,
+		ExpectedSHA256:    a.ExpectedSHA256,
+		Version:           a.Version,
+		SourceURL:         a.SourceURL,
 	}
 	if location != nil {
-		doc["storage_location"] = map[string]any{
-			"id":   location.ID,
-			"name": location.Name,
-			"path": location.Path,
-			"type": location.Type,
+		doc.StorageLocation = &artifactStorageLocation{
+			ID:   location.ID,
+			Name: location.Name,
+			Path: location.Path,
+			Type: location.Type,
 		}
 	}
 	return doc

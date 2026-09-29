@@ -46,6 +46,20 @@ type createMachineRequest struct {
 	machines.Spec
 }
 
+type createMachineResponse struct {
+	Success          bool              `json:"success"`
+	ParentTaskID     string            `json:"parent_task_id"`
+	MachineName      string            `json:"machine_name"`
+	StoragePathID    string            `json:"storage_path_id,omitempty"`
+	SourceMachine    string            `json:"source_machine,omitempty"`
+	Operation        string            `json:"operation"`
+	Status           string            `json:"status"`
+	Message          string            `json:"message"`
+	RequiresDownload bool              `json:"requires_download"`
+	SubTasks         map[string]string `json:"sub_tasks"`
+	ResourceWarnings []resourceIssue   `json:"resource_warnings,omitempty"`
+}
+
 // resolveMachineName settles the machine's name — the base's resolveZoneName:
 // base = hostname.(machine_domain || domain); with machines.prefix_machine_names
 // the server_id is REQUIRED (numeric, padded to 4, uniqueness-checked — never
@@ -296,11 +310,11 @@ func (s *Server) queueCreateOrchestration(ctx context.Context, name, home string
 //	@Tags			Machine Management
 //	@Accept			json
 //	@Produce		json
-//	@Param			request	body		map[string]interface{}	true	"Optional explicit name plus the MachineSpec creation document (allOf)"
-//	@Success		200	{object}	map[string]interface{}	"Create orchestration queued (single-host: the machine row lands at the finalize child; multi-host: one machines[] entry per hosts[] entry, in declaration order)"
+//	@Param			request	body		createMachineRequest	true	"Optional explicit name plus the MachineSpec creation document (allOf)"
+//	@Success		200	{object}	createMachineResponse	"Create orchestration queued (single-host: the machine row lands at the finalize child; multi-host: one machines[] entry per hosts[] entry, in declaration order)"
 //	@Failure		400	"Invalid spec, provisioner reference, server_id, safe_id_path, box reference, template render failure, an out-of-range or non-numeric settings.consoleport (the exact refusal: `consoleport <value> is outside the valid console port range (1025-65535)` — the converged pre-flight, sync 2026-07-17; multi-host entries whose RENDERED settings carry a bad consoleport refuse with the entry prefix), a non-whole or sub-1 settings.vcpus (the exact refusal: `vcpus <value> is not a valid vCPU count (whole number >= 1)` — same converged pre-flight; integral floats like 2.0 pass, and multi-host entries whose RENDERED settings carry a bad vcpus refuse with the entry prefix), a disks section breaking the TYPED DISK SPEC (the frozen strings, value/path 1-based-index verbatim: `disks.boot.type is required when disks.boot is present (template|image|blank|none)`, `disks.boot.type <value> is not a valid disk type (template|image|blank|none)`, `disks.boot.type template requires settings.box`, `disks.boot.type template does not take path`, `disks.boot.type image requires path`, `disks.boot.type image does not take size or volume_name (an image attaches as-is)`, `disks.boot.type image does not take directory`, `disks.boot.type blank requires size`, `disks.boot.type blank does not take path`, `disks.boot.type none takes no other keys`, `disks.boot.clone_strategy localize is zfs vocabulary with no analog on this hypervisor (clone|copy)`, `disks.boot.clone_strategy <value> is not a valid clone strategy (clone|copy)`, `disks.boot.clone_strategy requires disks.boot.type template`, `disks.boot.clone_strategy clone does not take size (a differencing disk keeps the template's size)`, `disks.boot.clone_strategy clone does not take directory (the differencing disk lives in the machine folder)`, `disks.boot.clone_strategy clone does not take volume_name (VirtualBox names the differencing disk)`, `disks.additional_disks[<n>].type is required (image|blank)`, `disks.additional_disks[<n>].type <value> is not a valid additional disk type (image|blank)`, `disks.cdroms[<n>] needs exactly one of iso or path` — the path-existence and in-use strings `disks.boot.path <path> does not exist on this host` / `disks.boot.path <path> is attached to <machine> (set force: true to attach anyway)` and their disks.additional_disks[<n>].path twins — plus the directory placement string `<where> directory <path> is not an absolute existing directory on this host` — are TASK-TIME failures in machine_create_storage; multi-host entries take every string with the entry prefix), Insufficient resources ({error, details[]} — the pre-flight resource validation rejection, machines.resource_validation), an explicit name on a multi-host document, or a multi-host document whose box templates are not all local (auto-download is single-host only). Multi-host refusals prefix the failing entry: "multi-host entry N: " (1-based) — the ATOMIC pre-check refuses the whole request"
 //	@Failure		409	"Machine name (DB or hypervisor), server_id, or working directory already in use (multi-host: prefixed "multi-host entry N: " — any entry's conflict refuses the whole request)"
-//	@Failure		422	{object}	map[string]interface{}	"Form answers fail the package's Field DSL — the body IS the {FIELD: message} map (design §3.1)"
+//	@Failure		422	{object}	map[string]string	"Form answers fail the package's Field DSL — the body IS the {FIELD: message} map (design §3.1)"
 //	@Router			/api/machines [post]
 func (s *Server) handleCreateMachine(w http.ResponseWriter, r *http.Request) {
 	var body createMachineRequest
@@ -402,19 +416,19 @@ func (s *Server) handleCreateMachine(w http.ResponseWriter, r *http.Request) {
 	if requiresDownload {
 		message = "Template download and machine creation queued"
 	}
-	response := map[string]any{
-		"success":           true,
-		"parent_task_id":    parentID,
-		"machine_name":      name,
-		"storage_path_id":   location.ID,
-		"operation":         machines.OpCreateOrchestration,
-		"status":            tasks.StatusPending,
-		"message":           message,
-		"requires_download": requiresDownload,
-		"sub_tasks":         subTasks,
+	response := createMachineResponse{
+		Success:          true,
+		ParentTaskID:     parentID,
+		MachineName:      name,
+		StoragePathID:    location.ID,
+		Operation:        machines.OpCreateOrchestration,
+		Status:           tasks.StatusPending,
+		Message:          message,
+		RequiresDownload: requiresDownload,
+		SubTasks:         subTasks,
 	}
 	if len(resourceWarnings) > 0 {
-		response["resource_warnings"] = resourceWarnings
+		response.ResourceWarnings = resourceWarnings
 	}
 	writeJSON(w, response)
 }

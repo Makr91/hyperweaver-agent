@@ -193,6 +193,11 @@ func (s *Server) handleGuestPing(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+type guestOSInfoResponse struct {
+	MachineName string          `json:"machine_name"`
+	OSInfo      json.RawMessage `json:"osinfo"`
+}
+
 // handleGuestOSInfo serves GET /machines/{name}/guest/osinfo — the guest's
 // own identity (guest-get-osinfo).
 //
@@ -201,7 +206,7 @@ func (s *Server) handleGuestPing(w http.ResponseWriter, r *http.Request) {
 //	@Tags			Guest Agent
 //	@Produce		json
 //	@Param			machineName	path		string					true	"Machine name"
-//	@Success		200			{object}	map[string]interface{}	"OS info"
+//	@Success		200			{object}	guestOSInfoResponse	"OS info"
 //	@Failure		400			{object}	problem.Body			"Machine is not running"
 //	@Failure		404			{object}	problem.Body			"Machine not found"
 //	@Failure		502			{object}	problem.Body			"Guest agent did not answer"
@@ -220,10 +225,20 @@ func (s *Server) handleGuestOSInfo(w http.ResponseWriter, r *http.Request) {
 	if machine == nil {
 		return
 	}
-	writeJSON(w, map[string]any{
-		"machine_name": machine.Name,
-		"osinfo":       result,
+	writeJSON(w, guestOSInfoResponse{
+		MachineName: machine.Name,
+		OSInfo:      result,
 	})
+}
+
+type guestNetworkResponse struct {
+	MachineName string          `json:"machine_name"`
+	Interfaces  json.RawMessage `json:"interfaces"`
+}
+
+type guestNetworkUTMResponse struct {
+	MachineName string   `json:"machine_name"`
+	IPs         []string `json:"ips"`
 }
 
 // handleGuestNetwork serves GET /machines/{name}/guest/network — the guest's
@@ -236,7 +251,7 @@ func (s *Server) handleGuestOSInfo(w http.ResponseWriter, r *http.Request) {
 //	@Tags			Guest Agent
 //	@Produce		json
 //	@Param			machineName	path		string					true	"Machine name"
-//	@Success		200			{object}	map[string]interface{}	"Interfaces"
+//	@Success		200			{object}	guestNetworkResponse	"Interfaces"
 //	@Failure		400			{object}	problem.Body			"Machine is not running"
 //	@Failure		404			{object}	problem.Body			"Machine not found"
 //	@Failure		502			{object}	problem.Body			"Guest agent did not answer"
@@ -266,9 +281,9 @@ func (s *Server) handleGuestNetwork(w http.ResponseWriter, r *http.Request) {
 				"Guest agent did not answer ("+err.Error()+") — the guest needs qemu-guest-agent running")
 			return
 		}
-		writeJSON(w, map[string]any{
-			"machine_name": machine.Name,
-			"ips":          ips,
+		writeJSON(w, guestNetworkUTMResponse{
+			MachineName: machine.Name,
+			IPs:         ips,
 		})
 		return
 	}
@@ -276,9 +291,9 @@ func (s *Server) handleGuestNetwork(w http.ResponseWriter, r *http.Request) {
 	if machine == nil {
 		return
 	}
-	writeJSON(w, map[string]any{
-		"machine_name": machine.Name,
-		"interfaces":   result,
+	writeJSON(w, guestNetworkResponse{
+		MachineName: machine.Name,
+		Interfaces:  result,
 	})
 }
 

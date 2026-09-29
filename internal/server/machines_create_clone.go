@@ -12,6 +12,28 @@ import (
 	"github.com/Makr91/hyperweaver-agent/internal/vbox"
 )
 
+type cloneMachineRequest struct {
+	Name             string         `json:"name"`
+	StoragePathID    string         `json:"storage_path_id"`
+	Settings         map[string]any `json:"settings"`
+	Overrides        map[string]any `json:"overrides"`
+	StartAfterCreate bool           `json:"start_after_create"`
+	Source           string         `json:"source"`
+	Snapshot         string         `json:"snapshot"`
+	Linked           bool           `json:"linked"`
+}
+
+type cloneCurrentResponse struct {
+	Success       bool   `json:"success"`
+	TaskID        string `json:"task_id"`
+	MachineName   string `json:"machine_name"`
+	SourceMachine string `json:"source_machine"`
+	Operation     string `json:"operation"`
+	Status        string `json:"status"`
+	Message       string `json:"message"`
+	StartTaskID   string `json:"start_task_id,omitempty"`
+}
+
 // handleCloneMachine clones a spec-carrying machine: the source spec with the
 // caller's settings/overrides merged, network identity stripped, then the
 // SAME create orchestration (the clone builds real infrastructure too).
@@ -22,8 +44,8 @@ import (
 //	@Accept			json
 //	@Produce		json
 //	@Param			machineName	path	string	true	"The SOURCE machine"
-//	@Param			request	body		map[string]interface{}	true	"Clone request: name, settings (hostname required), overrides, and disk source"
-//	@Success		200	{object}	map[string]interface{}	"Clone create orchestration queued (the row lands at the finalize child); source=current answers {task_id, operation: machine_clone_current, ...} (+start_task_id) instead"
+//	@Param			request	body		cloneMachineRequest	true	"Clone request: name, settings (hostname required), overrides, and disk source"
+//	@Success		200	{object}	createMachineResponse	"Clone create orchestration queued (the row lands at the finalize child); source=current answers {task_id, operation: machine_clone_current, ...} (+start_task_id) instead"
 //	@Failure		400	"Missing settings.hostname, invalid name, source has no creation spec, or the source's provisioner/safe-ID/box no longer resolves"
 //	@Failure		404	"Source machine not found"
 //	@Failure		409	"Clone name, server_id, or working directory already in use"
@@ -38,22 +60,7 @@ func (s *Server) handleCloneMachine(w http.ResponseWriter, r *http.Request) {
 			"Only machines this agent created can be cloned — this machine has no creation spec (discovered VM)")
 		return
 	}
-	var body struct {
-		Name             string         `json:"name"`
-		StoragePathID    string         `json:"storage_path_id"`
-		Settings         map[string]any `json:"settings"`
-		Overrides        map[string]any `json:"overrides"`
-		StartAfterCreate bool           `json:"start_after_create"`
-		// Source picks the disk semantics: "template" (default) re-runs the
-		// source SPEC through create — a fresh build from the original
-		// template; "current" copies the source's CURRENT disk state via
-		// VBoxManage clonevm (the base's ZFS-snapshot clone semantics).
-		Source string `json:"source"`
-		// Snapshot/Linked apply to source=current: clone from a named source
-		// snapshot, optionally as a linked (differencing) clone.
-		Snapshot string `json:"snapshot"`
-		Linked   bool   `json:"linked"`
-	}
+	var body cloneMachineRequest
 	if err := decodeBody(r, &body); err != nil {
 		taskError(w, http.StatusBadRequest, "Invalid JSON body")
 		return
@@ -173,19 +180,19 @@ func (s *Server) handleCloneMachine(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	slog.Info("machine clone queued", "source", source.Name, "clone", name, "by", createdBy)
-	response := map[string]any{
-		"success":           true,
-		"parent_task_id":    parentID,
-		"machine_name":      name,
-		"source_machine":    source.Name,
-		"operation":         machines.OpCreateOrchestration,
-		"status":            tasks.StatusPending,
-		"message":           "Machine clone creation queued",
-		"requires_download": requiresDownload,
-		"sub_tasks":         subTasks,
+	response := createMachineResponse{
+		Success:          true,
+		ParentTaskID:     parentID,
+		MachineName:      name,
+		SourceMachine:    source.Name,
+		Operation:        machines.OpCreateOrchestration,
+		Status:           tasks.StatusPending,
+		Message:          "Machine clone creation queued",
+		RequiresDownload: requiresDownload,
+		SubTasks:         subTasks,
 	}
 	if len(resourceWarnings) > 0 {
-		response["resource_warnings"] = resourceWarnings
+		response.ResourceWarnings = resourceWarnings
 	}
 	writeJSON(w, response)
 }
@@ -226,21 +233,21 @@ func (s *Server) queueCloneCurrent(w http.ResponseWriter, r *http.Request,
 		taskError(w, http.StatusInternalServerError, "Failed to clone machine")
 		return
 	}
-	response := map[string]any{
-		"success":        true,
-		"task_id":        task.ID,
-		"machine_name":   name,
-		"source_machine": source.Name,
-		"operation":      machines.OpCloneCurrent,
-		"status":         tasks.StatusPending,
-		"message":        "Current-state clone task queued (VBoxManage clonevm)",
+	response := cloneCurrentResponse{
+		Success:       true,
+		TaskID:        task.ID,
+		MachineName:   name,
+		SourceMachine: source.Name,
+		Operation:     machines.OpCloneCurrent,
+		Status:        tasks.StatusPending,
+		Message:       "Current-state clone task queued (VBoxManage clonevm)",
 	}
 	if startAfter {
 		start, serr := s.createChainTask(r.Context(), name, machines.OpStart, nil, &task.ID, "", createdBy)
 		if serr != nil {
 			slog.Warn("queue clone start task", "clone", name, "error", serr)
 		} else {
-			response["start_task_id"] = start.ID
+			response.StartTaskID = start.ID
 		}
 	}
 	slog.Info("current-state clone queued", "source", source.Name, "clone", name, "by", createdBy)

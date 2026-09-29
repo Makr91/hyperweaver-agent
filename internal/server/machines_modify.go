@@ -41,16 +41,30 @@ var credentialFields = []string{
 	"vagrant_user", "vagrant_user_pass", "vagrant_user_private_key_path",
 }
 
+type machineModifyResponse struct {
+	Success          bool            `json:"success"`
+	TaskID           string          `json:"task_id,omitempty"`
+	MachineName      string          `json:"machine_name"`
+	Operation        string          `json:"operation"`
+	Status           string          `json:"status"`
+	RequiresRestart  bool            `json:"requires_restart"`
+	PendingChanges   map[string]any  `json:"pending_changes,omitempty"`
+	Pipe             string          `json:"pipe,omitempty"`
+	Certificate      string          `json:"certificate,omitempty"`
+	ResourceWarnings []resourceIssue `json:"resource_warnings,omitempty"`
+	Message          string          `json:"message"`
+}
+
 // modifyCompleted answers the base's DB-only early returns: the change is
 // already applied, nothing queued, no restart needed.
 func modifyCompleted(w http.ResponseWriter, machineName, message string) {
-	writeJSON(w, map[string]any{
-		"success":          true,
-		"machine_name":     machineName,
-		"operation":        machines.OpModify,
-		"status":           tasks.StatusCompleted,
-		"message":          message,
-		"requires_restart": false,
+	writeJSON(w, machineModifyResponse{
+		Success:         true,
+		MachineName:     machineName,
+		Operation:       machines.OpModify,
+		Status:          tasks.StatusCompleted,
+		Message:         message,
+		RequiresRestart: false,
 	})
 }
 
@@ -101,17 +115,17 @@ func (s *Server) accrueModifyChanges(w http.ResponseWriter, r *http.Request,
 	}
 	slog.Info("machine changes accrued for next power cycle", "machine", machine.Name,
 		"keys", len(merged), "by", auth.FromContext(r.Context()).Name)
-	response := map[string]any{
-		"success":          true,
-		"machine_name":     machine.Name,
-		"operation":        machines.OpModify,
-		"status":           "pending_power_cycle",
-		"requires_restart": true,
-		"pending_changes":  merged,
-		"message":          "Machine is not powered off — changes stored and will apply at the next agent-driven power cycle (stop, start, or restart). DELETE /api/machines/{name}/pending-changes cancels them.",
+	response := machineModifyResponse{
+		Success:         true,
+		MachineName:     machine.Name,
+		Operation:       machines.OpModify,
+		Status:          "pending_power_cycle",
+		RequiresRestart: true,
+		PendingChanges:  merged,
+		Message:         "Machine is not powered off — changes stored and will apply at the next agent-driven power cycle (stop, start, or restart). DELETE /api/machines/{name}/pending-changes cancels them.",
 	}
 	if len(resourceWarnings) > 0 {
-		response["resource_warnings"] = resourceWarnings
+		response.ResourceWarnings = resourceWarnings
 	}
 	writeJSON(w, response)
 	return true
@@ -126,7 +140,7 @@ func (s *Server) accrueModifyChanges(w http.ResponseWriter, r *http.Request,
 //	@Produce		json
 //	@Param			machineName	path	string	true	"Machine name"
 //	@Param			request	body	map[string]interface{}	true	"Changed fields only — at least one of the modify vocabulary"
-//	@Success		200	{object}	map[string]interface{}	"Modification queued (infrastructure fields) or applied (DB-immediate fields only)"
+//	@Success		200	{object}	machineModifyResponse	"Modification queued (infrastructure fields) or applied (DB-immediate fields only)"
 //	@Failure		400	"No modification fields specified, an invalid field value, a provisioner document whose settings.consoleport is out of range or non-numeric (the exact refusal: `consoleport <value> is outside the valid console port range (1025-65535)` — the converged pre-flight, sync 2026-07-17), a top-level vcpus that is not a whole number >= 1 (the exact refusal: `vcpus <value> is not a valid vCPU count (whole number >= 1)` — same converged pre-flight, refused before anything applies; integral floats like 2.0 pass), or Insufficient resources ({error, details[]} — the resource validation rejection)"
 //	@Failure		404	"Machine not found"
 //	@Router			/api/machines/{machineName} [put]
@@ -352,17 +366,17 @@ func (s *Server) handleModifyMachine(w http.ResponseWriter, r *http.Request) {
 	}
 	slog.Info("machine modification queued", "machine", machine.Name,
 		"task_id", task.ID, "by", auth.FromContext(r.Context()).Name)
-	response := map[string]any{
-		"success":          true,
-		"task_id":          task.ID,
-		"machine_name":     machine.Name,
-		"operation":        machines.OpModify,
-		"status":           tasks.StatusPending,
-		"message":          "Modification queued. The machine must be powered off for the task to apply; changes take effect on next boot.",
-		"requires_restart": true,
+	response := machineModifyResponse{
+		Success:         true,
+		TaskID:          task.ID,
+		MachineName:     machine.Name,
+		Operation:       machines.OpModify,
+		Status:          tasks.StatusPending,
+		Message:         "Modification queued. The machine must be powered off for the task to apply; changes take effect on next boot.",
+		RequiresRestart: true,
 	}
 	if len(resourceWarnings) > 0 {
-		response["resource_warnings"] = resourceWarnings
+		response.ResourceWarnings = resourceWarnings
 	}
 	writeJSON(w, response)
 }

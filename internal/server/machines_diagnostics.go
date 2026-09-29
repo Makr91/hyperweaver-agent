@@ -126,6 +126,12 @@ func (s *Server) handleMachineScreenshot(w http.ResponseWriter, r *http.Request)
 	}
 }
 
+type guestPropertiesResponse struct {
+	MachineName string                    `json:"machine_name"`
+	Properties  []vbox.GuestPropertyEntry `json:"properties"`
+	Total       int                       `json:"total"`
+}
+
 // handleGuestProperties serves the machine's full guest-property set
 // (VBoxManage guestproperty enumerate) — the post-boot view: guest-additions
 // IPs, OS info, and this agent's cloud-init keys. Read-only, synchronous.
@@ -135,7 +141,7 @@ func (s *Server) handleMachineScreenshot(w http.ResponseWriter, r *http.Request)
 //	@Tags			Machine Management
 //	@Produce		json
 //	@Param			machineName	path	string	true	"Machine name"
-//	@Success		200	{object}	map[string]interface{}	"Guest properties"
+//	@Success		200	{object}	guestPropertiesResponse	"Guest properties"
 //	@Failure		404	"Machine not found, or no VM exists behind it yet"
 //	@Failure		503	"VirtualBox is not installed"
 //	@Router			/api/machines/{machineName}/guest-properties [get]
@@ -159,9 +165,9 @@ func (s *Server) handleGuestProperties(w http.ResponseWriter, r *http.Request) {
 		taskError(w, http.StatusInternalServerError, "Failed to enumerate guest properties")
 		return
 	}
-	writeJSON(w, map[string]any{
-		"machine_name": machine.Name,
-		"properties":   entries,
-		"total":        len(entries),
+	writeJSON(w, guestPropertiesResponse{
+		MachineName: machine.Name,
+		Properties:  entries,
+		Total:       len(entries),
 	})
 }

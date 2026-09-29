@@ -1,5 +1,5 @@
 [Unit]
-Description=Hyperweaver Agent - VirtualBox/Vagrant host-agent (headless)
+Description=Hyperweaver Agent - VirtualBox host-agent (headless)
 After=network.target
 Wants=network.target
 

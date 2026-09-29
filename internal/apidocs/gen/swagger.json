@@ -139,6 +139,68 @@
                 },
                 "type": "object"
             },
+            "assets.ServiceStatus": {
+                "properties": {
+                    "activeIntervals": {
+                        "$ref": "#/components/schemas/assets.ServiceStatusIntervals"
+                    },
+                    "config": {
+                        "$ref": "#/components/schemas/assets.ServiceStatusConfig"
+                    },
+                    "isInitialized": {
+                        "type": "boolean"
+                    },
+                    "isRunning": {
+                        "type": "boolean"
+                    },
+                    "isScanning": {
+                        "type": "boolean"
+                    },
+                    "stats": {
+                        "$ref": "#/components/schemas/assets.ServiceStatusStats"
+                    }
+                },
+                "type": "object"
+            },
+            "assets.ServiceStatusConfig": {
+                "properties": {
+                    "enabled": {
+                        "type": "boolean"
+                    },
+                    "paths_configured": {
+                        "type": "integer"
+                    },
+                    "scanning_interval": {
+                        "type": "integer"
+                    }
+                },
+                "type": "object"
+            },
+            "assets.ServiceStatusIntervals": {
+                "properties": {
+                    "periodicScan": {
+                        "type": "boolean"
+                    }
+                },
+                "type": "object"
+            },
+            "assets.ServiceStatusStats": {
+                "properties": {
+                    "lastScanSuccess": {
+                        "type": "string"
+                    },
+                    "locationsManaged": {
+                        "type": "integer"
+                    },
+                    "scanRuns": {
+                        "type": "integer"
+                    },
+                    "totalScanErrors": {
+                        "type": "integer"
+                    }
+                },
+                "type": "object"
+            },
             "config.Backup": {
                 "properties": {
                     "created_at": {
@@ -152,6 +214,37 @@
                         "uniqueItems": false
                     },
                     "id": {
+                        "type": "string"
+                    }
+                },
+                "type": "object"
+            },
+            "config.ProvisioningNetworkConfig": {
+                "properties": {
+                    "dhcp_range_end": {
+                        "type": "string"
+                    },
+                    "dhcp_range_start": {
+                        "description": "DHCPRangeStart/DHCPRangeEnd bound the assignable pool; fixed leases and\nthe clone allocator draw from it.",
+                        "type": "string"
+                    },
+                    "dhcp_server_ip": {
+                        "description": "DHCPServerIP is the VirtualBox DHCP server's OWN address (VirtualBox\nrequires one distinct from the interface's — the base's dhcpd binds the\nhost IP itself, which has no analog here).",
+                        "type": "string"
+                    },
+                    "enabled": {
+                        "type": "boolean"
+                    },
+                    "host_ip": {
+                        "description": "HostIP is the host's address on the network — the interface identity.",
+                        "type": "string"
+                    },
+                    "netmask": {
+                        "description": "Netmask is the network mask.",
+                        "type": "string"
+                    },
+                    "subnet": {
+                        "description": "Subnet is the provisioning network in CIDR form.",
                         "type": "string"
                     }
                 },
@@ -425,6 +518,99 @@
                     },
                     "priority_range": {
                         "type": "integer"
+                    }
+                },
+                "type": "object"
+            },
+            "machines.ProvisionerRef": {
+                "properties": {
+                    "name": {
+                        "type": "string"
+                    },
+                    "version": {
+                        "type": "string"
+                    }
+                },
+                "type": "object"
+            },
+            "machines.SkippedPlaybook": {
+                "properties": {
+                    "playbook": {
+                        "type": "string"
+                    },
+                    "run": {
+                        "type": "string"
+                    }
+                },
+                "type": "object"
+            },
+            "machines.Template": {
+                "properties": {
+                    "architecture": {
+                        "type": "string"
+                    },
+                    "box_name": {
+                        "type": "string"
+                    },
+                    "checksum": {
+                        "type": "string"
+                    },
+                    "disk_path": {
+                        "type": "string"
+                    },
+                    "downloaded_at": {
+                        "type": "string"
+                    },
+                    "id": {
+                        "type": "integer"
+                    },
+                    "metadata": {
+                        "items": {
+                            "type": "integer"
+                        },
+                        "type": "array",
+                        "uniqueItems": false
+                    },
+                    "organization": {
+                        "type": "string"
+                    },
+                    "provider": {
+                        "type": "string"
+                    },
+                    "size": {
+                        "type": "integer"
+                    },
+                    "source_name": {
+                        "type": "string"
+                    },
+                    "source_url": {
+                        "type": "string"
+                    },
+                    "version": {
+                        "type": "string"
+                    }
+                },
+                "type": "object"
+            },
+            "machines.TemplateDownloadMetadata": {
+                "properties": {
+                    "architecture": {
+                        "type": "string"
+                    },
+                    "box_name": {
+                        "type": "string"
+                    },
+                    "organization": {
+                        "type": "string"
+                    },
+                    "provider": {
+                        "type": "string"
+                    },
+                    "source_name": {
+                        "type": "string"
+                    },
+                    "version": {
+                        "type": "string"
                     }
                 },
                 "type": "object"
@@ -882,6 +1068,52 @@
                 },
                 "type": "object"
             },
+            "provisioner.RoleFiles": {
+                "properties": {
+                    "fixpack": {
+                        "type": "string"
+                    },
+                    "fixpack_hash": {
+                        "type": "string"
+                    },
+                    "fixpack_version": {
+                        "type": "string"
+                    },
+                    "hotfix": {
+                        "type": "string"
+                    },
+                    "hotfix_hash": {
+                        "type": "string"
+                    },
+                    "hotfix_version": {
+                        "type": "string"
+                    },
+                    "installer": {
+                        "type": "string"
+                    },
+                    "installer_hash": {
+                        "type": "string"
+                    },
+                    "installer_version": {
+                        "type": "string"
+                    }
+                },
+                "type": "object"
+            },
+            "provisioner.RoleInput": {
+                "properties": {
+                    "enabled": {
+                        "type": "boolean"
+                    },
+                    "files": {
+                        "$ref": "#/components/schemas/provisioner.RoleFiles"
+                    },
+                    "name": {
+                        "type": "string"
+                    }
+                },
+                "type": "object"
+            },
             "provisioner.RoleSpec": {
                 "properties": {
                     "collection": {
@@ -1226,12 +1458,79 @@
                 },
                 "type": "object"
             },
+            "server.artifactDocument": {
+                "properties": {
+                    "checksum": {
+                        "type": "string"
+                    },
+                    "checksum_algorithm": {
+                        "type": "string"
+                    },
+                    "checksum_verified": {
+                        "type": "boolean"
+                    },
+                    "discovered_at": {
+                        "type": "string"
+                    },
+                    "expected_sha256": {
+                        "type": "string"
+                    },
+                    "extension": {
+                        "type": "string"
+                    },
+                    "file_exists": {
+                        "type": "boolean"
+                    },
+                    "file_type": {
+                        "type": "string"
+                    },
+                    "filename": {
+                        "type": "string"
+                    },
+                    "id": {
+                        "type": "integer"
+                    },
+                    "last_verified": {
+                        "type": "string"
+                    },
+                    "mime_type": {
+                        "type": "string"
+                    },
+                    "path": {
+                        "type": "string"
+                    },
+                    "role": {
+                        "type": "string"
+                    },
+                    "size": {
+                        "type": "integer"
+                    },
+                    "source_url": {
+                        "type": "string"
+                    },
+                    "storage_location": {
+                        "$ref": "#/components/schemas/server.artifactStorageLocation"
+                    },
+                    "storage_location_id": {
+                        "type": "string"
+                    },
+                    "updatedAt": {
+                        "type": "string"
+                    },
+                    "verified": {
+                        "type": "boolean"
+                    },
+                    "version": {
+                        "type": "string"
+                    }
+                },
+                "type": "object"
+            },
             "server.artifactListResponse": {
                 "properties": {
                     "artifacts": {
                         "items": {
-                            "additionalProperties": {},
-                            "type": "object"
+                            "$ref": "#/components/schemas/server.artifactDocument"
                         },
                         "type": "array",
                         "uniqueItems": false
@@ -1254,6 +1553,121 @@
                         "type": "integer"
                     },
                     "total": {
+                        "type": "integer"
+                    }
+                },
+                "type": "object"
+            },
+            "server.artifactStatsActivity": {
+                "properties": {
+                    "downloads_last_24h": {
+                        "type": "integer"
+                    },
+                    "failed_operations_last_24h": {
+                        "type": "integer"
+                    },
+                    "uploads_last_24h": {
+                        "type": "integer"
+                    }
+                },
+                "type": "object"
+            },
+            "server.artifactStatsLocation": {
+                "properties": {
+                    "enabled": {
+                        "type": "boolean"
+                    },
+                    "file_count": {
+                        "type": "integer"
+                    },
+                    "id": {
+                        "type": "string"
+                    },
+                    "last_scan": {
+                        "type": "string"
+                    },
+                    "name": {
+                        "type": "string"
+                    },
+                    "path": {
+                        "type": "string"
+                    },
+                    "total_size": {
+                        "type": "integer"
+                    },
+                    "type": {
+                        "type": "string"
+                    }
+                },
+                "type": "object"
+            },
+            "server.artifactStatsResponse": {
+                "properties": {
+                    "by_type": {
+                        "additionalProperties": {
+                            "$ref": "#/components/schemas/server.artifactTypeTotals"
+                        },
+                        "type": "object"
+                    },
+                    "recent_activity": {
+                        "$ref": "#/components/schemas/server.artifactStatsActivity"
+                    },
+                    "storage_locations": {
+                        "items": {
+                            "$ref": "#/components/schemas/server.artifactStatsLocation"
+                        },
+                        "type": "array",
+                        "uniqueItems": false
+                    },
+                    "totals": {
+                        "$ref": "#/components/schemas/server.artifactStatsTotals"
+                    }
+                },
+                "type": "object"
+            },
+            "server.artifactStatsTotals": {
+                "properties": {
+                    "enabled_locations": {
+                        "type": "integer"
+                    },
+                    "locations": {
+                        "type": "integer"
+                    },
+                    "total_artifacts": {
+                        "type": "integer"
+                    },
+                    "total_size": {
+                        "type": "integer"
+                    }
+                },
+                "type": "object"
+            },
+            "server.artifactStorageLocation": {
+                "properties": {
+                    "id": {
+                        "type": "string"
+                    },
+                    "name": {
+                        "type": "string"
+                    },
+                    "path": {
+                        "type": "string"
+                    },
+                    "type": {
+                        "type": "string"
+                    }
+                },
+                "type": "object"
+            },
+            "server.artifactTypeTotals": {
+                "properties": {
+                    "count": {
+                        "type": "integer"
+                    },
+                    "locations": {
+                        "type": "integer"
+                    },
+                    "total_size": {
                         "type": "integer"
                     }
                 },
@@ -1564,6 +1978,37 @@
                 },
                 "type": "object"
             },
+            "server.cloneMachineRequest": {
+                "properties": {
+                    "linked": {
+                        "type": "boolean"
+                    },
+                    "name": {
+                        "type": "string"
+                    },
+                    "overrides": {
+                        "additionalProperties": {},
+                        "type": "object"
+                    },
+                    "settings": {
+                        "additionalProperties": {},
+                        "type": "object"
+                    },
+                    "snapshot": {
+                        "type": "string"
+                    },
+                    "source": {
+                        "type": "string"
+                    },
+                    "start_after_create": {
+                        "type": "boolean"
+                    },
+                    "storage_path_id": {
+                        "type": "string"
+                    }
+                },
+                "type": "object"
+            },
             "server.cpuEntry": {
                 "properties": {
                     "model": {
@@ -1692,6 +2137,138 @@
                     },
                     "type": {
                         "type": "string"
+                    }
+                },
+                "type": "object"
+            },
+            "server.createMachineRequest": {
+                "properties": {
+                    "cloud_init": {
+                        "additionalProperties": {},
+                        "description": "CloudInit is the document's cloud_init section at create\n(enabled/dns_domain/password/resolvers/sshkey — the base's vocabulary).",
+                        "type": "object"
+                    },
+                    "disks": {
+                        "additionalProperties": {},
+                        "description": "Disks is the document's disks section at create (the base's\ndisks{boot{...}, additional[]} + cdroms, in the Hosts.yml vocabulary\nthe executors consume: boot{path|size|sparse|volume_name},\nadditional_disks[], cdroms[{path|iso}] — iso names a cached ISO in the\nartifact registry; path stays the raw passthrough). Omit entirely for\na diskless machine. With a provisioner package the render's disks win.",
+                        "type": "object"
+                    },
+                    "host_index": {
+                        "description": "HostIndex selects this machine's hosts[] entry in the rendered document\n(multi-host converged wire, sync 2026-07-17: M-Q1): ONE render may carry\nN coordinated machines, and each machine's prepare child reads ITS OWN\nentry — the multi-host create handler stamps the index into each\nmachine's spec copy. 0 (omitted) is today's single-host shape.",
+                        "type": "integer"
+                    },
+                    "hypervisor": {
+                        "description": "Hypervisor is the per-machine hypervisor selection: \"\"/virtualbox =\nVirtualBox (the default), utm = UTM. Finalize persists it onto the row.",
+                        "type": "string"
+                    },
+                    "name": {
+                        "type": "string"
+                    },
+                    "networks": {
+                        "items": {},
+                        "type": "array",
+                        "uniqueItems": false
+                    },
+                    "notes": {
+                        "description": "Notes/Tags persist onto the machine row at finalize (the base's\nSubTaskExecutors finalize does exactly this).",
+                        "type": "string"
+                    },
+                    "properties": {
+                        "additionalProperties": {},
+                        "description": "Properties is THE answers map — one flat map keyed by exact field name\n(the Field DSL's contract; advanced_properties died in the one cut).",
+                        "type": "object"
+                    },
+                    "provisioner": {
+                        "$ref": "#/components/schemas/machines.ProvisionerRef"
+                    },
+                    "remove_transport_on_completion": {
+                        "description": "RemoveTransportOnCompletion is the wizard's per-create transport signal\n(the converged cross-agent key, sync 2026-07-18 — UI's Q1(b) answer with\nGo's NAT input consumed): true asks the provision pipeline to remove the\nprovisioning transport NIC (the intrinsic NAT, adapter 1) after the\nwhole-walk stamp, via the pipeline-owned power cycle (Mark's execution\nruling). POINTER: absent = this agent's ruled default FALSE (keep — the\nhome/dev model; zoneweaver's default is true, the datacenter model).\nFinalize persists the chosen value into configuration.settings as\nremove_transport_on_completion — the ONE effective-flag home the\nprovision chain, knob_current, and the PUT flip all read.",
+                        "type": "boolean"
+                    },
+                    "roles": {
+                        "items": {
+                            "$ref": "#/components/schemas/provisioner.RoleInput"
+                        },
+                        "type": "array",
+                        "uniqueItems": false
+                    },
+                    "safe_id_path": {
+                        "type": "string"
+                    },
+                    "settings": {
+                        "additionalProperties": {},
+                        "type": "object"
+                    },
+                    "start_after_create": {
+                        "type": "boolean"
+                    },
+                    "storage_path_id": {
+                        "type": "string"
+                    },
+                    "sync_method": {
+                        "type": "string"
+                    },
+                    "tags": {
+                        "items": {
+                            "type": "string"
+                        },
+                        "type": "array",
+                        "uniqueItems": false
+                    },
+                    "vbox": {
+                        "additionalProperties": {},
+                        "description": "Vbox is the document's vbox section at create — VirtualBox's own\nper-hypervisor key (Mark's ruling, sync 2026-07-19): the first-class\nknob vocabulary (vbox.\u003csection\u003e.\u003ckey\u003e — cpu, memory, graphics, audio,\nusb, integration, platform, firmware, recording, vrde, autostart,\nserial[], parallel[]), the directives[] passthrough, and the\nguest_agent/post_provision_boot booleans.",
+                        "type": "object"
+                    },
+                    "zones": {
+                        "additionalProperties": {},
+                        "description": "Zones is the document's zones section at create (autostart today; the\nbase's system attrs land through Vbox below).",
+                        "type": "object"
+                    }
+                },
+                "type": "object"
+            },
+            "server.createMachineResponse": {
+                "properties": {
+                    "machine_name": {
+                        "type": "string"
+                    },
+                    "message": {
+                        "type": "string"
+                    },
+                    "operation": {
+                        "type": "string"
+                    },
+                    "parent_task_id": {
+                        "type": "string"
+                    },
+                    "requires_download": {
+                        "type": "boolean"
+                    },
+                    "resource_warnings": {
+                        "items": {
+                            "$ref": "#/components/schemas/server.resourceIssue"
+                        },
+                        "type": "array",
+                        "uniqueItems": false
+                    },
+                    "source_machine": {
+                        "type": "string"
+                    },
+                    "status": {
+                        "type": "string"
+                    },
+                    "storage_path_id": {
+                        "type": "string"
+                    },
+                    "sub_tasks": {
+                        "additionalProperties": {
+                            "type": "string"
+                        },
+                        "type": "object"
+                    },
+                    "success": {
+                        "type": "boolean"
                     }
                 },
                 "type": "object"
@@ -2102,6 +2679,39 @@
                 },
                 "type": "object"
             },
+            "server.deleteMachineResponse": {
+                "properties": {
+                    "cleanup_disks": {
+                        "type": "boolean"
+                    },
+                    "delete_tasks": {
+                        "items": {
+                            "type": "string"
+                        },
+                        "type": "array",
+                        "uniqueItems": false
+                    },
+                    "force": {
+                        "type": "boolean"
+                    },
+                    "machine_name": {
+                        "type": "string"
+                    },
+                    "message": {
+                        "type": "string"
+                    },
+                    "operation": {
+                        "type": "string"
+                    },
+                    "status": {
+                        "type": "string"
+                    },
+                    "success": {
+                        "type": "boolean"
+                    }
+                },
+                "type": "object"
+            },
             "server.deleteStoragePathRequest": {
                 "properties": {
                     "force": {
@@ -2408,6 +3018,17 @@
                 },
                 "type": "object"
             },
+            "server.exportTemplateRequest": {
+                "properties": {
+                    "filename": {
+                        "type": "string"
+                    },
+                    "machine_name": {
+                        "type": "string"
+                    }
+                },
+                "type": "object"
+            },
             "server.filePermissions": {
                 "properties": {
                     "executable": {
@@ -2613,6 +3234,94 @@
                 },
                 "type": "object"
             },
+            "server.guestExecResponse": {
+                "properties": {
+                    "exitcode": {
+                        "type": "integer"
+                    },
+                    "exited": {
+                        "type": "boolean"
+                    },
+                    "machine_name": {
+                        "type": "string"
+                    },
+                    "message": {
+                        "type": "string"
+                    },
+                    "pid": {
+                        "type": "integer"
+                    },
+                    "signal": {
+                        "type": "integer"
+                    },
+                    "stderr": {
+                        "type": "string"
+                    },
+                    "stdout": {
+                        "type": "string"
+                    },
+                    "success": {
+                        "type": "boolean"
+                    }
+                },
+                "type": "object"
+            },
+            "server.guestExecStatusResponse": {
+                "properties": {
+                    "exitcode": {
+                        "type": "integer"
+                    },
+                    "exited": {
+                        "type": "boolean"
+                    },
+                    "machine_name": {
+                        "type": "string"
+                    },
+                    "pid": {
+                        "type": "integer"
+                    },
+                    "signal": {
+                        "type": "integer"
+                    },
+                    "stderr": {
+                        "type": "string"
+                    },
+                    "stdout": {
+                        "type": "string"
+                    }
+                },
+                "type": "object"
+            },
+            "server.guestNetworkResponse": {
+                "properties": {
+                    "interfaces": {
+                        "items": {
+                            "type": "integer"
+                        },
+                        "type": "array",
+                        "uniqueItems": false
+                    },
+                    "machine_name": {
+                        "type": "string"
+                    }
+                },
+                "type": "object"
+            },
+            "server.guestOSInfoResponse": {
+                "properties": {
+                    "machine_name": {
+                        "type": "string"
+                    },
+                    "osinfo": {
+                        "items": {
+                            "type": "integer"
+                        },
+                        "type": "array",
+                        "uniqueItems": false
+                    }
+                },
+                "type": "object"
+            },
             "server.guestPingResponse": {
                 "properties": {
                     "machine_name": {
@@ -2623,6 +3332,24 @@
                     },
                     "success": {
                         "type": "boolean"
+                    }
+                },
+                "type": "object"
+            },
+            "server.guestPropertiesResponse": {
+                "properties": {
+                    "machine_name": {
+                        "type": "string"
+                    },
+                    "properties": {
+                        "items": {
+                            "$ref": "#/components/schemas/vbox.GuestPropertyEntry"
+                        },
+                        "type": "array",
+                        "uniqueItems": false
+                    },
+                    "total": {
+                        "type": "integer"
                     }
                 },
                 "type": "object"
@@ -2669,6 +3396,20 @@
                     },
                     "timestamp": {
                         "description": "When the report was taken, RFC 3339",
+                        "type": "string"
+                    }
+                },
+                "type": "object"
+            },
+            "server.hostHooksConfirmation": {
+                "properties": {
+                    "confirm_with": {
+                        "type": "string"
+                    },
+                    "needs_confirmation": {
+                        "type": "boolean"
+                    },
+                    "reason": {
                         "type": "string"
                     }
                 },
@@ -3382,6 +4123,184 @@
                 },
                 "type": "object"
             },
+            "server.machineConfigResponse": {
+                "properties": {
+                    "configuration": {
+                        "items": {
+                            "type": "integer"
+                        },
+                        "type": "array",
+                        "uniqueItems": false
+                    },
+                    "machine_name": {
+                        "type": "string"
+                    },
+                    "nat_forwards": {
+                        "items": {
+                            "$ref": "#/components/schemas/server.natForwardRule"
+                        },
+                        "type": "array",
+                        "uniqueItems": false
+                    }
+                },
+                "type": "object"
+            },
+            "server.machineDefaultDisks": {
+                "properties": {
+                    "controller": {
+                        "type": "string"
+                    },
+                    "sparse": {
+                        "type": "boolean"
+                    }
+                },
+                "type": "object"
+            },
+            "server.machineDefaultNotes": {
+                "properties": {
+                    "disks": {
+                        "type": "string"
+                    },
+                    "knob_defaults": {
+                        "type": "string"
+                    },
+                    "knob_values": {
+                        "type": "string"
+                    },
+                    "settings": {
+                        "type": "string"
+                    },
+                    "sync_method": {
+                        "type": "string"
+                    },
+                    "vbox": {
+                        "type": "string"
+                    }
+                },
+                "type": "object"
+            },
+            "server.machineDefaultSettings": {
+                "properties": {
+                    "boot_priority": {
+                        "type": "integer"
+                    },
+                    "box_arch": {
+                        "type": "string"
+                    },
+                    "box_version": {
+                        "type": "string"
+                    },
+                    "communicator": {
+                        "type": "string"
+                    },
+                    "firmware_type": {
+                        "type": "string"
+                    },
+                    "memory": {
+                        "type": "string"
+                    },
+                    "os_type": {
+                        "type": "string"
+                    },
+                    "sync_method": {
+                        "type": "string"
+                    },
+                    "vagrant_ssh_insert_key": {
+                        "type": "boolean"
+                    },
+                    "vcpus": {
+                        "type": "integer"
+                    },
+                    "winrm_port": {
+                        "type": "integer"
+                    },
+                    "winrm_ssl_peer_verification": {
+                        "type": "boolean"
+                    },
+                    "winrm_transport": {
+                        "type": "string"
+                    }
+                },
+                "type": "object"
+            },
+            "server.machineDefaultVbox": {
+                "properties": {
+                    "guest_agent": {
+                        "type": "boolean"
+                    },
+                    "post_provision_boot": {
+                        "type": "boolean"
+                    }
+                },
+                "type": "object"
+            },
+            "server.machineDefaultsResponse": {
+                "properties": {
+                    "disks": {
+                        "$ref": "#/components/schemas/server.machineDefaultDisks"
+                    },
+                    "knob_defaults": {
+                        "additionalProperties": {},
+                        "type": "object"
+                    },
+                    "knob_values": {
+                        "additionalProperties": {
+                            "items": {
+                                "type": "string"
+                            },
+                            "type": "array"
+                        },
+                        "type": "object"
+                    },
+                    "notes": {
+                        "$ref": "#/components/schemas/server.machineDefaultNotes"
+                    },
+                    "settings": {
+                        "$ref": "#/components/schemas/server.machineDefaultSettings"
+                    },
+                    "vbox": {
+                        "$ref": "#/components/schemas/server.machineDefaultVbox"
+                    }
+                },
+                "type": "object"
+            },
+            "server.machineDetailsResponse": {
+                "properties": {
+                    "active_vnc_session": {},
+                    "configuration": {
+                        "items": {
+                            "type": "integer"
+                        },
+                        "type": "array",
+                        "uniqueItems": false
+                    },
+                    "knob_current": {
+                        "additionalProperties": {},
+                        "type": "object"
+                    },
+                    "machine_info": {
+                        "$ref": "#/components/schemas/machines.Machine"
+                    },
+                    "pending_changes": {
+                        "additionalProperties": {},
+                        "type": "object"
+                    },
+                    "pending_tasks": {
+                        "items": {
+                            "$ref": "#/components/schemas/tasks.Task"
+                        },
+                        "type": "array",
+                        "uniqueItems": false
+                    },
+                    "system_status": {
+                        "type": "string"
+                    },
+                    "web_address": {
+                        "type": "string"
+                    }
+                },
+                "type": "object"
+            },
             "server.machineListResponse": {
                 "properties": {
                     "machines": {
@@ -3393,6 +4312,49 @@
                     },
                     "total": {
                         "type": "integer"
+                    }
+                },
+                "type": "object"
+            },
+            "server.machineModifyResponse": {
+                "properties": {
+                    "certificate": {
+                        "type": "string"
+                    },
+                    "machine_name": {
+                        "type": "string"
+                    },
+                    "message": {
+                        "type": "string"
+                    },
+                    "operation": {
+                        "type": "string"
+                    },
+                    "pending_changes": {
+                        "additionalProperties": {},
+                        "type": "object"
+                    },
+                    "pipe": {
+                        "type": "string"
+                    },
+                    "requires_restart": {
+                        "type": "boolean"
+                    },
+                    "resource_warnings": {
+                        "items": {
+                            "$ref": "#/components/schemas/server.resourceIssue"
+                        },
+                        "type": "array",
+                        "uniqueItems": false
+                    },
+                    "status": {
+                        "type": "string"
+                    },
+                    "success": {
+                        "type": "boolean"
+                    },
+                    "task_id": {
+                        "type": "string"
                     }
                 },
                 "type": "object"
@@ -3953,6 +4915,25 @@
                 },
                 "type": "object"
             },
+            "server.moveTemplateRequest": {
+                "properties": {
+                    "target_path": {
+                        "type": "string"
+                    }
+                },
+                "type": "object"
+            },
+            "server.namedExistence": {
+                "properties": {
+                    "exists": {
+                        "type": "boolean"
+                    },
+                    "name": {
+                        "type": "string"
+                    }
+                },
+                "type": "object"
+            },
             "server.natForwardBody": {
                 "properties": {
                     "guest_ip": {
@@ -3990,6 +4971,35 @@
                 },
                 "type": "object"
             },
+            "server.natForwardRule": {
+                "properties": {
+                    "adapter": {
+                        "description": "NAT adapter number — present only when the machinereadable key names one (the flat Forwarding(N) form does not)",
+                        "type": "integer"
+                    },
+                    "guest_ip": {
+                        "description": "Guest target address (\"\" = the adapter's guest address)",
+                        "type": "string"
+                    },
+                    "guest_port": {
+                        "type": "integer"
+                    },
+                    "host_ip": {
+                        "description": "Host bind address (\"\" = every host address)",
+                        "type": "string"
+                    },
+                    "host_port": {
+                        "type": "integer"
+                    },
+                    "name": {
+                        "type": "string"
+                    },
+                    "protocol": {
+                        "type": "string"
+                    }
+                },
+                "type": "object"
+            },
             "server.natLoopbackBody": {
                 "properties": {
                     "address": {
@@ -4019,6 +5029,32 @@
                         "type": "boolean"
                     },
                     "name": {
+                        "type": "string"
+                    }
+                },
+                "type": "object"
+            },
+            "server.natNetworkForwardRow": {
+                "properties": {
+                    "guest_ip": {
+                        "type": "string"
+                    },
+                    "guest_port": {
+                        "type": "integer"
+                    },
+                    "host_ip": {
+                        "type": "string"
+                    },
+                    "host_port": {
+                        "type": "integer"
+                    },
+                    "ipv6": {
+                        "type": "boolean"
+                    },
+                    "name": {
+                        "type": "string"
+                    },
+                    "protocol": {
                         "type": "string"
                     }
                 },
@@ -4124,6 +5160,105 @@
                     },
                     "total": {
                         "description": "Entries returned (after filters and limit)",
+                        "type": "integer"
+                    }
+                },
+                "type": "object"
+            },
+            "server.networkSpace": {
+                "properties": {
+                    "cidr": {
+                        "type": "string"
+                    },
+                    "dhcp": {
+                        "$ref": "#/components/schemas/server.networkSpaceDHCP"
+                    },
+                    "dhcp_enabled": {
+                        "type": "boolean"
+                    },
+                    "enabled": {
+                        "type": "boolean"
+                    },
+                    "gateway": {
+                        "type": "string"
+                    },
+                    "guid": {
+                        "type": "string"
+                    },
+                    "ip_address": {
+                        "type": "string"
+                    },
+                    "ipv6": {
+                        "type": "boolean"
+                    },
+                    "ipv6_prefix": {
+                        "type": "string"
+                    },
+                    "loopback_mappings": {
+                        "items": {
+                            "$ref": "#/components/schemas/vbox.NATNetworkLoopback"
+                        },
+                        "type": "array",
+                        "uniqueItems": false
+                    },
+                    "lower_ip": {
+                        "type": "string"
+                    },
+                    "name": {
+                        "type": "string"
+                    },
+                    "network_mask": {
+                        "type": "string"
+                    },
+                    "port_forwards": {
+                        "items": {
+                            "$ref": "#/components/schemas/server.natNetworkForwardRow"
+                        },
+                        "type": "array",
+                        "uniqueItems": false
+                    },
+                    "type": {
+                        "type": "string"
+                    },
+                    "upper_ip": {
+                        "type": "string"
+                    },
+                    "vbox_network_name": {
+                        "type": "string"
+                    }
+                },
+                "type": "object"
+            },
+            "server.networkSpaceDHCP": {
+                "properties": {
+                    "enabled": {
+                        "type": "boolean"
+                    },
+                    "exists": {
+                        "type": "boolean"
+                    },
+                    "lower_ip": {
+                        "type": "string"
+                    },
+                    "server_ip": {
+                        "type": "string"
+                    },
+                    "upper_ip": {
+                        "type": "string"
+                    }
+                },
+                "type": "object"
+            },
+            "server.networkSpacesResponse": {
+                "properties": {
+                    "spaces": {
+                        "items": {
+                            "$ref": "#/components/schemas/server.networkSpace"
+                        },
+                        "type": "array",
+                        "uniqueItems": false
+                    },
+                    "total": {
                         "type": "integer"
                     }
                 },
@@ -4353,6 +5488,21 @@
                 },
                 "type": "object"
             },
+            "server.osTypesResponse": {
+                "properties": {
+                    "ostypes": {
+                        "items": {
+                            "$ref": "#/components/schemas/vbox.OSType"
+                        },
+                        "type": "array",
+                        "uniqueItems": false
+                    },
+                    "total": {
+                        "type": "integer"
+                    }
+                },
+                "type": "object"
+            },
             "server.permissionChanges": {
                 "properties": {
                     "gid": {
@@ -4408,6 +5558,26 @@
                         "type": "boolean"
                     },
                     "task_id": {
+                        "type": "string"
+                    }
+                },
+                "type": "object"
+            },
+            "server.preferencePatchRequest": {
+                "properties": {
+                    "language": {
+                        "type": "string"
+                    },
+                    "mode": {
+                        "type": "string"
+                    },
+                    "motion": {
+                        "type": "string"
+                    },
+                    "theme": {
+                        "type": "string"
+                    },
+                    "timezone": {
                         "type": "string"
                     }
                 },
@@ -4661,6 +5831,169 @@
                 },
                 "type": "object"
             },
+            "server.provisionRequest": {
+                "properties": {
+                    "confirm_host_hooks": {
+                        "type": "boolean"
+                    },
+                    "skip_boot": {
+                        "type": "boolean"
+                    }
+                },
+                "type": "object"
+            },
+            "server.provisionResponse": {
+                "properties": {
+                    "machine_name": {
+                        "type": "string"
+                    },
+                    "message": {
+                        "type": "string"
+                    },
+                    "parent_task_id": {
+                        "type": "string"
+                    },
+                    "skipped_methods": {
+                        "items": {
+                            "type": "string"
+                        },
+                        "type": "array",
+                        "uniqueItems": false
+                    },
+                    "steps": {
+                        "type": "integer"
+                    },
+                    "success": {
+                        "type": "boolean"
+                    },
+                    "task_chain": {
+                        "items": {
+                            "$ref": "#/components/schemas/server.taskChainEntry"
+                        },
+                        "type": "array",
+                        "uniqueItems": false
+                    }
+                },
+                "type": "object"
+            },
+            "server.provisionStatusResponse": {
+                "properties": {
+                    "last_provisioned_at": {
+                        "type": "string"
+                    },
+                    "machine_name": {
+                        "type": "string"
+                    },
+                    "provisioning_configured": {
+                        "type": "boolean"
+                    },
+                    "provisioning_status": {
+                        "type": "string"
+                    },
+                    "recent_tasks": {
+                        "items": {
+                            "$ref": "#/components/schemas/tasks.Task"
+                        },
+                        "type": "array",
+                        "uniqueItems": false
+                    },
+                    "success": {
+                        "type": "boolean"
+                    }
+                },
+                "type": "object"
+            },
+            "server.provisioningDHCP": {
+                "properties": {
+                    "embedded": {
+                        "type": "boolean"
+                    },
+                    "enabled": {
+                        "type": "boolean"
+                    },
+                    "exists": {
+                        "type": "boolean"
+                    }
+                },
+                "type": "object"
+            },
+            "server.provisioningIPAddress": {
+                "properties": {
+                    "address": {
+                        "type": "string"
+                    },
+                    "configured": {
+                        "type": "boolean"
+                    }
+                },
+                "type": "object"
+            },
+            "server.provisioningNetworkComponents": {
+                "properties": {
+                    "dhcp": {
+                        "$ref": "#/components/schemas/server.provisioningDHCP"
+                    },
+                    "interface": {
+                        "$ref": "#/components/schemas/server.namedExistence"
+                    },
+                    "ip_address": {
+                        "$ref": "#/components/schemas/server.provisioningIPAddress"
+                    },
+                    "network": {
+                        "$ref": "#/components/schemas/server.namedExistence"
+                    }
+                },
+                "type": "object"
+            },
+            "server.provisioningNetworkStatus": {
+                "properties": {
+                    "components": {
+                        "$ref": "#/components/schemas/server.provisioningNetworkComponents"
+                    },
+                    "config": {
+                        "$ref": "#/components/schemas/config.ProvisioningNetworkConfig"
+                    },
+                    "enabled": {
+                        "type": "boolean"
+                    },
+                    "message": {
+                        "type": "string"
+                    },
+                    "ready": {
+                        "type": "boolean"
+                    }
+                },
+                "type": "object"
+            },
+            "server.publishTemplateRequest": {
+                "properties": {
+                    "architecture": {
+                        "type": "string"
+                    },
+                    "box_name": {
+                        "type": "string"
+                    },
+                    "box_path": {
+                        "type": "string"
+                    },
+                    "description": {
+                        "type": "string"
+                    },
+                    "machine_name": {
+                        "type": "string"
+                    },
+                    "organization": {
+                        "type": "string"
+                    },
+                    "source_name": {
+                        "type": "string"
+                    },
+                    "version": {
+                        "type": "string"
+                    }
+                },
+                "type": "object"
+            },
             "server.queuedOperation": {
                 "properties": {
                     "machine_name": {
@@ -4834,6 +6167,44 @@
                 },
                 "type": "object"
             },
+            "server.resourceIssue": {
+                "additionalProperties": {},
+                "type": "object"
+            },
+            "server.restartMachineResponse": {
+                "properties": {
+                    "machine_name": {
+                        "type": "string"
+                    },
+                    "message": {
+                        "type": "string"
+                    },
+                    "operation": {
+                        "type": "string"
+                    },
+                    "restart_tasks": {
+                        "$ref": "#/components/schemas/server.restartTasks"
+                    },
+                    "status": {
+                        "type": "string"
+                    },
+                    "success": {
+                        "type": "boolean"
+                    }
+                },
+                "type": "object"
+            },
+            "server.restartTasks": {
+                "properties": {
+                    "start_task_id": {
+                        "type": "string"
+                    },
+                    "stop_task_id": {
+                        "type": "string"
+                    }
+                },
+                "type": "object"
+            },
             "server.revokeKeyResponse": {
                 "properties": {
                     "entity_id": {
@@ -4861,6 +6232,47 @@
                     "forms": {
                         "additionalProperties": {},
                         "type": "object"
+                    }
+                },
+                "type": "object"
+            },
+            "server.runProvisionersResponse": {
+                "properties": {
+                    "machine_name": {
+                        "type": "string"
+                    },
+                    "message": {
+                        "type": "string"
+                    },
+                    "parent_task_id": {
+                        "type": "string"
+                    },
+                    "playbook_count": {
+                        "type": "integer"
+                    },
+                    "playbooks_skipped": {
+                        "items": {
+                            "$ref": "#/components/schemas/machines.SkippedPlaybook"
+                        },
+                        "type": "array",
+                        "uniqueItems": false
+                    },
+                    "skipped_methods": {
+                        "items": {
+                            "type": "string"
+                        },
+                        "type": "array",
+                        "uniqueItems": false
+                    },
+                    "success": {
+                        "type": "boolean"
+                    },
+                    "task_chain": {
+                        "items": {
+                            "$ref": "#/components/schemas/server.taskChainEntry"
+                        },
+                        "type": "array",
+                        "uniqueItems": false
                     }
                 },
                 "type": "object"
@@ -4964,6 +6376,24 @@
                     "authorize_url": {
                         "description": "The IdP authorize URL (response_type=code, loopback redirect_uri, S256 PKCE challenge, prompt=none) — navigate the browser here; the agent holds the state and verifier",
                         "type": "string"
+                    }
+                },
+                "type": "object"
+            },
+            "server.snapshotListResponse": {
+                "properties": {
+                    "machine_name": {
+                        "type": "string"
+                    },
+                    "snapshots": {
+                        "items": {
+                            "$ref": "#/components/schemas/vbox.Snapshot"
+                        },
+                        "type": "array",
+                        "uniqueItems": false
+                    },
+                    "total": {
+                        "type": "integer"
                     }
                 },
                 "type": "object"
@@ -5301,6 +6731,17 @@
                 },
                 "type": "object"
             },
+            "server.successMessageResponse": {
+                "properties": {
+                    "message": {
+                        "type": "string"
+                    },
+                    "success": {
+                        "type": "boolean"
+                    }
+                },
+                "type": "object"
+            },
             "server.swapAreaRow": {
                 "properties": {
                     "free_bytes": {
@@ -5445,6 +6886,76 @@
                 },
                 "type": "object"
             },
+            "server.syncRequest": {
+                "properties": {
+                    "syncback": {
+                        "type": "boolean"
+                    }
+                },
+                "type": "object"
+            },
+            "server.syncResponse": {
+                "properties": {
+                    "folder_count": {
+                        "type": "integer"
+                    },
+                    "machine_name": {
+                        "type": "string"
+                    },
+                    "message": {
+                        "type": "string"
+                    },
+                    "parent_task_id": {
+                        "type": "string"
+                    },
+                    "success": {
+                        "type": "boolean"
+                    }
+                },
+                "type": "object"
+            },
+            "server.taskChainEntry": {
+                "properties": {
+                    "compose_count": {
+                        "type": "integer"
+                    },
+                    "folder_count": {
+                        "type": "integer"
+                    },
+                    "hook_count": {
+                        "type": "integer"
+                    },
+                    "keys": {
+                        "items": {
+                            "type": "string"
+                        },
+                        "type": "array",
+                        "uniqueItems": false
+                    },
+                    "last_task_id": {
+                        "type": "string"
+                    },
+                    "method": {
+                        "type": "string"
+                    },
+                    "playbook_count": {
+                        "type": "integer"
+                    },
+                    "playbooks_skipped": {
+                        "type": "integer"
+                    },
+                    "script_count": {
+                        "type": "integer"
+                    },
+                    "step": {
+                        "type": "string"
+                    },
+                    "task_id": {
+                        "type": "string"
+                    }
+                },
+                "type": "object"
+            },
             "server.taskOutputResponse": {
                 "properties": {
                     "output": {
@@ -5485,6 +6996,21 @@
                     },
                     "task_processor_running": {
                         "type": "boolean"
+                    }
+                },
+                "type": "object"
+            },
+            "server.templateListResponse": {
+                "properties": {
+                    "templates": {
+                        "items": {
+                            "$ref": "#/components/schemas/machines.Template"
+                        },
+                        "type": "array",
+                        "uniqueItems": false
+                    },
+                    "total": {
+                        "type": "integer"
                     }
                 },
                 "type": "object"
@@ -6210,6 +7736,82 @@
                     },
                     "updatedAt": {
                         "description": "Last modification — the since query parameter compares against this",
+                        "type": "string"
+                    }
+                },
+                "type": "object"
+            },
+            "vbox.GuestPropertyEntry": {
+                "properties": {
+                    "flags": {
+                        "type": "string"
+                    },
+                    "name": {
+                        "type": "string"
+                    },
+                    "timestamp": {
+                        "type": "string"
+                    },
+                    "value": {
+                        "type": "string"
+                    }
+                },
+                "type": "object"
+            },
+            "vbox.NATNetworkLoopback": {
+                "properties": {
+                    "address": {
+                        "type": "string"
+                    },
+                    "ipv6": {
+                        "type": "boolean"
+                    },
+                    "offset": {
+                        "type": "integer"
+                    }
+                },
+                "type": "object"
+            },
+            "vbox.OSType": {
+                "properties": {
+                    "architecture": {
+                        "description": "Architecture is VirtualBox's own vocabulary: \"x86\", \"x86 (64-bit)\",\n\"ARMv8 (64-bit)\".",
+                        "type": "string"
+                    },
+                    "description": {
+                        "type": "string"
+                    },
+                    "family": {
+                        "description": "Family groups the picker — the text before the parenthesis on the\nFamily line: \"Windows\", \"Linux / Debian\", \"BSD / FreeBSD\", \"Other\".",
+                        "type": "string"
+                    },
+                    "family_description": {
+                        "description": "FamilyDescription is the parenthesized remainder of the Family line\n(\"Microsoft Windows\", \"Linux\", ...).",
+                        "type": "string"
+                    },
+                    "id": {
+                        "type": "string"
+                    }
+                },
+                "type": "object"
+            },
+            "vbox.Snapshot": {
+                "properties": {
+                    "current": {
+                        "description": "Current marks the snapshot the machine's state currently derives from.",
+                        "type": "boolean"
+                    },
+                    "description": {
+                        "type": "string"
+                    },
+                    "name": {
+                        "type": "string"
+                    },
+                    "node": {
+                        "description": "Node is the machinereadable tree key (\"SnapshotName\", \"SnapshotName-1\",\n\"SnapshotName-1-1\", ...) — the suffix encodes the tree position.",
+                        "type": "string"
+                    },
+                    "uuid": {
                         "type": "string"
                     }
                 },
@@ -7097,8 +8699,7 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "additionalProperties": {},
-                                    "type": "object"
+                                    "$ref": "#/components/schemas/assets.ServiceStatus"
                                 }
                             }
                         },
@@ -7122,8 +8723,7 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "additionalProperties": {},
-                                    "type": "object"
+                                    "$ref": "#/components/schemas/server.artifactStatsResponse"
                                 }
                             }
                         },
@@ -9567,9 +11167,9 @@
                                         "type": "object"
                                     },
                                     {
-                                        "additionalProperties": {},
-                                        "title": "request",
-                                        "type": "object"
+                                        "$ref": "#/components/schemas/server.createMachineRequest",
+                                        "summary": "request",
+                                        "description": "Optional explicit name plus the MachineSpec creation document (allOf)"
                                     }
                                 ]
                             }
@@ -9583,8 +11183,7 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "additionalProperties": {},
-                                    "type": "object"
+                                    "$ref": "#/components/schemas/server.createMachineResponse"
                                 }
                             }
                         },
@@ -9600,7 +11199,9 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "additionalProperties": {},
+                                    "additionalProperties": {
+                                        "type": "string"
+                                    },
                                     "type": "object"
                                 }
                             }
@@ -9704,8 +11305,7 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "additionalProperties": {},
-                                    "type": "object"
+                                    "$ref": "#/components/schemas/server.machineDefaultsResponse"
                                 }
                             }
                         },
@@ -9972,8 +11572,7 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "additionalProperties": {},
-                                    "type": "object"
+                                    "$ref": "#/components/schemas/server.osTypesResponse"
                                 }
                             }
                         },
@@ -10109,8 +11708,7 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "additionalProperties": {},
-                                    "type": "object"
+                                    "$ref": "#/components/schemas/server.deleteMachineResponse"
                                 }
                             }
                         },
@@ -10160,8 +11758,7 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "additionalProperties": {},
-                                    "type": "object"
+                                    "$ref": "#/components/schemas/server.machineDetailsResponse"
                                 }
                             }
                         },
@@ -10214,8 +11811,7 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "additionalProperties": {},
-                                    "type": "object"
+                                    "$ref": "#/components/schemas/server.machineModifyResponse"
                                 }
                             }
                         },
@@ -10304,9 +11900,9 @@
                                         "type": "object"
                                     },
                                     {
-                                        "additionalProperties": {},
-                                        "title": "request",
-                                        "type": "object"
+                                        "$ref": "#/components/schemas/server.cloneMachineRequest",
+                                        "summary": "request",
+                                        "description": "Clone request: name, settings (hostname required), overrides, and disk source"
                                     }
                                 ]
                             }
@@ -10320,8 +11916,7 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "additionalProperties": {},
-                                    "type": "object"
+                                    "$ref": "#/components/schemas/server.createMachineResponse"
                                 }
                             }
                         },
@@ -10362,8 +11957,7 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "additionalProperties": {},
-                                    "type": "object"
+                                    "$ref": "#/components/schemas/server.machineConfigResponse"
                                 }
                             }
                         },
@@ -10518,8 +12112,7 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "additionalProperties": {},
-                                    "type": "object"
+                                    "$ref": "#/components/schemas/server.machineModifyResponse"
                                 }
                             }
                         },
@@ -10571,8 +12164,7 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "additionalProperties": {},
-                                    "type": "object"
+                                    "$ref": "#/components/schemas/server.guestPropertiesResponse"
                                 }
                             }
                         },
@@ -10630,8 +12222,7 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "additionalProperties": {},
-                                    "type": "object"
+                                    "$ref": "#/components/schemas/server.guestExecResponse"
                                 }
                             }
                         },
@@ -10712,8 +12303,7 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "additionalProperties": {},
-                                    "type": "object"
+                                    "$ref": "#/components/schemas/server.guestExecStatusResponse"
                                 }
                             }
                         },
@@ -10785,8 +12375,7 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "additionalProperties": {},
-                                    "type": "object"
+                                    "$ref": "#/components/schemas/server.guestNetworkResponse"
                                 }
                             }
                         },
@@ -10858,8 +12447,7 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "additionalProperties": {},
-                                    "type": "object"
+                                    "$ref": "#/components/schemas/server.guestOSInfoResponse"
                                 }
                             }
                         },
@@ -11844,9 +13432,9 @@
                                         "type": "object"
                                     },
                                     {
-                                        "additionalProperties": {},
-                                        "title": "request",
-                                        "type": "object"
+                                        "$ref": "#/components/schemas/server.provisionRequest",
+                                        "summary": "request",
+                                        "description": "Optional {skip_boot, confirm_host_hooks}"
                                     }
                                 ]
                             }
@@ -11859,8 +13447,7 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "additionalProperties": {},
-                                    "type": "object"
+                                    "$ref": "#/components/schemas/server.provisionResponse"
                                 }
                             }
                         },
@@ -11876,8 +13463,7 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "additionalProperties": {},
-                                    "type": "object"
+                                    "$ref": "#/components/schemas/server.hostHooksConfirmation"
                                 }
                             }
                         },
@@ -11909,8 +13495,7 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "additionalProperties": {},
-                                    "type": "object"
+                                    "$ref": "#/components/schemas/server.provisionStatusResponse"
                                 }
                             }
                         },
@@ -12083,8 +13668,7 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "additionalProperties": {},
-                                    "type": "object"
+                                    "$ref": "#/components/schemas/server.restartMachineResponse"
                                 }
                             }
                         },
@@ -12157,8 +13741,7 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "additionalProperties": {},
-                                    "type": "object"
+                                    "$ref": "#/components/schemas/server.runProvisionersResponse"
                                 }
                             }
                         },
@@ -12196,8 +13779,7 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "additionalProperties": {},
-                                    "type": "object"
+                                    "$ref": "#/components/schemas/server.snapshotListResponse"
                                 }
                             }
                         },
@@ -12572,9 +14154,9 @@
                                         "type": "object"
                                     },
                                     {
-                                        "additionalProperties": {},
-                                        "title": "request",
-                                        "type": "object"
+                                        "$ref": "#/components/schemas/server.syncRequest",
+                                        "summary": "request",
+                                        "description": "Optional {syncback}"
                                     }
                                 ]
                             }
@@ -12587,8 +14169,7 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "additionalProperties": {},
-                                    "type": "object"
+                                    "$ref": "#/components/schemas/server.syncResponse"
                                 }
                             }
                         },
@@ -13271,8 +14852,7 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "additionalProperties": {},
-                                    "type": "object"
+                                    "$ref": "#/components/schemas/server.machineModifyResponse"
                                 }
                             }
                         },
@@ -14267,8 +15847,7 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "additionalProperties": {},
-                                    "type": "object"
+                                    "$ref": "#/components/schemas/server.networkSpacesResponse"
                                 }
                             }
                         },
@@ -15096,8 +16675,7 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "additionalProperties": {},
-                                    "type": "object"
+                                    "$ref": "#/components/schemas/server.provisioningNetworkStatus"
                                 }
                             }
                         },
@@ -15977,8 +17555,7 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "additionalProperties": {},
-                                    "type": "object"
+                                    "$ref": "#/components/schemas/server.successMessageResponse"
                                 }
                             }
                         },
@@ -17753,8 +19330,7 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "additionalProperties": {},
-                                    "type": "object"
+                                    "$ref": "#/components/schemas/server.templateListResponse"
                                 }
                             }
                         },
@@ -17779,9 +19355,9 @@
                                         "type": "object"
                                     },
                                     {
-                                        "additionalProperties": {},
-                                        "title": "request",
-                                        "type": "object"
+                                        "$ref": "#/components/schemas/server.exportTemplateRequest",
+                                        "summary": "request",
+                                        "description": "{machine_name, filename}"
                                     }
                                 ]
                             }
@@ -17826,9 +19402,9 @@
                                         "type": "object"
                                     },
                                     {
-                                        "additionalProperties": {},
-                                        "title": "request",
-                                        "type": "object"
+                                        "$ref": "#/components/schemas/server.publishTemplateRequest",
+                                        "summary": "request",
+                                        "description": "{machine_name|box_path, source_name (the source's id), organization, box_name, version, description, architecture}"
                                     }
                                 ]
                             }
@@ -17873,9 +19449,9 @@
                                         "type": "object"
                                     },
                                     {
-                                        "additionalProperties": {},
-                                        "title": "request",
-                                        "type": "object"
+                                        "$ref": "#/components/schemas/machines.TemplateDownloadMetadata",
+                                        "summary": "request",
+                                        "description": "{organization, box_name, version, source_name (the source's id), provider, architecture}"
                                     }
                                 ]
                             }
@@ -17951,8 +19527,11 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "additionalProperties": {},
-                                    "type": "object"
+                                    "items": {
+                                        "additionalProperties": {},
+                                        "type": "object"
+                                    },
+                                    "type": "array"
                                 }
                             }
                         },
@@ -18140,9 +19719,9 @@
                                         "type": "object"
                                     },
                                     {
-                                        "additionalProperties": {},
-                                        "title": "request",
-                                        "type": "object"
+                                        "$ref": "#/components/schemas/server.moveTemplateRequest",
+                                        "summary": "request",
+                                        "description": "{target_path}"
                                     }
                                 ]
                             }
@@ -18253,8 +19832,7 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "additionalProperties": {},
-                                    "type": "object"
+                                    "$ref": "#/components/schemas/server.successMessageResponse"
                                 }
                             }
                         },
@@ -18413,9 +19991,9 @@
                                         "type": "object"
                                     },
                                     {
-                                        "additionalProperties": {},
-                                        "title": "body",
-                                        "type": "object"
+                                        "$ref": "#/components/schemas/server.preferencePatchRequest",
+                                        "summary": "body",
+                                        "description": "The members to change"
                                     }
                                 ]
                             }

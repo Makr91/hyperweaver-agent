@@ -198,7 +198,21 @@ type walkStep struct {
 	operation string
 	extra     map[string]any
 	step      string
-	stepInfo  map[string]any
+	stepInfo  taskChainEntry
+}
+
+type taskChainEntry struct {
+	Step             string   `json:"step"`
+	TaskID           string   `json:"task_id,omitempty"`
+	LastTaskID       string   `json:"last_task_id,omitempty"`
+	Keys             []string `json:"keys,omitempty"`
+	FolderCount      int      `json:"folder_count,omitempty"`
+	HookCount        int      `json:"hook_count,omitempty"`
+	ScriptCount      int      `json:"script_count,omitempty"`
+	ComposeCount     int      `json:"compose_count,omitempty"`
+	PlaybookCount    int      `json:"playbook_count,omitempty"`
+	PlaybooksSkipped *int     `json:"playbooks_skipped,omitempty"`
+	Method           string   `json:"method,omitempty"`
 }
 
 // docEnabled reads a method section's enabled gate in the document's own
@@ -224,7 +238,7 @@ func hookSteps(hooks []machines.Hook, label string) []walkStep {
 		step := walkStep{operation: machines.OpHook, extra: map[string]any{"hook": hooks[i]}}
 		if i == 0 {
 			step.step = label
-			step.stepInfo = map[string]any{"hook_count": len(hooks)}
+			step.stepInfo = taskChainEntry{HookCount: len(hooks)}
 		}
 		steps = append(steps, step)
 	}
@@ -243,10 +257,11 @@ func playbookSteps(playbooks []machines.Playbook, skippedCount int) []walkStep {
 		}
 		step := walkStep{operation: operation, extra: map[string]any{"playbook": playbooks[i]}}
 		if i == 0 {
+			skipped := skippedCount
 			step.step = "method:ansible"
-			step.stepInfo = map[string]any{
-				"playbook_count":    len(playbooks),
-				"playbooks_skipped": skippedCount,
+			step.stepInfo = taskChainEntry{
+				PlaybookCount:    len(playbooks),
+				PlaybooksSkipped: &skipped,
 			}
 		}
 		steps = append(steps, step)
@@ -278,7 +293,7 @@ func winnowLocalPlaybooksForWinRM(v *provisionValidation, playbooks []machines.P
 	if localCount > 0 {
 		methods = append(methods, walkStep{
 			step:     "ansible_local_skipped_winrm",
-			stepInfo: map[string]any{"playbook_count": localCount},
+			stepInfo: taskChainEntry{PlaybookCount: localCount},
 		})
 	}
 	return remote, methods
@@ -315,7 +330,7 @@ func planWalk(machine *machines.Machine, v *provisionValidation, provisionedBefo
 				}
 				if i == 0 {
 					step.step = "method:shell"
-					step.stepInfo = map[string]any{"script_count": len(scripts)}
+					step.stepInfo = taskChainEntry{ScriptCount: len(scripts)}
 				}
 				methods = append(methods, step)
 			}
@@ -350,7 +365,7 @@ func planWalk(machine *machines.Machine, v *provisionValidation, provisionedBefo
 				}
 				if i == 0 {
 					step.step = "method:docker"
-					step.stepInfo = map[string]any{"compose_count": len(composeFiles)}
+					step.stepInfo = taskChainEntry{ComposeCount: len(composeFiles)}
 				}
 				methods = append(methods, step)
 			}
@@ -360,7 +375,7 @@ func planWalk(machine *machines.Machine, v *provisionValidation, provisionedBefo
 			skippedMethods = append(skippedMethods, key)
 			methods = append(methods, walkStep{
 				step:     "method_not_executable",
-				stepInfo: map[string]any{"method": key},
+				stepInfo: taskChainEntry{Method: key},
 			})
 		}
 	}

@@ -23,7 +23,7 @@ import (
 //	@Tags			Guest Agent
 //	@Produce		json
 //	@Param			machineName	path		string						true	"Machine name"
-//	@Success		200			{object}	map[string]interface{}		"Setup queued (powered off) or accrued (pending_power_cycle)"
+//	@Success		200			{object}	machineModifyResponse		"Setup queued (powered off) or accrued (pending_power_cycle)"
 //	@Failure		404			{object}	problem.Body				"Machine not found, or no VM exists behind it yet"
 //	@Failure		503			{object}	problem.Body				"VirtualBox is not installed, or the guest agent channel is disabled"
 //	@Router			/api/machines/{machineName}/guest-agent/setup [post]
@@ -88,15 +88,15 @@ func (s *Server) handleGuestAgentSetup(w http.ResponseWriter, r *http.Request) {
 			taskError(w, http.StatusInternalServerError, "Failed to queue the guest-agent setup")
 			return
 		}
-		writeJSON(w, map[string]any{
-			"success":          true,
-			"task_id":          task.ID,
-			"machine_name":     machine.Name,
-			"operation":        machines.OpModify,
-			"status":           tasks.StatusPending,
-			"requires_restart": true,
-			"pipe":             pipe,
-			"message":          "Guest-agent UART setup queued (machine is powered off) — the guest needs qemu-ga on its COM2 (baked into current box templates).",
+		writeJSON(w, machineModifyResponse{
+			Success:         true,
+			TaskID:          task.ID,
+			MachineName:     machine.Name,
+			Operation:       machines.OpModify,
+			Status:          tasks.StatusPending,
+			RequiresRestart: true,
+			Pipe:            pipe,
+			Message:         "Guest-agent UART setup queued (machine is powered off) — the guest needs qemu-ga on its COM2 (baked into current box templates).",
 		})
 	default:
 		merged, merr := s.machines.MergePendingChanges(r.Context(), machine.Name, doc)
@@ -105,15 +105,15 @@ func (s *Server) handleGuestAgentSetup(w http.ResponseWriter, r *http.Request) {
 			taskError(w, http.StatusInternalServerError, "Failed to store the guest-agent setup")
 			return
 		}
-		writeJSON(w, map[string]any{
-			"success":          true,
-			"machine_name":     machine.Name,
-			"operation":        machines.OpModify,
-			"status":           "pending_power_cycle",
-			"requires_restart": true,
-			"pending_changes":  merged,
-			"pipe":             pipe,
-			"message":          "Guest-agent UART setup accrued — applies at the next agent-driven power cycle; the guest needs qemu-ga on its COM2 (baked into current box templates).",
+		writeJSON(w, machineModifyResponse{
+			Success:         true,
+			MachineName:     machine.Name,
+			Operation:       machines.OpModify,
+			Status:          "pending_power_cycle",
+			RequiresRestart: true,
+			PendingChanges:  merged,
+			Pipe:            pipe,
+			Message:         "Guest-agent UART setup accrued — applies at the next agent-driven power cycle; the guest needs qemu-ga on its COM2 (baked into current box templates).",
 		})
 	}
 }

@@ -123,8 +123,7 @@ release, an installer and a module path to three different owners.
 
 | # | Code file:line | What is | Required change |
 | --- | --- | --- | --- |
-| 1 | `internal/oidc/manager.go:284,472` | every OIDC identity is `admin` | keep for the bound single-user desktop model; any multi-user use maps the role from claims |
-| 4 | `internal/oidc/manager.go:57-93,150-158,181-203,239-285`; `internal/server/server.go:30` | one `oidc.Manager` is the resource-server validator, the OAuth client (device, silent, refresh) and the outbound token source | split the three roles when next touched: `binding`, `provider`, `validator`, `tokenSource`, `client` inside `internal/oidc`, the exported surface unchanged |
+| 1 | `internal/oidc/validator.go:85`, `client.go:241` | every OIDC identity is `admin` | keep for the bound single-user desktop model; any multi-user use maps the role from claims |
 | 5 | `go.mod:1`; `.github/workflows/build-packages.yml:47,64,92,317,487,492`; `.golangci.yml:70`; `packaging/macos/Info.plist:10,45`; `packaging/windows/hyperweaver-agent.iss:11-12`; `README.md:16,26,89`; `internal/server/status.go:25,250` | three namespaces: the `Makr91` module path and release URLs, the `MarkProminic` UI artifact, the `STARTcloud` seeds, PKI, publisher and bundle id | consolidate under one namespace in a quiet window; import-path churn |
 | 6 | `.github/workflows/build-packages.yml:40-116,201-262,374-435` | the UI bake, seed and PKI steps are repeated across the three OS jobs | a composite action, or the duplication kept knowingly |
 | 7 | `.golangci.yml:26-35,47-54` | `gosec` excludes G204 file-wide; `forbidigo` bans `fmt.Print*` | keep both scoped and intentional |
@@ -339,6 +338,6 @@ has no config routes (`config: []`, contract decision 31).
 | restart keys | the flagged leaves of the five schemas, each with `restartReason`; the restart spawns the agent's own successor over the handoff channel, systemd's `Restart=always` on a headless install | `internal/server/settings.go:154-187`; `internal/server/trayclaim.go` (`POST /api/protocol/handoff`) |
 | key case | `snake_case` | |
 | public subsets | `GET /api/config/ticket` | `internal/server/server_routes.go` |
-| `last_modified_by` | the email the OIDC login minted the key with when the key has one, else the key's name, which for a tray key is the local OS account | `internal/server/settings.go:26-35`; `internal/oidc/state.go:65-71` |
+| `last_modified_by` | the email the OIDC login minted the key with when the key has one, else the key's name, which for a tray key is the local OS account | `internal/server/settings.go:26-35`; `internal/oidc/binding.go:132-137` |
 | backups | the contract's one `<name>.config.yaml.bak` on every save, and beside it the timestamped history under `backups/` with restore, an extension Mark ruled stays and is to grow into the other backends | `internal/configengine/save.go:40-52`; `internal/config/backups.go` |
 | exit timing | the restart handler answers 202 and exits at once; the successor's spawn and the listener shutdown drain the answer, so no wait on the response's end is needed (BoxVault exits on `finish`, the authorization server after 500 ms) | `internal/configengine/routes.go:167-171`; `internal/server/settings.go:175-186` |

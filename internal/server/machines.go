@@ -134,6 +134,17 @@ func (s *Server) handleListMachines(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, machineListResponse{Machines: list, Total: len(list)})
 }
 
+type machineDetailsResponse struct {
+	MachineInfo      *machines.Machine `json:"machine_info"`
+	Configuration    json.RawMessage   `json:"configuration"`
+	ActiveVNCSession any               `json:"active_vnc_session"`
+	PendingTasks     []*tasks.Task     `json:"pending_tasks"`
+	SystemStatus     string            `json:"system_status"`
+	WebAddress       *string           `json:"web_address"`
+	KnobCurrent      map[string]any    `json:"knob_current"`
+	PendingChanges   map[string]any    `json:"pending_changes"`
+}
+
 // handleMachineDetails: live status check (updating the registry when it
 // drifted), the machine record, its live configuration, and its pending
 // tasks.
@@ -143,7 +154,7 @@ func (s *Server) handleListMachines(w http.ResponseWriter, r *http.Request) {
 //	@Tags			Machine Management
 //	@Produce		json
 //	@Param			machineName	path	string	true	"Machine name"
-//	@Success		200	{object}	map[string]interface{}	"Machine details"
+//	@Success		200	{object}	machineDetailsResponse	"Machine details"
 //	@Failure		404	"Machine not found"
 //	@Router			/api/machines/{machineName} [get]
 func (s *Server) handleMachineDetails(w http.ResponseWriter, r *http.Request) {
@@ -206,10 +217,10 @@ func (s *Server) handleMachineDetails(w http.ResponseWriter, r *http.Request) {
 	// The post-provision welcome page (SHI's web address), read live from
 	// the working copy's results.yml/.vagrant/done.txt — null until the
 	// first successful provision writes it.
-	var webAddress any
+	var webAddress *string
 	if fresh.Provisioned() {
 		if url := machines.WelcomeURL(*fresh.Home); url != "" {
-			webAddress = url
+			webAddress = &url
 		}
 	}
 
@@ -228,7 +239,7 @@ func (s *Server) handleMachineDetails(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	// The accrued pending set (the accrue-changes contract) — null when none.
-	var pendingChanges any
+	var pendingChanges map[string]any
 	if pending := machines.ParseConfiguration(fresh).Section("pending_changes"); len(pending) > 0 {
 		pendingChanges = pending
 	}
@@ -248,15 +259,15 @@ func (s *Server) handleMachineDetails(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	writeJSON(w, map[string]any{
-		"machine_info":       fresh,
-		"configuration":      detailConfiguration(fresh, liveRaw),
-		"active_vnc_session": nil,
-		"pending_tasks":      active,
-		"system_status":      systemStatus,
-		"web_address":        webAddress,
-		"knob_current":       machines.KnobCurrent(fresh, liveRaw, osTypeID, settingsFile),
-		"pending_changes":    pendingChanges,
+	writeJSON(w, machineDetailsResponse{
+		MachineInfo:      fresh,
+		Configuration:    detailConfiguration(fresh, liveRaw),
+		ActiveVNCSession: nil,
+		PendingTasks:     active,
+		SystemStatus:     systemStatus,
+		WebAddress:       webAddress,
+		KnobCurrent:      machines.KnobCurrent(fresh, liveRaw, osTypeID, settingsFile),
+		PendingChanges:   pendingChanges,
 	})
 }
 

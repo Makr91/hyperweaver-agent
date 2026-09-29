@@ -225,7 +225,7 @@ func (s *Server) handleSSHSessionInfo(w http.ResponseWriter, r *http.Request) {
 //	@Tags			Console
 //	@Produce		json
 //	@Param			sessionId	path	string	true	"SSH session id"
-//	@Success		200	{object}	map[string]interface{}	"Session stopped"
+//	@Success		200	{object}	successMessageResponse	"Session stopped"
 //	@Failure		404	"SSH session not found"
 //	@Router			/api/ssh/sessions/{sessionId}/stop [delete]
 func (s *Server) handleStopSSHSession(w http.ResponseWriter, r *http.Request) {
@@ -233,7 +233,12 @@ func (s *Server) handleStopSSHSession(w http.ResponseWriter, r *http.Request) {
 		taskError(w, http.StatusNotFound, "SSH session not found")
 		return
 	}
-	writeJSON(w, map[string]any{"success": true, "message": "SSH session stopped."})
+	writeJSON(w, successMessageResponse{Success: true, Message: "SSH session stopped."})
+}
+
+type successMessageResponse struct {
+	Success bool   `json:"success"`
+	Message string `json:"message"`
 }
 
 // terminalControl is the client → shell control frame (the base's resize
