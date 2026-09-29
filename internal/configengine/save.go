@@ -66,7 +66,7 @@ func (e *Engine) commit(p prepared, actor string) ([]RestartEntry, error) {
 	e.lastModifiedBy = &who
 	e.lastModifiedTime = &when
 	if e.hooks.OnSaved != nil {
-		e.hooks.OnSaved(p.name, actor)
+		e.hooks.OnSaved(p.name, actor, e.pendingStatus())
 	}
 	return diff, nil
 }

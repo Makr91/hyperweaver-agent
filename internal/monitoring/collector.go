@@ -25,6 +25,14 @@ type Service struct {
 	lastError    string
 	samplesTaken int64
 	errorCount   int64
+	onCollected  func(cpu *CPUSample, memory *MemorySample, network []NetworkSample)
+}
+
+// SetOnCollected attaches the function called with every family a collection took.
+func (s *Service) SetOnCollected(fn func(cpu *CPUSample, memory *MemorySample, network []NetworkSample)) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.onCollected = fn
 }
 
 // NewService builds the facade. store may be nil (realtime-only mode).
@@ -161,7 +169,8 @@ func (s *Service) CollectOnce(ctx context.Context) map[string]string {
 	results := map[string]string{}
 	failed := ""
 
-	if cpu, err := s.sampler.SampleCPU(ctx); err != nil {
+	cpu, err := s.sampler.SampleCPU(ctx)
+	if err != nil {
 		results["cpu"] = "failed: " + err.Error()
 		failed = err.Error()
 	} else if s.store != nil {
@@ -175,7 +184,8 @@ func (s *Service) CollectOnce(ctx context.Context) map[string]string {
 		results["cpu"] = "sampled"
 	}
 
-	if memory, err := s.sampler.SampleMemory(ctx); err != nil {
+	memory, err := s.sampler.SampleMemory(ctx)
+	if err != nil {
 		results["memory"] = "failed: " + err.Error()
 		failed = err.Error()
 	} else if s.store != nil {
@@ -189,7 +199,8 @@ func (s *Service) CollectOnce(ctx context.Context) map[string]string {
 		results["memory"] = "sampled"
 	}
 
-	if network, err := s.sampler.SampleNetwork(ctx); err != nil {
+	network, err := s.sampler.SampleNetwork(ctx)
+	if err != nil {
 		results["network"] = "failed: " + err.Error()
 		failed = err.Error()
 	} else if s.store != nil {
@@ -210,10 +221,14 @@ func (s *Service) CollectOnce(ctx context.Context) map[string]string {
 		s.errorCount++
 		s.lastError = failed
 	}
+	onCollected := s.onCollected
 	s.mu.Unlock()
 
 	if failed != "" {
 		monlog().Warn("monitoring collection had failures", "results", results)
+	}
+	if onCollected != nil {
+		onCollected(cpu, memory, network)
 	}
 	return results
 }

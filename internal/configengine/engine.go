@@ -25,7 +25,7 @@ type Hook func(pointer string, value any, name string, document map[string]any, 
 type Hooks struct {
 	Writable      Hook
 	Reachable     Hook
-	OnSaved       func(name, actor string)
+	OnSaved       func(name, actor string, status RestartStatus)
 	SetupComplete func() bool
 }
 
@@ -245,10 +245,21 @@ func (e *Engine) Schema(name string) validation.Schema {
 	return e.schemas[name]
 }
 
+// SetOnSaved attaches the after-write function; it runs after every save and restore with the pending restart list, outside no lock, so it must not call the engine.
+func (e *Engine) SetOnSaved(fn func(name, actor string, status RestartStatus)) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.hooks.OnSaved = fn
+}
+
 // RestartPending answers the union of every write's restart list since the last restart.
 func (e *Engine) RestartPending() RestartStatus {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
+	return e.pendingStatus()
+}
+
+func (e *Engine) pendingStatus() RestartStatus {
 	list := make([]RestartEntry, 0, len(e.pending))
 	for _, entry := range e.pending {
 		list = append(list, entry)

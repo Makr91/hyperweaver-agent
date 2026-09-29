@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Makr91/hyperweaver-agent/internal/auth"
 	"github.com/Makr91/hyperweaver-agent/internal/tasks"
 )
 
@@ -22,7 +23,9 @@ const (
 	eventStatsTimeout  = 30 * time.Second
 )
 
-var eventTopics = []string{"health", "tasks", "hosts"}
+var eventTopics = []string{"health", "tasks", "hosts", "admin", "monitoring"}
+
+const eventTopicAdmin = "admin"
 
 type eventEntry struct {
 	id    string
@@ -122,7 +125,7 @@ func eventFrame(id, event string, data any) ([]byte, error) {
 	return []byte("id: " + id + "\nevent: " + event + "\ndata: " + string(raw) + "\n\n"), nil
 }
 
-func requestedEventTopics(query string) map[string]bool {
+func requestedEventTopics(query string, admin bool) (topics map[string]bool, refused bool) {
 	requested := map[string]bool{}
 	for _, name := range strings.Split(query, ",") {
 		name = strings.TrimSpace(name)
@@ -132,13 +135,19 @@ func requestedEventTopics(query string) map[string]bool {
 			}
 		}
 	}
+	if requested[eventTopicAdmin] && !admin {
+		return nil, true
+	}
 	if len(requested) > 0 {
-		return requested
+		return requested, false
 	}
 	for _, topic := range eventTopics {
+		if topic == eventTopicAdmin && !admin {
+			continue
+		}
 		requested[topic] = true
 	}
-	return requested
+	return requested, false
 }
 
 func subscribedTopics(topics map[string]bool) []string {
@@ -260,18 +269,23 @@ func (s *Server) publishStats() {
 }
 
 // @Summary		Event stream (server-sent events)
-// @Description	Minimum role: viewer. The one event stream of the Universal Events Contract, plain WHATWG server-sent events. topics is a comma-separated list of health, tasks and hosts; unknown names are ignored and an empty list subscribes to every topic. The first frame is retry: 3000 followed by the ready event carrying the newest id and the subscribed topics. Every event carries id <epoch-ms>-<seq>, a kebab-case event name and one line of JSON data; a :hb comment line is sent after 25 seconds without a frame. Topic tasks sends task-updated, one task row as GET /api/tasks answers it, when a task is created and on every change of its status, progress_percent, progress_info or error_message. Topic hosts sends stats-updated, the GET /api/stats document, when a machine is created or removed and when one changes status. Topic health sends health, the GET /api/health report, whenever a task ends and the report differs from the last one sent. No topic has a snapshot event. The ring keeps the last 500 events or 5 minutes, whichever is larger: a Last-Event-ID inside it replays every later event of the subscribed topics, one outside it answers a reset event naming the subscribed topics. A task's output and every terminal stay on their WebSockets.
+// @Description	Minimum role: viewer; the admin topic needs admin. The one event stream of the Universal Events Contract, plain WHATWG server-sent events. topics is a comma-separated list of health, tasks, hosts, admin and monitoring; unknown names are ignored and an empty list subscribes to every topic the caller may read. The first frame is retry: 3000 followed by the ready event carrying the newest id and the subscribed topics. Every event carries id <epoch-ms>-<seq>, a kebab-case event name and one line of JSON data; a :hb comment line is sent after 25 seconds without a frame. Topic tasks sends task-updated, one task row as GET /api/tasks answers it, when a task is created and on every change of its status, progress_percent, progress_info or error_message. Topic hosts sends stats-updated, the GET /api/stats document, when a machine is created or removed and when one changes status. Topic health sends health, the GET /api/health report, whenever a task ends and the report differs from the last one sent. Topic admin sends restart-required, {required, last_modified_by, last_modified_time}, after every configuration save and backup restore, and {required: false} as the agent restarts; a non-admin key naming the topic is answered 403. Topic monitoring sends cpu-sample {cpu: [sample]} with per_core_parsed, memory-sample {memory: [sample]} and network-sample {usage: [samples]}, the members GET /api/monitoring/system/cpu, /system/memory and /network/usage answer, whenever the collector takes them: on every collector tick while monitoring.storage_enabled, else only on POST /api/monitoring/collect. No topic has a snapshot event. The ring keeps the last 500 events or 5 minutes, whichever is larger: a Last-Event-ID inside it replays every later event of the subscribed topics, one outside it answers a reset event naming the subscribed topics. A task's output and every terminal stay on their WebSockets.
 // @Tags			Status
 // @Produce		text/event-stream
-// @Param			topics			query	string	false	"Comma-separated topics: health, tasks, hosts"
+// @Param			topics			query	string	false	"Comma-separated topics: health, tasks, hosts, admin, monitoring"
 // @Param			Last-Event-ID	header	string	false	"The id of the last frame processed, sent on a reconnect only"
 // @Success		200	"The stream"
 // @Failure		401	{object}	auth.ErrorMsg	"Missing credential"
-// @Failure		403	{object}	auth.ErrorMsg	"Invalid credential or insufficient role"
+// @Failure		403	{object}	auth.ErrorMsg	"Invalid credential, insufficient role, or the admin topic asked for by a non-admin"
 // @Router			/api/events [get]
 func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 	controller := http.NewResponseController(w)
-	topics := requestedEventTopics(r.URL.Query().Get("topics"))
+	identity := auth.FromContext(r.Context())
+	topics, refused := requestedEventTopics(r.URL.Query().Get("topics"), identity != nil && identity.Role == "admin")
+	if refused {
+		auth.WriteMsg(w, http.StatusForbidden, "The admin topic requires the admin role")
+		return
+	}
 
 	header := w.Header()
 	header.Set("Content-Type", "text/event-stream; charset=utf-8")

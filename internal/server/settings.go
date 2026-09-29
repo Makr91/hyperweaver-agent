@@ -20,6 +20,7 @@ import (
 const configUploadLimit = 1024 * 1024
 
 func (s *Server) mountConfigRoutes(mux *http.ServeMux, requireKey func(http.Handler) http.Handler) {
+	s.cfg.Engine().SetOnSaved(s.publishRestartRequired)
 	s.cfg.Engine().Routes(mux, configengine.Auth{
 		Admin: requireKey,
 		Actor: func(r *http.Request) string {
@@ -171,6 +172,7 @@ func (s *Server) restartSelf() {
 		}
 	}
 
+	s.publishRestartCleared()
 	s.teardown()
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()

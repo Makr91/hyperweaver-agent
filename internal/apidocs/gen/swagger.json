@@ -8636,10 +8636,10 @@
         },
         "/api/events": {
             "get": {
-                "description": "Minimum role: viewer. The one event stream of the Universal Events Contract, plain WHATWG server-sent events. topics is a comma-separated list of health, tasks and hosts; unknown names are ignored and an empty list subscribes to every topic. The first frame is retry: 3000 followed by the ready event carrying the newest id and the subscribed topics. Every event carries id \u003cepoch-ms\u003e-\u003cseq\u003e, a kebab-case event name and one line of JSON data; a :hb comment line is sent after 25 seconds without a frame. Topic tasks sends task-updated, one task row as GET /api/tasks answers it, when a task is created and on every change of its status, progress_percent, progress_info or error_message. Topic hosts sends stats-updated, the GET /api/stats document, when a machine is created or removed and when one changes status. Topic health sends health, the GET /api/health report, whenever a task ends and the report differs from the last one sent. No topic has a snapshot event. The ring keeps the last 500 events or 5 minutes, whichever is larger: a Last-Event-ID inside it replays every later event of the subscribed topics, one outside it answers a reset event naming the subscribed topics. A task's output and every terminal stay on their WebSockets.",
+                "description": "Minimum role: viewer; the admin topic needs admin. The one event stream of the Universal Events Contract, plain WHATWG server-sent events. topics is a comma-separated list of health, tasks, hosts, admin and monitoring; unknown names are ignored and an empty list subscribes to every topic the caller may read. The first frame is retry: 3000 followed by the ready event carrying the newest id and the subscribed topics. Every event carries id \u003cepoch-ms\u003e-\u003cseq\u003e, a kebab-case event name and one line of JSON data; a :hb comment line is sent after 25 seconds without a frame. Topic tasks sends task-updated, one task row as GET /api/tasks answers it, when a task is created and on every change of its status, progress_percent, progress_info or error_message. Topic hosts sends stats-updated, the GET /api/stats document, when a machine is created or removed and when one changes status. Topic health sends health, the GET /api/health report, whenever a task ends and the report differs from the last one sent. Topic admin sends restart-required, {required, last_modified_by, last_modified_time}, after every configuration save and backup restore, and {required: false} as the agent restarts; a non-admin key naming the topic is answered 403. Topic monitoring sends cpu-sample {cpu: [sample]} with per_core_parsed, memory-sample {memory: [sample]} and network-sample {usage: [samples]}, the members GET /api/monitoring/system/cpu, /system/memory and /network/usage answer, whenever the collector takes them: on every collector tick while monitoring.storage_enabled, else only on POST /api/monitoring/collect. No topic has a snapshot event. The ring keeps the last 500 events or 5 minutes, whichever is larger: a Last-Event-ID inside it replays every later event of the subscribed topics, one outside it answers a reset event naming the subscribed topics. A task's output and every terminal stay on their WebSockets.",
                 "parameters": [
                     {
-                        "description": "Comma-separated topics: health, tasks, hosts",
+                        "description": "Comma-separated topics: health, tasks, hosts, admin, monitoring",
                         "in": "query",
                         "name": "topics",
                         "schema": {
@@ -8684,7 +8684,7 @@
                                 }
                             }
                         },
-                        "description": "Invalid credential or insufficient role"
+                        "description": "Invalid credential, insufficient role, or the admin topic asked for by a non-admin"
                     }
                 },
                 "summary": "Event stream (server-sent events)",

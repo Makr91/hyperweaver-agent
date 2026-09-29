@@ -103,6 +103,7 @@ func New(cfg *config.Config, keyStore *keys.Store, trayTokens *auth.TrayTokens, 
 	machines.SetOIDCTokenSource(s.oidcMgr.bearerToken)
 	taskQueue.Store().Notify = s.publishTask
 	machineStore.Notify = s.publishStats
+	monitor.SetOnCollected(s.publishSamples)
 
 	mux := http.NewServeMux()
 	if err := s.registerRoutes(mux); err != nil {
