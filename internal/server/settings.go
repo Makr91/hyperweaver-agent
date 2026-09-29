@@ -24,10 +24,14 @@ func (s *Server) mountConfigRoutes(mux *http.ServeMux, requireKey func(http.Hand
 	s.cfg.Engine().Routes(mux, configengine.Auth{
 		Admin: requireKey,
 		Actor: func(r *http.Request) string {
-			if identity := auth.FromContext(r.Context()); identity != nil {
-				return identity.Name
+			identity := auth.FromContext(r.Context())
+			if identity == nil {
+				return ""
 			}
-			return ""
+			if minted, ok := s.oidcMgr.identityForKey(identity.ID); ok && minted.Email != "" {
+				return minted.Email
+			}
+			return identity.Name
 		},
 	}, s.restartSelf, configUploadLimit)
 	mux.Handle("GET /api/config/backups", requireKey(http.HandlerFunc(s.handleListBackups)))

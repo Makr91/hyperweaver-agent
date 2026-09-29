@@ -91,9 +91,9 @@ properties:
         type: array
         items:
           type: string
-        default: [openid, profile, email, organizations]
+        default: [openid, profile, email]
         title: Scopes
-        description: openid is required; organizations carries the organization claim
+        description: openid is required; every scope must be one the client is registered for at the identity provider
         order: 4
       allowed_users:
         type: array

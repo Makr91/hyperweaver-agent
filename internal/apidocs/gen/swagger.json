@@ -5701,9 +5701,7 @@
                     "current_version": {
                         "type": "string"
                     },
-                    "latest_version": {
-                        "type": "string"
-                    },
+                    "latest_version": {},
                     "message": {
                         "type": "string"
                     },
@@ -6594,7 +6592,7 @@
         },
         "/api/app/updates/check": {
             "get": {
-                "description": "Minimum role: viewer. Fetches the configured versioninfo document (updates.versioninfo_url) and compares against the running build.",
+                "description": "Minimum role: viewer. Fetches the configured versioninfo document (updates.versioninfo_url) and compares against the running build. When no URL is configured or the document cannot be fetched or read, the answer is still 200 with update_available false, latest_version null and the reason in message, so a page never draws a failure for a check it could not make.",
                 "responses": {
                     "200": {
                         "content": {
@@ -6605,26 +6603,6 @@
                             }
                         },
                         "description": "Update check result"
-                    },
-                    "400": {
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/problem.Body"
-                                }
-                            }
-                        },
-                        "description": "Update checking not configured"
-                    },
-                    "500": {
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/problem.Body"
-                                }
-                            }
-                        },
-                        "description": "Versioninfo fetch or parse failure"
                     }
                 },
                 "summary": "Check for application updates",

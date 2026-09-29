@@ -92,36 +92,42 @@ type updateCheckResponse struct {
 	Message         string `json:"message"`
 	Timestamp       string `json:"timestamp"`
 	CurrentVersion  string `json:"current_version"`
-	LatestVersion   string `json:"latest_version"`
+	LatestVersion   any    `json:"latest_version"`
 	UpdateAvailable bool   `json:"update_available"`
 	ReleaseURL      any    `json:"release_url"`
 	ReleaseDate     any    `json:"release_date"`
 	Changelog       any    `json:"changelog"`
 }
 
+func updateUnknown(reason string) updateCheckResponse {
+	return updateCheckResponse{
+		Success:        true,
+		Message:        reason,
+		Timestamp:      time.Now().UTC().Format(time.RFC3339),
+		CurrentVersion: version.Version,
+	}
+}
+
 // handleUpdateCheck mirrors the Node agent's GET /app/updates/check: fetch
 // the configured versioninfo document and compare against the running build.
 //
 //	@Summary		Check for application updates
-//	@Description	Minimum role: viewer. Fetches the configured versioninfo document (updates.versioninfo_url) and compares against the running build.
+//	@Description	Minimum role: viewer. Fetches the configured versioninfo document (updates.versioninfo_url) and compares against the running build. When no URL is configured or the document cannot be fetched or read, the answer is still 200 with update_available false, latest_version null and the reason in message, so a page never draws a failure for a check it could not make.
 //	@Tags			System
 //	@Produce		json
 //	@Success		200	{object}	updateCheckResponse	"Update check result"
-//	@Failure		400	{object}	problem.Body	"Update checking not configured"
-//	@Failure		500	{object}	problem.Body	"Versioninfo fetch or parse failure"
 //	@Router			/api/app/updates/check [get]
 func (s *Server) handleUpdateCheck(w http.ResponseWriter, r *http.Request) {
 	url := s.cfg.Updates.VersionInfoURL
 	if url == "" {
-		errorResponse(w, http.StatusBadRequest,
-			"Update checking not configured", "Set updates.versioninfo_url in configuration")
+		writeJSON(w, updateUnknown("Update checking is not configured: set updates.versioninfo_url"))
 		return
 	}
 
 	info, available, err := updater.Check(r.Context(), url, version.Version)
 	if err != nil {
-		slog.Error("update check failed", "error", err, "url", url)
-		errorResponse(w, http.StatusInternalServerError, "Failed to check for updates", err.Error())
+		slog.Warn("update check failed", "error", err, "url", url)
+		writeJSON(w, updateUnknown("Failed to check for updates: "+err.Error()))
 		return
 	}
 

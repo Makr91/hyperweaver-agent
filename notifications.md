@@ -148,7 +148,6 @@ release, an installer and a module path to three different owners.
 | # | Code file:line | What is | Required change |
 | --- | --- | --- | --- |
 | 1 | `internal/server/oidc_flow.go:199,361-362` | every OIDC identity is `admin` | keep for the bound single-user desktop model; any multi-user use maps the role from claims |
-| 2 | `internal/config/config.go:77`; `defaults.go:124-129`; `settings_schema_core.go:246-247`; `oidc_jwt.go:68-76` | the `organizations` scope is requested and the claim is never parsed | parse it (organization display, future ACLs) or stop requesting it |
 | 3 | `internal/server/oidc_flow.go:1`, `oidc_jwt.go:1`, `oidc_silent.go:1`, `oidc_provider.go:1`, `oidc_state.go:1`, `oidc_refresh.go:1`, `oidc_login.go:1` | the OIDC files live in `package server` with no dependency on it | move them to `internal/oidc/` |
 | 4 | `internal/server/oidc_flow.go:45-76,117-124,171-200,202-238`; `server.go:85` | one `oidcManager` is the resource-server validator, the OAuth client (device, silent, refresh) and the outbound token source | split the three roles when next touched |
 | 5 | `go.mod:1`; `.github/workflows/build-packages.yml:47,64,92`; `.golangci.yml:70`; `packaging/macos/Info.plist:10,43`; `packaging/windows/hyperweaver-agent.iss:11-12`; `README.md:16,26,89` | three namespaces: the `Makr91` module path and release URLs, the `MarkProminic` UI artifact, the `STARTcloud` seeds, PKI, publisher and bundle id | consolidate under one namespace in a quiet window; import-path churn |
@@ -332,10 +331,57 @@ Every route below is hyperweaver-ui's own call, carried into the shared
 UI as it was and prefixed `/api` under section 1's rule; the page reads
 each once as it draws and again on Refresh.
 
+Answered by this agent: the settings wire (`GET`/`PUT /api/settings`, its
+schema, backups, restore, `POST /api/server/restart`) is retired for the
+config contract's routes over the five files `status.config` lists. The
+shared UI has dropped that half of its Agent settings page; the agent's
+configuration is the shared configuration pages' at
+`/admin/config/<name>`. What is left on the wire:
+
 | Route the UI sends | Answer today | Read by | Required change |
 | --- | --- | --- | --- |
-| `GET /api/settings` | 404 | `features/hosts/api/manage.js` (`fetchSettings`), `components/AgentSettings.jsx` | serve the settings document under `/api`, the route `internal/server/settings.go` serves at the root today |
-| `GET /api/settings/schema` | 404 | `api/agentSettings.js` (`fetchSettingsSchema`) | serve the schema under `/api` |
-| `GET /api/settings/backups` | 404 | `api/agentSettings.js` (`fetchSettingsBackups`) | serve the backups list under `/api`; with it `POST /api/settings/restore/{file}`, `DELETE /api/settings/backups/{file}`, `PUT /api/settings`, `POST /api/server/restart` |
-| `GET /api/app/updates/check` | 500 "Failed to check for updates: versioninfo fetch returned 404 Not Found" | `api/agentSettings.js` (`checkAgentUpdate`) | answer `{ update_available: false }` with the reason when the version source cannot be reached, never 500; the page draws no Update button either way |
-| `GET /api/api-keys`, `POST /api/api-keys/generate`, `POST /api/api-keys/bootstrap`, `DELETE /api/api-keys/{id}` | unproven, the page never reached them | `api/apiKeyAPI.js`, `components/ApiKeysTab.jsx` | serve under `/api`, the API management tab of the same page |
+| `GET /api/settings` then `PUT /api/settings` with `machines.orchestration.strategy` | 404 | `components/OrchestrationPanel.jsx` (`setStrategy`), the Manage page's orchestration panel | the file is `machines`, the key path `/machines/orchestration/strategy`, `enum: [sequential, parallel_by_priority, staggered]`, no restart (`internal/config/schema/machines.schema.yaml:79-104`); the panel reads `GET /api/config/machines` and writes `PUT /api/config/machines` with `{ "machines": { "orchestration": { "strategy": "<value>" } } }`; `enabled` (`:85-91`, restart) and `priority_delay` (`:98-103`) sit beside it |
+| `GET /api/settings` then `PUT /api/settings` with the template `sources` category | 404 | `components/TemplatesSection.jsx` (`saveSources`), the Manage page's Templates section | the file is `storage`, the key path `/template_sources/sources`, a map keyed `^[a-z0-9_]+$` whose entries carry `enabled`, `display_name`, `url`, `default`, `auth_token` (`writeOnly`), `ca_file` (`internal/config/schema/storage.schema.yaml:63-106`); the section writes `PUT /api/config/storage` with `{ "template_sources": { "sources": { "<id>": { … } } } }`, `null` for an entry to remove, the merge patch of the contract; the catalogs map is `/catalog_sources/sources` (`:115-149`) |
+| `GET /api/api-keys`, `POST /api/api-keys/generate`, `POST /api/api-keys/bootstrap`, `DELETE /api/api-keys/{id}` | answer under `/api`, as you said | `api/apiKeyAPI.js`, `components/ApiKeysTab.jsx` | none |
+
+## 13. The config wire as built, and where it differs from its siblings
+
+Why: the shared UI's editor scenarios carry this agent's answers as
+fixtures, and the contract's section 9 row for the agents reads "to be
+recorded"; both need the shapes from the code with `file:line`, and the
+places this agent departs from BoxVault and the authorization server
+written down so a reader never argues them again.
+
+Read whole for this record: `universal-config.md`, BoxVault's
+`backend/app/config/config-engine.js` and `boxvault.js`, the authorization
+server's `ConfigEngine.groovy` and `ConfigApiController.groovy`; the catalog
+has no config routes (`config: []`, contract decision 31).
+
+### Fixtures
+
+| Member | Value | File:line |
+| --- | --- | --- |
+| `status.config` | `["app", "auth", "db", "machines", "storage"]`, the load order | `internal/config/defaults.go:21`; `internal/server/status.go` (`Config: config.Names`) |
+| `PUT /api/config/<name>` 200 | `{ "message": "Configuration saved.", "requires_restart": [ { "pointer", "title", "reason" } ] }`, `[]` when no flagged leaf changed | `internal/configengine/routes.go:20-24,225-228`; the entry `engine.go:32-37` |
+| `PUT` 422 | `application/problem+json` `{ "type": "https://auth.startcloud.com/probs/validation", "title": "The configuration did not pass validation.", "status": 422, "errors": [ { "pointer": "/server/port", "rule": "maximum", "params": { "maximum": 65535 }, "detail": "port must be at most 65535." } ] }`; `rule: readOnly` with empty `params` for `/schemaVersion`; 409 `conflict` when every rule is `unique` | `internal/problem/problem.go:49-64` (the entry and body), `:146-177` (the send), `:217-231` (422 or 409); the title `internal/configengine/routes.go:126-128`; the sentences `problem.go:27-47` |
+| `GET /api/config/restart-status` | `{ "restart_required": <bool>, "requires_restart": [ … ], "last_modified_by": "<actor>" or null, "last_modified_time": "<RFC 3339 UTC, Z>" or null }`, entries sorted by pointer | `internal/configengine/engine.go:39-45,262-274`; the time `engine.go:283-285` |
+| `POST /api/config/restart` | 202 `{ "message": "Restarting." }`, then the successor spawn | `routes.go:167-171`; `internal/server/settings.go:154-187` |
+| `GET /api/setup/status` | `{ "setup_complete": <bool> }`, always `true` on a desktop run | `routes.go:237-239`; `main.go:109-112` |
+| `PUT /api/setup` | pointers as `/configs/<name>/…`; 200 `{ "message": "Setup complete." }` | `internal/configengine/save.go:89-118`; `routes.go:303-331` |
+| upload | `POST /api/config/<name>/upload`, parts `file` and `pointer`, 200 `{ "path" }`, 413 `payload-too-large`, 422 rule `pointer` at `/pointer`, rule `writable` with `params: { user }` | `routes.go:346-387`; `save.go:227-252` |
+| backups | `GET`/`POST /api/config/backups`, `DELETE /api/config/backups/{id}`, `POST /api/config/backups/{id}/restore` (422 as the `PUT`) | `internal/server/settings.go:33-127` |
+
+### The section 9 row of this agent
+
+| Column | Value | File:line |
+| --- | --- | --- |
+| `CONFIG_DIR` default and names | the per-user configuration folder (`os.UserConfigDir()/hyperweaver-agent`, Roaming on Windows), `CONFIG_DIR` when set, `--config` naming the folder; the five names above | `internal/config/config.go:64-74,84-114`; `main.go:99-116` |
+| development directory | none: the desktop agent has no development layout; a missing file is seeded from the embedded `seed/<name>.config.yaml` at first run on a desktop, never on a headless run, the desktop install being its own installer (Mark's ruling) | `internal/config/defaults.go:14-18,41-62`; `main.go:109` |
+| setup token | headless installs alone: created at boot while no key exists, the bootstrap key claimed under it, `PUT /api/setup` deleting it; a desktop run answers `setup_complete: true` always | `main.go:184-188`; `internal/configengine/save.go:178-225` |
+| upgrade mechanism | none recorded; no migration list yet (nobody else runs this agent) | |
+| restart keys | the flagged leaves of the five schemas, each with `restartReason`; the restart spawns the agent's own successor over the handoff channel, systemd's `Restart=always` on a headless install | `internal/server/settings.go:154-187`; `internal/server/trayclaim.go` (`POST /api/protocol/handoff`) |
+| key case | `snake_case` | |
+| public subsets | `GET /api/config/ticket` | `internal/server/server_routes.go` |
+| `last_modified_by` | the email the OIDC login minted the key with when the key has one, else the key's name, which for a tray key is the local OS account | `internal/server/settings.go:26-35`; `internal/server/oidc_state.go:66-71` |
+| backups | the contract's one `<name>.config.yaml.bak` on every save, and beside it the timestamped history under `backups/` with restore, an extension Mark ruled stays and is to grow into the other backends | `internal/configengine/save.go:40-52`; `internal/config/backups.go` |
+| exit timing | the restart handler answers 202 and exits at once; the successor's spawn and the listener shutdown drain the answer, so no wait on the response's end is needed (BoxVault exits on `finish`, the authorization server after 500 ms) | `internal/configengine/routes.go:167-171`; `internal/server/settings.go:175-186` |
