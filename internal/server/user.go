@@ -23,6 +23,8 @@ type userResponse struct {
 	Email             *string  `json:"email"`
 	AuthProvider      *string  `json:"auth_provider"`
 	CustomerID        *string  `json:"customer_id"`
+	Issuer            *string  `json:"issuer"`
+	Subject           *string  `json:"subject"`
 	Role              string   `json:"role"`
 	Organizations     []string `json:"organizations"`
 	PreferredLanguage *string  `json:"preferred_language"`
@@ -50,7 +52,7 @@ func optional(value string) *string {
 }
 
 // @Summary		The signed-in person
-// @Description	Minimum role: viewer. The person the calling key stands for, in the identity provider's profile shape the shared UI reads: id, username and name are the key's, email, auth_provider ("oidc") and customer_id come from the federated login that minted the key and are null on a plain key, role is the key's own (admin, operator or viewer), organizations is always empty, and the preferred_* members are the person's stored preferences, null when unset. Preferences are kept per person: by the email of a federated login, else by the key's name.
+// @Description	Minimum role: viewer. The person the calling key stands for, in the identity provider's profile shape the shared UI reads: id, username and name are the key's, email, auth_provider ("oidc"), customer_id, issuer and subject come from the federated login that minted the key and are null on a plain key, role is the key's own (admin, operator or viewer), organizations is always empty, and the preferred_* members are the person's stored preferences, null when unset. Preferences are kept per person: by the email of a federated login, else by the key's name.
 // @Tags			Local Login
 // @Produce		json
 // @Success		200	{object}	userResponse	"The person"
@@ -76,6 +78,8 @@ func (s *Server) handleUser(w http.ResponseWriter, r *http.Request) {
 		response.AuthProvider = optional("oidc")
 		response.Email = optional(minted.Email)
 		response.CustomerID = optional(minted.CustomerID)
+		response.Issuer = optional(s.oidcMgr.Issuer())
+		response.Subject = optional(minted.Subject)
 	}
 	writeJSON(w, response)
 }
@@ -119,14 +123,6 @@ func validatePreference(name, value string) *problem.Error {
 		return nil
 	}
 	return &failure
-}
-
-type preferencePatchRequest struct {
-	Language *string `json:"language"`
-	Mode     *string `json:"mode"`
-	Theme    *string `json:"theme"`
-	Motion   *string `json:"motion"`
-	Timezone *string `json:"timezone"`
 }
 
 func decodePreferencePatch(r *http.Request) (map[string]*string, []problem.Error, bool) {
@@ -174,7 +170,7 @@ func decodePreferencePatch(r *http.Request) (map[string]*string, []problem.Error
 // @Tags			Local Login
 // @Accept			json
 // @Produce		json
-// @Param			body	body		preferencePatchRequest	true	"The members to change"
+// @Param			body	body		map[string]string	true	"The members to change: language, mode, theme, motion, timezone; null clears one"
 // @Success		200		{object}	prefs.Preferences		"The preferences as stored"
 // @Failure		400		{object}	problem.Body			"Unreadable body"
 // @Failure		401		{object}	problem.Body			"Missing credential"

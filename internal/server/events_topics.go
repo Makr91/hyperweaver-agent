@@ -35,6 +35,10 @@ func (s *Server) publishProfileUpdated(person string) {
 	s.events.publishTo(eventTopicProfile, "profile-updated", struct{}{}, person)
 }
 
+func (s *Server) publishUnreadCount(person string, count int) {
+	s.events.publishTo(eventTopicNotifications, "unread-count", unreadCountResponse{Count: count}, person)
+}
+
 func (s *Server) publishRestartCleared() {
 	s.events.publish(eventTopicAdmin, "restart-required", restartRequiredEvent{Required: false})
 }

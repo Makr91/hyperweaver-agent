@@ -14,6 +14,7 @@ import (
 
 // KeyIdentity is the federated account a minted key stands for.
 type KeyIdentity struct {
+	Subject    string `json:"subject"`
 	Email      string `json:"email"`
 	CustomerID string `json:"customer_id"`
 }
@@ -22,6 +23,7 @@ type stateFile struct {
 	BoundSubject    string                `json:"bound_subject"`
 	BoundEmail      string                `json:"bound_email"`
 	BoundCustomerID string                `json:"bound_customer_id"`
+	RefreshToken    string                `json:"refresh_token,omitempty"`
 	MintedKeys      map[int64]KeyIdentity `json:"minted_keys"`
 }
 
@@ -32,6 +34,7 @@ type binding struct {
 	subject      string
 	email        string
 	customerID   string
+	refreshToken string
 	mintedKeys   map[int64]KeyIdentity
 }
 
@@ -48,8 +51,25 @@ func newBinding(storePath string, allowedUsers []string, load bool) *binding {
 	b.subject = state.BoundSubject
 	b.email = state.BoundEmail
 	b.customerID = state.BoundCustomerID
+	b.refreshToken = state.RefreshToken
 	b.mintedKeys = state.MintedKeys
 	return b
+}
+
+func (b *binding) storedRefreshToken() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.refreshToken
+}
+
+func (b *binding) setRefreshToken(token string) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.refreshToken == token {
+		return
+	}
+	b.refreshToken = token
+	b.saveLocked()
 }
 
 func loadState(path string) (*stateFile, error) {
@@ -75,6 +95,7 @@ func (b *binding) saveLocked() {
 		BoundSubject:    b.subject,
 		BoundEmail:      b.email,
 		BoundCustomerID: b.customerID,
+		RefreshToken:    b.refreshToken,
 		MintedKeys:      b.mintedKeys,
 	}
 	raw, err := json.MarshalIndent(state, "", "  ")
@@ -120,7 +141,7 @@ func (b *binding) record(entityID int64, claims *identityClaims, keyExists func(
 		b.email = claims.Email
 		b.customerID = claims.CustomerID
 	}
-	b.mintedKeys[entityID] = KeyIdentity{Email: claims.Email, CustomerID: claims.CustomerID}
+	b.mintedKeys[entityID] = KeyIdentity{Subject: claims.stableID(), Email: claims.Email, CustomerID: claims.CustomerID}
 	for id := range b.mintedKeys {
 		if id != entityID && !keyExists(id) {
 			delete(b.mintedKeys, id)

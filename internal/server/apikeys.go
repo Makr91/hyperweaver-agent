@@ -255,10 +255,14 @@ type keyInfoResponse struct {
 	Email string `json:"email,omitempty"`
 	// The federated account's customer id, from the access token's customer_id claim (SSO-minted keys only)
 	CustomerID string `json:"customer_id,omitempty"`
+	// The identity provider's origin the key was minted against (SSO-minted keys only)
+	Issuer string `json:"issuer,omitempty"`
+	// The federated account's stable id, the UUID claim with sub fallback (SSO-minted keys only)
+	Subject string `json:"subject,omitempty"`
 }
 
 // @Summary		Describe the calling key
-// @Description	Minimum role: viewer (every valid key may inspect itself). Keys minted by a federated login (device or silent SSO) additionally answer auth_provider ("oidc"), email, and customer_id — the identity read off the validated token at login; plain keys omit all three (the UI consumes fail-open).
+// @Description	Minimum role: viewer (every valid key may inspect itself). Keys minted by a federated login (device or silent SSO) additionally answer auth_provider ("oidc"), email, customer_id, issuer and subject — the identity read off the validated token at login and the provider it came from, so the UI can draw the person's profile at <issuer>/user/profile; plain keys omit all five (the UI consumes fail-open).
 // @Tags			API Keys
 // @Produce		json
 // @Success		200	{object}	keyInfoResponse	"The calling key's attributes"
@@ -289,6 +293,8 @@ func (s *Server) handleKeyInfo(w http.ResponseWriter, r *http.Request) {
 		response.AuthProvider = "oidc"
 		response.Email = ssoIdentity.Email
 		response.CustomerID = ssoIdentity.CustomerID
+		response.Issuer = s.oidcMgr.Issuer()
+		response.Subject = ssoIdentity.Subject
 	}
 	writeJSON(w, response)
 }

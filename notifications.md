@@ -74,48 +74,6 @@ against.
 - `G:\Projects\hyperweaver-ui\notifications.md`: the UI side of the same
   rule and the feature-first tree
 
-## 7. Code gaps against the contracts
-
-Why: `GET /settings` hands the registry token to any admin session in the
-clear, the environment handshake breaks a restart under any process manager
-that scrubs the environment, the shared UI cannot draw the admin, setup,
-health, footer or event surfaces from a status payload and schema it does
-not recognise, a refused write paints as a generic card instead of at the
-field, a bound IdP token presented as `Bearer` is accepted, and the
-catalog's Open-in-Hyperweaver button and the platform-wide `device` removal
-both stay blocked on this repository.
-
-Each row: what the code does → required change → deciding source.
-
-| Code file:line | What is | Required change | Deciding source |
-| --- | --- | --- | --- |
-| `internal/config/paths.go:123`; `internal/loginitem/loginitem_linux.go:17`; `internal/server/hostsfile.go:28`; `internal/prereqs/prereqs.go:153-154`; `internal/sshrun/sync.go:60`; `internal/hostshell/hostshell_unix.go:27`; `internal/server/settings.go:224` | reads of `XDG_DATA_HOME`, `XDG_CONFIG_HOME`, `SystemRoot`, `VBOX_MSI_INSTALL_PATH`, `VBOX_INSTALL_PATH`, `PATH`, `SHELL`, `INVOCATION_ID` | tolerated as operating-system facts; none may become a configuration setting, and a value the file can carry must come from the file | `universal-config.md:70` |
-| `internal/server/status.go:21-40` | no `analytics` member | optional: `{ script_url, attribute, value }` only when an estate-run collector is configured and its hostname is one this agent's configuration names; absent otherwise, and absent today is correct | `universal-navbar.md:623`; `universal-identity.md:261` |
-| `internal/server/status.go:21-40`; `server_routes.go:11-445` | the payload carries no sidebar member, and none is wanted: sidebar entries come only from a feature's `sidebar(status, account)` export, and the `actionMenu` swap that moves the user menu to the sidebar's foot is a feature export too | nothing for this agent to add; hyperweaver is named the first fit for the `actionMenu` swap and is not being changed now, so when hyperweaver-ui converges on the shared build its feature owns that export, and no field for it ever lands in `/api/status` | `universal-navbar.md:358-475` (`:434-435`, `:463-468`); `UI-GROWTH-GUIDE.md:56` |
-| `internal/keys/keys.go:143`; `middleware.go:140`; `apidocs.go:214` | the API-key prefix is `hw_` | keep `hw_`; a `wh_` anywhere is a defect | this repository's own rule |
-
-## 8. Packaging and workflows
-
-Why: a workflow that grows a hand-written smoke script diverges from every
-sibling repository the moment the testing contract lands.
-
-| File:line | What is | Required change | Deciding source |
-| --- | --- | --- | --- |
-| `.github/workflows/ci.yml:18-74`; `build-packages.yml:1-554` | the workflows carry lint, build, vet, govulncheck, CodeQL and the packaging steps, and no hand-written smoke script | keep it so: a check that must survive becomes a proper tool in a reusable workflow, never an ad-hoc script; when the Universal Testing Contract is written the browser test tool joins `ci.yml` as a normal step, the same shape as every repository of this class | `priorities.yaml:71-74,276-281`; `universal-identity.md:309-318,2030-2033`; `UI-GROWTH-GUIDE.md:62` |
-| `README.md:127`; `LICENSE.md`; `versioninfo.json:26`; `packaging/macos/Info.plist:43` | GPL-3.0 stated in every place this repository names a license | nothing here until the estate picks one license; when it does, every place above changes together | `priorities.yaml:293-300` |
-
-## 9. Hardening items
-
-Why: a requested claim is thrown away, and the namespace split sends a
-release, an installer and a module path to three different owners.
-
-| # | Code file:line | What is | Required change |
-| --- | --- | --- | --- |
-| 1 | `internal/oidc/validator.go:85`, `client.go:241` | every OIDC identity is `admin` | keep for the bound single-user desktop model; any multi-user use maps the role from claims |
-| 5 | `go.mod:1`; `.github/workflows/build-packages.yml:47,64,92,317,487,492`; `.golangci.yml:70`; `packaging/macos/Info.plist:10,45`; `packaging/windows/hyperweaver-agent.iss:11-12`; `README.md:16,26,89`; `internal/server/status.go:25,250` | three namespaces: the `Makr91` module path and release URLs, the `MarkProminic` UI artifact, the `STARTcloud` seeds, PKI, publisher and bundle id | consolidate under one namespace in a quiet window; import-path churn |
-| 6 | `.github/workflows/build-packages.yml:40-116,201-262,374-435` | the UI bake, seed and PKI steps are repeated across the three OS jobs | a composite action, or the duplication kept knowingly |
-| 7 | `.golangci.yml:26-35,47-54` | `gosec` excludes G204 file-wide; `forbidigo` bans `fmt.Print*` | keep both scoped and intentional |
-
 ## 11. What the shared UI reads from `GET /api/status` and the host's own row
 
 Why: the shared UI builds every surface from the status payload and from
@@ -329,29 +287,3 @@ has no config routes (`config: []`, contract decision 31).
 | `last_modified_by` | the email the OIDC login minted the key with when the key has one, else the key's name, which for a tray key is the local OS account | `internal/server/settings.go:26-35`; `internal/oidc/binding.go:132-137` |
 | backups | the contract's one `<name>.config.yaml.bak` on every save, and beside it the timestamped history under `backups/` with restore, an extension Mark ruled stays and is to grow into the other backends | `internal/configengine/save.go:40-52`; `internal/config/backups.go` |
 | exit timing | the restart handler answers 202 and exits at once; the successor's spawn and the listener shutdown drain the answer, so no wait on the response's end is needed (BoxVault exits on `finish`, the authorization server after 500 ms) | `internal/configengine/routes.go:167-171`; `internal/server/settings.go:175-186` |
-
-## 14. What the shared UI asks of this agent for a person signed in through the identity provider
-
-Why: Mark signed into the live agent through SSO and found the user menu
-dead where the estate's other hosts make it live: the favorites are not
-read, and Profile leads nowhere, neither to the identity provider's
-profile page nor to a local one. Mark's words: "I expect that since i am
-signed into SSO that the favorits would be working, the user profile
-switcher isn't working, it doesnt' take me to theirt the idp or the users
-local profile".
-
-The shared UI draws the favorites while `features` lists `favorites` and
-reads them from `GET /api/user/favorites` on the serving origin, a
-`backend` host proxying that path to the issuer with the person's token
-(`universal-identity.md`, the `GET /api/user/favorites` row); it draws the
-Profile row to the local profile page, whose adapter reads `GET /api/user`,
-and to the issuer's profile page as the Manage at identity provider link
-while the record is the issuer's (`features/profile/api/account.js`,
-`manageUrl`). On an `apikey` host neither exists today, so the row leads
-to a stub.
-
-| What is | Required change | Deciding source |
-| --- | --- | --- |
-| `GET /api/api-keys/info` answers the key alone: `id`, `name`, `description`, `role`, `created_at`, `last_used` | add the identity the key is bound to when the OIDC login minted it: `issuer` (the identity provider's origin), `subject`, `email`, `name`, absent on a tray or typed key; the UI then draws the Profile row as the issuer's profile page, `<issuer>/user/profile`, and the person's name and email in the menu | `internal/oidc/binding.go:132-137` (the email the login minted the key with); `universal-session.md` |
-| no `favorites` token, no `/api/user/favorites` | while the key is OIDC-bound: list `favorites` in `features` and proxy `GET /api/user/favorites` and its writes to the issuer with the bound token, the way a `backend` host does; while the key is local, leave both out | `universal-navbar.md:1547`; `universal-identity.md` (`GET /api/user/favorites`) |
-| no `GET /api/user`, no `PATCH /api/user/preferences` | the local profile of a person whose key is local, as section 10 asked before it was closed: the record in the identity provider's shape and the preferences written beside it, `profile-updated` on the stream; a person whose key is OIDC-bound gets the issuer's record read-only, `manageUrl` the issuer's profile page | `preferences-and-branding.md` (Write path); `universal-session.md` (`load` reads `/api/user`) |

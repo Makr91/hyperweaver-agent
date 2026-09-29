@@ -13,6 +13,7 @@ type tokenSource struct {
 	clientID     string
 	ctx          context.Context
 	wg           *sync.WaitGroup
+	persist      func(refreshToken string)
 	accessToken  string
 	refreshToken string
 	expiry       time.Time
@@ -35,8 +36,27 @@ func (t *tokenSource) set(answer *tokenAnswer) {
 		t.refreshToken = answer.RefreshToken
 	}
 	t.expiry = time.Now().Add(time.Duration(answer.ExpiresIn) * time.Second)
+	refreshToken := t.refreshToken
 	t.mu.Unlock()
+	t.persist(refreshToken)
 	t.startRefreshLoop()
+}
+
+func (t *tokenSource) resume(refreshToken string) {
+	if refreshToken == "" {
+		return
+	}
+	t.mu.Lock()
+	t.refreshToken = refreshToken
+	t.refreshing = true
+	t.mu.Unlock()
+	t.wg.Add(1)
+	go func() {
+		defer t.wg.Done()
+		if t.refreshOnce(refreshToken) {
+			t.loop()
+		}
+	}()
 }
 
 func (t *tokenSource) startRefreshLoop() {
@@ -47,11 +67,13 @@ func (t *tokenSource) startRefreshLoop() {
 	}
 	t.refreshing = true
 	t.wg.Add(1)
-	go t.refreshLoop()
+	go func() {
+		defer t.wg.Done()
+		t.loop()
+	}()
 }
 
-func (t *tokenSource) refreshLoop() {
-	defer t.wg.Done()
+func (t *tokenSource) loop() {
 	for {
 		t.mu.Lock()
 		refreshToken := t.refreshToken
@@ -97,6 +119,7 @@ func (t *tokenSource) refreshOnce(refreshToken string) bool {
 		t.expiry = time.Time{}
 		t.refreshing = false
 		t.mu.Unlock()
+		t.persist("")
 		return false
 	}
 	if answer.Error != "" || answer.AccessToken == "" {
@@ -109,7 +132,9 @@ func (t *tokenSource) refreshOnce(refreshToken string) bool {
 		t.refreshToken = answer.RefreshToken
 	}
 	t.expiry = time.Now().Add(time.Duration(answer.ExpiresIn) * time.Second)
+	rotated := t.refreshToken
 	t.mu.Unlock()
+	t.persist(rotated)
 	return true
 }
 

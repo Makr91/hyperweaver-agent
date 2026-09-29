@@ -70,6 +70,26 @@ type Task struct {
 	ProgressInfo json.RawMessage `json:"progress_info"`
 	// ALWAYS null on the wire (list AND detail — the converged task wire); GET /api/tasks/{taskId}/output and the /api/tasks/{taskId}/stream WebSocket are the output channels; storage stays TEXT
 	Output json.RawMessage `json:"output"`
+	// True when the task's end is written to the bound person's inbox at the identity provider; set by the request that queued it, else by the operation kind
+	Notify bool `json:"notify"`
+}
+
+// NotableOperations are the operation kinds whose end is written to the bound person's inbox unless the request says otherwise.
+var NotableOperations = map[string]bool{
+	"machine_create_orchestration":    true,
+	"machine_provision_orchestration": true,
+	"machine_provision_parent":        true,
+	"machine_import":                  true,
+	"machine_clone_current":           true,
+	"machine_unattended_install":      true,
+	"delete":                          true,
+	"snapshot_restore":                true,
+	"template_download":               true,
+	"template_upload":                 true,
+	"template_export":                 true,
+	"provisioner_import":              true,
+	"provisioner_catalog_install":     true,
+	"agent_update":                    true,
 }
 
 // NewTask describes a task to enqueue. Inserting the row IS enqueueing
@@ -91,6 +111,9 @@ type NewTask struct {
 	// Prepared creates the task in status prepared (the artifact-upload
 	// handshake): never dispatched until Requeue flips it to pending.
 	Prepared bool
+
+	// Notify overrides the operation-kind default: nil follows NotableOperations, a value decides.
+	Notify *bool
 }
 
 // newTaskID mints a random UUIDv4 (the Node agent's task id format).

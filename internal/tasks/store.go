@@ -41,6 +41,7 @@ var Migrations = []string{
 	CREATE INDEX idx_tasks_updated_at ON tasks (updated_at DESC);
 	CREATE INDEX idx_tasks_operation ON tasks (operation);
 	CREATE INDEX idx_tasks_parent ON tasks (parent_task_id);`,
+	`ALTER TABLE tasks ADD COLUMN notify INTEGER NOT NULL DEFAULT 0;`,
 }
 
 // timeLayout is the stored timestamp format: fixed-width (zero-padded
@@ -82,7 +83,7 @@ func NewStore(database *sql.DB) *Store {
 // channels; Store.GetOutput reads the column directly.
 const taskColumns = `id, machine_name, operation, status, priority, created_by,
 	depends_on, parent_task_id, error_message, created_at, started_at,
-	completed_at, updated_at, metadata, progress_percent, progress_info`
+	completed_at, updated_at, metadata, progress_percent, progress_info, notify`
 
 // scanTask reads one task row from any row scanner.
 func scanTask(row interface{ Scan(...any) error }) (*Task, error) {
@@ -92,7 +93,7 @@ func scanTask(row interface{ Scan(...any) error }) (*Task, error) {
 	err := row.Scan(&t.ID, &t.MachineName, &t.Operation, &t.Status, &t.Priority,
 		&t.CreatedBy, &t.DependsOn, &t.ParentTaskID, &t.ErrorMessage,
 		&createdAt, &startedAt, &completedAt, &updatedAt,
-		&metadata, &t.ProgressPercent, &progressInfo)
+		&metadata, &t.ProgressPercent, &progressInfo, &t.Notify)
 	if err != nil {
 		return nil, err
 	}
@@ -148,13 +149,17 @@ func (s *Store) Create(ctx context.Context, nt *NewTask) (*Task, error) {
 	if priority == 0 {
 		priority = PriorityMedium
 	}
+	notify := NotableOperations[nt.Operation]
+	if nt.Notify != nil {
+		notify = *nt.Notify
+	}
 
 	_, err = s.db.ExecContext(ctx, `INSERT INTO tasks
 		(id, machine_name, operation, status, priority, created_by,
-		 depends_on, parent_task_id, metadata, created_at, started_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		 depends_on, parent_task_id, metadata, created_at, started_at, updated_at, notify)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		id, nt.MachineName, nt.Operation, status, priority, nt.CreatedBy,
-		nt.DependsOn, nt.ParentTaskID, nt.Metadata, now, startedAt, now)
+		nt.DependsOn, nt.ParentTaskID, nt.Metadata, now, startedAt, now, notify)
 	if err != nil {
 		return nil, err
 	}

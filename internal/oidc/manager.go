@@ -4,6 +4,7 @@ package oidc
 import (
 	"context"
 	"errors"
+	"io"
 	"net/http"
 	"path/filepath"
 	"strings"
@@ -51,7 +52,7 @@ func New(cfg *config.Config, keyStore *keys.Store) *Manager {
 		baseURL:  baseURL,
 		proofs:   dpop.NewSeen(),
 	}
-	m.tokens = &tokenSource{provider: m.provider, clientID: cfg.OIDC.ClientID, ctx: ctx, wg: &m.wg}
+	m.tokens = &tokenSource{provider: m.provider, clientID: cfg.OIDC.ClientID, ctx: ctx, wg: &m.wg, persist: m.binding.setRefreshToken}
 	m.client = &client{
 		provider:    m.provider,
 		binding:     m.binding,
@@ -67,6 +68,9 @@ func New(cfg *config.Config, keyStore *keys.Store) *Manager {
 		keyLength:   cfg.APIKeys.KeyLength,
 		flows:       map[string]*flow{},
 		silent:      map[string]*silentFlow{},
+	}
+	if m.enabled {
+		m.tokens.resume(m.binding.storedRefreshToken())
 	}
 	return m
 }
@@ -92,12 +96,45 @@ func (m *Manager) BearerToken() string {
 	return m.tokens.bearer()
 }
 
+// Issuer answers the configured identity provider's origin.
+func (m *Manager) Issuer() string {
+	return m.provider.issuer
+}
+
+// ErrNoToken is answered when no valid token for the bound account is held.
+var ErrNoToken = errors.New("no valid token for the bound account is held")
+
+// IssuerRequest sends one request to the issuer under the bound account's Bearer token; the caller closes the body.
+func (m *Manager) IssuerRequest(ctx context.Context, method, path string, body io.Reader, contentType string) (*http.Response, error) {
+	token := m.tokens.bearer()
+	if token == "" {
+		return nil, ErrNoToken
+	}
+	request, err := http.NewRequestWithContext(ctx, method, strings.TrimRight(m.provider.issuer, "/")+path, body)
+	if err != nil {
+		return nil, err
+	}
+	request.Header.Set("Authorization", "Bearer "+token)
+	request.Header.Set("Accept", "application/json")
+	if contentType != "" {
+		request.Header.Set("Content-Type", contentType)
+	}
+	return httpClient.Do(request)
+}
+
 // AuthenticateToken validates an issuer token presented as Bearer or DPoP and answers the admin identity of the bound account.
 func (m *Manager) AuthenticateToken(r *http.Request, scheme auth.Scheme, token string) (*auth.Identity, error) {
 	if !m.enabled {
 		return nil, errors.New("federated login is disabled")
 	}
 	return m.validator.authenticate(r, scheme, token)
+}
+
+// BoundSubject answers the stable id of the account the agent is bound to, empty while unbound.
+func (m *Manager) BoundSubject() string {
+	m.binding.mu.Lock()
+	defer m.binding.mu.Unlock()
+	return m.binding.subject
 }
 
 // IdentityForKey answers the federated account a key was minted for, false for a plain key.

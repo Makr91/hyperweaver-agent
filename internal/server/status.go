@@ -153,6 +153,9 @@ func (s *Server) features() []string {
 	if s.cfg.GuestAgent.Enabled {
 		tokens = append(tokens, "guest-agent")
 	}
+	if s.oidcMgr.BearerToken() != "" {
+		tokens = append(tokens, "favorites", "notifications")
+	}
 	return tokens
 }
 

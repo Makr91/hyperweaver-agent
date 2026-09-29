@@ -453,11 +453,11 @@
                         "type": "string"
                     },
                     "server_id": {
-                        "description": "Numeric server identifier (assigned at creation; see /machines/ids)",
+                        "description": "Numeric server identifier (assigned at creation; see /api/machines/ids)",
                         "type": "string"
                     },
                     "spec": {
-                        "description": "The creation document (machines this agent created; discovered VMs have none) — the user's intent, never overwritten by discovery. THE DOCUMENT SHAPE (the Hosts.yml-shaped MachineSpec, design §4), stored verbatim on the machine row. The provisioner reference is OPTIONAL — a machine is just a machine, provisioning is optional (the base's provisioner-free create). WITH a provisioner: machine_prepare renders the package's Jinja2 templates/Hosts.template.yml — at create and again before every provision — and the rendered hosts[0] drives everything: its settings/networks/disks build the VM natively (VBoxManage), and its folders/provisioning/vars/roles become the stored provisioner document the pipeline consumes. WITHOUT one: no prepare/render step exists, the spec's own settings/networks build the VM directly, finalize persists no provisioner, and a provisioner document can attach later via PUT /machines/{name} + POST /provision. Template context precedence (package-based creates): settings (also flattened UPPERCASE) → per-role \u003cROLE\u003e_INSTALLER/_INSTALLER_HASH/_INSTALLER_VERSION/_FIXPACK*/_HOTFIX* vars + boolean role flags (both casings) → the Field DSL's contribution (metadata.configuration {groups, fields} — defaults merge BEFORE conditional evaluation, answers apply by exact field name, hidden fields are ABSENT from the context) → SECRETS_* vars. Structured settings/networks/disks/roles ride alongside — disks joined the context 2026-07-17 (the converged ask, the networks model exactly): the request's disks section, structured and VERBATIM, inert until a template echoes it (the agent guarantees no keys; the Provisioner's next release adds the echo). Answers are validated authoritatively pre-render: a failing create answers 422 whose body IS the {FIELD: message} map (design §3.1, ruled 2026-07-16). KEY VOCABULARY — provisioner: OPTIONAL package reference; omit it entirely for a provisioner-less machine; when present, both name and version are required and must exist in the registry. hypervisor: OPTIONAL per-machine hypervisor selection (default virtualbox); utm requires a macOS agent host and a box template (settings.box — the .box carries a box.utm bundle imported whole); other boot types are not yet supported on utm. settings: Hosts.yml settings vocabulary. hostname and domain are REQUIRED (machine_domain optionally overrides the naming domain); with machines.prefix_machine_names server_id is REQUIRED too (numeric 1-8 digits, padded to 4 — never auto-assigned; GET /machines/ids/next prefills it). box/box_version/box_arch/box_url select the template (package defaults apply); vcpus/memory/os_type/firmware_type/consoleport/consolehost/setup_wait/vagrant_user* drive the build and the pipeline. boot_order: ordered list of floppy|dvd|disk|net|none → --boot1..4 (remaining slots cleared) — the ISO-first install story with disks.cdroms. firmware_type (BIOS|UEFI) is generic — both hypervisors consume it (Hosts.rb reads it for the virtualbox AND zone providers). THE COMMUNICATOR FAMILY (the winrm convergence, sync 2026-07-17): communicator selects the guest transport — ssh (default) or winrm (Windows guests); winrm_port (default 5985, 5986 when winrm_transport is ssl), winrm_transport (default negotiate), and winrm_ssl_peer_verification (default true) tune it. Each of these FOUR keys has a RULED vagrant_-prefixed alias (vagrant_communicator, vagrant_winrm_port, vagrant_winrm_transport, vagrant_winrm_ssl_peer_verification) — these four pairs ONLY, a ruled exception to the no-alias rule; the new spelling WINS when both are present and the shadowed key is narrated as a {step: 'communicator_keys_shadowed', keys: []} task_chain entry on the provision response. networks: Hosts.yml networks vocabulary; entry i rides adapter i+2 (adapter 1 is the reserved NAT transport). dns DECLARE-normalizes at ad-hoc create: wire strings become the document's map shape [{nameserver: ip}] (converged contract, sync 2026-07-18 — the networking role hard-consumes dns[0]['nameserver']; packaged renders already emit maps). disks: OPTIONAL disks section at create (omit entirely = the SPELLED default: boot type template when settings.box is present, else none — a DISKLESS stub; attach media later via modify). THE TYPED DISK SPEC (Mark's word, sync 2026-07-17 — the ZERO-inference model): boot.type is REQUIRED whenever boot is present and is the ONLY dispatcher — template (clone settings.box's image; size = the grow-to; takes no path) | image (attach the EXISTING file at path AS-IS — never created/deleted/resized; size/volume_name refused; force: true skips the task-time attached-elsewhere pre-check) | blank (fresh VDI; size REQUIRED; sparse?/volume_name? legal; takes no path) | none (diskless; no other keys). THE DIRECTORY ADDENDUM (converged, sync 2026-07-17 — the pool/dataset mirror for VBox): blank and template entries may additionally carry directory — the agent-host folder the CREATED disk file lands in; ABSENT = the machine folder (the spelled default). The folder must already exist and be absolute — the agent NEVER creates it (task-time refusal: `\u003cwhere\u003e directory \u003cpath\u003e is not an absolute existing directory on this host`); image entries refuse the key outright (`\u003cwhere\u003e type image does not take directory` — an image's own path already places it). Template clones name their file by volume_name (absent = \"boot\"), keeping the template's own extension. THE CLONE STRATEGY (frozen, sync 2026-07-19 — the converged cross-platform vocabulary): a template boot may carry clone_strategy — copy (DEFAULT everywhere, Mark's ruling: an independent full copy of the template image, exactly today's behavior) | clone (a differencing child off the template's shared multiattach clone base: the base materializes ONCE beside the template image as clone-base.vdi — a one-time full copy, promoted to multiattach — and every clone machine links from it, so creates are near-instant and siblings share the base's blocks; VirtualBox creates the child in the machine folder at the template's size, so clone takes NO size, volume_name, or directory — each is refused; the child is stamped template like any agent-created boot, and template delete gains a children gate). localize is zfs vocabulary (the cross-pool cure — no analog here, clonemedium already crosses drives) and is REFUSED, never warned; a clone_strategy on a non-template boot is refused too. additional_disks[]: type REQUIRED, image|blank only, same per-type rules — {type: \"blank\", size, volume_name?, sparse?, directory?, controller?, port?, device?} or {type: \"image\", path, force?, controller?, port?, device?} (refusal indexes are 1-based). Unknown keys in disk entries are never read for behavior and always preserved verbatim. Agent-created media (template clones, blank VDIs) are provenance-stamped at materialization (hyperweaver:source property / .hw-source sidecar — GET /media lists the stamps; delete destroys ONLY stamped media). THE DEVICE MODEL (VirtualBox's real storage surface): controllers[] declares the storage controllers ({name?, type: ide|sata|scsi|sas|nvme|virtio|usb|floppy, ports?, bootable?} — name defaults per type, e.g. \"NVMe Controller\"); every media entry may address one by `controller` name plus `port`/`device` (device matters on IDE — two devices per port). Omitting controllers[] creates ONE controller named \"SATA Controller\" of type sata — the original shape. boot lands on the FIRST controller port 0 unless it names its own controller/port/device. cdroms[]: [{path: agent-host ISO path | iso: a cached-ISO FILENAME resolved through the artifact registry (GET /artifacts/iso lists them; the file must exist in an enabled location) — EXACTLY one of the two, controller?, port?, device?}] — the attach-an-ISO-and-install-yourself flow. With a provisioner package the render's disks win. zones: DEAD ON THIS AGENT (Mark's ruling, sync 2026-07-19): zones is Solaris/bhyve configuration — zoneweaver's own section. This agent reads NOTHING from it; a document carrying one stores and survives verbatim, inert (foreign-hypervisor vocabulary, preserved like bhyve disk keys). The keys it used to drive have per-hypervisor homes now: diskif → disks.controllers[].type, bootrom → settings.firmware_type, netif → networks[].nic_type per entry (generic — Hosts.rb consumes those for both providers), and the rest under the vbox key: hostbridge → vbox.platform.chipset, acpi → vbox.platform.acpi, xhci → vbox.usb.xhci, vnc → vbox.vrde.enabled, autostart → vbox.autostart.enabled, guest_agent → vbox.guest_agent, post_provision_boot → vbox.post_provision_boot. cloud_init: OPTIONAL cloud-init section at create (enabled/dns_domain/password/resolvers/sshkey — set as guest properties under /Hyperweaver/CloudInit/). vbox: OPTIONAL vbox section at create — VirtualBox's own PER-HYPERVISOR key (Mark's ruling, sync 2026-07-19: zones is bhyve's, vbox is VirtualBox's, utm reserved; the former top-level hardware key is DEAD — its whole tree lives here now). Contents: (1) the first-class knob vocabulary, vbox.\u003csection\u003e.\u003ckey\u003e grouped by VBoxManage's own usage sections: cpu (hotplug, execution_cap, profile, pae, long_mode, hwvirtex, nested_paging, large_pages, nested_hw_virt, virt_vmsave_vmload, vtx_vpid, vtx_ux, apic, x2apic, hpet, spec_ctrl, ibpb_on_vm_exit/entry, l1d_flush_on_sched/vm_entry, mds_clear_on_sched/vm_entry, arm_gic_its, cpuid_portability_level) · memory (vram, page_fusion, balloon) · graphics (controller, monitor_count, accelerate_3d) · audio (enabled, driver, controller, codec, in, out) · usb (ohci, ehci, xhci, card_reader) · integration (clipboard_mode, clipboard_file_transfers, drag_and_drop, mouse, keyboard) · platform (acpi, chipset, iommu, tpm_type, tpm_location, rtc_use_utc, paravirt_provider, ioapic, triple_fault_reset, hardware_uuid, system_uuid_le, snapshot_folder, description, groups, icon_file, default_frontend, vm_process_priority, vm_execution_engine) · firmware (boot_menu, apic, logo_fade_in/out, logo_display_time, logo_image_path, system_time_offset, pxe_debug) · recording (enabled, screens, file, max_size_mb, max_time_seconds, opts, video_fps, video_rate, video_res) · vrde (enabled, port — range strings allowed, extpack, address, auth_type, auth_library, multi_con, reuse_con, video_channel, video_channel_quality) · autostart (enabled, delay — enabled also drives the agent's startup orchestration) · serial[] ({port 1-4, io_base|\"off\", irq, mode, type}) · parallel[] ({port 1-2, io_base|\"off\", irq, device}) — values pass to VirtualBox UNVALIDATED, unknown sections/keys fail honestly; (2) directives[] = [{directive, value}], the generic modifyvm passthrough (any --flag=value) and the FINAL word after the knobs — the passthrough-only exotica (teleporter, cpuid-set, tracing/testing, guest-debug, pci-attach, plug/unplug-cpu) rides it; (3) guest_agent (boolean, default false — the QEMU guest-agent UART opt-in, the Proxmox model, under the guest_agent.enabled master gate; a document claiming serial port 2 itself always wins) and post_provision_boot (boolean, default false — cycle the machine stop→start after a successful provision run). networks[] entries additionally take per-adapter cable_connected, promisc (deny|allow-vms|allow-all), speed (kbps), boot_prio (0-4), bandwidth_group, nic_type (raw VirtualBox adapter type). notes: free-form notes, persisted onto the machine row at finalize (the base's create contract). tags: tags, persisted at finalize. roles[].files: installer assignments, resolved against the artifact registry at every prepare (artifact_storage.enabled): the named file must exist under (role, type, filename) and pass SHA-256 verification or the start FAILS; hashes are auto-filled from the registry into the template vars, and a spec-supplied hash must match the stored one. Files mount into the working copy's installers/\u003crole\u003e/ tree as hard links or hash-verified copies. properties: THE answers map — one flat map keyed by each Field-DSL field's EXACT name (multiselect answers are native lists). The old basic/advanced split (advanced_properties) died in the one cut. Validated authoritatively pre-render: failures answer 422 {FIELD: message}. sync_method: per-machine file-sync preference (SHI's Rsync/SCP setting), default rsync. Platform rules apply at render time: forced rsync on Windows hosts; macOS auto-falls back to SCP when the system rsync is the ancient Apple 2.x build. The EFFECTIVE value reaches the template context as settings.sync_method / SYNC_METHOD; the stored spec keeps the preference. safe_id_path: agent-host path of a Domino safe-ID file, placed under id-files per the package's id_files metadata (safe_id_dir, keep_original_name). start_after_create: POST /machines only — queue the first start immediately. remove_transport_on_completion: the wizard's per-create transport signal (the converged cross-agent key, sync 2026-07-18): true asks the provision pipeline to remove the provisioning transport NIC (the intrinsic NAT, adapter 1 — it has no networks[] entry, so a per-entry flag can never express it) after the whole-walk stamp, via the pipeline-owned power cycle (Mark's execution ruling — stop → machine_transport_remove → start; the post-removal boot gates on NOTHING). ABSENT = this agent's ruled default FALSE (keep — the home/dev model, vagrant-ssh keeps working; zoneweaver's absent-default is true, the datacenter model — knob_defaults['transport.remove_on_completion'] serves each agent's own). Finalize persists the chosen value at configuration.settings.remove_transport_on_completion; flip it later via PUT nics[] {adapter: 1, remove_on_completion}. Document networks[] entries additionally take a per-entry remove_on_completion boolean targeting their own adapters (i+2), same semantics, same cycle.",
+                        "description": "The creation document (machines this agent created; discovered VMs have none) — the user's intent, never overwritten by discovery. THE DOCUMENT SHAPE (the Hosts.yml-shaped MachineSpec, design §4), stored verbatim on the machine row. The provisioner reference is OPTIONAL — a machine is just a machine, provisioning is optional (the base's provisioner-free create). WITH a provisioner: machine_prepare renders the package's Jinja2 templates/Hosts.template.yml — at create and again before every provision — and the rendered hosts[0] drives everything: its settings/networks/disks build the VM natively (VBoxManage), and its folders/provisioning/vars/roles become the stored provisioner document the pipeline consumes. WITHOUT one: no prepare/render step exists, the spec's own settings/networks build the VM directly, finalize persists no provisioner, and a provisioner document can attach later via PUT /api/machines/{name} + POST /provision. Template context precedence (package-based creates): settings (also flattened UPPERCASE) → per-role \u003cROLE\u003e_INSTALLER/_INSTALLER_HASH/_INSTALLER_VERSION/_FIXPACK*/_HOTFIX* vars + boolean role flags (both casings) → the Field DSL's contribution (metadata.configuration {groups, fields} — defaults merge BEFORE conditional evaluation, answers apply by exact field name, hidden fields are ABSENT from the context) → SECRETS_* vars. Structured settings/networks/disks/roles ride alongside — disks joined the context 2026-07-17 (the converged ask, the networks model exactly): the request's disks section, structured and VERBATIM, inert until a template echoes it (the agent guarantees no keys; the Provisioner's next release adds the echo). Answers are validated authoritatively pre-render: a failing create answers 422 whose body IS the {FIELD: message} map (design §3.1, ruled 2026-07-16). KEY VOCABULARY — provisioner: OPTIONAL package reference; omit it entirely for a provisioner-less machine; when present, both name and version are required and must exist in the registry. hypervisor: OPTIONAL per-machine hypervisor selection (default virtualbox); utm requires a macOS agent host and a box template (settings.box — the .box carries a box.utm bundle imported whole); other boot types are not yet supported on utm. settings: Hosts.yml settings vocabulary. hostname and domain are REQUIRED (machine_domain optionally overrides the naming domain); with machines.prefix_machine_names server_id is REQUIRED too (numeric 1-8 digits, padded to 4 — never auto-assigned; GET /api/machines/ids/next prefills it). box/box_version/box_arch/box_url select the template (package defaults apply); vcpus/memory/os_type/firmware_type/consoleport/consolehost/setup_wait/vagrant_user* drive the build and the pipeline. boot_order: ordered list of floppy|dvd|disk|net|none → --boot1..4 (remaining slots cleared) — the ISO-first install story with disks.cdroms. firmware_type (BIOS|UEFI) is generic — both hypervisors consume it (Hosts.rb reads it for the virtualbox AND zone providers). THE COMMUNICATOR FAMILY (the winrm convergence, sync 2026-07-17): communicator selects the guest transport — ssh (default) or winrm (Windows guests); winrm_port (default 5985, 5986 when winrm_transport is ssl), winrm_transport (default negotiate), and winrm_ssl_peer_verification (default true) tune it. Each of these FOUR keys has a RULED vagrant_-prefixed alias (vagrant_communicator, vagrant_winrm_port, vagrant_winrm_transport, vagrant_winrm_ssl_peer_verification) — these four pairs ONLY, a ruled exception to the no-alias rule; the new spelling WINS when both are present and the shadowed key is narrated as a {step: 'communicator_keys_shadowed', keys: []} task_chain entry on the provision response. networks: Hosts.yml networks vocabulary; entry i rides adapter i+2 (adapter 1 is the reserved NAT transport). dns DECLARE-normalizes at ad-hoc create: wire strings become the document's map shape [{nameserver: ip}] (converged contract, sync 2026-07-18 — the networking role hard-consumes dns[0]['nameserver']; packaged renders already emit maps). disks: OPTIONAL disks section at create (omit entirely = the SPELLED default: boot type template when settings.box is present, else none — a DISKLESS stub; attach media later via modify). THE TYPED DISK SPEC (Mark's word, sync 2026-07-17 — the ZERO-inference model): boot.type is REQUIRED whenever boot is present and is the ONLY dispatcher — template (clone settings.box's image; size = the grow-to; takes no path) | image (attach the EXISTING file at path AS-IS — never created/deleted/resized; size/volume_name refused; force: true skips the task-time attached-elsewhere pre-check) | blank (fresh VDI; size REQUIRED; sparse?/volume_name? legal; takes no path) | none (diskless; no other keys). THE DIRECTORY ADDENDUM (converged, sync 2026-07-17 — the pool/dataset mirror for VBox): blank and template entries may additionally carry directory — the agent-host folder the CREATED disk file lands in; ABSENT = the machine folder (the spelled default). The folder must already exist and be absolute — the agent NEVER creates it (task-time refusal: `\u003cwhere\u003e directory \u003cpath\u003e is not an absolute existing directory on this host`); image entries refuse the key outright (`\u003cwhere\u003e type image does not take directory` — an image's own path already places it). Template clones name their file by volume_name (absent = \"boot\"), keeping the template's own extension. THE CLONE STRATEGY (frozen, sync 2026-07-19 — the converged cross-platform vocabulary): a template boot may carry clone_strategy — copy (DEFAULT everywhere, Mark's ruling: an independent full copy of the template image, exactly today's behavior) | clone (a differencing child off the template's shared multiattach clone base: the base materializes ONCE beside the template image as clone-base.vdi — a one-time full copy, promoted to multiattach — and every clone machine links from it, so creates are near-instant and siblings share the base's blocks; VirtualBox creates the child in the machine folder at the template's size, so clone takes NO size, volume_name, or directory — each is refused; the child is stamped template like any agent-created boot, and template delete gains a children gate). localize is zfs vocabulary (the cross-pool cure — no analog here, clonemedium already crosses drives) and is REFUSED, never warned; a clone_strategy on a non-template boot is refused too. additional_disks[]: type REQUIRED, image|blank only, same per-type rules — {type: \"blank\", size, volume_name?, sparse?, directory?, controller?, port?, device?} or {type: \"image\", path, force?, controller?, port?, device?} (refusal indexes are 1-based). Unknown keys in disk entries are never read for behavior and always preserved verbatim. Agent-created media (template clones, blank VDIs) are provenance-stamped at materialization (hyperweaver:source property / .hw-source sidecar — GET /api/media lists the stamps; delete destroys ONLY stamped media). THE DEVICE MODEL (VirtualBox's real storage surface): controllers[] declares the storage controllers ({name?, type: ide|sata|scsi|sas|nvme|virtio|usb|floppy, ports?, bootable?} — name defaults per type, e.g. \"NVMe Controller\"); every media entry may address one by `controller` name plus `port`/`device` (device matters on IDE — two devices per port). Omitting controllers[] creates ONE controller named \"SATA Controller\" of type sata — the original shape. boot lands on the FIRST controller port 0 unless it names its own controller/port/device. cdroms[]: [{path: agent-host ISO path | iso: a cached-ISO FILENAME resolved through the artifact registry (GET /api/artifacts/iso lists them; the file must exist in an enabled location) — EXACTLY one of the two, controller?, port?, device?}] — the attach-an-ISO-and-install-yourself flow. With a provisioner package the render's disks win. zones: DEAD ON THIS AGENT (Mark's ruling, sync 2026-07-19): zones is Solaris/bhyve configuration — zoneweaver's own section. This agent reads NOTHING from it; a document carrying one stores and survives verbatim, inert (foreign-hypervisor vocabulary, preserved like bhyve disk keys). The keys it used to drive have per-hypervisor homes now: diskif → disks.controllers[].type, bootrom → settings.firmware_type, netif → networks[].nic_type per entry (generic — Hosts.rb consumes those for both providers), and the rest under the vbox key: hostbridge → vbox.platform.chipset, acpi → vbox.platform.acpi, xhci → vbox.usb.xhci, vnc → vbox.vrde.enabled, autostart → vbox.autostart.enabled, guest_agent → vbox.guest_agent, post_provision_boot → vbox.post_provision_boot. cloud_init: OPTIONAL cloud-init section at create (enabled/dns_domain/password/resolvers/sshkey — set as guest properties under /Hyperweaver/CloudInit/). vbox: OPTIONAL vbox section at create — VirtualBox's own PER-HYPERVISOR key (Mark's ruling, sync 2026-07-19: zones is bhyve's, vbox is VirtualBox's, utm reserved; the former top-level hardware key is DEAD — its whole tree lives here now). Contents: (1) the first-class knob vocabulary, vbox.\u003csection\u003e.\u003ckey\u003e grouped by VBoxManage's own usage sections: cpu (hotplug, execution_cap, profile, pae, long_mode, hwvirtex, nested_paging, large_pages, nested_hw_virt, virt_vmsave_vmload, vtx_vpid, vtx_ux, apic, x2apic, hpet, spec_ctrl, ibpb_on_vm_exit/entry, l1d_flush_on_sched/vm_entry, mds_clear_on_sched/vm_entry, arm_gic_its, cpuid_portability_level) · memory (vram, page_fusion, balloon) · graphics (controller, monitor_count, accelerate_3d) · audio (enabled, driver, controller, codec, in, out) · usb (ohci, ehci, xhci, card_reader) · integration (clipboard_mode, clipboard_file_transfers, drag_and_drop, mouse, keyboard) · platform (acpi, chipset, iommu, tpm_type, tpm_location, rtc_use_utc, paravirt_provider, ioapic, triple_fault_reset, hardware_uuid, system_uuid_le, snapshot_folder, description, groups, icon_file, default_frontend, vm_process_priority, vm_execution_engine) · firmware (boot_menu, apic, logo_fade_in/out, logo_display_time, logo_image_path, system_time_offset, pxe_debug) · recording (enabled, screens, file, max_size_mb, max_time_seconds, opts, video_fps, video_rate, video_res) · vrde (enabled, port — range strings allowed, extpack, address, auth_type, auth_library, multi_con, reuse_con, video_channel, video_channel_quality) · autostart (enabled, delay — enabled also drives the agent's startup orchestration) · serial[] ({port 1-4, io_base|\"off\", irq, mode, type}) · parallel[] ({port 1-2, io_base|\"off\", irq, device}) — values pass to VirtualBox UNVALIDATED, unknown sections/keys fail honestly; (2) directives[] = [{directive, value}], the generic modifyvm passthrough (any --flag=value) and the FINAL word after the knobs — the passthrough-only exotica (teleporter, cpuid-set, tracing/testing, guest-debug, pci-attach, plug/unplug-cpu) rides it; (3) guest_agent (boolean, default false — the QEMU guest-agent UART opt-in, the Proxmox model, under the guest_agent.enabled master gate; a document claiming serial port 2 itself always wins) and post_provision_boot (boolean, default false — cycle the machine stop→start after a successful provision run). networks[] entries additionally take per-adapter cable_connected, promisc (deny|allow-vms|allow-all), speed (kbps), boot_prio (0-4), bandwidth_group, nic_type (raw VirtualBox adapter type). notes: free-form notes, persisted onto the machine row at finalize (the base's create contract). tags: tags, persisted at finalize. roles[].files: installer assignments, resolved against the artifact registry at every prepare (artifact_storage.enabled): the named file must exist under (role, type, filename) and pass SHA-256 verification or the start FAILS; hashes are auto-filled from the registry into the template vars, and a spec-supplied hash must match the stored one. Files mount into the working copy's installers/\u003crole\u003e/ tree as hard links or hash-verified copies. properties: THE answers map — one flat map keyed by each Field-DSL field's EXACT name (multiselect answers are native lists). The old basic/advanced split (advanced_properties) died in the one cut. Validated authoritatively pre-render: failures answer 422 {FIELD: message}. sync_method: per-machine file-sync preference (SHI's Rsync/SCP setting), default rsync. Platform rules apply at render time: forced rsync on Windows hosts; macOS auto-falls back to SCP when the system rsync is the ancient Apple 2.x build. The EFFECTIVE value reaches the template context as settings.sync_method / SYNC_METHOD; the stored spec keeps the preference. safe_id_path: agent-host path of a Domino safe-ID file, placed under id-files per the package's id_files metadata (safe_id_dir, keep_original_name). start_after_create: POST /api/machines only — queue the first start immediately. remove_transport_on_completion: the wizard's per-create transport signal (the converged cross-agent key, sync 2026-07-18): true asks the provision pipeline to remove the provisioning transport NIC (the intrinsic NAT, adapter 1 — it has no networks[] entry, so a per-entry flag can never express it) after the whole-walk stamp, via the pipeline-owned power cycle (Mark's execution ruling — stop → machine_transport_remove → start; the post-removal boot gates on NOTHING). ABSENT = this agent's ruled default FALSE (keep — the home/dev model, vagrant-ssh keeps working; zoneweaver's absent-default is true, the datacenter model — knob_defaults['transport.remove_on_completion'] serves each agent's own). Finalize persists the chosen value at configuration.settings.remove_transport_on_completion; flip it later via PUT nics[] {adapter: 1, remove_on_completion}. Document networks[] entries additionally take a per-entry remove_on_completion boolean targeting their own adapters (i+2), same semantics, same cycle.",
                         "items": {
                             "type": "integer"
                         },
@@ -1142,7 +1142,7 @@
                 "type": "object"
             },
             "provisioner.Source": {
-                "description": "Stored git provenance — recorded at git import, NEVER inside package files: {source_type: \"git\", url, branch?}. null for folder/archive imports and catalog installs (catalog families update through the catalog). Feeds POST /provisioning/provisioners/{name}/refresh-from-source.",
+                "description": "Stored git provenance — recorded at git import, NEVER inside package files: {source_type: \"git\", url, branch?}. null for folder/archive imports and catalog installs (catalog families update through the catalog). Feeds POST /api/provisioning/provisioners/{name}/refresh-from-source.",
                 "properties": {
                     "branch": {
                         "type": "string"
@@ -1310,7 +1310,7 @@
                         "type": "boolean"
                     },
                     "task_id": {
-                        "description": "The queued task's id — poll it via GET /tasks/{taskId}.",
+                        "description": "The queued task's id — poll it via GET /api/tasks/{taskId}.",
                         "type": "string"
                     },
                     "type": {
@@ -2755,7 +2755,7 @@
                         "type": "integer"
                     },
                     "handle": {
-                        "description": "Opaque agent-side flow id for GET /auth/oidc/device-status (the device_code never leaves the agent)",
+                        "description": "Opaque agent-side flow id for GET /api/auth/oidc/device-status (the device_code never leaves the agent)",
                         "type": "string"
                     },
                     "interval": {
@@ -3025,6 +3025,43 @@
                     },
                     "machine_name": {
                         "type": "string"
+                    }
+                },
+                "type": "object"
+            },
+            "server.favoriteEntry": {
+                "properties": {
+                    "client_id": {
+                        "type": "string"
+                    },
+                    "client_name": {
+                        "type": "string"
+                    },
+                    "custom_label": {
+                        "type": "string"
+                    },
+                    "home_url": {
+                        "type": "string"
+                    },
+                    "icon_url": {
+                        "type": "string"
+                    },
+                    "order": {
+                        "type": "integer"
+                    }
+                },
+                "type": "object"
+            },
+            "server.favoriteWrite": {
+                "properties": {
+                    "client_id": {
+                        "type": "string"
+                    },
+                    "custom_label": {
+                        "type": "string"
+                    },
+                    "order": {
+                        "type": "integer"
                     }
                 },
                 "type": "object"
@@ -3887,6 +3924,10 @@
                     "id": {
                         "type": "integer"
                     },
+                    "issuer": {
+                        "description": "The identity provider's origin the key was minted against (SSO-minted keys only)",
+                        "type": "string"
+                    },
                     "last_used": {
                         "type": "string"
                     },
@@ -3894,6 +3935,10 @@
                         "type": "string"
                     },
                     "role": {
+                        "type": "string"
+                    },
+                    "subject": {
+                        "description": "The federated account's stable id, the UUID claim with sub fallback (SSO-minted keys only)",
                         "type": "string"
                     }
                 },
@@ -5332,6 +5377,67 @@
                 },
                 "type": "object"
             },
+            "server.notificationPage": {
+                "properties": {
+                    "items": {
+                        "items": {
+                            "$ref": "#/components/schemas/server.notificationRow"
+                        },
+                        "type": "array",
+                        "uniqueItems": false
+                    },
+                    "page": {
+                        "type": "integer"
+                    },
+                    "size": {
+                        "type": "integer"
+                    },
+                    "total": {
+                        "type": "integer"
+                    },
+                    "total_pages": {
+                        "type": "integer"
+                    }
+                },
+                "type": "object"
+            },
+            "server.notificationRow": {
+                "properties": {
+                    "body": {
+                        "items": {
+                            "type": "integer"
+                        },
+                        "type": "array",
+                        "uniqueItems": false
+                    },
+                    "created_at": {
+                        "type": "string"
+                    },
+                    "id": {
+                        "type": "string"
+                    },
+                    "navigate": {
+                        "type": "string"
+                    },
+                    "read_at": {
+                        "type": "string"
+                    },
+                    "severity": {
+                        "type": "string"
+                    },
+                    "title": {
+                        "items": {
+                            "type": "integer"
+                        },
+                        "type": "array",
+                        "uniqueItems": false
+                    },
+                    "type": {
+                        "type": "string"
+                    }
+                },
+                "type": "object"
+            },
             "server.openMachineDirectoryResponse": {
                 "properties": {
                     "directory": {
@@ -5558,26 +5664,6 @@
                         "type": "boolean"
                     },
                     "task_id": {
-                        "type": "string"
-                    }
-                },
-                "type": "object"
-            },
-            "server.preferencePatchRequest": {
-                "properties": {
-                    "language": {
-                        "type": "string"
-                    },
-                    "mode": {
-                        "type": "string"
-                    },
-                    "motion": {
-                        "type": "string"
-                    },
-                    "theme": {
-                        "type": "string"
-                    },
-                    "timezone": {
                         "type": "string"
                     }
                 },
@@ -6603,7 +6689,7 @@
                         "uniqueItems": false
                     },
                     "console": {
-                        "description": "EMERGENCY consoles only (Mark's placement ruling 2026-07-12 — hypervisor-level surfaces that work with zero guest cooperation): rdp always (base VRDP ships in VirtualBox 7.2 — the IronRDP web client rides the /machines/{name}/rdp-bridge RDCleanPath WebSocket); vnc only when a USABLE VBoxVNC VRDE module is installed (the websockify bridge needs RFB on the VRDE port). The machine SSH terminal is guest-network access and advertises as features 'ssh' instead.",
+                        "description": "EMERGENCY consoles only (Mark's placement ruling 2026-07-12 — hypervisor-level surfaces that work with zero guest cooperation): rdp always (base VRDP ships in VirtualBox 7.2 — the IronRDP web client rides the /api/machines/{name}/rdp-bridge RDCleanPath WebSocket); vnc only when a USABLE VBoxVNC VRDE module is installed (the websockify bridge needs RFB on the VRDE port). The machine SSH terminal is guest-network access and advertises as features 'ssh' instead.",
                         "items": {
                             "type": "string"
                         },
@@ -6614,7 +6700,7 @@
                         "$ref": "#/components/schemas/server.statusEvents"
                     },
                     "features": {
-                        "description": "Capability tokens (platform support ∧ config state): host-power is absent when host_power.enabled is false, artifacts when artifact_storage.enabled is false, file-browser when file_browser.enabled is false, guest-agent when guest_agent.enabled is false. provisioner-registry names the SHI-format package registry surface and secrets the global secrets store — finer than the cross-agent provisioning/machine-create tokens, which are true on every provisioning-capable agent regardless of wire shape (Mark's gating ruling, 2026-07-06). machine-modify names PUT's infrastructure-modify surface (the base's zone_modify contract). ssh names the machine SSH-terminal family (POST /machines/{name}/ssh/start + the /ssh/{id} WebSocket) — a FEATURE, not a console, per Mark's placement ruling 2026-07-12: console[] carries emergency consoles only. hosts-file names the /system/hosts editor surface (the converged wire, minted 2026-07-17) — a platform token, always advertised on both agents. dns names the /system/dns surface beside it (minted 2026-07-17, same converged wire — per-OS mechanics, wire identical; the UI's Network-tab DNS section gates on it). hostname names the /network/hostname surface (minted 2026-07-17, the converged wire): GET is the live view, PUT queues the async set_hostname task. ip-addresses names the /network/addresses surface (minted 2026-07-17; mutations shipped 2026-07-19 per Mark's build order): the live listing plus the zoneweaver-converged task mutations — create (static everywhere, dhcp Windows-only, addrconf refused), delete (?address= disambiguator), and the INTERFACE-level enable/disable toggles. network-spaces names the /network/spaces surface (minted 2026-07-19): enumerate + manage VirtualBox's network spaces (host-only interfaces with DHCP, NAT networks with port forwards, read-only internal networks) — the UI topology mapper gates its network-space fetch on it.",
+                        "description": "Capability tokens (platform support ∧ config state): host-power is absent when host_power.enabled is false, artifacts when artifact_storage.enabled is false, file-browser when file_browser.enabled is false, guest-agent when guest_agent.enabled is false. provisioner-registry names the SHI-format package registry surface and secrets the global secrets store — finer than the cross-agent provisioning/machine-create tokens, which are true on every provisioning-capable agent regardless of wire shape (Mark's gating ruling, 2026-07-06). machine-modify names PUT's infrastructure-modify surface (the base's zone_modify contract). ssh names the machine SSH-terminal family (POST /api/machines/{name}/ssh/start + the /api/ssh/{id} WebSocket) — a FEATURE, not a console, per Mark's placement ruling 2026-07-12: console[] carries emergency consoles only. hosts-file names the /api/system/hosts editor surface (the converged wire, minted 2026-07-17) — a platform token, always advertised on both agents. dns names the /api/system/dns surface beside it (minted 2026-07-17, same converged wire — per-OS mechanics, wire identical; the UI's Network-tab DNS section gates on it). hostname names the /api/network/hostname surface (minted 2026-07-17, the converged wire): GET is the live view, PUT queues the async set_hostname task. ip-addresses names the /api/network/addresses surface (minted 2026-07-17; mutations shipped 2026-07-19 per Mark's build order): the live listing plus the zoneweaver-converged task mutations — create (static everywhere, dhcp Windows-only, addrconf refused), delete (?address= disambiguator), and the INTERFACE-level enable/disable toggles. network-spaces names the /api/network/spaces surface (minted 2026-07-19): enumerate + manage VirtualBox's network spaces (host-only interfaces with DHCP, NAT networks with port forwards, read-only internal networks) — the UI topology mapper gates its network-space fetch on it.",
                         "items": {
                             "type": "string"
                         },
@@ -7221,6 +7307,14 @@
                 },
                 "type": "object"
             },
+            "server.unreadCountResponse": {
+                "properties": {
+                    "count": {
+                        "type": "integer"
+                    }
+                },
+                "type": "object"
+            },
             "server.updateApplyResponse": {
                 "properties": {
                     "message": {
@@ -7477,6 +7571,9 @@
                     "id": {
                         "type": "integer"
                     },
+                    "issuer": {
+                        "type": "string"
+                    },
                     "name": {
                         "type": "string"
                     },
@@ -7503,6 +7600,9 @@
                         "type": "string"
                     },
                     "role": {
+                        "type": "string"
+                    },
+                    "subject": {
                         "type": "string"
                     },
                     "username": {
@@ -7696,12 +7796,16 @@
                         "type": "array",
                         "uniqueItems": false
                     },
+                    "notify": {
+                        "description": "True when the task's end is written to the bound person's inbox at the identity provider; set by the request that queued it, else by the operation kind",
+                        "type": "boolean"
+                    },
                     "operation": {
-                        "description": "Operation kind. Vocabulary: start, stop, suspend, delete, discover, machine_modify (PUT's infrastructure changes), machine_import (OVA/OVF appliance import), machine_move (movevm relocation), machine_unattended_install (VBoxManage answer-file install), restart (never dispatched — a restart is a stop→start chain); create orchestration: machine_create_orchestration (parent), machine_prepare, machine_create_storage, machine_create_config, machine_create_finalize, template_download; provisioning pipeline: machine_provision_orchestration (parent — the document-walk children chain directly under it), machine_wait_ssh, machine_sync_parent, machine_sync (one per folder), machine_hook (one per provisioning.pre[]/post[] sequence-hook entry — pre entries before the first method, post entries after the last), machine_shell (one per provisioning.shell.scripts[] entry, in the document walk), machine_provision (one per ansible local[] playbook entry), machine_provision_remote (one per ansible remote[] entry — ansible-playbook ON the agent host over the guest transport; needs host ansible), machine_docker_compose (one per provisioning.docker.docker_compose[] file — no engine setup; an absent guest engine fails the task honestly), machine_provision_parent (ONLY as the /run-provisioners anchor), machine_syncback_parent, machine_syncback (one per syncback-flagged folder — the post-provision guest→host pull), machine_key_rotate (queued only when settings.vagrant_ssh_insert_key is set and the communicator is not winrm — adopts the box's rotated private key into the working copy after the syncback bracket; never the whole-walk stamp owner); network: provisioning_network_setup, provisioning_network_teardown; consoles/snapshots: reset, pause, resume, snapshot_take (user takes AND the rotation service's scheduled rows — created_by snapshot_rotation), snapshot_restore, snapshot_delete, snapshot_modify (rename and/or description edit via PUT), machine_clone_current (clonevm current-state clone); templates: template_download, template_delete, template_export, template_upload (publish), template_move; filesystem (machine_name \"filesystem\"): file_move, file_copy, file_archive_create, file_archive_extract; registry/artifacts/system: provisioner_import, provisioner_export (one version → registry-shaped tar.gz + archive sha256 sidecar), provisioner_catalog_install (fetch catalog.json → download the versioned asset → verify sha256 → import), artifact_scan, artifact_download, artifact_upload, artifact_move, artifact_copy, artifact_delete_file, artifact_delete_folder, hcl_download, agent_update, set_hostname (PUT /network/hostname's queued rename — zoneweaver's exact op name, machine_name \"system\"; the converged wire, sync 2026-07-17).",
+                        "description": "Operation kind. Vocabulary: start, stop, suspend, delete, discover, machine_modify (PUT's infrastructure changes), machine_import (OVA/OVF appliance import), machine_move (movevm relocation), machine_unattended_install (VBoxManage answer-file install), restart (never dispatched — a restart is a stop→start chain); create orchestration: machine_create_orchestration (parent), machine_prepare, machine_create_storage, machine_create_config, machine_create_finalize, template_download; provisioning pipeline: machine_provision_orchestration (parent — the document-walk children chain directly under it), machine_wait_ssh, machine_sync_parent, machine_sync (one per folder), machine_hook (one per provisioning.pre[]/post[] sequence-hook entry — pre entries before the first method, post entries after the last), machine_shell (one per provisioning.shell.scripts[] entry, in the document walk), machine_provision (one per ansible local[] playbook entry), machine_provision_remote (one per ansible remote[] entry — ansible-playbook ON the agent host over the guest transport; needs host ansible), machine_docker_compose (one per provisioning.docker.docker_compose[] file — no engine setup; an absent guest engine fails the task honestly), machine_provision_parent (ONLY as the /run-provisioners anchor), machine_syncback_parent, machine_syncback (one per syncback-flagged folder — the post-provision guest→host pull), machine_key_rotate (queued only when settings.vagrant_ssh_insert_key is set and the communicator is not winrm — adopts the box's rotated private key into the working copy after the syncback bracket; never the whole-walk stamp owner); network: provisioning_network_setup, provisioning_network_teardown; consoles/snapshots: reset, pause, resume, snapshot_take (user takes AND the rotation service's scheduled rows — created_by snapshot_rotation), snapshot_restore, snapshot_delete, snapshot_modify (rename and/or description edit via PUT), machine_clone_current (clonevm current-state clone); templates: template_download, template_delete, template_export, template_upload (publish), template_move; filesystem (machine_name \"filesystem\"): file_move, file_copy, file_archive_create, file_archive_extract; registry/artifacts/system: provisioner_import, provisioner_export (one version → registry-shaped tar.gz + archive sha256 sidecar), provisioner_catalog_install (fetch catalog.json → download the versioned asset → verify sha256 → import), artifact_scan, artifact_download, artifact_upload, artifact_move, artifact_copy, artifact_delete_file, artifact_delete_folder, hcl_download, agent_update, set_hostname (PUT /api/network/hostname's queued rename — zoneweaver's exact op name, machine_name \"system\"; the converged wire, sync 2026-07-17).",
                         "type": "string"
                     },
                     "output": {
-                        "description": "ALWAYS null on the wire (list AND detail — the converged task wire); GET /tasks/{taskId}/output and the /tasks/{taskId}/stream WebSocket are the output channels; storage stays TEXT",
+                        "description": "ALWAYS null on the wire (list AND detail — the converged task wire); GET /api/tasks/{taskId}/output and the /api/tasks/{taskId}/stream WebSocket are the output channels; storage stays TEXT",
                         "items": {
                             "type": "integer"
                         },
@@ -7731,7 +7835,7 @@
                         "type": "string"
                     },
                     "status": {
-                        "description": "completed_with_errors is a parent-task terminal state: some children failed, some completed. prepared is the artifact-upload handshake's holding state (never dispatched; the upload landing at POST /artifacts/upload/{taskId} flips it to pending; agent restart cancels it).",
+                        "description": "completed_with_errors is a parent-task terminal state: some children failed, some completed. prepared is the artifact-upload handshake's holding state (never dispatched; the upload landing at POST /api/artifacts/upload/{taskId} flips it to pending; agent restart cancels it).",
                         "type": "string"
                     },
                     "updatedAt": {
@@ -8076,7 +8180,7 @@
         },
         "/api/api-keys/info": {
             "get": {
-                "description": "Minimum role: viewer (every valid key may inspect itself). Keys minted by a federated login (device or silent SSO) additionally answer auth_provider (\"oidc\"), email, and customer_id — the identity read off the validated token at login; plain keys omit all three (the UI consumes fail-open).",
+                "description": "Minimum role: viewer (every valid key may inspect itself). Keys minted by a federated login (device or silent SSO) additionally answer auth_provider (\"oidc\"), email, customer_id, issuer and subject — the identity read off the validated token at login and the provider it came from, so the UI can draw the person's profile at \u003cissuer\u003e/user/profile; plain keys omit all five (the UI consumes fail-open).",
                 "responses": {
                     "200": {
                         "content": {
@@ -10283,10 +10387,10 @@
         },
         "/api/events": {
             "get": {
-                "description": "Minimum role: viewer. The one event stream of the Universal Events Contract, plain WHATWG server-sent events. topics is a comma-separated list of health, tasks, hosts, admin, monitoring and profile; unknown names are ignored, an empty list asks for every topic, and the stream answers the topics the key's role may read, admin left out for a non-admin key, so the ready event's topics list is the subscription that stands; 403 only when nothing is left. The first frame is retry: 3000 followed by the ready event carrying the newest id and the subscribed topics. Every event carries id \u003cepoch-ms\u003e-\u003cseq\u003e, a kebab-case event name and one line of JSON data; a :hb comment line is sent after 25 seconds without a frame. Topic tasks sends task-updated, one task row as GET /api/tasks answers it, when a task is created and on every change of its status, progress_percent, progress_info or error_message. Topic hosts sends stats-updated, the GET /api/stats document, when a machine is created or removed and when one changes status. Topic health sends health, the GET /api/health report, whenever a task ends and the report differs from the last one sent. Topic admin sends restart-required, {required, last_modified_by, last_modified_time}, after every configuration save and backup restore, and {required: false} as the agent restarts; it is subscribed for an admin key alone. Topic monitoring sends cpu-sample {cpu: [sample]} with per_core_parsed, memory-sample {memory: [sample]} and network-sample {usage: [samples]}, the members GET /api/monitoring/system/cpu, /system/memory and /network/usage answer, whenever the collector takes them: on every collector tick while monitoring.storage_enabled, else only on POST /api/monitoring/collect. Topic profile sends profile-updated {} to the person whose preferences a PATCH /api/user/preferences changed, that person alone, on the stream and in a replay. No topic has a snapshot event. The ring keeps the last 500 events or 5 minutes, whichever is larger: a Last-Event-ID inside it replays every later event of the subscribed topics, one outside it answers a reset event naming the subscribed topics. A task's output and every terminal stay on their WebSockets.",
+                "description": "Minimum role: viewer. The one event stream of the Universal Events Contract, plain WHATWG server-sent events. topics is a comma-separated list of health, tasks, hosts, admin, monitoring, profile and notifications; unknown names are ignored, an empty list asks for every topic, and the stream answers the topics the key's role may read, admin left out for a non-admin key, so the ready event's topics list is the subscription that stands; 403 only when nothing is left. The first frame is retry: 3000 followed by the ready event carrying the newest id and the subscribed topics. Every event carries id \u003cepoch-ms\u003e-\u003cseq\u003e, a kebab-case event name and one line of JSON data; a :hb comment line is sent after 25 seconds without a frame. Topic tasks sends task-updated, one task row as GET /api/tasks answers it, when a task is created and on every change of its status, progress_percent, progress_info or error_message. Topic hosts sends stats-updated, the GET /api/stats document, when a machine is created or removed and when one changes status. Topic health sends health, the GET /api/health report, whenever a task ends and the report differs from the last one sent. Topic admin sends restart-required, {required, last_modified_by, last_modified_time}, after every configuration save and backup restore, and {required: false} as the agent restarts; it is subscribed for an admin key alone. Topic monitoring sends cpu-sample {cpu: [sample]} with per_core_parsed, memory-sample {memory: [sample]} and network-sample {usage: [samples]}, the members GET /api/monitoring/system/cpu, /api/system/memory and /api/network/usage answer, whenever the collector takes them: on every collector tick while monitoring.storage_enabled, else only on POST /api/monitoring/collect. Topic profile sends profile-updated {} to the person whose preferences a PATCH /api/user/preferences changed, that person alone, on the stream and in a replay. Topic notifications sends unread-count {count} to the person whose inbox write the agent relayed to the identity provider, read back from the issuer after the write, that person alone. No topic has a snapshot event. The ring keeps the last 500 events or 5 minutes, whichever is larger: a Last-Event-ID inside it replays every later event of the subscribed topics, one outside it answers a reset event naming the subscribed topics. A task's output and every terminal stay on their WebSockets.",
                 "parameters": [
                     {
-                        "description": "Comma-separated topics: health, tasks, hosts, admin, monitoring, profile",
+                        "description": "Comma-separated topics: health, tasks, hosts, admin, monitoring, profile, notifications",
                         "in": "query",
                         "name": "topics",
                         "schema": {
@@ -16382,6 +16486,406 @@
                 ]
             }
         },
+        "/api/notifications": {
+            "delete": {
+                "description": "Minimum role: viewer. Relayed to the identity provider's DELETE /api/notifications; the unread count follows on the stream.",
+                "responses": {
+                    "204": {
+                        "description": "Cleared"
+                    },
+                    "404": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/problem.Body"
+                                }
+                            }
+                        },
+                        "description": "The calling key was not minted by a federated login"
+                    },
+                    "502": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/problem.Body"
+                                }
+                            }
+                        },
+                        "description": "Identity provider unreachable"
+                    },
+                    "503": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/problem.Body"
+                                }
+                            }
+                        },
+                        "description": "No valid token for the bound account"
+                    }
+                },
+                "summary": "Clear the signed-in person's inbox",
+                "tags": [
+                    "Local Login"
+                ]
+            },
+            "get": {
+                "description": "Minimum role: viewer. Relayed to the identity provider's GET /api/notifications under the bound account's token with page, size and unread_only passed through, the way a backend host proxies the hub; the issuer's status and body are answered as they came. A key no federated login minted answers 404, no valid token 503. The notifications token is listed in status.features only while such a token is held.",
+                "parameters": [
+                    {
+                        "description": "Page number",
+                        "in": "query",
+                        "name": "page",
+                        "schema": {
+                            "type": "integer"
+                        }
+                    },
+                    {
+                        "description": "Page size",
+                        "in": "query",
+                        "name": "size",
+                        "schema": {
+                            "type": "integer"
+                        }
+                    },
+                    {
+                        "description": "Unread rows alone",
+                        "in": "query",
+                        "name": "unread_only",
+                        "schema": {
+                            "type": "boolean"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/server.notificationPage"
+                                }
+                            }
+                        },
+                        "description": "The page of rows"
+                    },
+                    "404": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/problem.Body"
+                                }
+                            }
+                        },
+                        "description": "The calling key was not minted by a federated login"
+                    },
+                    "502": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/problem.Body"
+                                }
+                            }
+                        },
+                        "description": "Identity provider unreachable"
+                    },
+                    "503": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/problem.Body"
+                                }
+                            }
+                        },
+                        "description": "No valid token for the bound account"
+                    }
+                },
+                "summary": "The signed-in person's inbox",
+                "tags": [
+                    "Local Login"
+                ]
+            }
+        },
+        "/api/notifications/read-all": {
+            "post": {
+                "description": "Minimum role: viewer. Relayed to the identity provider's POST /api/notifications/read-all; the unread count follows on the stream.",
+                "responses": {
+                    "204": {
+                        "description": "Marked"
+                    },
+                    "404": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/problem.Body"
+                                }
+                            }
+                        },
+                        "description": "The calling key was not minted by a federated login"
+                    },
+                    "502": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/problem.Body"
+                                }
+                            }
+                        },
+                        "description": "Identity provider unreachable"
+                    },
+                    "503": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/problem.Body"
+                                }
+                            }
+                        },
+                        "description": "No valid token for the bound account"
+                    }
+                },
+                "summary": "Mark every notification read",
+                "tags": [
+                    "Local Login"
+                ]
+            }
+        },
+        "/api/notifications/unread-count": {
+            "get": {
+                "description": "Minimum role: viewer. Relayed to the identity provider's GET /api/notifications/unread-count under the bound account's token.",
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/server.unreadCountResponse"
+                                }
+                            }
+                        },
+                        "description": "The count"
+                    },
+                    "404": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/problem.Body"
+                                }
+                            }
+                        },
+                        "description": "The calling key was not minted by a federated login"
+                    },
+                    "502": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/problem.Body"
+                                }
+                            }
+                        },
+                        "description": "Identity provider unreachable"
+                    },
+                    "503": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/problem.Body"
+                                }
+                            }
+                        },
+                        "description": "No valid token for the bound account"
+                    }
+                },
+                "summary": "The signed-in person's unread count",
+                "tags": [
+                    "Local Login"
+                ]
+            }
+        },
+        "/api/notifications/vapid-key": {
+            "get": {
+                "description": "Minimum role: viewer. This agent signs no browser push of its own: the identity provider's push reaches the person on every host, so the VAPID key, the subscription routes and the test toast answer 503 not-configured, and the shared UI's notifications switch stays off here.",
+                "responses": {
+                    "503": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/problem.Body"
+                                }
+                            }
+                        },
+                        "description": "Push is not offered by this agent"
+                    }
+                },
+                "summary": "Browser push is not offered",
+                "tags": [
+                    "Local Login"
+                ]
+            }
+        },
+        "/api/notifications/{id}": {
+            "delete": {
+                "description": "Minimum role: viewer. Relayed to the identity provider's DELETE /api/notifications/{id}; the unread count follows on the stream.",
+                "parameters": [
+                    {
+                        "description": "The notification id",
+                        "in": "path",
+                        "name": "id",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "Deleted"
+                    },
+                    "404": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/problem.Body"
+                                }
+                            }
+                        },
+                        "description": "The calling key was not minted by a federated login, or the issuer knows no such row"
+                    },
+                    "502": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/problem.Body"
+                                }
+                            }
+                        },
+                        "description": "Identity provider unreachable"
+                    },
+                    "503": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/problem.Body"
+                                }
+                            }
+                        },
+                        "description": "No valid token for the bound account"
+                    }
+                },
+                "summary": "Delete one notification",
+                "tags": [
+                    "Local Login"
+                ]
+            }
+        },
+        "/api/notifications/{id}/read": {
+            "post": {
+                "description": "Minimum role: viewer. Relayed to the identity provider's POST /api/notifications/{id}/read; afterwards the unread count is read again and sent as unread-count on the notifications topic of the stream to this person.",
+                "parameters": [
+                    {
+                        "description": "The notification id",
+                        "in": "path",
+                        "name": "id",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "Marked"
+                    },
+                    "404": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/problem.Body"
+                                }
+                            }
+                        },
+                        "description": "The calling key was not minted by a federated login, or the issuer knows no such row"
+                    },
+                    "502": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/problem.Body"
+                                }
+                            }
+                        },
+                        "description": "Identity provider unreachable"
+                    },
+                    "503": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/problem.Body"
+                                }
+                            }
+                        },
+                        "description": "No valid token for the bound account"
+                    }
+                },
+                "summary": "Mark one notification read",
+                "tags": [
+                    "Local Login"
+                ]
+            }
+        },
+        "/api/notifications/{id}/unread": {
+            "post": {
+                "description": "Minimum role: viewer. Relayed to the identity provider's POST /api/notifications/{id}/unread; the unread count follows on the stream.",
+                "parameters": [
+                    {
+                        "description": "The notification id",
+                        "in": "path",
+                        "name": "id",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "Marked"
+                    },
+                    "404": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/problem.Body"
+                                }
+                            }
+                        },
+                        "description": "The calling key was not minted by a federated login, or the issuer knows no such row"
+                    },
+                    "502": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/problem.Body"
+                                }
+                            }
+                        },
+                        "description": "Identity provider unreachable"
+                    },
+                    "503": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/problem.Body"
+                                }
+                            }
+                        },
+                        "description": "No valid token for the bound account"
+                    }
+                },
+                "summary": "Mark one notification unread",
+                "tags": [
+                    "Local Login"
+                ]
+            }
+        },
         "/api/protocol/handoff": {
             "post": {
                 "description": "Public but secret-gated, the restart's successor side: the freshly spawned agent posts the running agent's protocol secret before it opens any database or binds any port. With a restart pending the running agent holds this request open while it closes its listeners, stops its services and closes its databases, then answers 200 and exits; the answer, or the connection closing with it, is the successor's signal that the port and the database files are free. Without a pending restart (an ordinary second launch) it answers 409 and the caller proceeds as a normal launch.",
@@ -19911,7 +20415,7 @@
         },
         "/api/user": {
             "get": {
-                "description": "Minimum role: viewer. The person the calling key stands for, in the identity provider's profile shape the shared UI reads: id, username and name are the key's, email, auth_provider (\"oidc\") and customer_id come from the federated login that minted the key and are null on a plain key, role is the key's own (admin, operator or viewer), organizations is always empty, and the preferred_* members are the person's stored preferences, null when unset. Preferences are kept per person: by the email of a federated login, else by the key's name.",
+                "description": "Minimum role: viewer. The person the calling key stands for, in the identity provider's profile shape the shared UI reads: id, username and name are the key's, email, auth_provider (\"oidc\"), customer_id, issuer and subject come from the federated login that minted the key and are null on a plain key, role is the key's own (admin, operator or viewer), organizations is always empty, and the preferred_* members are the person's stored preferences, null when unset. Preferences are kept per person: by the email of a federated login, else by the key's name.",
                 "responses": {
                     "200": {
                         "content": {
@@ -19945,6 +20449,144 @@
                     }
                 },
                 "summary": "The signed-in person",
+                "tags": [
+                    "Local Login"
+                ]
+            }
+        },
+        "/api/user/favorites": {
+            "get": {
+                "description": "Minimum role: viewer. Relayed to the identity provider's GET /api/user/favorites under the bound account's token, the way a backend host proxies it, so the user menu draws the same list on every host; the issuer's status and body are answered as they came. A key no federated login minted answers 404, and an agent holding no valid token for its bound account answers 503. The favorites token is listed in status.features only while such a token is held.",
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "items": {
+                                        "$ref": "#/components/schemas/server.favoriteEntry"
+                                    },
+                                    "type": "array"
+                                }
+                            }
+                        },
+                        "description": "The ordered favorites"
+                    },
+                    "404": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/problem.Body"
+                                }
+                            }
+                        },
+                        "description": "The calling key was not minted by a federated login"
+                    },
+                    "502": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/problem.Body"
+                                }
+                            }
+                        },
+                        "description": "Identity provider unreachable"
+                    },
+                    "503": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/problem.Body"
+                                }
+                            }
+                        },
+                        "description": "No valid token for the bound account"
+                    }
+                },
+                "summary": "The signed-in person's favorites",
+                "tags": [
+                    "Local Login"
+                ]
+            },
+            "put": {
+                "description": "Minimum role: viewer. The whole ordered list, relayed to the identity provider's PUT /api/user/favorites under the bound account's token; the issuer answers the enriched entries from each client's registration, and its status and body are answered as they came.",
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "oneOf": [
+                                    {
+                                        "type": "object"
+                                    },
+                                    {
+                                        "items": {
+                                            "$ref": "#/components/schemas/server.favoriteWrite"
+                                        },
+                                        "title": "body",
+                                        "type": "array"
+                                    }
+                                ]
+                            }
+                        }
+                    },
+                    "description": "The whole ordered list",
+                    "required": true
+                },
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "items": {
+                                        "$ref": "#/components/schemas/server.favoriteEntry"
+                                    },
+                                    "type": "array"
+                                }
+                            }
+                        },
+                        "description": "The favorites as stored"
+                    },
+                    "400": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/problem.Body"
+                                }
+                            }
+                        },
+                        "description": "The body is not a JSON array of entries"
+                    },
+                    "404": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/problem.Body"
+                                }
+                            }
+                        },
+                        "description": "The calling key was not minted by a federated login"
+                    },
+                    "502": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/problem.Body"
+                                }
+                            }
+                        },
+                        "description": "Identity provider unreachable"
+                    },
+                    "503": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/problem.Body"
+                                }
+                            }
+                        },
+                        "description": "No valid token for the bound account"
+                    }
+                },
+                "summary": "Save the signed-in person's favorites",
                 "tags": [
                     "Local Login"
                 ]
@@ -19991,15 +20633,17 @@
                                         "type": "object"
                                     },
                                     {
-                                        "$ref": "#/components/schemas/server.preferencePatchRequest",
-                                        "summary": "body",
-                                        "description": "The members to change"
+                                        "additionalProperties": {
+                                            "type": "string"
+                                        },
+                                        "title": "body",
+                                        "type": "object"
                                     }
                                 ]
                             }
                         }
                     },
-                    "description": "The members to change",
+                    "description": "The members to change: language, mode, theme, motion, timezone; null clears one",
                     "required": true
                 },
                 "responses": {
