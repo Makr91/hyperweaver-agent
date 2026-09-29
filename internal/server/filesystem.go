@@ -330,13 +330,6 @@ type browseResponse struct {
 	HiddenItemsFiltered int     `json:"hidden_items_filtered"`
 }
 
-// browseListingError is the internal listing-failure body ({error, details} —
-// the base's failure shape; the over-the-entry-cap refusal rides it too).
-type browseListingError struct {
-	Error   string `json:"error"`
-	Details string `json:"details"`
-}
-
 // handleBrowseFilesystem serves GET /filesystem — the base's browseDirectory:
 // list, hidden filter, user sort, parent path.
 //
@@ -349,10 +342,10 @@ type browseListingError struct {
 //	@Param			sort_by		query	string	false	"Sort field"	Enums(name,size,modified,type)	default(name)
 //	@Param			sort_order	query	string	false	"Sort direction"	Enums(asc,desc)	default(asc)
 //	@Success		200	{object}	browseResponse	"Directory contents"
-//	@Failure		403	"Path forbidden (traversal, outside the configured browse root, forbidden prefix, or pattern match)"
-//	@Failure		404	"Directory not found"
-//	@Failure		500	"Listing failure ({error, details} — includes the over-the-entry-cap refusal)"
-//	@Failure		503	"File browser is disabled"
+//	@Failure		403	{object}	problem.Body	"Path forbidden (traversal, outside the configured browse root, forbidden prefix, or pattern match)"
+//	@Failure		404	{object}	problem.Body	"Directory not found"
+//	@Failure		500	{object}	problem.Body	"Listing failure, the over-the-entry-cap refusal included, the cause in detail"
+//	@Failure		503	{object}	problem.Body	"File browser is disabled"
 //	@Router			/api/filesystem [get]
 func (s *Server) handleBrowseFilesystem(w http.ResponseWriter, r *http.Request) {
 	query := r.URL.Query()
@@ -383,12 +376,7 @@ func (s *Server) handleBrowseFilesystem(w http.ResponseWriter, r *http.Request) 
 			case errors.Is(err, os.ErrNotExist):
 				taskError(w, http.StatusNotFound, "Directory not found")
 			default:
-				w.Header().Set("Content-Type", "application/json")
-				w.WriteHeader(http.StatusInternalServerError)
-				writeJSON(w, browseListingError{
-					Error:   "Failed to browse directory",
-					Details: err.Error(),
-				})
+				taskError(w, http.StatusInternalServerError, "Failed to browse directory: "+err.Error())
 			}
 			return
 		}

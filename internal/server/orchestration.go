@@ -6,6 +6,7 @@ import (
 
 	"github.com/Makr91/hyperweaver-agent/internal/auth"
 	"github.com/Makr91/hyperweaver-agent/internal/machines"
+	"github.com/Makr91/hyperweaver-agent/internal/problem"
 )
 
 // Machine orchestration endpoints — the base's ZoneOrchestrationController:
@@ -73,7 +74,7 @@ type orchestrationEnableResponse struct {
 //	@Produce		json
 //	@Param			request	body		orchestrationEnableRequest	true	"Requires confirm: true"
 //	@Success		200		{object}	orchestrationEnableResponse	"Orchestration enabled"
-//	@Failure		400		{object}	map[string]string			"Missing confirmation"
+//	@Failure		422		{object}	problem.Body				"confirm not true (enum at /confirm)"
 //	@Router			/api/machines/orchestration/enable [post]
 func (s *Server) handleOrchestrationEnable(w http.ResponseWriter, r *http.Request) {
 	var body orchestrationEnableRequest
@@ -82,11 +83,7 @@ func (s *Server) handleOrchestrationEnable(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	if !body.Confirm {
-		writeJSONStatus(w, http.StatusBadRequest, map[string]any{
-			"success": false,
-			"error":   "Confirmation required",
-			"details": `You must set "confirm": true to enable machine orchestration`,
-		})
+		problem.Invalid(w, problem.Enum("/confirm", "true"))
 		return
 	}
 	if err := s.persistOrchestrationEnabled(true); err != nil {
@@ -211,7 +208,7 @@ type orchestrationTestResponse struct {
 //	@Produce		json
 //	@Param			request	body		orchestrationTestRequest	false	"Optional shutdown strategy selector"
 //	@Success		200		{object}	orchestrationTestResponse	"Execution plan"
-//	@Failure		400		{object}	map[string]string			"Invalid strategy"
+//	@Failure		422		{object}	problem.Body				"Invalid strategy (enum at /strategy)"
 //	@Router			/api/machines/orchestration/test [post]
 func (s *Server) handleOrchestrationTest(w http.ResponseWriter, r *http.Request) {
 	var body orchestrationTestRequest
@@ -226,8 +223,7 @@ func (s *Server) handleOrchestrationTest(w http.ResponseWriter, r *http.Request)
 	switch strategy {
 	case "sequential", "parallel_by_priority", "staggered":
 	default:
-		taskError(w, http.StatusBadRequest,
-			"Invalid strategy — valid options: sequential, parallel_by_priority, staggered")
+		problem.Invalid(w, problem.Enum("/strategy", "sequential", "parallel_by_priority", "staggered"))
 		return
 	}
 

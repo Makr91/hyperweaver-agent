@@ -142,7 +142,7 @@ func matchProcesses(ctx context.Context, user string, command *regexp.Regexp) ([
 //	@Param			detailed	query	bool	false	"Add CPU and memory statistics"	default(false)
 //	@Param			limit		query	int		false	"Maximum rows to return"		minimum(1)	maximum(1000)	default(100)
 //	@Success		200	{array}		processInfo		"Processes"
-//	@Failure		400	{object}	wrappedError	"Invalid command pattern"
+//	@Failure		400	{object}	problem.Body	"Invalid command pattern"
 //	@Router			/api/system/processes [get]
 func (s *Server) handleListProcesses(w http.ResponseWriter, r *http.Request) {
 	query := r.URL.Query()
@@ -205,8 +205,8 @@ func (s *Server) findProcess(w http.ResponseWriter, r *http.Request) *process.Pr
 //	@Produce		json
 //	@Param			pid	path	int	true	"Process ID"
 //	@Success		200	{object}	processInfo		"Process details"
-//	@Failure		400	{object}	wrappedError	"Invalid process ID"
-//	@Failure		404	{object}	wrappedError	"Process not found"
+//	@Failure		400	{object}	problem.Body	"Invalid process ID"
+//	@Failure		404	{object}	problem.Body	"Process not found"
 //	@Router			/api/system/processes/{pid} [get]
 func (s *Server) handleProcessDetails(w http.ResponseWriter, r *http.Request) {
 	p := s.findProcess(w, r)
@@ -243,7 +243,7 @@ type processOpenFile struct {
 //	@Produce		json
 //	@Param			pid	path	int	true	"Process ID"
 //	@Success		200	{array}		processOpenFile	"Open files"
-//	@Failure		404	{object}	wrappedError	"Process not found"
+//	@Failure		404	{object}	problem.Body	"Process not found"
 //	@Router			/api/system/processes/{pid}/files [get]
 func (s *Server) handleProcessFiles(w http.ResponseWriter, r *http.Request) {
 	p := s.findProcess(w, r)
@@ -278,7 +278,7 @@ type findProcessesResponse struct {
 //	@Param			pattern	query	string	true	"Command pattern (regex)"
 //	@Param			user	query	string	false	"Filter by username"
 //	@Success		200	{object}	findProcessesResponse	"Matching process IDs"
-//	@Failure		400	{object}	wrappedError			"Missing or invalid pattern"
+//	@Failure		400	{object}	problem.Body			"Missing or invalid pattern"
 //	@Router			/api/system/processes/find [get]
 func (s *Server) handleFindProcesses(w http.ResponseWriter, r *http.Request) {
 	pattern := r.URL.Query().Get("pattern")

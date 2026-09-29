@@ -2,13 +2,14 @@ package auth
 
 import (
 	"context"
-	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 	"strings"
 
 	"github.com/Makr91/hyperweaver-agent/internal/keys"
 	"github.com/Makr91/hyperweaver-agent/internal/logging"
+	"github.com/Makr91/hyperweaver-agent/internal/problem"
 )
 
 // alog is this package's category logger (the Node agent's auth logger:
@@ -87,64 +88,118 @@ func FromContext(ctx context.Context) *Identity {
 	return id
 }
 
-// ExtractKey pulls the API key from X-API-Key or Authorization: Bearer.
-func ExtractKey(r *http.Request) string {
+// Scheme names how a credential arrived.
+type Scheme string
+
+// The schemes a request may carry.
+const (
+	SchemeAPIKey Scheme = "apikey"
+	SchemeBearer Scheme = "Bearer"
+	SchemeDPoP   Scheme = "DPoP"
+)
+
+// ErrAmbiguous is two Authorization headers on one request (RFC 9449 §7.2).
+var ErrAmbiguous = errors.New("multiple Authorization headers")
+
+// ErrScheme is an Authorization scheme the agent does not read.
+var ErrScheme = errors.New("unsupported Authorization scheme")
+
+// Credential reads the request's credential: X-API-Key, else Authorization as Bearer or DPoP.
+func Credential(r *http.Request) (Scheme, string, error) {
 	if key := r.Header.Get("X-API-Key"); key != "" {
-		return key
+		return SchemeAPIKey, key, nil
 	}
-	parts := strings.SplitN(r.Header.Get("Authorization"), " ", 2)
-	if len(parts) == 2 {
-		return parts[1]
+	values := r.Header.Values("Authorization")
+	if len(values) > 1 {
+		return "", "", ErrAmbiguous
 	}
-	return ""
+	if len(values) == 0 {
+		return "", "", nil
+	}
+	name, token, found := strings.Cut(values[0], " ")
+	token = strings.TrimSpace(token)
+	if !found || token == "" {
+		return "", "", ErrScheme
+	}
+	switch {
+	case strings.EqualFold(name, string(SchemeBearer)):
+		return SchemeBearer, token, nil
+	case strings.EqualFold(name, string(SchemeDPoP)):
+		return SchemeDPoP, token, nil
+	}
+	return "", "", ErrScheme
 }
 
-// ErrorMsg is the agent's auth-layer error envelope (the spec's Error
-// component).
-type ErrorMsg struct {
-	// Error message
-	Msg string `json:"msg"`
+// Challenge is the WWW-Authenticate value a 401 carries: bare schemes with no credential, the failed scheme's error otherwise.
+func Challenge(scheme Scheme, code string) string {
+	if code == "" {
+		return `Bearer, DPoP algs="ES256"`
+	}
+	if scheme == SchemeDPoP {
+		return `DPoP error="` + code + `", algs="ES256"`
+	}
+	return `Bearer error="` + code + `", DPoP algs="ES256"`
 }
 
-// WriteMsg writes the agent's error shape: {"msg": "..."} — the field the
-// Hyperweaver UI surfaces.
+// Unauthorized answers 401 with the challenge header and a problem body.
+func Unauthorized(w http.ResponseWriter, scheme Scheme, code, detail string) {
+	w.Header().Set("WWW-Authenticate", Challenge(scheme, code))
+	problem.Detail(w, http.StatusUnauthorized, detail)
+}
+
+// WriteMsg writes a problem body of the status's registry type with msg as its detail.
 func WriteMsg(w http.ResponseWriter, status int, msg string) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	if err := json.NewEncoder(w).Encode(ErrorMsg{Msg: msg}); err != nil {
-		slog.Error("write error response", "error", err)
-	}
+	problem.Detail(w, status, msg)
 }
 
-// BearerValidator authenticates a non-API-key bearer credential (an OIDC
-// access token); nil = rejected.
-type BearerValidator func(token string) *Identity
+// TokenValidator authenticates an identity-provider token under its scheme; nil identity with the refusal's reason.
+type TokenValidator func(r *http.Request, scheme Scheme, token string) (*Identity, error)
 
 // Middleware validates the credential and enforces the role policy, mirroring
 // the Node agent's verifyApiKey: 401 missing credential, 403 invalid, 403
 // insufficient role. API keys (hw_-prefixed) authenticate against the key
-// store; a JWT-shaped bearer credential goes to the BearerValidator instead
-// (the OIDC resource-server door — nil validator disables it). On success the
+// store; a JWT-shaped credential goes to the TokenValidator instead (the
+// OIDC resource-server door — nil validator disables it). On success the
 // identity is attached to the context.
-func Middleware(store *keys.Store, bearer BearerValidator) func(http.Handler) http.Handler {
+func Middleware(store *keys.Store, tokens TokenValidator) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			credential := ExtractKey(r)
-			if credential == "" {
-				WriteMsg(w, http.StatusUnauthorized,
+			scheme, credential, cerr := Credential(r)
+			switch {
+			case errors.Is(cerr, ErrAmbiguous):
+				problem.Detail(w, http.StatusBadRequest, "Multiple methods used to include an access token")
+				return
+			case errors.Is(cerr, ErrScheme):
+				Unauthorized(w, "", "", "Authorization scheme must be Bearer or DPoP")
+				return
+			case credential == "":
+				Unauthorized(w, "", "",
 					"API key required - provide either X-API-Key header or Authorization: Bearer header")
 				return
 			}
 
 			var identity *Identity
-			if bearer != nil && strings.Count(credential, ".") == 2 &&
-				!strings.HasPrefix(credential, "hw_") {
-				identity = bearer(credential)
+			isJWT := strings.Count(credential, ".") == 2 && !strings.HasPrefix(credential, "hw_")
+			switch {
+			case scheme == SchemeDPoP && !isJWT:
+				Unauthorized(w, SchemeDPoP, "invalid_token", "An API key is never key-bound; send it as Bearer or X-API-Key")
+				return
+			case tokens != nil && isJWT:
+				var terr error
+				identity, terr = tokens(r, scheme, credential)
 				if identity == nil {
-					WriteMsg(w, http.StatusForbidden, "Invalid bearer token")
+					code := "invalid_token"
+					if terr != nil && strings.Contains(terr.Error(), "DPoP proof") {
+						code = "invalid_dpop_proof"
+					}
+					detail := "Invalid bearer token"
+					if terr != nil {
+						detail = terr.Error()
+					}
+					Unauthorized(w, scheme, code, detail)
 					return
 				}
-			} else {
+			default:
 				match, err := store.Verify(credential)
 				if err != nil {
 					alog().Error("api key validation failed", "error", err, "path", r.URL.Path)

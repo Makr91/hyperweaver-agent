@@ -57,8 +57,8 @@ type trayClaimResponse struct {
 //	@Produce		json
 //	@Param			request	body		trayClaimRequest	true	"Tray claim request"
 //	@Success		200		{object}	trayClaimResponse	"The admin key (SSO-minted when the grant carries one, else fresh and named after the local OS account)"
-//	@Failure		400		{object}	auth.ErrorMsg		"Missing token"
-//	@Failure		403		{object}	auth.ErrorMsg		"Unknown, expired, or already-used token"
+//	@Failure		400		{object}	problem.Body		"Missing token"
+//	@Failure		403		{object}	problem.Body		"Unknown, expired, or already-used token"
 //	@Router			/api/auth/tray-claim [post]
 func (s *Server) handleTrayClaim(w http.ResponseWriter, r *http.Request) {
 	var body trayClaimRequest
@@ -133,8 +133,8 @@ type protocolOpenResponse struct {
 //	@Produce		json
 //	@Param			request	body		protocolOpenRequest	true	"Protocol open request"
 //	@Success		200		{object}	protocolOpenResponse	"Action accepted; the agent is opening the browser"
-//	@Failure		400		{object}	auth.ErrorMsg		"Missing secret"
-//	@Failure		403		{object}	auth.ErrorMsg		"Invalid secret"
+//	@Failure		400		{object}	problem.Body		"Missing secret"
+//	@Failure		403		{object}	problem.Body		"Invalid secret"
 //	@Router			/api/protocol/open [post]
 func (s *Server) handleProtocolOpen(w http.ResponseWriter, r *http.Request) {
 	var body protocolOpenRequest
@@ -167,9 +167,9 @@ type protocolHandoffResponse struct {
 // @Produce		json
 // @Param			request	body		protocolOpenRequest		true	"The running agent's protocol secret"
 // @Success		200		{object}	protocolHandoffResponse	"Port and databases released"
-// @Failure		400		{object}	auth.ErrorMsg			"Missing secret"
-// @Failure		403		{object}	auth.ErrorMsg			"Invalid secret"
-// @Failure		409		{object}	auth.ErrorMsg			"No restart is pending"
+// @Failure		400		{object}	problem.Body			"Missing secret"
+// @Failure		403		{object}	problem.Body			"Invalid secret"
+// @Failure		409		{object}	problem.Body			"No restart is pending"
 // @Router			/api/protocol/handoff [post]
 func (s *Server) handleProtocolHandoff(w http.ResponseWriter, r *http.Request) {
 	var body protocolOpenRequest

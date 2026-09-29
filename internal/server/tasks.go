@@ -1,7 +1,6 @@
 package server
 
 import (
-	"encoding/json"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -9,6 +8,7 @@ import (
 	"time"
 
 	"github.com/Makr91/hyperweaver-agent/internal/auth"
+	"github.com/Makr91/hyperweaver-agent/internal/problem"
 	"github.com/Makr91/hyperweaver-agent/internal/tasks"
 )
 
@@ -18,18 +18,9 @@ import (
 // deliberate divergence (D-F): DELETE /tasks/{taskId} cancels running tasks
 // too, not just pending ones.
 
-// taskErrorBody is the task controllers' error shape: {"error": "..."}.
-type taskErrorBody struct {
-	Error string `json:"error"`
-}
-
-// taskError writes the task controllers' error shape: {"error": "..."}.
+// taskError writes a problem body of the status's registry type with message as its detail.
 func taskError(w http.ResponseWriter, status int, message string) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	if err := json.NewEncoder(w).Encode(taskErrorBody{Error: message}); err != nil {
-		slog.Error("write task error response", "error", err)
-	}
+	problem.Detail(w, status, message)
 }
 
 // listTasksResponse is GET /tasks's answer.
@@ -156,7 +147,7 @@ func (s *Server) handleTaskStats(w http.ResponseWriter, r *http.Request) {
 //	@Produce		json
 //	@Param			taskId	path	string	true	"Task id"
 //	@Success		200	{object}	tasks.Task	"The task"
-//	@Failure		404	{object}	taskErrorBody	"Task not found"
+//	@Failure		404	{object}	problem.Body	"Task not found"
 //	@Router			/api/tasks/{taskId} [get]
 func (s *Server) handleTaskDetails(w http.ResponseWriter, r *http.Request) {
 	task, err := s.tasks.Store().Get(r.Context(), r.PathValue("taskId"))
@@ -188,7 +179,7 @@ type taskOutputResponse struct {
 //	@Produce		json
 //	@Param			taskId	path	string	true	"Task id"
 //	@Success		200	{object}	taskOutputResponse	"Output entries"
-//	@Failure		404	{object}	taskErrorBody	"Task not found"
+//	@Failure		404	{object}	problem.Body	"Task not found"
 //	@Router			/api/tasks/{taskId}/output [get]
 func (s *Server) handleTaskOutput(w http.ResponseWriter, r *http.Request) {
 	taskID := r.PathValue("taskId")
@@ -223,13 +214,6 @@ type cancelTaskResponse struct {
 	Message string `json:"message"`
 }
 
-// cancelConflictError is DELETE /tasks/{taskId}'s 400 body (task already
-// in a terminal state).
-type cancelConflictError struct {
-	Error         string `json:"error"`
-	CurrentStatus string `json:"current_status"`
-}
-
 // handleCancelTask mirrors DELETE /tasks/{taskId}, extended per D-F: running
 // tasks are cancellable too — the executor's children are killed and its
 // cleanup runs; the task lands in cancelled with output preserved.
@@ -240,8 +224,8 @@ type cancelConflictError struct {
 //	@Produce		json
 //	@Param			taskId	path	string	true	"Task id"
 //	@Success		200	{object}	cancelTaskResponse	"Cancelled (pending) or cancellation in progress (running)"
-//	@Failure		400	{object}	cancelConflictError	"Task already in a terminal state"
-//	@Failure		404	{object}	taskErrorBody	"Task not found"
+//	@Failure		409	{object}	problem.Body	"Task already in a terminal state; current_status carries it"
+//	@Failure		404	{object}	problem.Body	"Task not found"
 //	@Router			/api/tasks/{taskId} [delete]
 func (s *Server) handleCancelTask(w http.ResponseWriter, r *http.Request) {
 	taskID := r.PathValue("taskId")
@@ -253,14 +237,8 @@ func (s *Server) handleCancelTask(w http.ResponseWriter, r *http.Request) {
 		taskError(w, http.StatusNotFound, "Task not found")
 		return
 	case errors.As(err, &notCancellable):
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusBadRequest)
-		if werr := json.NewEncoder(w).Encode(cancelConflictError{
-			Error:         "Can only cancel pending or running tasks",
-			CurrentStatus: notCancellable.Status,
-		}); werr != nil {
-			slog.Error("write task error response", "error", werr)
-		}
+		problem.Conflict(w, "Can only cancel pending or running tasks",
+			map[string]any{"current_status": notCancellable.Status})
 		return
 	case err != nil:
 		slog.Error("cancel task", "error", err, "task_id", taskID)

@@ -161,10 +161,10 @@ type guestPingResponse struct {
 //	@Produce		json
 //	@Param			machineName	path		string				true	"Machine name"
 //	@Success		200			{object}	guestPingResponse	"Guest agent is responding"
-//	@Failure		400			{object}	taskErrorBody		"Machine is not running"
-//	@Failure		404			{object}	taskErrorBody		"Machine not found"
-//	@Failure		502			{object}	taskErrorBody		"Guest agent did not answer (no UART wired, or qemu-ga not running in the guest)"
-//	@Failure		503			{object}	taskErrorBody		"Guest agent channel is disabled (guest_agent.enabled)"
+//	@Failure		400			{object}	problem.Body		"Machine is not running"
+//	@Failure		404			{object}	problem.Body		"Machine not found"
+//	@Failure		502			{object}	problem.Body		"Guest agent did not answer (no UART wired, or qemu-ga not running in the guest)"
+//	@Failure		503			{object}	problem.Body		"Guest agent channel is disabled (guest_agent.enabled)"
 //	@Router			/api/machines/{machineName}/guest/ping [get]
 func (s *Server) handleGuestPing(w http.ResponseWriter, r *http.Request) {
 	machine := s.findMachine(w, r)
@@ -202,10 +202,10 @@ func (s *Server) handleGuestPing(w http.ResponseWriter, r *http.Request) {
 //	@Produce		json
 //	@Param			machineName	path		string					true	"Machine name"
 //	@Success		200			{object}	map[string]interface{}	"OS info"
-//	@Failure		400			{object}	taskErrorBody			"Machine is not running"
-//	@Failure		404			{object}	taskErrorBody			"Machine not found"
-//	@Failure		502			{object}	taskErrorBody			"Guest agent did not answer"
-//	@Failure		503			{object}	taskErrorBody			"Guest agent channel is disabled"
+//	@Failure		400			{object}	problem.Body			"Machine is not running"
+//	@Failure		404			{object}	problem.Body			"Machine not found"
+//	@Failure		502			{object}	problem.Body			"Guest agent did not answer"
+//	@Failure		503			{object}	problem.Body			"Guest agent channel is disabled"
 //	@Router			/api/machines/{machineName}/guest/osinfo [get]
 func (s *Server) handleGuestOSInfo(w http.ResponseWriter, r *http.Request) {
 	machine := s.findMachine(w, r)
@@ -237,10 +237,10 @@ func (s *Server) handleGuestOSInfo(w http.ResponseWriter, r *http.Request) {
 //	@Produce		json
 //	@Param			machineName	path		string					true	"Machine name"
 //	@Success		200			{object}	map[string]interface{}	"Interfaces"
-//	@Failure		400			{object}	taskErrorBody			"Machine is not running"
-//	@Failure		404			{object}	taskErrorBody			"Machine not found"
-//	@Failure		502			{object}	taskErrorBody			"Guest agent did not answer"
-//	@Failure		503			{object}	taskErrorBody			"Guest agent channel is disabled"
+//	@Failure		400			{object}	problem.Body			"Machine is not running"
+//	@Failure		404			{object}	problem.Body			"Machine not found"
+//	@Failure		502			{object}	problem.Body			"Guest agent did not answer"
+//	@Failure		503			{object}	problem.Body			"Guest agent channel is disabled"
 //	@Router			/api/machines/{machineName}/guest/network [get]
 func (s *Server) handleGuestNetwork(w http.ResponseWriter, r *http.Request) {
 	machine := s.findMachine(w, r)
@@ -308,10 +308,10 @@ type guestShutdownResponse struct {
 //	@Param			machineName	path		string					true	"Machine name"
 //	@Param			request		body		guestShutdownRequest	false	"Shutdown mode"
 //	@Success		200			{object}	guestShutdownResponse	"Shutdown requested through the guest agent"
-//	@Failure		400			{object}	taskErrorBody			"Invalid mode, or machine is not running"
-//	@Failure		404			{object}	taskErrorBody			"Machine not found"
-//	@Failure		502			{object}	taskErrorBody			"Guest agent did not answer"
-//	@Failure		503			{object}	taskErrorBody			"Guest agent channel is disabled"
+//	@Failure		400			{object}	problem.Body			"Invalid mode, or machine is not running"
+//	@Failure		404			{object}	problem.Body			"Machine not found"
+//	@Failure		502			{object}	problem.Body			"Guest agent did not answer"
+//	@Failure		503			{object}	problem.Body			"Guest agent channel is disabled"
 //	@Router			/api/machines/{machineName}/guest/shutdown [post]
 func (s *Server) handleGuestShutdown(w http.ResponseWriter, r *http.Request) {
 	mode := "powerdown"

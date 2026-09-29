@@ -12,6 +12,7 @@ import (
 	"github.com/Makr91/hyperweaver-agent/internal/auth"
 	"github.com/Makr91/hyperweaver-agent/internal/hostinfo"
 	"github.com/Makr91/hyperweaver-agent/internal/hostpower"
+	"github.com/Makr91/hyperweaver-agent/internal/problem"
 	"github.com/Makr91/hyperweaver-agent/internal/tasks"
 )
 
@@ -23,16 +24,10 @@ import (
 // run as queued tasks through the platform shutdown command.
 
 // disabled503 answers the config-gated-503 convention: a killed surface
-// answers 503 on every endpoint, and its capability token is absent from
-// GET /api/status — token-gating clients never see these.
+// answers 503 not-configured on every endpoint, and its capability token is
+// absent from GET /api/status — token-gating clients never see these.
 func disabled503(w http.ResponseWriter, surface string) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusServiceUnavailable)
-	if err := json.NewEncoder(w).Encode(map[string]string{
-		"error": surface + " is disabled in configuration",
-	}); err != nil {
-		slog.Error("write disabled response", "error", err)
-	}
+	problem.Detail(w, http.StatusServiceUnavailable, surface+" is disabled in configuration")
 }
 
 // hostPowerGate wraps a host-power handler with the config kill-switch.
@@ -93,7 +88,7 @@ type hostStatusResponse struct {
 //	@Tags			System Host Management
 //	@Produce		json
 //	@Success		200	{object}	hostStatusResponse	"System status"
-//	@Failure		503	"Host power management is disabled in configuration"
+//	@Failure		503	{object}	problem.Body	"Host power management is disabled in configuration"
 //	@Router			/api/system/host/status [get]
 func (s *Server) handleHostStatus(w http.ResponseWriter, _ *http.Request) {
 	hostname, err := os.Hostname()
@@ -140,7 +135,7 @@ type hostUptimeResponse struct {
 //	@Tags			System Host Management
 //	@Produce		json
 //	@Success		200	{object}	hostUptimeResponse	"Uptime information"
-//	@Failure		503	"Host power management is disabled in configuration"
+//	@Failure		503	{object}	problem.Body	"Host power management is disabled in configuration"
 //	@Router			/api/system/host/uptime [get]
 func (s *Server) handleHostUptime(w http.ResponseWriter, _ *http.Request) {
 	uptime := hostinfo.UptimeSeconds()
@@ -181,31 +176,31 @@ type powerTaskResponse struct {
 func (s *Server) queuePowerTask(w http.ResponseWriter, r *http.Request, operation, label string, requireEmergency bool) {
 	var body powerRequest
 	if err := decodeBody(r, &body); err != nil {
-		errorResponse(w, http.StatusBadRequest, "Failed to create "+label+" task", "Invalid JSON body")
+		problem.BadRequest(w)
 		return
 	}
+	failures := []problem.Error{}
 	if !body.Confirm {
-		errorResponse(w, http.StatusBadRequest, "Failed to create "+label+" task",
-			"confirm: true is required — this operation affects the whole host")
-		return
+		failures = append(failures, problem.Enum("/confirm", "true"))
 	}
 	if requireEmergency && !body.Emergency {
-		errorResponse(w, http.StatusBadRequest, "Failed to create "+label+" task",
-			"emergency: true is required — halt skips graceful shutdown entirely")
-		return
+		failures = append(failures, problem.Enum("/emergency", "true"))
 	}
 	grace := 60
 	if body.GracePeriod != nil {
 		grace = *body.GracePeriod
 	}
-	if grace < 0 || grace > 7200 {
-		errorResponse(w, http.StatusBadRequest, "Failed to create "+label+" task",
-			"grace_period must be between 0 and 7200 seconds")
-		return
+	if grace < 0 {
+		failures = append(failures, problem.Rule("/grace_period", "minimum", map[string]any{"minimum": 0}))
+	}
+	if grace > 7200 {
+		failures = append(failures, problem.Rule("/grace_period", "maximum", map[string]any{"maximum": 7200}))
 	}
 	if len(body.Message) > 200 {
-		errorResponse(w, http.StatusBadRequest, "Failed to create "+label+" task",
-			"message must be at most 200 characters")
+		failures = append(failures, problem.Rule("/message", "maxLength", map[string]any{"maxLength": 200}))
+	}
+	if len(failures) > 0 {
+		problem.Invalid(w, failures...)
 		return
 	}
 
@@ -263,8 +258,8 @@ func (s *Server) queuePowerTask(w http.ResponseWriter, r *http.Request, operatio
 // @Produce		json
 // @Param			request	body	powerRequest	true	"Power action body (confirm required)"
 // @Success		202	{object}	powerTaskResponse	"Shutdown task created"
-// @Failure		400	"Missing confirmation or invalid parameters"
-// @Failure		503	"Host power management is disabled in configuration"
+// @Failure		422	{object}	problem.Body	"confirm not true, grace_period outside 0-7200, or message over 200 characters, one errors[] entry each"
+// @Failure		503	{object}	problem.Body	"Host power management is disabled in configuration"
 // @Router			/api/system/host/shutdown [post]
 func (s *Server) handleHostShutdown(w http.ResponseWriter, r *http.Request) {
 	s.queuePowerTask(w, r, hostpower.OpShutdown, "shutdown", false)
@@ -277,8 +272,8 @@ func (s *Server) handleHostShutdown(w http.ResponseWriter, r *http.Request) {
 // @Produce		json
 // @Param			request	body	powerRequest	true	"Power action body (confirm required)"
 // @Success		202	"Restart task created"
-// @Failure		400	"Missing confirmation or invalid parameters"
-// @Failure		503	"Host power management is disabled in configuration"
+// @Failure		422	{object}	problem.Body	"confirm not true or invalid parameters"
+// @Failure		503	{object}	problem.Body	"Host power management is disabled in configuration"
 // @Router			/api/system/host/restart [post]
 func (s *Server) handleHostRestart(w http.ResponseWriter, r *http.Request) {
 	s.queuePowerTask(w, r, hostpower.OpRestart, "restart", false)
@@ -291,8 +286,8 @@ func (s *Server) handleHostRestart(w http.ResponseWriter, r *http.Request) {
 // @Produce		json
 // @Param			request	body	powerRequest	true	"Power action body (confirm required)"
 // @Success		202	"Poweroff task created"
-// @Failure		400	"Missing confirmation or invalid parameters"
-// @Failure		503	"Host power management is disabled in configuration"
+// @Failure		422	{object}	problem.Body	"confirm not true or invalid parameters"
+// @Failure		503	{object}	problem.Body	"Host power management is disabled in configuration"
 // @Router			/api/system/host/poweroff [post]
 func (s *Server) handleHostPoweroff(w http.ResponseWriter, r *http.Request) {
 	s.queuePowerTask(w, r, hostpower.OpPoweroff, "poweroff", false)
@@ -305,8 +300,8 @@ func (s *Server) handleHostPoweroff(w http.ResponseWriter, r *http.Request) {
 // @Produce		json
 // @Param			request	body	powerRequest	true	"Power action body (confirm and emergency required)"
 // @Success		202	"Halt task created"
-// @Failure		400	"Missing confirmation or emergency acknowledgement"
-// @Failure		503	"Host power management is disabled in configuration"
+// @Failure		422	{object}	problem.Body	"confirm or emergency not true"
+// @Failure		503	{object}	problem.Body	"Host power management is disabled in configuration"
 // @Router			/api/system/host/halt [post]
 func (s *Server) handleHostHalt(w http.ResponseWriter, r *http.Request) {
 	s.queuePowerTask(w, r, hostpower.OpHalt, "halt", true)

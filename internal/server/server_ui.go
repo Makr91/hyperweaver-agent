@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Makr91/hyperweaver-agent/internal/problem"
 	"github.com/Makr91/hyperweaver-agent/internal/version"
 )
 
@@ -141,15 +142,8 @@ func handleUnknownAPI(w http.ResponseWriter, _ *http.Request) {
 func mountDocs(mux *http.ServeMux, uiFS fs.FS) {
 	if _, err := fs.Stat(uiFS, "docs"); err != nil {
 		mux.HandleFunc("GET /docs/", func(w http.ResponseWriter, _ *http.Request) {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusServiceUnavailable)
-			body := map[string]string{
-				"error":   "Documentation not bundled in this build",
-				"details": "The docs site ships inside the Hyperweaver UI artifact (dist/docs); use a build with the UI artifact baked in, or point ui.path at one.",
-			}
-			if err := json.NewEncoder(w).Encode(body); err != nil {
-				slog.Error("write docs response", "error", err)
-			}
+			problem.Detail(w, http.StatusServiceUnavailable,
+				"Documentation not bundled in this build: the docs site ships inside the Hyperweaver UI artifact (dist/docs); use a build with the UI artifact baked in, or point ui.path at one.")
 		})
 		return
 	}

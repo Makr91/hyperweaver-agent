@@ -41,7 +41,7 @@ type secretsUpdateResponse struct {
 // @Produce		json
 // @Param			body	body	secrets.Document	true	"Secrets categories to replace"
 // @Success		200	{object}	secretsUpdateResponse	"Secrets persisted"
-// @Failure		400	{object}	wrappedError	"Unknown category or invalid entry name"
+// @Failure		400	{object}	problem.Body	"Unknown category or invalid entry name"
 // @Router			/api/secrets [put]
 func (s *Server) handleUpdateSecrets(w http.ResponseWriter, r *http.Request) {
 	var categories map[string]json.RawMessage

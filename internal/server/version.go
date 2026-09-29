@@ -10,6 +10,7 @@ import (
 	"github.com/Makr91/hyperweaver-agent/internal/auth"
 	"github.com/Makr91/hyperweaver-agent/internal/hostinfo"
 	"github.com/Makr91/hyperweaver-agent/internal/prereqs"
+	"github.com/Makr91/hyperweaver-agent/internal/problem"
 	"github.com/Makr91/hyperweaver-agent/internal/tasks"
 	"github.com/Makr91/hyperweaver-agent/internal/updater"
 	"github.com/Makr91/hyperweaver-agent/internal/version"
@@ -17,7 +18,7 @@ import (
 
 // Response wrappers matching the Node agent's ResponseHelpers:
 // success -> {success:true, message, timestamp, ...data}
-// error   -> {success:false, error, timestamp, details?}
+// error   -> a problem body, the message and details as its detail
 
 func successResponse(w http.ResponseWriter, message string, data map[string]any) {
 	payload := map[string]any{
@@ -31,30 +32,11 @@ func successResponse(w http.ResponseWriter, message string, data map[string]any)
 	writeJSON(w, payload)
 }
 
-// wrappedError is the Node agent's error envelope — every errorResponse
-// answer (the spec's WrappedError component).
-type wrappedError struct {
-	Success bool `json:"success"`
-	// Error message
-	Error string `json:"error"`
-	// RFC3339 UTC
-	Timestamp string `json:"timestamp"`
-	// Optional detail; omitted when empty
-	Details string `json:"details,omitempty"`
-}
-
 func errorResponse(w http.ResponseWriter, status int, errText, details string) {
-	payload := wrappedError{
-		Success:   false,
-		Error:     errText,
-		Timestamp: time.Now().UTC().Format(time.RFC3339),
-		Details:   details,
+	if details != "" {
+		errText += ": " + details
 	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	if err := json.NewEncoder(w).Encode(payload); err != nil {
-		slog.Error("write error response", "error", err)
-	}
+	problem.Detail(w, status, errText)
 }
 
 // nullable maps empty strings to JSON null, matching the Node responses.
@@ -125,8 +107,8 @@ type updateCheckResponse struct {
 //	@Tags			System
 //	@Produce		json
 //	@Success		200	{object}	updateCheckResponse	"Update check result"
-//	@Failure		400	{object}	wrappedError	"Update checking not configured"
-//	@Failure		500	{object}	wrappedError	"Versioninfo fetch or parse failure"
+//	@Failure		400	{object}	problem.Body	"Update checking not configured"
+//	@Failure		500	{object}	problem.Body	"Versioninfo fetch or parse failure"
 //	@Router			/api/app/updates/check [get]
 func (s *Server) handleUpdateCheck(w http.ResponseWriter, r *http.Request) {
 	url := s.cfg.Updates.VersionInfoURL
@@ -174,8 +156,8 @@ type updateApplyResponse struct {
 //	@Tags			System
 //	@Produce		json
 //	@Success		202	{object}	updateApplyResponse	"Update task queued"
-//	@Failure		400	{object}	wrappedError	"Update checking not configured, or already up to date"
-//	@Failure		500	{object}	wrappedError	"Versioninfo fetch failure"
+//	@Failure		400	{object}	problem.Body	"Update checking not configured, or already up to date"
+//	@Failure		500	{object}	problem.Body	"Versioninfo fetch failure"
 //	@Router			/api/app/updates/apply [post]
 func (s *Server) handleUpdateApply(w http.ResponseWriter, r *http.Request) {
 	url := s.cfg.Updates.VersionInfoURL

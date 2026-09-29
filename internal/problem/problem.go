@@ -59,7 +59,31 @@ type Body struct {
 	Type   string  `json:"type"`
 	Title  string  `json:"title"`
 	Status int     `json:"status"`
+	Detail string  `json:"detail,omitempty"`
 	Errors []Error `json:"errors"`
+}
+
+var typeByStatus = map[int]string{
+	http.StatusBadRequest:            "bad-request",
+	http.StatusUnauthorized:          "authentication",
+	http.StatusForbidden:             "forbidden",
+	http.StatusNotFound:              "not-found",
+	http.StatusMethodNotAllowed:      "method-not-allowed",
+	http.StatusConflict:              "conflict",
+	http.StatusRequestEntityTooLarge: "payload-too-large",
+	http.StatusUnprocessableEntity:   "validation",
+	http.StatusTooManyRequests:       "throttled",
+	http.StatusInternalServerError:   "internal",
+	http.StatusBadGateway:            "bad-gateway",
+	http.StatusServiceUnavailable:    "not-configured",
+}
+
+// TypeFor answers the registry type bound to a status; internal for any other.
+func TypeFor(status int) string {
+	if t, ok := typeByStatus[status]; ok {
+		return t
+	}
+	return "internal"
 }
 
 func fieldOf(pointer string) string {
@@ -110,15 +134,28 @@ func DetailFor(e Error) string {
 
 // Write sends one problem body with the given status and type.
 func Write(w http.ResponseWriter, status int, problemType, title string, errors []Error) {
+	Send(w, status, problemType, title, "", errors, nil)
+}
+
+// Detail sends the status's registry type with one sentence for logs and other clients.
+func Detail(w http.ResponseWriter, status int, detail string) {
+	Send(w, status, TypeFor(status), "", detail, nil, nil)
+}
+
+// Send builds the body: the status's type, the title, the detail, the errors and any extra members a client may ignore.
+func Send(w http.ResponseWriter, status int, problemType, title, detail string, errors []Error, members map[string]any) {
 	if title == "" {
 		title = titles[problemType]
 	}
-	body := Body{
-		Type:   typeBase + problemType,
-		Title:  title,
-		Status: status,
-		Errors: make([]Error, 0, len(errors)),
+	body := map[string]any{
+		"type":   typeBase + problemType,
+		"title":  title,
+		"status": status,
 	}
+	if detail != "" {
+		body["detail"] = detail
+	}
+	list := make([]Error, 0, len(errors))
 	for _, e := range errors {
 		if e.Params == nil {
 			e.Params = map[string]any{}
@@ -126,13 +163,55 @@ func Write(w http.ResponseWriter, status int, problemType, title string, errors 
 		if e.Detail == "" {
 			e.Detail = DetailFor(e)
 		}
-		body.Errors = append(body.Errors, e)
+		list = append(list, e)
+	}
+	body["errors"] = list
+	for key, value := range members {
+		body[key] = value
 	}
 	w.Header().Set("Content-Type", "application/problem+json")
 	w.WriteHeader(status)
 	if err := json.NewEncoder(w).Encode(body); err != nil {
 		slog.Error("write problem body", "error", err)
 	}
+}
+
+// Conflict answers 409 with a detail sentence and extra members.
+func Conflict(w http.ResponseWriter, detail string, members map[string]any) {
+	Send(w, http.StatusConflict, "conflict", "", detail, nil, members)
+}
+
+// Required builds the required error at a pointer.
+func Required(pointer string) Error {
+	return Error{Pointer: pointer, Rule: "required", Params: map[string]any{}}
+}
+
+// Enum builds the enum error at a pointer.
+func Enum(pointer string, allowed ...string) Error {
+	return Error{Pointer: pointer, Rule: "enum", Params: map[string]any{"enum": strings.Join(allowed, ", ")}}
+}
+
+// Pattern builds the pattern error at a pointer, name the $defs name.
+func Pattern(pointer, name string) Error {
+	return Error{Pointer: pointer, Rule: "pattern", Params: map[string]any{"pattern": name}}
+}
+
+// Unique builds the unique error at a pointer within scope.
+func Unique(pointer, scope string) Error {
+	return Error{Pointer: pointer, Rule: "unique", Params: map[string]any{"scope": scope}}
+}
+
+// Rule builds any named rule at a pointer.
+func Rule(pointer, rule string, params map[string]any) Error {
+	if params == nil {
+		params = map[string]any{}
+	}
+	return Error{Pointer: pointer, Rule: rule, Params: params}
+}
+
+// Invalid answers a failed write with the given errors: 409 when every rule is unique, 422 otherwise.
+func Invalid(w http.ResponseWriter, errors ...Error) {
+	Refuse(w, errors, "")
 }
 
 // Refuse answers a failed write: 409 conflict when every rule is unique, 422 validation otherwise.

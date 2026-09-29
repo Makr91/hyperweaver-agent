@@ -86,9 +86,9 @@ type deviceStatusResponse struct {
 // @Tags			Local Login
 // @Produce		json
 // @Success		200	{object}	deviceStartResponse	"Device login started"
-// @Failure		429	{object}	taskErrorBody	"Too many login attempts from this address"
-// @Failure		502	{object}	taskErrorBody	"Identity provider unreachable or without a usable device grant"
-// @Failure		503	{object}	taskErrorBody	"OIDC login is disabled"
+// @Failure		429	{object}	problem.Body	"Too many login attempts from this address"
+// @Failure		502	{object}	problem.Body	"Identity provider unreachable or without a usable device grant"
+// @Failure		503	{object}	problem.Body	"OIDC login is disabled"
 // @Router			/api/auth/oidc/device-start [post]
 func (s *Server) handleOIDCDeviceStart(w http.ResponseWriter, r *http.Request) {
 	if !s.cfg.OIDC.Enabled {
@@ -109,20 +109,25 @@ func (s *Server) handleOIDCDeviceStart(w http.ResponseWriter, r *http.Request) {
 }
 
 // @Summary		Poll a federated device login
-// @Description	Public. Answers {status} while the flow runs: pending; denied = the ACCOUNT was refused (the human clicked Deny at the identity provider, or the account is not the bound one and not in oidc.allowed_users); expired; failed = the agent could not complete the exchange or validation (identity-provider outage, token rejected — the agent log names the cause; trying again is reasonable). On approval, EXACTLY ONCE, the full credential body {status: "approved", api_key, entity_id, name, role, message} — the minted local admin API key the UI stores in its normal auth slot. After that one delivery (and after the first expired answer) the handle is forgotten and further polls answer 404. Poll freely — the agent itself talks to the identity provider at the grant's own pace. Identity comes from the id_token when the provider mints one, else the ACCESS token's claims (Spring Authorization Server's device grant issues no id_token) — validated against the issuer's JWKS either way, account id = UUID claim with sub fallback.
+// @Description	Public. While the flow is pending the request stays open until the status changes or the grant's own interval elapses, then answers; wait=0 answers at once. So a client asks again as soon as an answer arrives and never on a timer. Answers {status} while the flow runs: pending; denied = the ACCOUNT was refused (the human clicked Deny at the identity provider, or the account is not the bound one and not in oidc.allowed_users); expired; failed = the agent could not complete the exchange or validation (identity-provider outage, token rejected — the agent log names the cause; trying again is reasonable). On approval, EXACTLY ONCE, the full credential body {status: "approved", api_key, entity_id, name, role, message} — the minted local admin API key the UI stores in its normal auth slot. After that one delivery (and after the first expired answer) the handle is forgotten and further polls answer 404. Identity comes from the id_token when the provider mints one, else the ACCESS token's claims (Spring Authorization Server's device grant issues no id_token) — validated against the issuer's JWKS either way, account id = UUID claim with sub fallback.
 // @Tags			Local Login
 // @Produce		json
 // @Param			handle	query	string	true	"The device-start answer's opaque flow id"
+// @Param			wait	query	string	false	"0 answers the current status at once instead of holding the request open"
 // @Success		200	{object}	deviceStatusResponse	"Flow status (credential fields present only on the single approved answer)"
-// @Failure		404	{object}	taskErrorBody	"Unknown, already-delivered, or expired-and-forgotten handle"
-// @Failure		503	{object}	taskErrorBody	"OIDC login is disabled"
+// @Failure		404	{object}	problem.Body	"Unknown, already-delivered, or expired-and-forgotten handle"
+// @Failure		503	{object}	problem.Body	"OIDC login is disabled"
 // @Router			/api/auth/oidc/device-status [get]
 func (s *Server) handleOIDCDeviceStatus(w http.ResponseWriter, r *http.Request) {
 	if !s.cfg.OIDC.Enabled {
 		taskError(w, http.StatusServiceUnavailable, "OIDC login is disabled")
 		return
 	}
-	status, credential, ok := s.oidcMgr.status(r.URL.Query().Get("handle"))
+	handle := r.URL.Query().Get("handle")
+	if r.URL.Query().Get("wait") != "0" {
+		s.oidcMgr.await(r.Context(), handle)
+	}
+	status, credential, ok := s.oidcMgr.status(handle)
 	if !ok {
 		taskError(w, http.StatusNotFound, "Unknown login handle")
 		return

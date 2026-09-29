@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"github.com/Makr91/hyperweaver-agent/internal/machines"
+	"github.com/Makr91/hyperweaver-agent/internal/problem"
 )
 
 type hostsYAMLResponse struct {
@@ -54,24 +55,17 @@ type hostsYAMLStoreResponse struct {
 	Warnings []string `json:"warnings"`
 }
 
-type hostsYAMLProblem struct {
-	// Parse errors only
-	Column *int   `json:"column,omitempty"`
-	Error  string `json:"error"`
-	// Parse errors only
-	Line *int `json:"line,omitempty"`
-}
-
 // @Summary		Replace the stored document from raw YAML
-// @Description	Minimum role: operator. The raw-YAML edit half (the FROZEN cross-agent contract, sync 2026-07-19 — the emergency hatch: missing vars, extra roles, hand edits between create-without-start and provision). Body {yaml}. Refusals, nothing stored: unparseable YAML → 400 {error, line, column} (numeric, editor-jumpable); impossible section shapes (root/settings/zones/disks/provisioner/metadata not mappings, networks not a list) → 400 {error}; the converged document pre-flights still gate — consoleport 1025-65535, vcpus whole ≥ 1, the typed-disk frozen strings — the YAML door bypasses NOTHING; a bookkeeping key named in the YAML (provisioner_state, pending_changes, guest_info, snapshots, host_hooks_confirmed) or any unknown top-level key → 400 {error} (it would silently die at the next discovery merge — loud beats silent loss). Otherwise the document stores VERBATIM with KEY ORDER PRESERVED (comments die; the document is the program — provisioning: method keys execute in document order): the six sections replace wholesale, a section ABSENT from the YAML is REMOVED, bookkeeping and the live view survive untouched. 200 {warnings: []} — non-blocking string advisories (bhyve-vocabulary disk keys, no control IP, ...). Unknown keys INSIDE sections ride verbatim.
+// @Description	Minimum role: operator. The raw-YAML edit half (the FROZEN cross-agent contract, sync 2026-07-19 — the emergency hatch: missing vars, extra roles, hand edits between create-without-start and provision). Body {yaml}. Refusals, nothing stored, every one a 422 problem body with one errors[] entry at /yaml: unparseable YAML carries rule yaml with params line and column (numeric, editor-jumpable) and the parser's message; impossible section shapes (root/settings/zones/disks/provisioner/metadata not mappings, networks not a list), the converged document pre-flights — consoleport 1025-65535, vcpus whole ≥ 1, the typed-disk frozen strings — the YAML door bypasses NOTHING, and a bookkeeping key named in the YAML (provisioner_state, pending_changes, guest_info, snapshots, host_hooks_confirmed) or any unknown top-level key (it would silently die at the next discovery merge — loud beats silent loss) carry rule yaml with the message alone. Otherwise the document stores VERBATIM with KEY ORDER PRESERVED (comments die; the document is the program — provisioning: method keys execute in document order): the six sections replace wholesale, a section ABSENT from the YAML is REMOVED, bookkeeping and the live view survive untouched. 200 {warnings: []} — non-blocking string advisories (bhyve-vocabulary disk keys, no control IP, ...). Unknown keys INSIDE sections ride verbatim.
 // @Tags			Machine Management
 // @Accept			json
 // @Produce		json
 // @Param			machineName	path	string	true	"Machine name"
 // @Param			request	body	hostsYAMLRequest	true	"The document as raw YAML"
 // @Success		200	{object}	hostsYAMLStoreResponse	"Document stored"
-// @Failure		400	{object}	hostsYAMLProblem	"Refused, nothing stored — parse error ({error, line, column}), impossible shape, converged pre-flight, bookkeeping/unknown top-level key ({error})"
-// @Failure		404	"Machine not found"
+// @Failure		400	{object}	problem.Body	"Unreadable body"
+// @Failure		422	{object}	problem.Body	"Refused, nothing stored: yaml missing (required at /yaml), or rule yaml at /yaml with the parser's line and column when it is a parse error"
+// @Failure		404	{object}	problem.Body	"Machine not found"
 // @Router			/api/machines/{machineName}/hosts-yml [put]
 func (s *Server) handlePutHostsYAML(w http.ResponseWriter, r *http.Request) {
 	machine := s.findMachine(w, r)
@@ -80,11 +74,11 @@ func (s *Server) handlePutHostsYAML(w http.ResponseWriter, r *http.Request) {
 	}
 	var body hostsYAMLRequest
 	if err := decodeBody(r, &body); err != nil {
-		taskError(w, http.StatusBadRequest, "Invalid JSON body")
+		problem.BadRequest(w)
 		return
 	}
 	if body.YAML == "" {
-		taskError(w, http.StatusBadRequest, "yaml is required")
+		problem.Invalid(w, problem.Required("/yaml"))
 		return
 	}
 	result, err := s.machines.StoreDocumentYAML(r.Context(), machine, body.YAML)
@@ -94,12 +88,12 @@ func (s *Server) handlePutHostsYAML(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if result.Problem != "" {
-		problem := hostsYAMLProblem{Error: result.Problem}
+		params := map[string]any{"message": result.Problem}
 		if result.Line > 0 {
-			problem.Line = &result.Line
-			problem.Column = &result.Column
+			params["line"] = result.Line
+			params["column"] = result.Column
 		}
-		writeJSONStatus(w, http.StatusBadRequest, problem)
+		problem.Invalid(w, problem.Rule("/yaml", "yaml", params))
 		return
 	}
 	writeJSON(w, hostsYAMLStoreResponse{Warnings: result.Warnings})

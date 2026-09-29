@@ -1,7 +1,6 @@
 package server
 
 import (
-	"encoding/json"
 	"log/slog"
 	"net/http"
 	"os"
@@ -12,6 +11,7 @@ import (
 
 	"github.com/Makr91/hyperweaver-agent/internal/auth"
 	"github.com/Makr91/hyperweaver-agent/internal/hostname"
+	"github.com/Makr91/hyperweaver-agent/internal/problem"
 	"github.com/Makr91/hyperweaver-agent/internal/procattr"
 	"github.com/Makr91/hyperweaver-agent/internal/tasks"
 )
@@ -20,21 +20,14 @@ import (
 // converged wire, sync 2026-07-17): zoneweaver's shipped
 // NetworkQueryController/NetworkModificationController family, mirrored on
 // this agent. The controller family answers BARE documents — no
-// success/message/timestamp envelope; errors are {error} or {error, details}
-// (taskError's shape, with an optional details field).
+// success/message/timestamp envelope; refusals are problem bodies.
 
-// netconfigError writes this controller family's error shape:
-// {error, details?} — zoneweaver's exact wire.
+// netconfigError writes a problem body, the text and details as its detail.
 func netconfigError(w http.ResponseWriter, status int, errText, details string) {
-	payload := map[string]string{"error": errText}
 	if details != "" {
-		payload["details"] = details
+		errText += ": " + details
 	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	if err := json.NewEncoder(w).Encode(payload); err != nil {
-		slog.Error("write netconfig error response", "error", err)
-	}
+	problem.Detail(w, status, errText)
 }
 
 // persistedHostname reads the platform's PERSISTED/configured host name —
@@ -209,18 +202,25 @@ type hostnameChangeQueued struct {
 //	@Produce		json
 //	@Param			request	body	hostnameUpdateRequest	true	"The new hostname and apply mode"
 //	@Success		202	{object}	hostnameChangeQueued	"Hostname change task created"
-//	@Failure		400	"Zoneweaver's exact refusals, {error} shape: "hostname is required and must be a string" (missing/non-string hostname or an unparseable body), "Invalid hostname format. Must be alphanumeric with hyphens and dots, 1-253 characters", "Invalid hostname format. Each part between dots must be 1-63 characters", or "Invalid hostname format. Each part must start and end with alphanumeric characters""
-//	@Failure		500	"Failed to create hostname change task"
+//	@Failure		400	{object}	problem.Body	"Unreadable body"
+//	@Failure		422	{object}	problem.Body	"hostname missing (required at /hostname) or not a hostname (format hostname at /hostname, the detail naming the failed stage: 1-253 characters, 1-63 per label, alphanumeric label edges)"
+//	@Failure		500	{object}	problem.Body	"Failed to create hostname change task"
 //	@Router			/api/network/hostname [put]
 func (s *Server) handleSetHostname(w http.ResponseWriter, r *http.Request) {
 	var body hostnameUpdateRequest
-	if err := decodeBody(r, &body); err != nil || body.Hostname == nil {
-		netconfigError(w, http.StatusBadRequest, "hostname is required and must be a string", "")
+	if err := decodeBody(r, &body); err != nil {
+		problem.BadRequest(w)
+		return
+	}
+	if body.Hostname == nil {
+		problem.Invalid(w, problem.Required("/hostname"))
 		return
 	}
 	name := *body.Hostname
-	if problem := validateHostnameRequest(name); problem != "" {
-		netconfigError(w, http.StatusBadRequest, problem, "")
+	if stage := validateHostnameRequest(name); stage != "" {
+		failure := problem.Rule("/hostname", "format", map[string]any{"format": "hostname"})
+		failure.Detail = stage
+		problem.Invalid(w, failure)
 		return
 	}
 

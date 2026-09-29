@@ -12,6 +12,7 @@ import (
 	"github.com/Makr91/hyperweaver-agent/internal/assets"
 	"github.com/Makr91/hyperweaver-agent/internal/auth"
 	"github.com/Makr91/hyperweaver-agent/internal/config"
+	"github.com/Makr91/hyperweaver-agent/internal/problem"
 	"github.com/Makr91/hyperweaver-agent/internal/safepath"
 	"github.com/Makr91/hyperweaver-agent/internal/tasks"
 )
@@ -112,42 +113,50 @@ type storageLocationResponse struct {
 //	@Produce		json
 //	@Param			body	body	createStoragePathRequest	true	"New location name, path, type, and enabled flag"
 //	@Success		201	{object}	storageLocationResponse	"Location created"
-//	@Failure		400	"Missing name/path/type, invalid type, or directory not creatable"
-//	@Failure		409	"Path already registered ({error, existing_location})"
-//	@Failure		503	"Artifact storage is disabled"
+//	@Failure		400	{object}	problem.Body	"Unreadable body"
+//	@Failure		422	{object}	problem.Body	"name, path or type missing (required); type outside iso, image, installer, fixpack, hotfix (enum at /type); path not absolute (pattern absolutePath at /path); directory not creatable (writable at /path)"
+//	@Failure		409	{object}	problem.Body	"Path already registered (unique at /path); existing_location carries the row"
+//	@Failure		503	{object}	problem.Body	"Artifact storage is disabled"
 //	@Router			/api/artifacts/storage/paths [post]
 func (s *Server) handleCreateStoragePath(w http.ResponseWriter, r *http.Request) {
 	var body createStoragePathRequest
 	if err := decodeBody(r, &body); err != nil {
-		taskError(w, http.StatusBadRequest, "Invalid JSON body")
+		problem.BadRequest(w)
 		return
 	}
-	if body.Name == "" || body.Path == "" || body.Type == "" {
-		taskError(w, http.StatusBadRequest, "name, path, and type are required")
-		return
+	failures := []problem.Error{}
+	if body.Name == "" {
+		failures = append(failures, problem.Required("/name"))
 	}
-	if !assets.ValidKind(body.Type) {
-		taskError(w, http.StatusBadRequest, "type must be one of iso, image, installer, fixpack, hotfix")
-		return
+	if body.Path == "" {
+		failures = append(failures, problem.Required("/path"))
+	}
+	switch {
+	case body.Type == "":
+		failures = append(failures, problem.Required("/type"))
+	case !assets.ValidKind(body.Type):
+		failures = append(failures, problem.Enum("/type", "iso", "image", "installer", "fixpack", "hotfix"))
 	}
 	clean, err := safepath.CleanAbs(body.Path)
-	if err != nil {
-		taskError(w, http.StatusBadRequest, "path is not usable")
+	if err != nil && body.Path != "" {
+		failures = append(failures, problem.Pattern("/path", "absolutePath"))
+	}
+	if len(failures) > 0 {
+		problem.Invalid(w, failures...)
 		return
 	}
 	if existing, ferr := s.assets.FindLocationByPath(r.Context(), clean); ferr == nil {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusConflict)
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"error": "Storage path already exists: " + clean,
-			"existing_location": map[string]any{
+		problem.Send(w, http.StatusConflict, "conflict", "", "Storage path already exists: "+clean,
+			[]problem.Error{problem.Unique("/path", "artifact storage paths")},
+			map[string]any{"existing_location": map[string]any{
 				"id": existing.ID, "name": existing.Name, "type": existing.Type,
-			},
-		})
+			}})
 		return
 	}
 	if merr := os.MkdirAll(clean, 0o750); merr != nil {
-		taskError(w, http.StatusBadRequest, "Cannot create storage directory: "+merr.Error())
+		failure := problem.Rule("/path", "writable", map[string]any{"user": ""})
+		failure.Detail = "Cannot create storage directory: " + merr.Error()
+		problem.Invalid(w, failure)
 		return
 	}
 

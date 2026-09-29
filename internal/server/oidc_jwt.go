@@ -13,11 +13,14 @@ import (
 	"time"
 )
 
+const tokenLeeway = 60 * time.Second
+
 type oidcIdentityClaims struct {
 	Subject    string
 	UUID       string
 	Email      string
 	CustomerID string
+	BoundJKT   string
 }
 
 func (c *oidcIdentityClaims) stableID() string {
@@ -32,21 +35,18 @@ var errOIDCUnknownKey = errors.New("no matching RSA key in the issuer's JWKS")
 func oidcValidateToken(raw string, jwks *oidcJWKSDocument, issuer, audience string) (*oidcIdentityClaims, error) {
 	parts := strings.Split(raw, ".")
 	if len(parts) != 3 {
-		return nil, errors.New("id_token is not a three-part JWT")
+		return nil, errors.New("token is not a three-part JWT")
 	}
 	headerRaw, err := base64.RawURLEncoding.DecodeString(parts[0])
 	if err != nil {
-		return nil, fmt.Errorf("id_token header undecodable: %w", err)
+		return nil, fmt.Errorf("token header undecodable: %w", err)
 	}
 	header := struct {
 		Alg string `json:"alg"`
 		Kid string `json:"kid"`
 	}{}
 	if uerr := json.Unmarshal(headerRaw, &header); uerr != nil {
-		return nil, fmt.Errorf("id_token header unreadable: %w", uerr)
-	}
-	if header.Alg != "RS256" {
-		return nil, fmt.Errorf("token algorithm %q is not RS256", header.Alg)
+		return nil, fmt.Errorf("token header unreadable: %w", uerr)
 	}
 	publicKey, err := jwks.rsaKey(header.Kid)
 	if err != nil {
@@ -54,16 +54,25 @@ func oidcValidateToken(raw string, jwks *oidcJWKSDocument, issuer, audience stri
 	}
 	signature, err := base64.RawURLEncoding.DecodeString(parts[2])
 	if err != nil {
-		return nil, fmt.Errorf("id_token signature undecodable: %w", err)
+		return nil, fmt.Errorf("token signature undecodable: %w", err)
 	}
 	digest := sha256.Sum256([]byte(parts[0] + "." + parts[1]))
-	if verr := rsa.VerifyPKCS1v15(publicKey, crypto.SHA256, digest[:], signature); verr != nil {
-		return nil, errors.New("id_token signature verification failed")
+	switch header.Alg {
+	case "RS256":
+		if verr := rsa.VerifyPKCS1v15(publicKey, crypto.SHA256, digest[:], signature); verr != nil {
+			return nil, errors.New("token signature verification failed")
+		}
+	case "PS256":
+		if verr := rsa.VerifyPSS(publicKey, crypto.SHA256, digest[:], signature, nil); verr != nil {
+			return nil, errors.New("token signature verification failed")
+		}
+	default:
+		return nil, fmt.Errorf("token algorithm %q is not RS256 or PS256", header.Alg)
 	}
 
 	payloadRaw, err := base64.RawURLEncoding.DecodeString(parts[1])
 	if err != nil {
-		return nil, fmt.Errorf("id_token payload undecodable: %w", err)
+		return nil, fmt.Errorf("token payload undecodable: %w", err)
 	}
 	payload := struct {
 		Issuer     string          `json:"iss"`
@@ -71,11 +80,16 @@ func oidcValidateToken(raw string, jwks *oidcJWKSDocument, issuer, audience stri
 		UUID       string          `json:"UUID"`
 		Audience   json.RawMessage `json:"aud"`
 		Expiry     int64           `json:"exp"`
+		NotBefore  int64           `json:"nbf"`
+		IssuedAt   int64           `json:"iat"`
 		Email      string          `json:"email"`
 		CustomerID string          `json:"customer_id"`
+		Cnf        struct {
+			JKT string `json:"jkt"`
+		} `json:"cnf"`
 	}{}
 	if uerr := json.Unmarshal(payloadRaw, &payload); uerr != nil {
-		return nil, fmt.Errorf("id_token payload unreadable: %w", uerr)
+		return nil, fmt.Errorf("token payload unreadable: %w", uerr)
 	}
 	if strings.TrimRight(payload.Issuer, "/") != strings.TrimRight(issuer, "/") {
 		return nil, fmt.Errorf("token issuer %q does not match the configured issuer", payload.Issuer)
@@ -83,8 +97,15 @@ func oidcValidateToken(raw string, jwks *oidcJWKSDocument, issuer, audience stri
 	if !oidcAudienceContains(payload.Audience, audience) {
 		return nil, fmt.Errorf("token audience does not include %q", audience)
 	}
-	if payload.Expiry <= time.Now().Unix() {
+	now := time.Now()
+	if payload.Expiry == 0 || time.Unix(payload.Expiry, 0).Add(tokenLeeway).Before(now) {
 		return nil, errors.New("token is expired")
+	}
+	if payload.NotBefore != 0 && time.Unix(payload.NotBefore, 0).Add(-tokenLeeway).After(now) {
+		return nil, errors.New("token is not yet valid")
+	}
+	if payload.IssuedAt != 0 && time.Unix(payload.IssuedAt, 0).Add(-tokenLeeway).After(now) {
+		return nil, errors.New("token is issued in the future")
 	}
 	if payload.Subject == "" {
 		return nil, errors.New("token carries no subject")
@@ -94,6 +115,7 @@ func oidcValidateToken(raw string, jwks *oidcJWKSDocument, issuer, audience stri
 		UUID:       payload.UUID,
 		Email:      payload.Email,
 		CustomerID: payload.CustomerID,
+		BoundJKT:   payload.Cnf.JKT,
 	}, nil
 }
 

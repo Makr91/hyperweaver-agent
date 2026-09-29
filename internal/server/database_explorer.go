@@ -145,8 +145,8 @@ type databaseTablesResponse struct {
 //	@Produce		json
 //	@Param			db	path	string	true	"Database name from GET /api/database/stats databases[].name"
 //	@Success		200	{object}	databaseTablesResponse	"Tables retrieved"
-//	@Failure		404	{object}	wrappedError	"Unknown database (the message names the legal values)"
-//	@Failure		500	{object}	wrappedError	"Failed to list database tables"
+//	@Failure		404	{object}	problem.Body	"Unknown database (the message names the legal values)"
+//	@Failure		500	{object}	problem.Body	"Failed to list database tables"
 //	@Router			/api/database/{db}/tables [get]
 func (s *Server) handleListDatabaseTables(w http.ResponseWriter, r *http.Request) {
 	handle := s.findDatabase(w, r)
@@ -287,9 +287,9 @@ type databaseRowsResponse struct {
 //	@Param			offset	query	integer	false	"Page offset"	default(0)
 //	@Param			order_by	query	string	false	"Column name, optionally with :desc"
 //	@Success		200	{object}	databaseRowsResponse	"Rows retrieved"
-//	@Failure		400	{object}	wrappedError	"order_by does not name a column of the table"
-//	@Failure		404	{object}	wrappedError	"Unknown database or unknown table"
-//	@Failure		500	{object}	wrappedError	"Failed to browse database table"
+//	@Failure		400	{object}	problem.Body	"order_by does not name a column of the table"
+//	@Failure		404	{object}	problem.Body	"Unknown database or unknown table"
+//	@Failure		500	{object}	problem.Body	"Failed to browse database table"
 //	@Router			/api/database/{db}/tables/{table}/rows [get]
 func (s *Server) handleBrowseDatabaseTable(w http.ResponseWriter, r *http.Request) {
 	handle := s.findDatabase(w, r)

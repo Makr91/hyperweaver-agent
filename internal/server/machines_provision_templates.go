@@ -10,6 +10,7 @@ import (
 
 	"github.com/Makr91/hyperweaver-agent/internal/auth"
 	"github.com/Makr91/hyperweaver-agent/internal/machines"
+	"github.com/Makr91/hyperweaver-agent/internal/problem"
 	"github.com/Makr91/hyperweaver-agent/internal/tasks"
 )
 
@@ -355,19 +356,30 @@ func (s *Server) handleMoveTemplate(w http.ResponseWriter, r *http.Request) {
 //	@Produce		json
 //	@Param			request	body	map[string]interface{}	true	"{organization, box_name, version, source_name (the source's id), provider, architecture}"
 //	@Success		202	"Template download task queued"
-//	@Failure		400	"Missing tuple fields, non-specific version, an invalid provider, or no usable source"
-//	@Failure		409	{object}	map[string]interface{}	"Template already exists locally"
+//	@Failure		400	{object}	problem.Body	"Unreadable body, an invalid provider, or no usable source"
+//	@Failure		422	{object}	problem.Body	"organization, box_name or version missing, or version latest (not at /version)"
+//	@Failure		409	{object}	problem.Body	"Template already exists locally; template_id carries the row"
 //	@Router			/api/templates/pull [post]
 func (s *Server) handlePullTemplate(w http.ResponseWriter, r *http.Request) {
 	var meta machines.TemplateDownloadMetadata
 	if err := decodeBody(r, &meta); err != nil {
-		taskError(w, http.StatusBadRequest, "Invalid JSON body")
+		problem.BadRequest(w)
 		return
 	}
-	if meta.Organization == "" || meta.BoxName == "" || meta.Version == "" ||
-		meta.Version == "latest" {
-		taskError(w, http.StatusBadRequest,
-			"organization, box_name, and a specific version are required")
+	failures := []problem.Error{}
+	if meta.Organization == "" {
+		failures = append(failures, problem.Required("/organization"))
+	}
+	if meta.BoxName == "" {
+		failures = append(failures, problem.Required("/box_name"))
+	}
+	if meta.Version == "" {
+		failures = append(failures, problem.Required("/version"))
+	} else if meta.Version == "latest" {
+		failures = append(failures, problem.Rule("/version", "not", map[string]any{}))
+	}
+	if len(failures) > 0 {
+		problem.Invalid(w, failures...)
 		return
 	}
 	if meta.SourceName == "" {
@@ -397,14 +409,7 @@ func (s *Server) handlePullTemplate(w http.ResponseWriter, r *http.Request) {
 		meta.BoxName, meta.Version, meta.Provider, meta.Architecture)
 	switch {
 	case ferr == nil:
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusConflict)
-		if werr := json.NewEncoder(w).Encode(map[string]any{
-			"error":       "Template already exists locally",
-			"template_id": existing.ID,
-		}); werr != nil {
-			slog.Error("write template conflict response", "error", werr)
-		}
+		problem.Conflict(w, "Template already exists locally", map[string]any{"template_id": existing.ID})
 		return
 	case !errors.Is(ferr, machines.ErrTemplateNotFound):
 		slog.Error("check existing template", "error", ferr)

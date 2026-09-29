@@ -171,6 +171,7 @@ var publicPaths = []string{
 	"/api/status",
 	"/api/health",
 	"/api/config/ticket",
+	"/api/rules",
 	"/api/api-keys/bootstrap",
 	"/api/auth/tray-claim",
 	"/api/auth/oidc/device-start",

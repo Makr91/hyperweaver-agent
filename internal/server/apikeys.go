@@ -11,6 +11,7 @@ import (
 
 	"github.com/Makr91/hyperweaver-agent/internal/auth"
 	"github.com/Makr91/hyperweaver-agent/internal/keys"
+	"github.com/Makr91/hyperweaver-agent/internal/problem"
 )
 
 // API-key management endpoints (Agent API v1 local tier). Paths, payloads,
@@ -53,8 +54,8 @@ type bootstrapKeyResponse struct {
 // @Produce		json
 // @Param			body	body	bootstrapRequest	false	"Optional name, description, and setup claim token"
 // @Success		200	{object}	bootstrapKeyResponse	"Key created — shown once, only a hash is stored"
-// @Failure		400	{object}	auth.ErrorMsg	"Invalid JSON body"
-// @Failure		403	{object}	auth.ErrorMsg	"Bootstrap disabled, auto-disabled, or setup token invalid"
+// @Failure		400	{object}	problem.Body	"Invalid JSON body"
+// @Failure		403	{object}	problem.Body	"Bootstrap disabled, auto-disabled, or setup token invalid"
 // @Router			/api/api-keys/bootstrap [post]
 func (s *Server) handleBootstrapKey(w http.ResponseWriter, r *http.Request) {
 	akCfg := s.cfg.APIKeys
@@ -143,27 +144,30 @@ type generateKeyResponse struct {
 // @Produce		json
 // @Param			body	body	generateRequest	true	"New key name, optional description, and role"
 // @Success		200	{object}	generateKeyResponse	"Key created — shown once, only a hash is stored"
-// @Failure		400	{object}	auth.ErrorMsg	"Missing name or invalid role"
-// @Failure		401	{object}	auth.ErrorMsg	"Missing API key"
-// @Failure		403	{object}	auth.ErrorMsg	"Invalid key or insufficient role"
+// @Failure		400	{object}	problem.Body	"Unreadable body"
+// @Failure		422	{object}	problem.Body	"name missing (required at /name) or role outside admin, operator, viewer (enum at /role)"
+// @Failure		401	{object}	problem.Body	"Missing API key"
+// @Failure		403	{object}	problem.Body	"Invalid key or insufficient role"
 // @Router			/api/api-keys/generate [post]
 func (s *Server) handleGenerateKey(w http.ResponseWriter, r *http.Request) {
 	var body generateRequest
 	if err := decodeBody(r, &body); err != nil {
-		auth.WriteMsg(w, http.StatusBadRequest, "Invalid JSON body")
+		problem.BadRequest(w)
 		return
 	}
+	failures := []problem.Error{}
 	if body.Name == "" {
-		auth.WriteMsg(w, http.StatusBadRequest, "Name is required")
-		return
+		failures = append(failures, problem.Required("/name"))
 	}
-
 	role := body.Role
 	if role == "" {
 		role = "admin"
 	}
 	if !keys.RoleValid(role) {
-		auth.WriteMsg(w, http.StatusBadRequest, "role must be one of: admin, operator, viewer")
+		failures = append(failures, problem.Enum("/role", "admin", "operator", "viewer"))
+	}
+	if len(failures) > 0 {
+		problem.Invalid(w, failures...)
 		return
 	}
 
@@ -215,8 +219,8 @@ type listKeysResponse struct {
 // @Tags			API Keys
 // @Produce		json
 // @Success		200	{object}	listKeysResponse	"All keys, newest first"
-// @Failure		401	{object}	auth.ErrorMsg	"Missing API key"
-// @Failure		403	{object}	auth.ErrorMsg	"Invalid key or insufficient role"
+// @Failure		401	{object}	problem.Body	"Missing API key"
+// @Failure		403	{object}	problem.Body	"Invalid key or insufficient role"
 // @Router			/api/api-keys [get]
 func (s *Server) handleListKeys(w http.ResponseWriter, _ *http.Request) {
 	list := s.keys.List()
@@ -258,8 +262,8 @@ type keyInfoResponse struct {
 // @Tags			API Keys
 // @Produce		json
 // @Success		200	{object}	keyInfoResponse	"The calling key's attributes"
-// @Failure		401	{object}	auth.ErrorMsg	"Missing API key"
-// @Failure		403	{object}	auth.ErrorMsg	"Invalid API key"
+// @Failure		401	{object}	problem.Body	"Missing API key"
+// @Failure		403	{object}	problem.Body	"Invalid API key"
 // @Router			/api/api-keys/info [get]
 func (s *Server) handleKeyInfo(w http.ResponseWriter, r *http.Request) {
 	identity := auth.FromContext(r.Context())
@@ -301,8 +305,8 @@ type deleteKeyResponse struct {
 // @Produce		json
 // @Param			id	path	int	true	"API key id"
 // @Success		200	{object}	deleteKeyResponse	"Key deleted"
-// @Failure		404	{object}	auth.ErrorMsg	"No key with that id"
-// @Failure		409	{object}	auth.ErrorMsg	"Would remove the last active admin key"
+// @Failure		404	{object}	problem.Body	"No key with that id"
+// @Failure		409	{object}	problem.Body	"Would remove the last active admin key"
 // @Router			/api/api-keys/{id} [delete]
 func (s *Server) handleDeleteKey(w http.ResponseWriter, r *http.Request) {
 	idStr := r.PathValue("id")
@@ -348,8 +352,8 @@ type revokeKeyResponse struct {
 // @Produce		json
 // @Param			id	path	int	true	"API key id"
 // @Success		200	{object}	revokeKeyResponse	"Key deactivated"
-// @Failure		404	{object}	auth.ErrorMsg	"No key with that id"
-// @Failure		409	{object}	auth.ErrorMsg	"Would deactivate the last active admin key"
+// @Failure		404	{object}	problem.Body	"No key with that id"
+// @Failure		409	{object}	problem.Body	"Would deactivate the last active admin key"
 // @Router			/api/api-keys/{id}/revoke [put]
 func (s *Server) handleRevokeKey(w http.ResponseWriter, r *http.Request) {
 	idStr := r.PathValue("id")

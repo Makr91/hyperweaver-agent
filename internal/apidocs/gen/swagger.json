@@ -139,15 +139,6 @@
                 },
                 "type": "object"
             },
-            "auth.ErrorMsg": {
-                "properties": {
-                    "msg": {
-                        "description": "Error message",
-                        "type": "string"
-                    }
-                },
-                "type": "object"
-            },
             "config.Backup": {
                 "properties": {
                     "created_at": {
@@ -671,6 +662,9 @@
             },
             "problem.Body": {
                 "properties": {
+                    "detail": {
+                        "type": "string"
+                    },
                     "errors": {
                         "items": {
                             "$ref": "#/components/schemas/problem.Error"
@@ -1441,17 +1435,6 @@
                         "type": "string"
                     },
                     "reason": {
-                        "type": "string"
-                    }
-                },
-                "type": "object"
-            },
-            "server.cancelConflictError": {
-                "properties": {
-                    "current_status": {
-                        "type": "string"
-                    },
-                    "error": {
                         "type": "string"
                     }
                 },
@@ -3013,22 +2996,6 @@
                     },
                     "timestamp": {
                         "type": "string"
-                    }
-                },
-                "type": "object"
-            },
-            "server.hostsYAMLProblem": {
-                "properties": {
-                    "column": {
-                        "description": "Parse errors only",
-                        "type": "integer"
-                    },
-                    "error": {
-                        "type": "string"
-                    },
-                    "line": {
-                        "description": "Parse errors only",
-                        "type": "integer"
                     }
                 },
                 "type": "object"
@@ -4670,21 +4637,6 @@
                 },
                 "type": "object"
             },
-            "server.provisionerConflictResponse": {
-                "properties": {
-                    "error": {
-                        "type": "string"
-                    },
-                    "machines": {
-                        "items": {
-                            "type": "string"
-                        },
-                        "type": "array",
-                        "uniqueItems": false
-                    }
-                },
-                "type": "object"
-            },
             "server.queuedOperation": {
                 "properties": {
                     "machine_name": {
@@ -4868,6 +4820,23 @@
                     },
                     "name": {
                         "type": "string"
+                    }
+                },
+                "type": "object"
+            },
+            "server.rulesDocument": {
+                "properties": {
+                    "$defs": {
+                        "additionalProperties": {},
+                        "type": "object"
+                    },
+                    "$schema": {
+                        "example": "https://json-schema.org/draft/2020-12/schema",
+                        "type": "string"
+                    },
+                    "forms": {
+                        "additionalProperties": {},
+                        "type": "object"
                     }
                 },
                 "type": "object"
@@ -5441,14 +5410,6 @@
                     },
                     "usedSwapBytes": {
                         "type": "integer"
-                    }
-                },
-                "type": "object"
-            },
-            "server.taskErrorBody": {
-                "properties": {
-                    "error": {
-                        "type": "string"
                     }
                 },
                 "type": "object"
@@ -6034,26 +5995,6 @@
                 },
                 "type": "object"
             },
-            "server.wrappedError": {
-                "properties": {
-                    "details": {
-                        "description": "Optional detail; omitted when empty",
-                        "type": "string"
-                    },
-                    "error": {
-                        "description": "Error message",
-                        "type": "string"
-                    },
-                    "success": {
-                        "type": "boolean"
-                    },
-                    "timestamp": {
-                        "description": "RFC3339 UTC",
-                        "type": "string"
-                    }
-                },
-                "type": "object"
-            },
             "server.writeFileContentRequest": {
                 "properties": {
                     "backup": {
@@ -6290,7 +6231,7 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "$ref": "#/components/schemas/auth.ErrorMsg"
+                                    "$ref": "#/components/schemas/problem.Body"
                                 }
                             }
                         },
@@ -6300,7 +6241,7 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "$ref": "#/components/schemas/auth.ErrorMsg"
+                                    "$ref": "#/components/schemas/problem.Body"
                                 }
                             }
                         },
@@ -6350,7 +6291,7 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "$ref": "#/components/schemas/auth.ErrorMsg"
+                                    "$ref": "#/components/schemas/problem.Body"
                                 }
                             }
                         },
@@ -6360,7 +6301,7 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "$ref": "#/components/schemas/auth.ErrorMsg"
+                                    "$ref": "#/components/schemas/problem.Body"
                                 }
                             }
                         },
@@ -6411,17 +6352,17 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "$ref": "#/components/schemas/auth.ErrorMsg"
+                                    "$ref": "#/components/schemas/problem.Body"
                                 }
                             }
                         },
-                        "description": "Missing name or invalid role"
+                        "description": "Unreadable body"
                     },
                     "401": {
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "$ref": "#/components/schemas/auth.ErrorMsg"
+                                    "$ref": "#/components/schemas/problem.Body"
                                 }
                             }
                         },
@@ -6431,11 +6372,21 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "$ref": "#/components/schemas/auth.ErrorMsg"
+                                    "$ref": "#/components/schemas/problem.Body"
                                 }
                             }
                         },
                         "description": "Invalid key or insufficient role"
+                    },
+                    "422": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/problem.Body"
+                                }
+                            }
+                        },
+                        "description": "name missing (required at /name) or role outside admin, operator, viewer (enum at /role)"
                     }
                 },
                 "summary": "Generate a new API key",
@@ -6462,7 +6413,7 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "$ref": "#/components/schemas/auth.ErrorMsg"
+                                    "$ref": "#/components/schemas/problem.Body"
                                 }
                             }
                         },
@@ -6472,7 +6423,7 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "$ref": "#/components/schemas/auth.ErrorMsg"
+                                    "$ref": "#/components/schemas/problem.Body"
                                 }
                             }
                         },
@@ -6514,7 +6465,7 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "$ref": "#/components/schemas/auth.ErrorMsg"
+                                    "$ref": "#/components/schemas/problem.Body"
                                 }
                             }
                         },
@@ -6524,7 +6475,7 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "$ref": "#/components/schemas/auth.ErrorMsg"
+                                    "$ref": "#/components/schemas/problem.Body"
                                 }
                             }
                         },
@@ -6566,7 +6517,7 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "$ref": "#/components/schemas/auth.ErrorMsg"
+                                    "$ref": "#/components/schemas/problem.Body"
                                 }
                             }
                         },
@@ -6576,7 +6527,7 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "$ref": "#/components/schemas/auth.ErrorMsg"
+                                    "$ref": "#/components/schemas/problem.Body"
                                 }
                             }
                         },
@@ -6607,7 +6558,7 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "$ref": "#/components/schemas/server.wrappedError"
+                                    "$ref": "#/components/schemas/problem.Body"
                                 }
                             }
                         },
@@ -6617,7 +6568,7 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "$ref": "#/components/schemas/server.wrappedError"
+                                    "$ref": "#/components/schemas/problem.Body"
                                 }
                             }
                         },
@@ -6648,7 +6599,7 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "$ref": "#/components/schemas/server.wrappedError"
+                                    "$ref": "#/components/schemas/problem.Body"
                                 }
                             }
                         },
@@ -6658,7 +6609,7 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "$ref": "#/components/schemas/server.wrappedError"
+                                    "$ref": "#/components/schemas/problem.Body"
                                 }
                             }
                         },
@@ -7206,12 +7157,43 @@
                         "description": "Location created"
                     },
                     "400": {
-                        "description": "Missing name/path/type, invalid type, or directory not creatable"
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/problem.Body"
+                                }
+                            }
+                        },
+                        "description": "Unreadable body"
                     },
                     "409": {
-                        "description": "Path already registered ({error, existing_location})"
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/problem.Body"
+                                }
+                            }
+                        },
+                        "description": "Path already registered (unique at /path); existing_location carries the row"
+                    },
+                    "422": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/problem.Body"
+                                }
+                            }
+                        },
+                        "description": "name, path or type missing (required); type outside iso, image, installer, fixpack, hotfix (enum at /type); path not absolute (pattern absolutePath at /path); directory not creatable (writable at /path)"
                     },
                     "503": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/problem.Body"
+                                }
+                            }
+                        },
                         "description": "Artifact storage is disabled"
                     }
                 },
@@ -7701,7 +7683,7 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "$ref": "#/components/schemas/server.taskErrorBody"
+                                    "$ref": "#/components/schemas/problem.Body"
                                 }
                             }
                         },
@@ -7711,7 +7693,7 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "$ref": "#/components/schemas/server.taskErrorBody"
+                                    "$ref": "#/components/schemas/problem.Body"
                                 }
                             }
                         },
@@ -7721,7 +7703,7 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "$ref": "#/components/schemas/server.taskErrorBody"
+                                    "$ref": "#/components/schemas/problem.Body"
                                 }
                             }
                         },
@@ -7736,13 +7718,21 @@
         },
         "/api/auth/oidc/device-status": {
             "get": {
-                "description": "Public. Answers {status} while the flow runs: pending; denied = the ACCOUNT was refused (the human clicked Deny at the identity provider, or the account is not the bound one and not in oidc.allowed_users); expired; failed = the agent could not complete the exchange or validation (identity-provider outage, token rejected — the agent log names the cause; trying again is reasonable). On approval, EXACTLY ONCE, the full credential body {status: \"approved\", api_key, entity_id, name, role, message} — the minted local admin API key the UI stores in its normal auth slot. After that one delivery (and after the first expired answer) the handle is forgotten and further polls answer 404. Poll freely — the agent itself talks to the identity provider at the grant's own pace. Identity comes from the id_token when the provider mints one, else the ACCESS token's claims (Spring Authorization Server's device grant issues no id_token) — validated against the issuer's JWKS either way, account id = UUID claim with sub fallback.",
+                "description": "Public. While the flow is pending the request stays open until the status changes or the grant's own interval elapses, then answers; wait=0 answers at once. So a client asks again as soon as an answer arrives and never on a timer. Answers {status} while the flow runs: pending; denied = the ACCOUNT was refused (the human clicked Deny at the identity provider, or the account is not the bound one and not in oidc.allowed_users); expired; failed = the agent could not complete the exchange or validation (identity-provider outage, token rejected — the agent log names the cause; trying again is reasonable). On approval, EXACTLY ONCE, the full credential body {status: \"approved\", api_key, entity_id, name, role, message} — the minted local admin API key the UI stores in its normal auth slot. After that one delivery (and after the first expired answer) the handle is forgotten and further polls answer 404. Identity comes from the id_token when the provider mints one, else the ACCESS token's claims (Spring Authorization Server's device grant issues no id_token) — validated against the issuer's JWKS either way, account id = UUID claim with sub fallback.",
                 "parameters": [
                     {
                         "description": "The device-start answer's opaque flow id",
                         "in": "query",
                         "name": "handle",
                         "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    {
+                        "description": "0 answers the current status at once instead of holding the request open",
+                        "in": "query",
+                        "name": "wait",
                         "schema": {
                             "type": "string"
                         }
@@ -7763,7 +7753,7 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "$ref": "#/components/schemas/server.taskErrorBody"
+                                    "$ref": "#/components/schemas/problem.Body"
                                 }
                             }
                         },
@@ -7773,7 +7763,7 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "$ref": "#/components/schemas/server.taskErrorBody"
+                                    "$ref": "#/components/schemas/problem.Body"
                                 }
                             }
                         },
@@ -7804,7 +7794,7 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "$ref": "#/components/schemas/server.taskErrorBody"
+                                    "$ref": "#/components/schemas/problem.Body"
                                 }
                             }
                         },
@@ -7814,7 +7804,7 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "$ref": "#/components/schemas/server.taskErrorBody"
+                                    "$ref": "#/components/schemas/problem.Body"
                                 }
                             }
                         },
@@ -7824,7 +7814,7 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "$ref": "#/components/schemas/server.taskErrorBody"
+                                    "$ref": "#/components/schemas/problem.Body"
                                 }
                             }
                         },
@@ -7875,7 +7865,7 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "$ref": "#/components/schemas/auth.ErrorMsg"
+                                    "$ref": "#/components/schemas/problem.Body"
                                 }
                             }
                         },
@@ -7885,7 +7875,7 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "$ref": "#/components/schemas/auth.ErrorMsg"
+                                    "$ref": "#/components/schemas/problem.Body"
                                 }
                             }
                         },
@@ -8379,7 +8369,7 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "$ref": "#/components/schemas/server.wrappedError"
+                                    "$ref": "#/components/schemas/problem.Body"
                                 }
                             }
                         },
@@ -8410,7 +8400,7 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "$ref": "#/components/schemas/server.wrappedError"
+                                    "$ref": "#/components/schemas/problem.Body"
                                 }
                             }
                         },
@@ -8441,7 +8431,7 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "$ref": "#/components/schemas/server.wrappedError"
+                                    "$ref": "#/components/schemas/problem.Body"
                                 }
                             }
                         },
@@ -8472,7 +8462,7 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "$ref": "#/components/schemas/server.wrappedError"
+                                    "$ref": "#/components/schemas/problem.Body"
                                 }
                             }
                         },
@@ -8514,7 +8504,7 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "$ref": "#/components/schemas/server.wrappedError"
+                                    "$ref": "#/components/schemas/problem.Body"
                                 }
                             }
                         },
@@ -8524,7 +8514,7 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "$ref": "#/components/schemas/server.wrappedError"
+                                    "$ref": "#/components/schemas/problem.Body"
                                 }
                             }
                         },
@@ -8601,7 +8591,7 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "$ref": "#/components/schemas/server.wrappedError"
+                                    "$ref": "#/components/schemas/problem.Body"
                                 }
                             }
                         },
@@ -8611,7 +8601,7 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "$ref": "#/components/schemas/server.wrappedError"
+                                    "$ref": "#/components/schemas/problem.Body"
                                 }
                             }
                         },
@@ -8621,7 +8611,7 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "$ref": "#/components/schemas/server.wrappedError"
+                                    "$ref": "#/components/schemas/problem.Body"
                                 }
                             }
                         },
@@ -8636,7 +8626,7 @@
         },
         "/api/events": {
             "get": {
-                "description": "Minimum role: viewer; the admin topic needs admin. The one event stream of the Universal Events Contract, plain WHATWG server-sent events. topics is a comma-separated list of health, tasks, hosts, admin and monitoring; unknown names are ignored and an empty list subscribes to every topic the caller may read. The first frame is retry: 3000 followed by the ready event carrying the newest id and the subscribed topics. Every event carries id \u003cepoch-ms\u003e-\u003cseq\u003e, a kebab-case event name and one line of JSON data; a :hb comment line is sent after 25 seconds without a frame. Topic tasks sends task-updated, one task row as GET /api/tasks answers it, when a task is created and on every change of its status, progress_percent, progress_info or error_message. Topic hosts sends stats-updated, the GET /api/stats document, when a machine is created or removed and when one changes status. Topic health sends health, the GET /api/health report, whenever a task ends and the report differs from the last one sent. Topic admin sends restart-required, {required, last_modified_by, last_modified_time}, after every configuration save and backup restore, and {required: false} as the agent restarts; a non-admin key naming the topic is answered 403. Topic monitoring sends cpu-sample {cpu: [sample]} with per_core_parsed, memory-sample {memory: [sample]} and network-sample {usage: [samples]}, the members GET /api/monitoring/system/cpu, /system/memory and /network/usage answer, whenever the collector takes them: on every collector tick while monitoring.storage_enabled, else only on POST /api/monitoring/collect. No topic has a snapshot event. The ring keeps the last 500 events or 5 minutes, whichever is larger: a Last-Event-ID inside it replays every later event of the subscribed topics, one outside it answers a reset event naming the subscribed topics. A task's output and every terminal stay on their WebSockets.",
+                "description": "Minimum role: viewer. The one event stream of the Universal Events Contract, plain WHATWG server-sent events. topics is a comma-separated list of health, tasks, hosts, admin and monitoring; unknown names are ignored, an empty list asks for every topic, and the stream answers the topics the key's role may read, admin left out for a non-admin key, so the ready event's topics list is the subscription that stands; 403 only when nothing is left. The first frame is retry: 3000 followed by the ready event carrying the newest id and the subscribed topics. Every event carries id \u003cepoch-ms\u003e-\u003cseq\u003e, a kebab-case event name and one line of JSON data; a :hb comment line is sent after 25 seconds without a frame. Topic tasks sends task-updated, one task row as GET /api/tasks answers it, when a task is created and on every change of its status, progress_percent, progress_info or error_message. Topic hosts sends stats-updated, the GET /api/stats document, when a machine is created or removed and when one changes status. Topic health sends health, the GET /api/health report, whenever a task ends and the report differs from the last one sent. Topic admin sends restart-required, {required, last_modified_by, last_modified_time}, after every configuration save and backup restore, and {required: false} as the agent restarts; it is subscribed for an admin key alone. Topic monitoring sends cpu-sample {cpu: [sample]} with per_core_parsed, memory-sample {memory: [sample]} and network-sample {usage: [samples]}, the members GET /api/monitoring/system/cpu, /system/memory and /network/usage answer, whenever the collector takes them: on every collector tick while monitoring.storage_enabled, else only on POST /api/monitoring/collect. No topic has a snapshot event. The ring keeps the last 500 events or 5 minutes, whichever is larger: a Last-Event-ID inside it replays every later event of the subscribed topics, one outside it answers a reset event naming the subscribed topics. A task's output and every terminal stay on their WebSockets.",
                 "parameters": [
                     {
                         "description": "Comma-separated topics: health, tasks, hosts, admin, monitoring",
@@ -8670,7 +8660,7 @@
                         "content": {
                             "text/event-stream": {
                                 "schema": {
-                                    "$ref": "#/components/schemas/auth.ErrorMsg"
+                                    "$ref": "#/components/schemas/problem.Body"
                                 }
                             }
                         },
@@ -8680,11 +8670,11 @@
                         "content": {
                             "text/event-stream": {
                                 "schema": {
-                                    "$ref": "#/components/schemas/auth.ErrorMsg"
+                                    "$ref": "#/components/schemas/problem.Body"
                                 }
                             }
                         },
-                        "description": "Invalid credential, insufficient role, or the admin topic asked for by a non-admin"
+                        "description": "Invalid credential, or no requested topic the key may read"
                     }
                 },
                 "summary": "Event stream (server-sent events)",
@@ -8807,15 +8797,43 @@
                         "description": "Directory contents"
                     },
                     "403": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/problem.Body"
+                                }
+                            }
+                        },
                         "description": "Path forbidden (traversal, outside the configured browse root, forbidden prefix, or pattern match)"
                     },
                     "404": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/problem.Body"
+                                }
+                            }
+                        },
                         "description": "Directory not found"
                     },
                     "500": {
-                        "description": "Listing failure ({error, details} — includes the over-the-entry-cap refusal)"
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/problem.Body"
+                                }
+                            }
+                        },
+                        "description": "Listing failure, the over-the-entry-cap refusal included, the cause in detail"
                     },
                     "503": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/problem.Body"
+                                }
+                            }
+                        },
                         "description": "File browser is disabled"
                     }
                 },
@@ -9146,12 +9164,53 @@
                         "description": "Directory created ({success, message, item})"
                     },
                     "400": {
-                        "description": "Missing fields, bad mode, or directory already exists"
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/problem.Body"
+                                }
+                            }
+                        },
+                        "description": "Unreadable body"
                     },
                     "403": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/problem.Body"
+                                }
+                            }
+                        },
                         "description": "Path forbidden"
                     },
+                    "409": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/problem.Body"
+                                }
+                            }
+                        },
+                        "description": "Directory already exists (unique at /name)"
+                    },
+                    "422": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/problem.Body"
+                                }
+                            }
+                        },
+                        "description": "path or name missing, or mode not octal (pattern octal at /mode)"
+                    },
                     "503": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/problem.Body"
+                                }
+                            }
+                        },
                         "description": "File browser is disabled"
                     }
                 },
@@ -9682,7 +9741,7 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "$ref": "#/components/schemas/server.taskErrorBody"
+                                    "$ref": "#/components/schemas/problem.Body"
                                 }
                             }
                         },
@@ -9692,7 +9751,7 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "$ref": "#/components/schemas/server.taskErrorBody"
+                                    "$ref": "#/components/schemas/problem.Body"
                                 }
                             }
                         },
@@ -9760,18 +9819,15 @@
                         },
                         "description": "Orchestration enabled"
                     },
-                    "400": {
+                    "422": {
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "additionalProperties": {
-                                        "type": "string"
-                                    },
-                                    "type": "object"
+                                    "$ref": "#/components/schemas/problem.Body"
                                 }
                             }
                         },
-                        "description": "Missing confirmation"
+                        "description": "confirm not true (enum at /confirm)"
                     }
                 },
                 "summary": "Enable machine orchestration",
@@ -9834,18 +9890,15 @@
                         },
                         "description": "Execution plan"
                     },
-                    "400": {
+                    "422": {
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "additionalProperties": {
-                                        "type": "string"
-                                    },
-                                    "type": "object"
+                                    "$ref": "#/components/schemas/problem.Body"
                                 }
                             }
                         },
-                        "description": "Invalid strategy"
+                        "description": "Invalid strategy (enum at /strategy)"
                     }
                 },
                 "summary": "Test orchestration (dry run)",
@@ -9939,7 +9992,7 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "$ref": "#/components/schemas/server.taskErrorBody"
+                                    "$ref": "#/components/schemas/problem.Body"
                                 }
                             }
                         },
@@ -9949,7 +10002,7 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "$ref": "#/components/schemas/server.taskErrorBody"
+                                    "$ref": "#/components/schemas/problem.Body"
                                 }
                             }
                         },
@@ -9959,7 +10012,7 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "$ref": "#/components/schemas/server.taskErrorBody"
+                                    "$ref": "#/components/schemas/problem.Body"
                                 }
                             }
                         },
@@ -10006,11 +10059,25 @@
                         },
                         "description": "Delete tasks queued"
                     },
-                    "400": {
-                        "description": "Machine is running and force is not set"
-                    },
                     "404": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/problem.Body"
+                                }
+                            }
+                        },
                         "description": "Machine not found"
+                    },
+                    "409": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/problem.Body"
+                                }
+                            }
+                        },
+                        "description": "Machine is running and force is not set; current_status carries the state"
                     }
                 },
                 "summary": "Delete a machine",
@@ -10304,7 +10371,7 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "$ref": "#/components/schemas/server.taskErrorBody"
+                                    "$ref": "#/components/schemas/problem.Body"
                                 }
                             }
                         },
@@ -10314,7 +10381,7 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "$ref": "#/components/schemas/server.taskErrorBody"
+                                    "$ref": "#/components/schemas/problem.Body"
                                 }
                             }
                         },
@@ -10324,7 +10391,7 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "$ref": "#/components/schemas/server.taskErrorBody"
+                                    "$ref": "#/components/schemas/problem.Body"
                                 }
                             }
                         },
@@ -10405,7 +10472,7 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "$ref": "#/components/schemas/server.taskErrorBody"
+                                    "$ref": "#/components/schemas/problem.Body"
                                 }
                             }
                         },
@@ -10415,7 +10482,7 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "$ref": "#/components/schemas/server.taskErrorBody"
+                                    "$ref": "#/components/schemas/problem.Body"
                                 }
                             }
                         },
@@ -10517,7 +10584,7 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "$ref": "#/components/schemas/server.taskErrorBody"
+                                    "$ref": "#/components/schemas/problem.Body"
                                 }
                             }
                         },
@@ -10527,7 +10594,7 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "$ref": "#/components/schemas/server.taskErrorBody"
+                                    "$ref": "#/components/schemas/problem.Body"
                                 }
                             }
                         },
@@ -10537,7 +10604,7 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "$ref": "#/components/schemas/server.taskErrorBody"
+                                    "$ref": "#/components/schemas/problem.Body"
                                 }
                             }
                         },
@@ -10547,7 +10614,7 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "$ref": "#/components/schemas/server.taskErrorBody"
+                                    "$ref": "#/components/schemas/problem.Body"
                                 }
                             }
                         },
@@ -10599,7 +10666,7 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "$ref": "#/components/schemas/server.taskErrorBody"
+                                    "$ref": "#/components/schemas/problem.Body"
                                 }
                             }
                         },
@@ -10609,7 +10676,7 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "$ref": "#/components/schemas/server.taskErrorBody"
+                                    "$ref": "#/components/schemas/problem.Body"
                                 }
                             }
                         },
@@ -10619,7 +10686,7 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "$ref": "#/components/schemas/server.taskErrorBody"
+                                    "$ref": "#/components/schemas/problem.Body"
                                 }
                             }
                         },
@@ -10629,7 +10696,7 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "$ref": "#/components/schemas/server.taskErrorBody"
+                                    "$ref": "#/components/schemas/problem.Body"
                                 }
                             }
                         },
@@ -10672,7 +10739,7 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "$ref": "#/components/schemas/server.taskErrorBody"
+                                    "$ref": "#/components/schemas/problem.Body"
                                 }
                             }
                         },
@@ -10682,7 +10749,7 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "$ref": "#/components/schemas/server.taskErrorBody"
+                                    "$ref": "#/components/schemas/problem.Body"
                                 }
                             }
                         },
@@ -10692,7 +10759,7 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "$ref": "#/components/schemas/server.taskErrorBody"
+                                    "$ref": "#/components/schemas/problem.Body"
                                 }
                             }
                         },
@@ -10702,7 +10769,7 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "$ref": "#/components/schemas/server.taskErrorBody"
+                                    "$ref": "#/components/schemas/problem.Body"
                                 }
                             }
                         },
@@ -10745,7 +10812,7 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "$ref": "#/components/schemas/server.taskErrorBody"
+                                    "$ref": "#/components/schemas/problem.Body"
                                 }
                             }
                         },
@@ -10755,7 +10822,7 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "$ref": "#/components/schemas/server.taskErrorBody"
+                                    "$ref": "#/components/schemas/problem.Body"
                                 }
                             }
                         },
@@ -10765,7 +10832,7 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "$ref": "#/components/schemas/server.taskErrorBody"
+                                    "$ref": "#/components/schemas/problem.Body"
                                 }
                             }
                         },
@@ -10775,7 +10842,7 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "$ref": "#/components/schemas/server.taskErrorBody"
+                                    "$ref": "#/components/schemas/problem.Body"
                                 }
                             }
                         },
@@ -10817,7 +10884,7 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "$ref": "#/components/schemas/server.taskErrorBody"
+                                    "$ref": "#/components/schemas/problem.Body"
                                 }
                             }
                         },
@@ -10827,7 +10894,7 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "$ref": "#/components/schemas/server.taskErrorBody"
+                                    "$ref": "#/components/schemas/problem.Body"
                                 }
                             }
                         },
@@ -10837,7 +10904,7 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "$ref": "#/components/schemas/server.taskErrorBody"
+                                    "$ref": "#/components/schemas/problem.Body"
                                 }
                             }
                         },
@@ -10847,7 +10914,7 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "$ref": "#/components/schemas/server.taskErrorBody"
+                                    "$ref": "#/components/schemas/problem.Body"
                                 }
                             }
                         },
@@ -10908,7 +10975,7 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "$ref": "#/components/schemas/server.taskErrorBody"
+                                    "$ref": "#/components/schemas/problem.Body"
                                 }
                             }
                         },
@@ -10918,7 +10985,7 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "$ref": "#/components/schemas/server.taskErrorBody"
+                                    "$ref": "#/components/schemas/problem.Body"
                                 }
                             }
                         },
@@ -10928,7 +10995,7 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "$ref": "#/components/schemas/server.taskErrorBody"
+                                    "$ref": "#/components/schemas/problem.Body"
                                 }
                             }
                         },
@@ -10938,7 +11005,7 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "$ref": "#/components/schemas/server.taskErrorBody"
+                                    "$ref": "#/components/schemas/problem.Body"
                                 }
                             }
                         },
@@ -11000,7 +11067,7 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "$ref": "#/components/schemas/server.taskErrorBody"
+                                    "$ref": "#/components/schemas/problem.Body"
                                 }
                             }
                         },
@@ -11010,7 +11077,7 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "$ref": "#/components/schemas/server.taskErrorBody"
+                                    "$ref": "#/components/schemas/problem.Body"
                                 }
                             }
                         },
@@ -11020,7 +11087,7 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "$ref": "#/components/schemas/server.taskErrorBody"
+                                    "$ref": "#/components/schemas/problem.Body"
                                 }
                             }
                         },
@@ -11030,7 +11097,7 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "$ref": "#/components/schemas/server.taskErrorBody"
+                                    "$ref": "#/components/schemas/problem.Body"
                                 }
                             }
                         },
@@ -11081,7 +11148,7 @@
                 ]
             },
             "put": {
-                "description": "Minimum role: operator. The raw-YAML edit half (the FROZEN cross-agent contract, sync 2026-07-19 — the emergency hatch: missing vars, extra roles, hand edits between create-without-start and provision). Body {yaml}. Refusals, nothing stored: unparseable YAML → 400 {error, line, column} (numeric, editor-jumpable); impossible section shapes (root/settings/zones/disks/provisioner/metadata not mappings, networks not a list) → 400 {error}; the converged document pre-flights still gate — consoleport 1025-65535, vcpus whole ≥ 1, the typed-disk frozen strings — the YAML door bypasses NOTHING; a bookkeeping key named in the YAML (provisioner_state, pending_changes, guest_info, snapshots, host_hooks_confirmed) or any unknown top-level key → 400 {error} (it would silently die at the next discovery merge — loud beats silent loss). Otherwise the document stores VERBATIM with KEY ORDER PRESERVED (comments die; the document is the program — provisioning: method keys execute in document order): the six sections replace wholesale, a section ABSENT from the YAML is REMOVED, bookkeeping and the live view survive untouched. 200 {warnings: []} — non-blocking string advisories (bhyve-vocabulary disk keys, no control IP, ...). Unknown keys INSIDE sections ride verbatim.",
+                "description": "Minimum role: operator. The raw-YAML edit half (the FROZEN cross-agent contract, sync 2026-07-19 — the emergency hatch: missing vars, extra roles, hand edits between create-without-start and provision). Body {yaml}. Refusals, nothing stored, every one a 422 problem body with one errors[] entry at /yaml: unparseable YAML carries rule yaml with params line and column (numeric, editor-jumpable) and the parser's message; impossible section shapes (root/settings/zones/disks/provisioner/metadata not mappings, networks not a list), the converged document pre-flights — consoleport 1025-65535, vcpus whole ≥ 1, the typed-disk frozen strings — the YAML door bypasses NOTHING, and a bookkeeping key named in the YAML (provisioner_state, pending_changes, guest_info, snapshots, host_hooks_confirmed) or any unknown top-level key (it would silently die at the next discovery merge — loud beats silent loss) carry rule yaml with the message alone. Otherwise the document stores VERBATIM with KEY ORDER PRESERVED (comments die; the document is the program — provisioning: method keys execute in document order): the six sections replace wholesale, a section ABSENT from the YAML is REMOVED, bookkeeping and the live view survive untouched. 200 {warnings: []} — non-blocking string advisories (bhyve-vocabulary disk keys, no control IP, ...). Unknown keys INSIDE sections ride verbatim.",
                 "parameters": [
                     {
                         "description": "Machine name",
@@ -11128,14 +11195,31 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "$ref": "#/components/schemas/server.hostsYAMLProblem"
+                                    "$ref": "#/components/schemas/problem.Body"
                                 }
                             }
                         },
-                        "description": "Refused, nothing stored — parse error ({error, line, column}), impossible shape, converged pre-flight, bookkeeping/unknown top-level key ({error})"
+                        "description": "Unreadable body"
                     },
                     "404": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/problem.Body"
+                                }
+                            }
+                        },
                         "description": "Machine not found"
+                    },
+                    "422": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/problem.Body"
+                                }
+                            }
+                        },
+                        "description": "Refused, nothing stored: yaml missing (required at /yaml), or rule yaml at /yaml with the parser's line and column when it is a parse error"
                     }
                 },
                 "summary": "Replace the stored document from raw YAML",
@@ -11193,7 +11277,7 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "$ref": "#/components/schemas/server.taskErrorBody"
+                                    "$ref": "#/components/schemas/problem.Body"
                                 }
                             }
                         },
@@ -11203,7 +11287,7 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "$ref": "#/components/schemas/server.taskErrorBody"
+                                    "$ref": "#/components/schemas/problem.Body"
                                 }
                             }
                         },
@@ -11390,7 +11474,7 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "$ref": "#/components/schemas/server.taskErrorBody"
+                                    "$ref": "#/components/schemas/problem.Body"
                                 }
                             }
                         },
@@ -11400,7 +11484,7 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "$ref": "#/components/schemas/server.taskErrorBody"
+                                    "$ref": "#/components/schemas/problem.Body"
                                 }
                             }
                         },
@@ -11410,7 +11494,7 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "$ref": "#/components/schemas/server.taskErrorBody"
+                                    "$ref": "#/components/schemas/problem.Body"
                                 }
                             }
                         },
@@ -11420,7 +11504,7 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "$ref": "#/components/schemas/server.taskErrorBody"
+                                    "$ref": "#/components/schemas/problem.Body"
                                 }
                             }
                         },
@@ -12596,7 +12680,7 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "$ref": "#/components/schemas/server.taskErrorBody"
+                                    "$ref": "#/components/schemas/problem.Body"
                                 }
                             }
                         },
@@ -12606,7 +12690,7 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "$ref": "#/components/schemas/server.taskErrorBody"
+                                    "$ref": "#/components/schemas/problem.Body"
                                 }
                             }
                         },
@@ -12668,7 +12752,7 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "$ref": "#/components/schemas/server.taskErrorBody"
+                                    "$ref": "#/components/schemas/problem.Body"
                                 }
                             }
                         },
@@ -12678,7 +12762,7 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "$ref": "#/components/schemas/server.taskErrorBody"
+                                    "$ref": "#/components/schemas/problem.Body"
                                 }
                             }
                         },
@@ -12688,7 +12772,7 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "$ref": "#/components/schemas/server.taskErrorBody"
+                                    "$ref": "#/components/schemas/problem.Body"
                                 }
                             }
                         },
@@ -12750,7 +12834,7 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "$ref": "#/components/schemas/server.taskErrorBody"
+                                    "$ref": "#/components/schemas/problem.Body"
                                 }
                             }
                         },
@@ -12760,7 +12844,7 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "$ref": "#/components/schemas/server.taskErrorBody"
+                                    "$ref": "#/components/schemas/problem.Body"
                                 }
                             }
                         },
@@ -12770,7 +12854,7 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "$ref": "#/components/schemas/server.taskErrorBody"
+                                    "$ref": "#/components/schemas/problem.Body"
                                 }
                             }
                         },
@@ -12812,7 +12896,7 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "$ref": "#/components/schemas/server.taskErrorBody"
+                                    "$ref": "#/components/schemas/problem.Body"
                                 }
                             }
                         },
@@ -12822,7 +12906,7 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "$ref": "#/components/schemas/server.taskErrorBody"
+                                    "$ref": "#/components/schemas/problem.Body"
                                 }
                             }
                         },
@@ -12882,7 +12966,7 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "$ref": "#/components/schemas/server.taskErrorBody"
+                                    "$ref": "#/components/schemas/problem.Body"
                                 }
                             }
                         },
@@ -12892,7 +12976,7 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "$ref": "#/components/schemas/server.taskErrorBody"
+                                    "$ref": "#/components/schemas/problem.Body"
                                 }
                             }
                         },
@@ -12902,7 +12986,7 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "$ref": "#/components/schemas/server.taskErrorBody"
+                                    "$ref": "#/components/schemas/problem.Body"
                                 }
                             }
                         },
@@ -12953,7 +13037,7 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "$ref": "#/components/schemas/server.taskErrorBody"
+                                    "$ref": "#/components/schemas/problem.Body"
                                 }
                             }
                         },
@@ -12963,7 +13047,7 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "$ref": "#/components/schemas/server.taskErrorBody"
+                                    "$ref": "#/components/schemas/problem.Body"
                                 }
                             }
                         },
@@ -12973,7 +13057,7 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "$ref": "#/components/schemas/server.taskErrorBody"
+                                    "$ref": "#/components/schemas/problem.Body"
                                 }
                             }
                         },
@@ -13393,7 +13477,7 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "$ref": "#/components/schemas/server.wrappedError"
+                                    "$ref": "#/components/schemas/problem.Body"
                                 }
                             }
                         },
@@ -13460,7 +13544,7 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "$ref": "#/components/schemas/server.wrappedError"
+                                    "$ref": "#/components/schemas/problem.Body"
                                 }
                             }
                         },
@@ -13518,7 +13602,7 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "$ref": "#/components/schemas/server.wrappedError"
+                                    "$ref": "#/components/schemas/problem.Body"
                                 }
                             }
                         },
@@ -13570,7 +13654,7 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "$ref": "#/components/schemas/server.wrappedError"
+                                    "$ref": "#/components/schemas/problem.Body"
                                 }
                             }
                         },
@@ -13629,7 +13713,7 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "$ref": "#/components/schemas/server.wrappedError"
+                                    "$ref": "#/components/schemas/problem.Body"
                                 }
                             }
                         },
@@ -13679,7 +13763,7 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "$ref": "#/components/schemas/server.wrappedError"
+                                    "$ref": "#/components/schemas/problem.Body"
                                 }
                             }
                         },
@@ -13729,7 +13813,7 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "$ref": "#/components/schemas/server.wrappedError"
+                                    "$ref": "#/components/schemas/problem.Body"
                                 }
                             }
                         },
@@ -14046,9 +14130,33 @@
                         "description": "Hostname change task created"
                     },
                     "400": {
-                        "description": "Zoneweaver's exact refusals, {error} shape: \"hostname is required and must be a string\" (missing/non-string hostname or an unparseable body), \"Invalid hostname format. Must be alphanumeric with hyphens and dots, 1-253 characters\", \"Invalid hostname format. Each part between dots must be 1-63 characters\", or \"Invalid hostname format. Each part must start and end with alphanumeric characters"
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/problem.Body"
+                                }
+                            }
+                        },
+                        "description": "Unreadable body"
+                    },
+                    "422": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/problem.Body"
+                                }
+                            }
+                        },
+                        "description": "hostname missing (required at /hostname) or not a hostname (format hostname at /hostname, the detail naming the failed stage: 1-253 characters, 1-63 per label, alphanumeric label edges)"
                     },
                     "500": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/problem.Body"
+                                }
+                            }
+                        },
                         "description": "Failed to create hostname change task"
                     }
                 },
@@ -14676,7 +14784,7 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "$ref": "#/components/schemas/auth.ErrorMsg"
+                                    "$ref": "#/components/schemas/problem.Body"
                                 }
                             }
                         },
@@ -14686,7 +14794,7 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "$ref": "#/components/schemas/auth.ErrorMsg"
+                                    "$ref": "#/components/schemas/problem.Body"
                                 }
                             }
                         },
@@ -14696,7 +14804,7 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "$ref": "#/components/schemas/auth.ErrorMsg"
+                                    "$ref": "#/components/schemas/problem.Body"
                                 }
                             }
                         },
@@ -14747,7 +14855,7 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "$ref": "#/components/schemas/auth.ErrorMsg"
+                                    "$ref": "#/components/schemas/problem.Body"
                                 }
                             }
                         },
@@ -14757,7 +14865,7 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "$ref": "#/components/schemas/auth.ErrorMsg"
+                                    "$ref": "#/components/schemas/problem.Body"
                                 }
                             }
                         },
@@ -15139,17 +15247,24 @@
                         "description": "Family deleted"
                     },
                     "404": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/problem.Body"
+                                }
+                            }
+                        },
                         "description": "Provisioner not found"
                     },
                     "409": {
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "$ref": "#/components/schemas/server.provisionerConflictResponse"
+                                    "$ref": "#/components/schemas/problem.Body"
                                 }
                             }
                         },
-                        "description": "Referenced by existing machines"
+                        "description": "Referenced by existing machines; machines names them"
                     }
                 },
                 "summary": "Delete a provisioner family",
@@ -15264,17 +15379,24 @@
                         "description": "Version deleted"
                     },
                     "404": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/problem.Body"
+                                }
+                            }
+                        },
                         "description": "Provisioner or version not found"
                     },
                     "409": {
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "$ref": "#/components/schemas/server.provisionerConflictResponse"
+                                    "$ref": "#/components/schemas/problem.Body"
                                 }
                             }
                         },
-                        "description": "Referenced by existing machines"
+                        "description": "Referenced by existing machines; machines names them"
                     }
                 },
                 "summary": "Delete a provisioner version",
@@ -15393,6 +15515,27 @@
                 ]
             }
         },
+        "/api/rules": {
+            "get": {
+                "description": "Public, before login. One JSON Schema 2020-12 document: $defs carries the estate's named patterns every backend shares; forms lists the request bodies this agent's routes evaluate as object schemas, empty until the shared UI's hyperweaver pages declare their form keys, so every form validates required alone from the page's own declaration and the route still evaluates every write.",
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/server.rulesDocument"
+                                }
+                            }
+                        },
+                        "description": "The rules"
+                    }
+                },
+                "summary": "The validation rules",
+                "tags": [
+                    "Status"
+                ]
+            }
+        },
         "/api/secrets": {
             "get": {
                 "description": "Minimum role: admin. The whole store, plain — nothing masked (Mark's ruling: the user's local machine; the generated Hosts.yml carries these as SECRETS_* vars anyway).",
@@ -15450,7 +15593,7 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "$ref": "#/components/schemas/server.wrappedError"
+                                    "$ref": "#/components/schemas/problem.Body"
                                 }
                             }
                         },
@@ -15926,15 +16069,15 @@
                         },
                         "description": "Storage paths"
                     },
-                    "400": {
+                    "422": {
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "$ref": "#/components/schemas/server.taskErrorBody"
+                                    "$ref": "#/components/schemas/problem.Body"
                                 }
                             }
                         },
-                        "description": "Unknown type"
+                        "description": "Unknown type (enum at /type)"
                     }
                 },
                 "summary": "List storage paths of machines, provisioners and templates",
@@ -15979,21 +16122,31 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "$ref": "#/components/schemas/server.taskErrorBody"
+                                    "$ref": "#/components/schemas/problem.Body"
                                 }
                             }
                         },
-                        "description": "Missing or invalid type, id, display_name or path, or the folder cannot be created"
+                        "description": "Unreadable body"
                     },
                     "409": {
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "$ref": "#/components/schemas/server.taskErrorBody"
+                                    "$ref": "#/components/schemas/problem.Body"
                                 }
                             }
                         },
-                        "description": "The id or the folder is already a storage path of this type"
+                        "description": "The id or the folder is already a storage path of this type (unique at /id or /path, scope the type)"
+                    },
+                    "422": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/problem.Body"
+                                }
+                            }
+                        },
+                        "description": "type outside machines, provisioners, templates (enum at /type); display_name or path missing (required); id not lower-case letters, digits and underscores or builtin (pattern storagePathId at /id); path not absolute (pattern absolutePath at /path); the folder cannot be created (writable at /path)"
                     }
                 },
                 "summary": "Add a storage path",
@@ -16036,31 +16189,31 @@
                         },
                         "description": "Storage path removed"
                     },
-                    "400": {
+                    "403": {
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "$ref": "#/components/schemas/server.taskErrorBody"
+                                    "$ref": "#/components/schemas/problem.Body"
                                 }
                             }
                         },
-                        "description": "Unknown type, or the built-in path"
+                        "description": "The built-in path is never removed"
                     },
                     "404": {
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "$ref": "#/components/schemas/server.taskErrorBody"
+                                    "$ref": "#/components/schemas/problem.Body"
                                 }
                             }
                         },
-                        "description": "Storage path not found"
+                        "description": "Unknown type or storage path not found"
                     },
                     "409": {
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "$ref": "#/components/schemas/server.taskErrorBody"
+                                    "$ref": "#/components/schemas/problem.Body"
                                 }
                             }
                         },
@@ -16129,31 +16282,41 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "$ref": "#/components/schemas/server.taskErrorBody"
+                                    "$ref": "#/components/schemas/problem.Body"
                                 }
                             }
                         },
-                        "description": "Unknown type, nothing to change, a change the built-in path does not take, or default on a disabled path"
+                        "description": "Unreadable body"
                     },
                     "404": {
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "$ref": "#/components/schemas/server.taskErrorBody"
+                                    "$ref": "#/components/schemas/problem.Body"
                                 }
                             }
                         },
-                        "description": "Storage path not found"
+                        "description": "Unknown type or storage path not found"
                     },
                     "409": {
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "$ref": "#/components/schemas/server.taskErrorBody"
+                                    "$ref": "#/components/schemas/problem.Body"
                                 }
                             }
                         },
                         "description": "Items still live in the path"
+                    },
+                    "422": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/problem.Body"
+                                }
+                            }
+                        },
+                        "description": "Nothing to change, a change the built-in path does not take, an empty display_name, default on a disabled path, or a folder that cannot be reached"
                     }
                 },
                 "summary": "Rename, enable or disable a storage path, or make it the default",
@@ -16180,7 +16343,7 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "$ref": "#/components/schemas/server.wrappedError"
+                                    "$ref": "#/components/schemas/problem.Body"
                                 }
                             }
                         },
@@ -16229,7 +16392,7 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "$ref": "#/components/schemas/server.wrappedError"
+                                    "$ref": "#/components/schemas/problem.Body"
                                 }
                             }
                         },
@@ -16239,7 +16402,7 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "$ref": "#/components/schemas/server.wrappedError"
+                                    "$ref": "#/components/schemas/problem.Body"
                                 }
                             }
                         },
@@ -16286,10 +16449,24 @@
                         },
                         "description": "Halt task created"
                     },
-                    "400": {
-                        "description": "Missing confirmation or emergency acknowledgement"
+                    "422": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/problem.Body"
+                                }
+                            }
+                        },
+                        "description": "confirm or emergency not true"
                     },
                     "503": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/problem.Body"
+                                }
+                            }
+                        },
                         "description": "Host power management is disabled in configuration"
                     }
                 },
@@ -16333,10 +16510,24 @@
                         },
                         "description": "Poweroff task created"
                     },
-                    "400": {
-                        "description": "Missing confirmation or invalid parameters"
+                    "422": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/problem.Body"
+                                }
+                            }
+                        },
+                        "description": "confirm not true or invalid parameters"
                     },
                     "503": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/problem.Body"
+                                }
+                            }
+                        },
                         "description": "Host power management is disabled in configuration"
                     }
                 },
@@ -16380,10 +16571,24 @@
                         },
                         "description": "Restart task created"
                     },
-                    "400": {
-                        "description": "Missing confirmation or invalid parameters"
+                    "422": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/problem.Body"
+                                }
+                            }
+                        },
+                        "description": "confirm not true or invalid parameters"
                     },
                     "503": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/problem.Body"
+                                }
+                            }
+                        },
                         "description": "Host power management is disabled in configuration"
                     }
                 },
@@ -16427,10 +16632,24 @@
                         },
                         "description": "Shutdown task created"
                     },
-                    "400": {
-                        "description": "Missing confirmation or invalid parameters"
+                    "422": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/problem.Body"
+                                }
+                            }
+                        },
+                        "description": "confirm not true, grace_period outside 0-7200, or message over 200 characters, one errors[] entry each"
                     },
                     "503": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/problem.Body"
+                                }
+                            }
+                        },
                         "description": "Host power management is disabled in configuration"
                     }
                 },
@@ -16455,6 +16674,13 @@
                         "description": "System status"
                     },
                     "503": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/problem.Body"
+                                }
+                            }
+                        },
                         "description": "Host power management is disabled in configuration"
                     }
                 },
@@ -16479,6 +16705,13 @@
                         "description": "Uptime information"
                     },
                     "503": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/problem.Body"
+                                }
+                            }
+                        },
                         "description": "Host power management is disabled in configuration"
                     }
                 },
@@ -16506,7 +16739,7 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "$ref": "#/components/schemas/server.wrappedError"
+                                    "$ref": "#/components/schemas/problem.Body"
                                 }
                             }
                         },
@@ -16555,7 +16788,7 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "$ref": "#/components/schemas/server.wrappedError"
+                                    "$ref": "#/components/schemas/problem.Body"
                                 }
                             }
                         },
@@ -16565,7 +16798,7 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "$ref": "#/components/schemas/server.wrappedError"
+                                    "$ref": "#/components/schemas/problem.Body"
                                 }
                             }
                         },
@@ -16637,7 +16870,7 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "$ref": "#/components/schemas/server.wrappedError"
+                                    "$ref": "#/components/schemas/problem.Body"
                                 }
                             }
                         },
@@ -16688,7 +16921,7 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "$ref": "#/components/schemas/server.wrappedError"
+                                    "$ref": "#/components/schemas/problem.Body"
                                 }
                             }
                         },
@@ -16738,7 +16971,7 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "$ref": "#/components/schemas/server.wrappedError"
+                                    "$ref": "#/components/schemas/problem.Body"
                                 }
                             }
                         },
@@ -16804,7 +17037,7 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "$ref": "#/components/schemas/server.wrappedError"
+                                    "$ref": "#/components/schemas/problem.Body"
                                 }
                             }
                         },
@@ -16814,7 +17047,7 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "$ref": "#/components/schemas/server.wrappedError"
+                                    "$ref": "#/components/schemas/problem.Body"
                                 }
                             }
                         },
@@ -16859,7 +17092,7 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "$ref": "#/components/schemas/server.wrappedError"
+                                    "$ref": "#/components/schemas/problem.Body"
                                 }
                             }
                         },
@@ -16920,7 +17153,7 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "$ref": "#/components/schemas/server.wrappedError"
+                                    "$ref": "#/components/schemas/problem.Body"
                                 }
                             }
                         },
@@ -16930,7 +17163,7 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "$ref": "#/components/schemas/server.wrappedError"
+                                    "$ref": "#/components/schemas/problem.Body"
                                 }
                             }
                         },
@@ -16940,7 +17173,7 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "$ref": "#/components/schemas/server.wrappedError"
+                                    "$ref": "#/components/schemas/problem.Body"
                                 }
                             }
                         },
@@ -17001,7 +17234,7 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "$ref": "#/components/schemas/server.wrappedError"
+                                    "$ref": "#/components/schemas/problem.Body"
                                 }
                             }
                         },
@@ -17011,7 +17244,7 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "$ref": "#/components/schemas/server.wrappedError"
+                                    "$ref": "#/components/schemas/problem.Body"
                                 }
                             }
                         },
@@ -17021,7 +17254,7 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "$ref": "#/components/schemas/server.wrappedError"
+                                    "$ref": "#/components/schemas/problem.Body"
                                 }
                             }
                         },
@@ -17114,7 +17347,7 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "$ref": "#/components/schemas/server.taskErrorBody"
+                                    "$ref": "#/components/schemas/problem.Body"
                                 }
                             }
                         },
@@ -17305,25 +17538,25 @@
                         },
                         "description": "Cancelled (pending) or cancellation in progress (running)"
                     },
-                    "400": {
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/server.cancelConflictError"
-                                }
-                            }
-                        },
-                        "description": "Task already in a terminal state"
-                    },
                     "404": {
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "$ref": "#/components/schemas/server.taskErrorBody"
+                                    "$ref": "#/components/schemas/problem.Body"
                                 }
                             }
                         },
                         "description": "Task not found"
+                    },
+                    "409": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/problem.Body"
+                                }
+                            }
+                        },
+                        "description": "Task already in a terminal state; current_status carries it"
                     }
                 },
                 "summary": "Cancel a task",
@@ -17359,7 +17592,7 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "$ref": "#/components/schemas/server.taskErrorBody"
+                                    "$ref": "#/components/schemas/problem.Body"
                                 }
                             }
                         },
@@ -17401,7 +17634,7 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "$ref": "#/components/schemas/server.taskErrorBody"
+                                    "$ref": "#/components/schemas/problem.Body"
                                 }
                             }
                         },
@@ -17606,18 +17839,34 @@
                         "description": "Template download task queued"
                     },
                     "400": {
-                        "description": "Missing tuple fields, non-specific version, an invalid provider, or no usable source"
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/problem.Body"
+                                }
+                            }
+                        },
+                        "description": "Unreadable body, an invalid provider, or no usable source"
                     },
                     "409": {
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "additionalProperties": {},
-                                    "type": "object"
+                                    "$ref": "#/components/schemas/problem.Body"
                                 }
                             }
                         },
-                        "description": "Template already exists locally"
+                        "description": "Template already exists locally; template_id carries the row"
+                    },
+                    "422": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/problem.Body"
+                                }
+                            }
+                        },
+                        "description": "organization, box_name or version missing, or version latest (not at /version)"
                     }
                 },
                 "summary": "Download a box template",

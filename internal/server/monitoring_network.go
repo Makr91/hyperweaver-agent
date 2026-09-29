@@ -31,7 +31,7 @@ type monitoringInterfacesResponse struct {
 // @Param			state	query	string	false	"Filter by state (up | down)"
 // @Param			link	query	string	false	"Filter by interface name"
 // @Success		200	{object}	monitoringInterfacesResponse	"Network interfaces"
-// @Failure		500	{object}	wrappedError					"Failed to get network interfaces"
+// @Failure		500	{object}	problem.Body					"Failed to get network interfaces"
 // @Router			/api/monitoring/network/interfaces [get]
 func (s *Server) handleMonitoringInterfaces(w http.ResponseWriter, r *http.Request) {
 	q := parseMonitoringQuery(r)
@@ -111,7 +111,7 @@ type networkUsageResponse struct {
 // @Param			since	query	string	false	"Stored samples at or after this time (storage mode)"
 // @Param			link	query	string	false	"Filter by interface name"
 // @Success		200	{object}	networkUsageResponse	"Network usage"
-// @Failure		500	{object}	wrappedError			"Failed to get network usage"
+// @Failure		500	{object}	problem.Body			"Failed to get network usage"
 // @Router			/api/monitoring/network/usage [get]
 func (s *Server) handleMonitoringNetworkUsage(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()

@@ -43,10 +43,10 @@ type secureBootResponse struct {
 //	@Param			machineName	path	string	true	"Machine name"
 //	@Param			request	body	secureBootRequest	true	"Secure Boot configuration"
 //	@Success		200	{object}	secureBootResponse	"Applied ({success, machine_name, enabled, steps[], message})"
-//	@Failure		400	{object}	taskErrorBody	"Machine is not powered off"
-//	@Failure		404	{object}	taskErrorBody	"Machine not found"
-//	@Failure		500	{object}	taskErrorBody	"A modifynvram step failed (BIOS firmware, missing var store, ...)"
-//	@Failure		503	{object}	taskErrorBody	"VirtualBox is not installed"
+//	@Failure		400	{object}	problem.Body	"Machine is not powered off"
+//	@Failure		404	{object}	problem.Body	"Machine not found"
+//	@Failure		500	{object}	problem.Body	"A modifynvram step failed (BIOS firmware, missing var store, ...)"
+//	@Failure		503	{object}	problem.Body	"VirtualBox is not installed"
 //	@Router			/api/machines/{machineName}/nvram/secureboot [post]
 func (s *Server) handleSecureBoot(w http.ResponseWriter, r *http.Request) {
 	machine := s.findMachine(w, r)
@@ -142,10 +142,10 @@ type guestControlRunResponse struct {
 //	@Param			machineName	path	string	true	"Machine name"
 //	@Param			request	body	guestControlRunRequest	true	"Guest command and credentials"
 //	@Success		200	{object}	guestControlRunResponse	"Run finished ({success, machine_name, exit_code, stdout, stderr})"
-//	@Failure		400	{object}	taskErrorBody	"Missing path, no password available, or machine not running"
-//	@Failure		404	{object}	taskErrorBody	"Machine not found"
-//	@Failure		502	{object}	taskErrorBody	"guestcontrol failed to start (Guest Additions absent?)"
-//	@Failure		503	{object}	taskErrorBody	"VirtualBox is not installed"
+//	@Failure		400	{object}	problem.Body	"Missing path, no password available, or machine not running"
+//	@Failure		404	{object}	problem.Body	"Machine not found"
+//	@Failure		502	{object}	problem.Body	"guestcontrol failed to start (Guest Additions absent?)"
+//	@Failure		503	{object}	problem.Body	"VirtualBox is not installed"
 //	@Router			/api/machines/{machineName}/guestcontrol/run [post]
 func (s *Server) handleGuestControlRun(w http.ResponseWriter, r *http.Request) {
 	machine := s.findMachine(w, r)

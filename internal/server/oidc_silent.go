@@ -124,9 +124,9 @@ type silentStartResponse struct {
 // @Tags			Local Login
 // @Produce		json
 // @Success		200	{object}	silentStartResponse	"Authorize URL minted"
-// @Failure		429	{object}	taskErrorBody	"Too many attempts from this address"
-// @Failure		502	{object}	taskErrorBody	"Identity provider unreachable or without an authorization endpoint"
-// @Failure		503	{object}	taskErrorBody	"OIDC login is disabled"
+// @Failure		429	{object}	problem.Body	"Too many attempts from this address"
+// @Failure		502	{object}	problem.Body	"Identity provider unreachable or without an authorization endpoint"
+// @Failure		503	{object}	problem.Body	"OIDC login is disabled"
 // @Router			/api/auth/oidc/silent-start [post]
 func (s *Server) handleOIDCSilentStart(w http.ResponseWriter, r *http.Request) {
 	if !s.cfg.OIDC.Enabled {

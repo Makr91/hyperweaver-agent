@@ -39,6 +39,7 @@ func corsMiddleware(cfg *config.CORSConfig, next http.Handler) http.Handler {
 		if allowed {
 			headers.Set("Access-Control-Allow-Origin", origin)
 			headers.Set("Access-Control-Allow-Credentials", "true")
+			headers.Set("Access-Control-Expose-Headers", "WWW-Authenticate")
 			headers.Add("Vary", "Origin")
 		} else {
 			logging.Category("api_requests").Warn("CORS: origin not allowed", "origin", origin)
@@ -48,10 +49,12 @@ func corsMiddleware(cfg *config.CORSConfig, next http.Handler) http.Handler {
 		if r.Method == http.MethodOptions && r.Header.Get("Access-Control-Request-Method") != "" {
 			if allowed {
 				headers.Set("Access-Control-Allow-Methods", "GET,HEAD,PUT,PATCH,POST,DELETE")
+				allowHeaders := "Authorization, DPoP, X-API-Key, Content-Type"
 				if requestHeaders := r.Header.Get("Access-Control-Request-Headers"); requestHeaders != "" {
-					headers.Set("Access-Control-Allow-Headers", requestHeaders)
+					allowHeaders += ", " + requestHeaders
 					headers.Add("Vary", "Access-Control-Request-Headers")
 				}
+				headers.Set("Access-Control-Allow-Headers", allowHeaders)
 			}
 			w.WriteHeader(http.StatusNoContent)
 			return

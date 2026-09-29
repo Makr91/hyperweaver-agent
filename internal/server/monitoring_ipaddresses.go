@@ -39,7 +39,7 @@ type monitoringIPAddressesResponse struct {
 // @Param			interface	query	string	false	"Filter by interface name"
 // @Param			ip_version	query	string	false	"Filter by IP version (v4 | v6)"
 // @Success		200	{object}	monitoringIPAddressesResponse	"IP addresses"
-// @Failure		500	{object}	wrappedError					"Failed to get IP addresses"
+// @Failure		500	{object}	problem.Body					"Failed to get IP addresses"
 // @Router			/api/monitoring/network/ipaddresses [get]
 func (s *Server) handleMonitoringIPAddresses(w http.ResponseWriter, r *http.Request) {
 	q := parseMonitoringQuery(r)

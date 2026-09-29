@@ -8,6 +8,7 @@ import (
 
 	"github.com/Makr91/hyperweaver-agent/internal/auth"
 	"github.com/Makr91/hyperweaver-agent/internal/machines"
+	"github.com/Makr91/hyperweaver-agent/internal/problem"
 	"github.com/Makr91/hyperweaver-agent/internal/tasks"
 )
 
@@ -374,8 +375,8 @@ func (s *Server) handleResumeMachine(w http.ResponseWriter, r *http.Request) {
 //	@Param			machineName	path	string	true	"Machine name"
 //	@Param			cleanup_disks	query	boolean	false	"false preserves every medium file and the working directory (the base's keep-datasets default, as an explicit flag)"
 //	@Success		200	{object}	map[string]interface{}	"Delete tasks queued"
-//	@Failure		400	"Machine is running and force is not set"
-//	@Failure		404	"Machine not found"
+//	@Failure		409	{object}	problem.Body	"Machine is running and force is not set; current_status carries the state"
+//	@Failure		404	{object}	problem.Body	"Machine not found"
 //	@Router			/api/machines/{machineName} [delete]
 func (s *Server) handleDeleteMachine(w http.ResponseWriter, r *http.Request) {
 	machine := s.findMachine(w, r)
@@ -392,14 +393,8 @@ func (s *Server) handleDeleteMachine(w http.ResponseWriter, r *http.Request) {
 
 	status := liveMachineStatus(r.Context(), machine)
 	if status == machines.StatusRunning && !force {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusBadRequest)
-		if err := json.NewEncoder(w).Encode(map[string]any{
-			"error":          "Machine is running. Use force=true to stop and delete",
-			"current_status": status,
-		}); err != nil {
-			slog.Error("write machine error response", "error", err)
-		}
+		problem.Conflict(w, "Machine is running. Use force=true to stop and delete",
+			map[string]any{"current_status": status})
 		return
 	}
 

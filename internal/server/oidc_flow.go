@@ -3,9 +3,12 @@ package server
 import (
 	"context"
 	"crypto/rand"
+	"encoding/base64"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"log/slog"
+	"net/http"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -13,6 +16,7 @@ import (
 
 	"github.com/Makr91/hyperweaver-agent/internal/auth"
 	"github.com/Makr91/hyperweaver-agent/internal/config"
+	"github.com/Makr91/hyperweaver-agent/internal/dpop"
 	"github.com/Makr91/hyperweaver-agent/internal/keys"
 	"github.com/Makr91/hyperweaver-agent/internal/logging"
 )
@@ -40,6 +44,8 @@ type oidcFlow struct {
 	status     string
 	credential *oidcCredential
 	expiresAt  time.Time
+	interval   time.Duration
+	changed    chan struct{}
 }
 
 type oidcManager struct {
@@ -71,9 +77,14 @@ type oidcManager struct {
 	refreshing       bool
 	jwks             *oidcJWKSDocument
 	jwksFetched      time.Time
+	unknownKids      map[string]time.Time
 	endpoints        *oidcProviderEndpoints
 	endpointsFetched time.Time
+	proofs           *dpop.Seen
+	baseURL          string
 }
+
+const unknownKidCooldown = 5 * time.Minute
 
 func newOIDCManager(cfg *config.Config, keyStore *keys.Store) *oidcManager {
 	ctx, cancel := context.WithCancel(context.Background())
@@ -93,6 +104,9 @@ func newOIDCManager(cfg *config.Config, keyStore *keys.Store) *oidcManager {
 		flows:        map[string]*oidcFlow{},
 		silent:       map[string]*oidcSilentFlow{},
 		mintedKeys:   map[int64]oidcKeyIdentity{},
+		unknownKids:  map[string]time.Time{},
+		proofs:       dpop.NewSeen(),
+		baseURL:      strings.TrimRight(cfg.BaseURL(), "/"),
 	}
 	if !m.enabled {
 		return m
@@ -168,35 +182,86 @@ func (m *oidcManager) cachedJWKS(force bool) (*oidcJWKSDocument, error) {
 	return fetched, nil
 }
 
-func (m *oidcManager) authenticateBearer(token string) *auth.Identity {
+func (m *oidcManager) kidRefetchAllowed(kid string) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	now := time.Now()
+	for known, seen := range m.unknownKids {
+		if now.Sub(seen) > unknownKidCooldown {
+			delete(m.unknownKids, known)
+		}
+	}
+	if _, cooling := m.unknownKids[kid]; cooling {
+		return false
+	}
+	m.unknownKids[kid] = now
+	return true
+}
+
+func tokenKid(token string) string {
+	parts := strings.Split(token, ".")
+	if len(parts) != 3 {
+		return ""
+	}
+	raw, err := base64.RawURLEncoding.DecodeString(parts[0])
+	if err != nil {
+		return ""
+	}
+	header := struct {
+		Kid string `json:"kid"`
+	}{}
+	if json.Unmarshal(raw, &header) != nil {
+		return ""
+	}
+	return header.Kid
+}
+
+func (m *oidcManager) authenticateToken(r *http.Request, scheme auth.Scheme, token string) (*auth.Identity, error) {
 	if !m.enabled {
-		return nil
+		return nil, errors.New("federated login is disabled")
 	}
 	jwks, err := m.cachedJWKS(false)
 	if err != nil {
-		slog.Warn("oidc bearer auth: jwks unavailable", "error", err)
-		return nil
+		slog.Warn("oidc token auth: jwks unavailable", "error", err)
+		return nil, errors.New("the identity provider's keys are unavailable")
 	}
 	claims, err := oidcValidateToken(token, jwks, m.issuer, m.clientID)
-	if errors.Is(err, errOIDCUnknownKey) {
+	if errors.Is(err, errOIDCUnknownKey) && m.kidRefetchAllowed(tokenKid(token)) {
 		if jwks, err = m.cachedJWKS(true); err == nil {
 			claims, err = oidcValidateToken(token, jwks, m.issuer, m.clientID)
 		}
 	}
 	if err != nil {
-		logging.Category("auth").Warn("oidc bearer token rejected", "error", err)
-		return nil
+		logging.Category("auth").Warn("oidc token rejected", "error", err)
+		return nil, errors.New("invalid token")
+	}
+	switch {
+	case scheme == auth.SchemeBearer && claims.BoundJKT != "":
+		logging.Category("auth").Warn("key-bound token presented as Bearer")
+		return nil, errors.New("a key-bound token must be presented with the DPoP scheme")
+	case scheme == auth.SchemeDPoP && claims.BoundJKT == "":
+		return nil, errors.New("the token is not key-bound")
+	case scheme == auth.SchemeDPoP:
+		proofs := r.Header.Values("DPoP")
+		if len(proofs) != 1 {
+			return nil, errors.New("exactly one DPoP proof header is required")
+		}
+		htu := m.baseURL + r.URL.Path
+		if perr := dpop.Verify(proofs[0], r.Method, htu, token, claims.BoundJKT, time.Now(), m.proofs); perr != nil {
+			logging.Category("auth").Warn("dpop proof rejected", "error", perr)
+			return nil, errors.New("the DPoP proof was refused: " + perr.Error())
+		}
 	}
 	if !m.subjectAllowed(claims) {
-		logging.Category("auth").Warn("oidc bearer refused — not the bound account and not in oidc.allowed_users",
+		logging.Category("auth").Warn("oidc token refused — not the bound account and not in oidc.allowed_users",
 			"subject", claims.Subject, "email", claims.Email)
-		return nil
+		return nil, errors.New("the account is not bound to this agent")
 	}
 	name := claims.Email
 	if name == "" {
 		name = claims.Subject
 	}
-	return &auth.Identity{Name: name, Description: "OIDC bearer token", Role: "admin"}
+	return &auth.Identity{Name: name, Description: "OIDC " + string(scheme) + " token", Role: "admin"}, nil
 }
 
 func (m *oidcManager) start(ctx context.Context) (*deviceStartResponse, error) {
@@ -221,7 +286,12 @@ func (m *oidcManager) start(ctx context.Context) (*deviceStartResponse, error) {
 			delete(m.flows, existing)
 		}
 	}
-	m.flows[handle] = &oidcFlow{status: oidcStatusPending, expiresAt: expiresAt}
+	m.flows[handle] = &oidcFlow{
+		status:    oidcStatusPending,
+		expiresAt: expiresAt,
+		interval:  time.Duration(authorization.Interval) * time.Second,
+		changed:   make(chan struct{}),
+	}
 	m.mu.Unlock()
 
 	m.wg.Add(1)
@@ -235,6 +305,24 @@ func (m *oidcManager) start(ctx context.Context) (*deviceStartResponse, error) {
 		ExpiresIn:               authorization.ExpiresIn,
 		Interval:                authorization.Interval,
 	}, nil
+}
+
+// await blocks while the flow is pending, until it changes, the grant's interval elapses or the request ends.
+func (m *oidcManager) await(ctx context.Context, handle string) {
+	m.mu.Lock()
+	entry := m.flows[handle]
+	if entry == nil || entry.status != oidcStatusPending {
+		m.mu.Unlock()
+		return
+	}
+	changed := entry.changed
+	interval := entry.interval
+	m.mu.Unlock()
+	select {
+	case <-changed:
+	case <-ctx.Done():
+	case <-time.After(interval):
+	}
 }
 
 func (m *oidcManager) status(handle string) (string, *oidcCredential, bool) {
@@ -260,8 +348,9 @@ func (m *oidcManager) status(handle string) (string, *oidcCredential, bool) {
 func (m *oidcManager) setStatus(handle, status string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if entry := m.flows[handle]; entry != nil {
+	if entry := m.flows[handle]; entry != nil && entry.status == oidcStatusPending {
 		entry.status = status
+		close(entry.changed)
 	}
 }
 
@@ -346,9 +435,10 @@ func (m *oidcManager) finish(handle string, endpoints *oidcProviderEndpoints, an
 		return
 	}
 	m.mu.Lock()
-	if entry := m.flows[handle]; entry != nil {
+	if entry := m.flows[handle]; entry != nil && entry.status == oidcStatusPending {
 		entry.status = oidcStatusApproved
 		entry.credential = credential
+		close(entry.changed)
 	}
 	m.mu.Unlock()
 	slog.Info("oidc device login succeeded", "entity_id", credential.entityID, "name", credential.name)

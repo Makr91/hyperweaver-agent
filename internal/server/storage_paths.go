@@ -13,6 +13,7 @@ import (
 	"github.com/Makr91/hyperweaver-agent/internal/config"
 	"github.com/Makr91/hyperweaver-agent/internal/locations"
 	"github.com/Makr91/hyperweaver-agent/internal/machines"
+	"github.com/Makr91/hyperweaver-agent/internal/problem"
 	"github.com/Makr91/hyperweaver-agent/internal/safepath"
 )
 
@@ -134,13 +135,13 @@ func (s *Server) storagePathDocument(ctx context.Context, location *locations.Lo
 // @Produce		json
 // @Param			type	query		string						false	"machines, provisioners or templates"
 // @Success		200		{object}	libraryPathsResponse	"Storage paths"
-// @Failure		400		{object}	taskErrorBody				"Unknown type"
+// @Failure		422		{object}	problem.Body				"Unknown type (enum at /type)"
 // @Router			/api/storage/paths [get]
 func (s *Server) handleListLibraryPaths(w http.ResponseWriter, r *http.Request) {
 	kinds := []locations.Kind{locations.Machines, locations.Provisioners, locations.Templates}
 	if raw := r.URL.Query().Get("type"); raw != "" {
 		if !locations.ValidKind(raw) {
-			taskError(w, http.StatusBadRequest, "type must be one of machines, provisioners, templates")
+			problem.Invalid(w, problem.Enum("/type", "machines", "provisioners", "templates"))
 			return
 		}
 		kinds = []locations.Kind{locations.Kind(raw)}
@@ -171,49 +172,56 @@ type createLibraryPathRequest struct {
 // @Produce		json
 // @Param			body	body		createLibraryPathRequest	true	"The new storage path"
 // @Success		201		{object}	libraryPathResponse	"Storage path added"
-// @Failure		400		{object}	taskErrorBody				"Missing or invalid type, id, display_name or path, or the folder cannot be created"
-// @Failure		409		{object}	taskErrorBody				"The id or the folder is already a storage path of this type"
+// @Failure		400		{object}	problem.Body				"Unreadable body"
+// @Failure		422		{object}	problem.Body				"type outside machines, provisioners, templates (enum at /type); display_name or path missing (required); id not lower-case letters, digits and underscores or builtin (pattern storagePathId at /id); path not absolute (pattern absolutePath at /path); the folder cannot be created (writable at /path)"
+// @Failure		409		{object}	problem.Body				"The id or the folder is already a storage path of this type (unique at /id or /path, scope the type)"
 // @Router			/api/storage/paths [post]
 func (s *Server) handleCreateLibraryPath(w http.ResponseWriter, r *http.Request) {
 	var body createLibraryPathRequest
 	if err := decodeBody(r, &body); err != nil {
-		taskError(w, http.StatusBadRequest, "Invalid JSON body")
+		problem.BadRequest(w)
 		return
 	}
+	failures := []problem.Error{}
 	if !locations.ValidKind(body.Type) {
-		taskError(w, http.StatusBadRequest, "type must be one of machines, provisioners, templates")
-		return
+		failures = append(failures, problem.Enum("/type", "machines", "provisioners", "templates"))
 	}
-	kind := locations.Kind(body.Type)
-	if body.DisplayName == "" || body.Path == "" {
-		taskError(w, http.StatusBadRequest, "display_name and path are required")
-		return
+	if body.DisplayName == "" {
+		failures = append(failures, problem.Required("/display_name"))
+	}
+	if body.Path == "" {
+		failures = append(failures, problem.Required("/path"))
 	}
 	id := body.ID
 	if id == "" {
 		id = strings.Trim(storagePathSlug.ReplaceAllString(strings.ToLower(body.DisplayName), "_"), "_")
 	}
 	if !config.ValidStoragePathID(id) {
-		taskError(w, http.StatusBadRequest, "id must be lower-case letters, digits and underscores, and must not be builtin")
-		return
+		failures = append(failures, problem.Pattern("/id", "storagePathId"))
 	}
 	clean, err := safepath.CleanAbs(body.Path)
-	if err != nil {
-		taskError(w, http.StatusBadRequest, "path is not usable")
+	if err != nil && body.Path != "" {
+		failures = append(failures, problem.Pattern("/path", "absolutePath"))
+	}
+	if len(failures) > 0 {
+		problem.Invalid(w, failures...)
 		return
 	}
+	kind := locations.Kind(body.Type)
 	for _, existing := range s.storage.List(kind) {
 		if existing.ID == id {
-			taskError(w, http.StatusConflict, "Storage path id "+id+" already exists")
+			problem.Invalid(w, problem.Unique("/id", body.Type))
 			return
 		}
 		if locations.SamePath(existing.Path, clean) {
-			taskError(w, http.StatusConflict, "Storage path already exists: "+clean)
+			problem.Invalid(w, problem.Unique("/path", body.Type))
 			return
 		}
 	}
 	if merr := os.MkdirAll(clean, 0o750); merr != nil {
-		taskError(w, http.StatusBadRequest, "Cannot create storage directory: "+merr.Error())
+		failure := problem.Rule("/path", "writable", map[string]any{"user": ""})
+		failure.Detail = "Cannot create storage directory: " + merr.Error()
+		problem.Invalid(w, failure)
 		return
 	}
 
@@ -262,29 +270,30 @@ type updateLibraryPathRequest struct {
 // @Param			id		path		string						true	"Storage path id"
 // @Param			body	body		updateLibraryPathRequest	true	"The members to change"
 // @Success		200		{object}	libraryPathResponse	"Storage path updated"
-// @Failure		400		{object}	taskErrorBody				"Unknown type, nothing to change, a change the built-in path does not take, or default on a disabled path"
-// @Failure		404		{object}	taskErrorBody				"Storage path not found"
-// @Failure		409		{object}	taskErrorBody				"Items still live in the path"
+// @Failure		400		{object}	problem.Body				"Unreadable body"
+// @Failure		404		{object}	problem.Body				"Unknown type or storage path not found"
+// @Failure		422		{object}	problem.Body				"Nothing to change, a change the built-in path does not take, an empty display_name, default on a disabled path, or a folder that cannot be reached"
+// @Failure		409		{object}	problem.Body				"Items still live in the path"
 // @Router			/api/storage/paths/{type}/{id} [put]
 func (s *Server) handleUpdateLibraryPath(w http.ResponseWriter, r *http.Request) {
 	if !locations.ValidKind(r.PathValue("type")) {
-		taskError(w, http.StatusBadRequest, "type must be one of machines, provisioners, templates")
+		problem.NotFound(w)
 		return
 	}
 	kind := locations.Kind(r.PathValue("type"))
 	id := r.PathValue("id")
 	var body updateLibraryPathRequest
 	if err := decodeBody(r, &body); err != nil {
-		taskError(w, http.StatusBadRequest, "Invalid JSON body")
+		problem.BadRequest(w)
 		return
 	}
 	if body.DisplayName == nil && body.Enabled == nil && body.Default == nil {
-		taskError(w, http.StatusBadRequest, "display_name, enabled or default is required")
+		problem.Invalid(w, problem.Required("/display_name"), problem.Required("/enabled"), problem.Required("/default"))
 		return
 	}
 	location, found := s.storage.Get(kind, id)
 	if !found {
-		taskError(w, http.StatusNotFound, "Storage path not found")
+		problem.NotFound(w)
 		return
 	}
 
@@ -297,7 +306,9 @@ func (s *Server) handleUpdateLibraryPath(w http.ResponseWriter, r *http.Request)
 	}
 	if location.Builtin {
 		if body.DisplayName != nil || body.Enabled != nil || body.Default == nil || !*body.Default {
-			taskError(w, http.StatusBadRequest, "The built-in storage path takes default: true only")
+			failure := problem.Enum("/default", "true")
+			failure.Detail = "The built-in storage path takes default: true only"
+			problem.Invalid(w, failure)
 			return
 		}
 		clearDefaults()
@@ -305,7 +316,7 @@ func (s *Server) handleUpdateLibraryPath(w http.ResponseWriter, r *http.Request)
 		entry := paths[id]
 		if body.DisplayName != nil {
 			if *body.DisplayName == "" {
-				taskError(w, http.StatusBadRequest, "display_name must not be empty")
+				problem.Invalid(w, problem.Rule("/display_name", "minLength", map[string]any{"minLength": 1}))
 				return
 			}
 			entry.DisplayName = *body.DisplayName
@@ -330,7 +341,9 @@ func (s *Server) handleUpdateLibraryPath(w http.ResponseWriter, r *http.Request)
 		}
 		if body.Default != nil {
 			if *body.Default && !entry.Enabled {
-				taskError(w, http.StatusBadRequest, "A disabled storage path cannot be the default")
+				failure := problem.Enum("/default", "false")
+				failure.Detail = "A disabled storage path cannot be the default"
+				problem.Invalid(w, failure)
 				return
 			}
 			if *body.Default {
@@ -340,7 +353,9 @@ func (s *Server) handleUpdateLibraryPath(w http.ResponseWriter, r *http.Request)
 		}
 		if entry.Enabled {
 			if merr := os.MkdirAll(entry.Path, 0o750); merr != nil {
-				taskError(w, http.StatusBadRequest, "Cannot reach the storage directory: "+merr.Error())
+				failure := problem.Rule("/enabled", "writable", map[string]any{"user": ""})
+				failure.Detail = "Cannot reach the storage directory: " + merr.Error()
+				problem.Invalid(w, failure)
 				return
 			}
 		}
@@ -374,24 +389,24 @@ type deleteLibraryPathResponse struct {
 // @Param			type	path		string						true	"machines, provisioners or templates"
 // @Param			id		path		string						true	"Storage path id"
 // @Success		200		{object}	deleteLibraryPathResponse	"Storage path removed"
-// @Failure		400		{object}	taskErrorBody				"Unknown type, or the built-in path"
-// @Failure		404		{object}	taskErrorBody				"Storage path not found"
-// @Failure		409		{object}	taskErrorBody				"Items still live in the path"
+// @Failure		403		{object}	problem.Body				"The built-in path is never removed"
+// @Failure		404		{object}	problem.Body				"Unknown type or storage path not found"
+// @Failure		409		{object}	problem.Body				"Items still live in the path"
 // @Router			/api/storage/paths/{type}/{id} [delete]
 func (s *Server) handleDeleteLibraryPath(w http.ResponseWriter, r *http.Request) {
 	if !locations.ValidKind(r.PathValue("type")) {
-		taskError(w, http.StatusBadRequest, "type must be one of machines, provisioners, templates")
+		problem.NotFound(w)
 		return
 	}
 	kind := locations.Kind(r.PathValue("type"))
 	id := r.PathValue("id")
 	location, found := s.storage.Get(kind, id)
 	if !found {
-		taskError(w, http.StatusNotFound, "Storage path not found")
+		problem.NotFound(w)
 		return
 	}
 	if location.Builtin {
-		taskError(w, http.StatusBadRequest, "The built-in storage path cannot be removed")
+		problem.Detail(w, http.StatusForbidden, "The built-in storage path cannot be removed")
 		return
 	}
 	count, err := s.storagePathItems(r.Context(), &location)

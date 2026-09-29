@@ -56,7 +56,7 @@ type cpuStatsResponse struct {
 // @Param			since			query	string	false	"Stored samples at or after this time (storage mode)"
 // @Param			include_cores	query	bool	false	"Include the per_core_parsed array on every sample"	default(false)
 // @Success		200	{object}	cpuStatsResponse	"CPU statistics"
-// @Failure		500	{object}	wrappedError		"Failed to get CPU statistics"
+// @Failure		500	{object}	problem.Body		"Failed to get CPU statistics"
 // @Router			/api/monitoring/system/cpu [get]
 func (s *Server) handleMonitoringCPU(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
@@ -102,7 +102,7 @@ type memoryStatsResponse struct {
 // @Param			limit	query	int		false	"Maximum samples"	default(100)
 // @Param			since	query	string	false	"Stored samples at or after this time (storage mode)"
 // @Success		200	{object}	memoryStatsResponse	"Memory statistics"
-// @Failure		500	{object}	wrappedError		"Failed to get memory statistics"
+// @Failure		500	{object}	problem.Body		"Failed to get memory statistics"
 // @Router			/api/monitoring/system/memory [get]
 func (s *Server) handleMonitoringMemory(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
@@ -204,7 +204,7 @@ func loadEntry(sample *monitoring.CPUSample) loadMetricsEntry {
 // @Param			limit	query	int		false	"Maximum entries"	default(100)
 // @Param			since	query	string	false	"Stored samples at or after this time (storage mode)"
 // @Success		200	{object}	loadMetricsResponse	"Load metrics"
-// @Failure		500	{object}	wrappedError		"Failed to get system load metrics"
+// @Failure		500	{object}	problem.Body		"Failed to get system load metrics"
 // @Router			/api/monitoring/system/load [get]
 func (s *Server) handleMonitoringLoad(w http.ResponseWriter, r *http.Request) {
 	q := parseMonitoringQuery(r)

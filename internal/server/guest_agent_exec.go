@@ -75,10 +75,10 @@ type guestExecRequest struct {
 //	@Param			machineName	path		string				true	"Machine name"
 //	@Param			request		body		guestExecRequest	true	"Command to run in the guest"
 //	@Success		200			{object}	map[string]interface{}	"Exit status with decoded output (wait), the pid (wait:false), or a still-running notice past the timeout"
-//	@Failure		400			{object}	taskErrorBody		"Missing path, or machine is not running"
-//	@Failure		404			{object}	taskErrorBody		"Machine not found"
-//	@Failure		502			{object}	taskErrorBody		"Guest agent did not answer"
-//	@Failure		503			{object}	taskErrorBody		"Guest agent channel is disabled"
+//	@Failure		400			{object}	problem.Body		"Missing path, or machine is not running"
+//	@Failure		404			{object}	problem.Body		"Machine not found"
+//	@Failure		502			{object}	problem.Body		"Guest agent did not answer"
+//	@Failure		503			{object}	problem.Body		"Guest agent channel is disabled"
 //	@Router			/api/machines/{machineName}/guest/exec [post]
 func (s *Server) handleGuestExec(w http.ResponseWriter, r *http.Request) {
 	var body guestExecRequest
@@ -206,10 +206,10 @@ func (s *Server) handleGuestExec(w http.ResponseWriter, r *http.Request) {
 //	@Param			machineName	path		string					true	"Machine name"
 //	@Param			pid			path		int						true	"Guest process id"
 //	@Success		200			{object}	map[string]interface{}	"Process status"
-//	@Failure		400			{object}	taskErrorBody			"Invalid pid, or machine is not running"
-//	@Failure		404			{object}	taskErrorBody			"Machine not found"
-//	@Failure		502			{object}	taskErrorBody			"Guest agent did not answer"
-//	@Failure		503			{object}	taskErrorBody			"Guest agent channel is disabled"
+//	@Failure		400			{object}	problem.Body			"Invalid pid, or machine is not running"
+//	@Failure		404			{object}	problem.Body			"Machine not found"
+//	@Failure		502			{object}	problem.Body			"Guest agent did not answer"
+//	@Failure		503			{object}	problem.Body			"Guest agent channel is disabled"
 //	@Router			/api/machines/{machineName}/guest/exec/{pid} [get]
 func (s *Server) handleGuestExecStatus(w http.ResponseWriter, r *http.Request) {
 	pid, err := strconv.Atoi(r.PathValue("pid"))

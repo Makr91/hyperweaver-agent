@@ -22,6 +22,8 @@ import (
 	"regexp"
 	"runtime"
 	"strconv"
+
+	"github.com/Makr91/hyperweaver-agent/internal/problem"
 )
 
 // unsafeNameCharacters is the base's rename/upload sanitizer: anything
@@ -34,10 +36,10 @@ func sanitizeFileName(name string) string {
 }
 
 // writeBrowseError maps a filesystem error onto the base's status vocabulary:
-// 403 forbidden, 404 missing, 500 {error, details} otherwise. Every refusal
-// ALSO logs (Mark's go 2026-07-17: a permission denial that lives only in the
-// response body makes agent.log blind to the whole failure class — the OS
-// error text carries the path, so one line here covers every mutate handler).
+// 403 forbidden, 404 missing, 500 otherwise, each a problem body. Every
+// refusal ALSO logs (Mark's go 2026-07-17: a permission denial that lives only
+// in the response body makes agent.log blind to the whole failure class — the
+// OS error text carries the path, so one line here covers every mutate handler).
 func writeBrowseError(w http.ResponseWriter, err error, message string) {
 	slog.Warn("filesystem operation refused", "context", message, "error", err)
 	switch {
@@ -46,8 +48,7 @@ func writeBrowseError(w http.ResponseWriter, err error, message string) {
 	case errors.Is(err, os.ErrNotExist):
 		taskError(w, http.StatusNotFound, "Item not found")
 	default:
-		writeJSONStatus(w, http.StatusInternalServerError,
-			map[string]any{"error": message, "details": err.Error()})
+		taskError(w, http.StatusInternalServerError, message+": "+err.Error())
 	}
 }
 
@@ -164,18 +165,35 @@ type createFolderResponse struct {
 //	@Produce		json
 //	@Param			request	body	createFolderRequest	true	"Parent path, folder name, and optional mode/uid/gid"
 //	@Success		201	{object}	createFolderResponse	"Directory created ({success, message, item})"
-//	@Failure		400	"Missing fields, bad mode, or directory already exists"
-//	@Failure		403	"Path forbidden"
-//	@Failure		503	"File browser is disabled"
+//	@Failure		400	{object}	problem.Body	"Unreadable body"
+//	@Failure		403	{object}	problem.Body	"Path forbidden"
+//	@Failure		409	{object}	problem.Body	"Directory already exists (unique at /name)"
+//	@Failure		422	{object}	problem.Body	"path or name missing, or mode not octal (pattern octal at /mode)"
+//	@Failure		503	{object}	problem.Body	"File browser is disabled"
 //	@Router			/api/filesystem/folder [post]
 func (s *Server) handleCreateFolder(w http.ResponseWriter, r *http.Request) {
 	var body createFolderRequest
 	if err := decodeBody(r, &body); err != nil {
-		taskError(w, http.StatusBadRequest, "Invalid JSON body")
+		problem.BadRequest(w)
 		return
 	}
-	if body.Path == "" || body.Name == "" {
-		taskError(w, http.StatusBadRequest, "path and name are required")
+	failures := []problem.Error{}
+	if body.Path == "" {
+		failures = append(failures, problem.Required("/path"))
+	}
+	if body.Name == "" {
+		failures = append(failures, problem.Required("/name"))
+	}
+	var mode os.FileMode
+	if body.Mode != "" {
+		parsed, perr := parseOctalMode(body.Mode)
+		if perr != nil {
+			failures = append(failures, problem.Pattern("/mode", "octal"))
+		}
+		mode = parsed
+	}
+	if len(failures) > 0 {
+		problem.Invalid(w, failures...)
 		return
 	}
 	normalized, err := s.validateBrowsePath(filepath.Join(filepath.FromSlash(body.Path), body.Name))
@@ -185,18 +203,13 @@ func (s *Server) handleCreateFolder(w http.ResponseWriter, r *http.Request) {
 	}
 	if merr := os.Mkdir(normalized, 0o750); merr != nil {
 		if errors.Is(merr, os.ErrExist) {
-			taskError(w, http.StatusBadRequest, "Directory already exists")
+			problem.Invalid(w, problem.Unique("/name", body.Path))
 			return
 		}
 		writeBrowseError(w, merr, "Failed to create directory")
 		return
 	}
 	if body.Mode != "" {
-		mode, perr := parseOctalMode(body.Mode)
-		if perr != nil {
-			taskError(w, http.StatusBadRequest, perr.Error())
-			return
-		}
 		if cerr := applyMode(normalized, mode, false); cerr != nil {
 			slog.Warn("set directory permissions", "path", normalized, "error", cerr)
 		}

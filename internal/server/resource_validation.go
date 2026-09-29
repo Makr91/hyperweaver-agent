@@ -14,14 +14,16 @@ import (
 
 	"github.com/Makr91/hyperweaver-agent/internal/hostinfo"
 	"github.com/Makr91/hyperweaver-agent/internal/machines"
+	"github.com/Makr91/hyperweaver-agent/internal/problem"
 )
 
 // Pre-flight resource validation on create/clone/modify — the base's
 // lib/resourcevalidation family in VirtualBox terms: disk free where the
 // media land (the machines root's volume replaces the ZFS pool), host RAM
 // (no ARC on this platform), and CPU overcommit against physical cores.
-// Failing checks answer 400 {error: "Insufficient resources", details[]};
-// passing checks may annotate resource_warnings[] on the success response.
+// Failing checks answer 422 validation with details[] beside the problem
+// members; passing checks may annotate resource_warnings[] on the success
+// response.
 // Probe failures never block an operation — they warn and pass (the base
 // logs-and-continues the same way).
 
@@ -329,12 +331,10 @@ func (s *Server) validateModificationResources(ctx context.Context, root string,
 	return errs, warns
 }
 
-// insufficientResources writes the base's 400 rejection shape.
+// insufficientResources answers 422 validation with the base's details[] as an extra member.
 func insufficientResources(w http.ResponseWriter, details []resourceIssue) {
-	writeJSONStatus(w, http.StatusBadRequest, map[string]any{
-		"error":   "Insufficient resources",
-		"details": details,
-	})
+	problem.Send(w, http.StatusUnprocessableEntity, "validation", "", "Insufficient resources",
+		nil, map[string]any{"details": details})
 }
 
 // writeJSONStatus writes a JSON payload with an explicit status code.

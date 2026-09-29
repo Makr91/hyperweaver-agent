@@ -9,6 +9,7 @@ import (
 
 	"github.com/Makr91/hyperweaver-agent/internal/auth"
 	"github.com/Makr91/hyperweaver-agent/internal/machines"
+	"github.com/Makr91/hyperweaver-agent/internal/problem"
 	"github.com/Makr91/hyperweaver-agent/internal/provisioner"
 	"github.com/Makr91/hyperweaver-agent/internal/tasks"
 )
@@ -300,8 +301,8 @@ func (s *Server) handleRefreshProvisionerFromSource(w http.ResponseWriter, r *ht
 //	@Produce		json
 //	@Param			name	path	string	true	"Provisioner family name"
 //	@Success		200	"Family deleted"
-//	@Failure		404	"Provisioner not found"
-//	@Failure		409	{object}	provisionerConflictResponse	"Referenced by existing machines"
+//	@Failure		404	{object}	problem.Body	"Provisioner not found"
+//	@Failure		409	{object}	problem.Body	"Referenced by existing machines; machines names them"
 //	@Router			/api/provisioning/provisioners/{name} [delete]
 func (s *Server) handleDeleteProvisioner(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
@@ -339,8 +340,8 @@ func (s *Server) handleDeleteProvisioner(w http.ResponseWriter, r *http.Request)
 //	@Param			name	path	string	true	"Provisioner family name"
 //	@Param			version	path	string	true	"Version string or directory name"
 //	@Success		200	"Version deleted"
-//	@Failure		404	"Provisioner or version not found"
-//	@Failure		409	{object}	provisionerConflictResponse	"Referenced by existing machines"
+//	@Failure		404	{object}	problem.Body	"Provisioner or version not found"
+//	@Failure		409	{object}	problem.Body	"Referenced by existing machines; machines names them"
 //	@Router			/api/provisioning/provisioners/{name}/versions/{version} [delete]
 func (s *Server) handleDeleteProvisionerVersion(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
@@ -376,15 +377,9 @@ func (s *Server) handleDeleteProvisionerVersion(w http.ResponseWriter, r *http.R
 	})
 }
 
-// provisionerConflictResponse is the 409 body returned when machines still
-// reference the family or version being deleted.
-type provisionerConflictResponse struct {
-	Error    string   `json:"error"`
-	Machines []string `json:"machines"`
-}
-
-// refuseReferencedProvisioner answers 409 (and returns false) when machines
-// still reference the family (version "" = any version).
+// refuseReferencedProvisioner answers 409 conflict, machines naming the
+// holders, (and returns false) when machines still reference the family
+// (version "" = any version).
 func (s *Server) refuseReferencedProvisioner(ctx context.Context, w http.ResponseWriter, name, version string) bool {
 	references, err := s.provisionerReferences(ctx, name, version)
 	if err != nil {
@@ -393,14 +388,8 @@ func (s *Server) refuseReferencedProvisioner(ctx context.Context, w http.Respons
 		return false
 	}
 	if len(references) > 0 {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusConflict)
-		if werr := json.NewEncoder(w).Encode(provisionerConflictResponse{
-			Error:    "Provisioner is referenced by existing machines and cannot be deleted",
-			Machines: references,
-		}); werr != nil {
-			slog.Error("write provisioner conflict response", "error", werr)
-		}
+		problem.Conflict(w, "Provisioner is referenced by existing machines and cannot be deleted",
+			map[string]any{"machines": references})
 		return false
 	}
 	return true

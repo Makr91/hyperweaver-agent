@@ -13,11 +13,12 @@ func (s *Server) registerRoutes(mux *http.ServeMux) error {
 	mux.HandleFunc("GET /api/status", s.handleStatus)
 	mux.HandleFunc("GET /api/health", s.handleHealth)
 	mux.HandleFunc("GET /api/config/ticket", s.handleTicketConfig)
+	mux.HandleFunc("GET /api/rules", s.handleRules)
 
 	// API-key surface (Agent API v1 local tier). Bootstrap is public (gated
 	// by config + the setup token); everything else goes through the auth
 	// middleware, whose central policy enforces the role model per path.
-	requireKey := auth.Middleware(s.keys, s.oidcMgr.authenticateBearer)
+	requireKey := auth.Middleware(s.keys, s.oidcMgr.authenticateToken)
 	mux.Handle("GET /api/events", requireKey(http.HandlerFunc(s.handleEvents)))
 	mux.HandleFunc("POST /api/api-keys/bootstrap", s.handleBootstrapKey)
 	mux.HandleFunc("POST /api/auth/tray-claim", s.handleTrayClaim)

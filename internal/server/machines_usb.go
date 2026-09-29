@@ -32,7 +32,7 @@ type hostUSBResponse struct {
 //	@Tags			Machine Management
 //	@Produce		json
 //	@Success		200	{object}	hostUSBResponse	"Host USB devices"
-//	@Failure		503	{object}	taskErrorBody	"VirtualBox is not installed"
+//	@Failure		503	{object}	problem.Body	"VirtualBox is not installed"
 //	@Router			/api/system/usb [get]
 func (s *Server) handleListHostUSB(w http.ResponseWriter, r *http.Request) {
 	exe := machines.VBoxManagePath(r.Context())
@@ -75,9 +75,9 @@ type usbActionResponse struct {
 //	@Param			machineName	path	string	true	"Machine name"
 //	@Param			request	body	usbDeviceRequest	true	"Host USB device to attach"
 //	@Success		200	{object}	usbActionResponse	"Device attached ({success, machine_name, device, message})"
-//	@Failure		400	{object}	taskErrorBody	"Missing device, or machine not running"
-//	@Failure		404	{object}	taskErrorBody	"Machine not found"
-//	@Failure		503	{object}	taskErrorBody	"VirtualBox is not installed"
+//	@Failure		400	{object}	problem.Body	"Missing device, or machine not running"
+//	@Failure		404	{object}	problem.Body	"Machine not found"
+//	@Failure		503	{object}	problem.Body	"VirtualBox is not installed"
 //	@Router			/api/machines/{machineName}/usb/attach [post]
 func (s *Server) handleUSBAttach(w http.ResponseWriter, r *http.Request) {
 	s.runUSBVerb(w, r, vbox.USBAttach, "attach")
@@ -93,9 +93,9 @@ func (s *Server) handleUSBAttach(w http.ResponseWriter, r *http.Request) {
 //	@Param			machineName	path	string	true	"Machine name"
 //	@Param			request	body	usbDeviceRequest	true	"Host USB device to detach"
 //	@Success		200	{object}	usbActionResponse	"Device detached"
-//	@Failure		400	{object}	taskErrorBody	"Missing device, or machine not running"
-//	@Failure		404	{object}	taskErrorBody	"Machine not found"
-//	@Failure		503	{object}	taskErrorBody	"VirtualBox is not installed"
+//	@Failure		400	{object}	problem.Body	"Missing device, or machine not running"
+//	@Failure		404	{object}	problem.Body	"Machine not found"
+//	@Failure		503	{object}	problem.Body	"VirtualBox is not installed"
 //	@Router			/api/machines/{machineName}/usb/detach [post]
 func (s *Server) handleUSBDetach(w http.ResponseWriter, r *http.Request) {
 	s.runUSBVerb(w, r, vbox.USBDetach, "detach")
@@ -221,8 +221,8 @@ type usbFiltersResponse struct {
 //	@Produce		json
 //	@Param			machineName	path	string	true	"Machine name"
 //	@Success		200	{object}	usbFiltersResponse	"Filters"
-//	@Failure		404	{object}	taskErrorBody	"Machine not found, or no VM exists behind it yet"
-//	@Failure		503	{object}	taskErrorBody	"VirtualBox is not installed"
+//	@Failure		404	{object}	problem.Body	"Machine not found, or no VM exists behind it yet"
+//	@Failure		503	{object}	problem.Body	"VirtualBox is not installed"
 //	@Router			/api/machines/{machineName}/usb/filters [get]
 func (s *Server) handleListUSBFilters(w http.ResponseWriter, r *http.Request) {
 	machine := s.findMachine(w, r)
@@ -271,9 +271,9 @@ type usbFilterAddResponse struct {
 //	@Param			machineName	path	string	true	"Machine name"
 //	@Param			request	body	vbox.USBFilterSpec	true	"USB capture filter to add"
 //	@Success		201	{object}	usbFilterAddResponse	"Filter added ({success, machine_name, index, name, message})"
-//	@Failure		400	{object}	taskErrorBody	"Missing name"
-//	@Failure		404	{object}	taskErrorBody	"Machine not found, or no VM exists behind it yet"
-//	@Failure		503	{object}	taskErrorBody	"VirtualBox is not installed"
+//	@Failure		400	{object}	problem.Body	"Missing name"
+//	@Failure		404	{object}	problem.Body	"Machine not found, or no VM exists behind it yet"
+//	@Failure		503	{object}	problem.Body	"VirtualBox is not installed"
 //	@Router			/api/machines/{machineName}/usb/filters [post]
 func (s *Server) handleAddUSBFilter(w http.ResponseWriter, r *http.Request) {
 	machine := s.findMachine(w, r)
@@ -339,9 +339,9 @@ type usbFilterRemoveResponse struct {
 //	@Param			machineName	path	string	true	"Machine name"
 //	@Param			filterIndex	path	int	true	"Filter index (0-based)"
 //	@Success		200	{object}	usbFilterRemoveResponse	"Filter removed"
-//	@Failure		400	{object}	taskErrorBody	"Invalid index"
-//	@Failure		404	{object}	taskErrorBody	"Machine not found"
-//	@Failure		503	{object}	taskErrorBody	"VirtualBox is not installed"
+//	@Failure		400	{object}	problem.Body	"Invalid index"
+//	@Failure		404	{object}	problem.Body	"Machine not found"
+//	@Failure		503	{object}	problem.Body	"VirtualBox is not installed"
 //	@Router			/api/machines/{machineName}/usb/filters/{filterIndex} [delete]
 func (s *Server) handleRemoveUSBFilter(w http.ResponseWriter, r *http.Request) {
 	machine := s.findMachine(w, r)

@@ -36,9 +36,9 @@ type processSignalResponse struct {
 //	@Param			pid		path	int						true	"Process ID"
 //	@Param			request	body	processSignalRequest	false	"Signal to send (defaults to TERM)"
 //	@Success		200	{object}	processSignalResponse	"Signal sent"
-//	@Failure		400	{object}	wrappedError			"Invalid process ID or unsupported signal"
-//	@Failure		404	{object}	wrappedError			"Process not found"
-//	@Failure		500	{object}	wrappedError			"Failed to send signal"
+//	@Failure		400	{object}	problem.Body			"Invalid process ID or unsupported signal"
+//	@Failure		404	{object}	problem.Body			"Process not found"
+//	@Failure		500	{object}	problem.Body			"Failed to send signal"
 //	@Router			/api/system/processes/{pid}/signal [post]
 func (s *Server) handleProcessSignal(w http.ResponseWriter, r *http.Request) {
 	p := s.findProcess(w, r)
@@ -98,9 +98,9 @@ type processKillResponse struct {
 //	@Param			pid		path	int					true	"Process ID"
 //	@Param			request	body	processKillRequest	false	"force=true kills immediately"
 //	@Success		200	{object}	processKillResponse	"Process killed"
-//	@Failure		400	{object}	wrappedError		"Invalid process ID"
-//	@Failure		404	{object}	wrappedError		"Process not found"
-//	@Failure		500	{object}	wrappedError		"Failed to kill process"
+//	@Failure		400	{object}	problem.Body		"Invalid process ID"
+//	@Failure		404	{object}	problem.Body		"Process not found"
+//	@Failure		500	{object}	problem.Body		"Failed to kill process"
 //	@Router			/api/system/processes/{pid}/kill [post]
 func (s *Server) handleProcessKill(w http.ResponseWriter, r *http.Request) {
 	p := s.findProcess(w, r)
@@ -165,7 +165,7 @@ type batchKillResponse struct {
 //	@Produce		json
 //	@Param			request	body	batchKillRequest	true	"Match pattern, optional user filter, and signal"
 //	@Success		200	{object}	batchKillResponse	"Batch results"
-//	@Failure		400	{object}	wrappedError		"Missing pattern or unsupported signal"
+//	@Failure		400	{object}	problem.Body		"Missing pattern or unsupported signal"
 //	@Router			/api/system/processes/batch-kill [post]
 func (s *Server) handleBatchKillProcesses(w http.ResponseWriter, r *http.Request) {
 	var body batchKillRequest

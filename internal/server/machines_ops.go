@@ -39,8 +39,8 @@ type applianceImportResponse struct {
 //	@Produce		json
 //	@Param			request	body	machines.ImportMetadata	true	"Appliance path and optional machine-name override"
 //	@Success		202	{object}	applianceImportResponse	"Import task queued ({success, task_id, path, operation, status, message})"
-//	@Failure		400	{object}	taskErrorBody	"Missing/invalid path, not .ova/.ovf, file absent, or invalid name"
-//	@Failure		409	{object}	taskErrorBody	"A machine with that name already exists"
+//	@Failure		400	{object}	problem.Body	"Missing/invalid path, not .ova/.ovf, file absent, or invalid name"
+//	@Failure		409	{object}	problem.Body	"A machine with that name already exists"
 //	@Router			/api/machines/import [post]
 func (s *Server) handleImportMachine(w http.ResponseWriter, r *http.Request) {
 	var body machines.ImportMetadata
@@ -129,8 +129,8 @@ type queuedOperation struct {
 //	@Param			machineName	path	string	true	"Machine name"
 //	@Param			request	body	machines.MoveMetadata	true	"Destination directory"
 //	@Success		200	{object}	queuedOperation	"Move task queued"
-//	@Failure		400	{object}	taskErrorBody	"Missing target_path, or machine is not powered off"
-//	@Failure		404	{object}	taskErrorBody	"Machine not found"
+//	@Failure		400	{object}	problem.Body	"Missing target_path, or machine is not powered off"
+//	@Failure		404	{object}	problem.Body	"Machine not found"
 //	@Router			/api/machines/{machineName}/move [post]
 func (s *Server) handleMoveMachine(w http.ResponseWriter, r *http.Request) {
 	machine := s.findMachine(w, r)
@@ -181,9 +181,9 @@ type unattendedDetectResponse struct {
 //	@Produce		json
 //	@Param			iso	query	string	true	"Agent-host ISO path"
 //	@Success		200	{object}	unattendedDetectResponse	"Detection result"
-//	@Failure		400	{object}	taskErrorBody	"Missing iso, or file absent"
-//	@Failure		500	{object}	taskErrorBody	"Detection failed"
-//	@Failure		503	{object}	taskErrorBody	"VirtualBox is not installed"
+//	@Failure		400	{object}	problem.Body	"Missing iso, or file absent"
+//	@Failure		500	{object}	problem.Body	"Detection failed"
+//	@Failure		503	{object}	problem.Body	"VirtualBox is not installed"
 //	@Router			/api/machines/unattended/detect [get]
 func (s *Server) handleUnattendedDetect(w http.ResponseWriter, r *http.Request) {
 	iso := r.URL.Query().Get("iso")
@@ -246,8 +246,8 @@ type unattendedInstallRequest struct {
 //	@Param			machineName	path	string	true	"Machine name"
 //	@Param			request	body	unattendedInstallRequest	true	"Installer ISO, the account to create, and unattended options"
 //	@Success		200	{object}	queuedOperation	"Unattended install task queued"
-//	@Failure		400	{object}	taskErrorBody	"Missing ISO reference or credentials, or machine not powered off"
-//	@Failure		404	{object}	taskErrorBody	"Machine not found"
+//	@Failure		400	{object}	problem.Body	"Missing ISO reference or credentials, or machine not powered off"
+//	@Failure		404	{object}	problem.Body	"Machine not found"
 //	@Router			/api/machines/{machineName}/unattended [post]
 func (s *Server) handleUnattendedInstall(w http.ResponseWriter, r *http.Request) {
 	machine := s.findMachine(w, r)
@@ -312,9 +312,9 @@ type displayHintResponse struct {
 //	@Param			machineName	path	string	true	"Machine name"
 //	@Param			request	body	displayHintRequest	true	"Target resolution and optional depth/display"
 //	@Success		200	{object}	displayHintResponse	"Hint sent ({success, machine_name, message})"
-//	@Failure		400	{object}	taskErrorBody	"Missing width/height, or machine is not running"
-//	@Failure		404	{object}	taskErrorBody	"Machine not found"
-//	@Failure		503	{object}	taskErrorBody	"VirtualBox is not installed"
+//	@Failure		400	{object}	problem.Body	"Missing width/height, or machine is not running"
+//	@Failure		404	{object}	problem.Body	"Machine not found"
+//	@Failure		503	{object}	problem.Body	"VirtualBox is not installed"
 //	@Router			/api/machines/{machineName}/display [post]
 func (s *Server) handleSetDisplay(w http.ResponseWriter, r *http.Request) {
 	machine := s.findMachine(w, r)

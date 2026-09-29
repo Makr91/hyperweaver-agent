@@ -76,7 +76,7 @@ type monitoringSummaryResponse struct {
 // @Tags			Host Monitoring
 // @Produce		json
 // @Success		200	{object}	monitoringSummaryResponse	"Monitoring summary"
-// @Failure		500	{object}	wrappedError				"Failed to get monitoring summary"
+// @Failure		500	{object}	problem.Body				"Failed to get monitoring summary"
 // @Router			/api/monitoring/summary [get]
 func (s *Server) handleMonitoringSummary(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()

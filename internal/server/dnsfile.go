@@ -120,7 +120,7 @@ type dnsGetResponse struct {
 //	@Tags			Host Configuration
 //	@Produce		json
 //	@Success		200	{object}	dnsGetResponse	"DNS configuration"
-//	@Failure		500	{object}	wrappedError	"Failed to read DNS configuration"
+//	@Failure		500	{object}	problem.Body	"Failed to read DNS configuration"
 //	@Router			/api/system/dns [get]
 func (s *Server) handleGetDNS(w http.ResponseWriter, r *http.Request) {
 	var view dnsView
@@ -226,8 +226,8 @@ type dnsUpdateResponse struct {
 //	@Produce		json
 //	@Param			body	body	dnsUpdateRequest	true	"DNS configuration to apply"
 //	@Success		200	{object}	dnsUpdateResponse	"DNS configuration updated"
-//	@Failure		400	{object}	wrappedError	"Neither nameservers nor raw present ('Either nameservers array or raw string is required'), a non-IP nameserver, invalid token values, or a field the platform cannot honor (raw / search_domains / domain / options per the per-OS rules above — refused by name, never silently dropped)"
-//	@Failure		500	{object}	wrappedError	"Failed to write DNS configuration (tool failure, backup or write failure — typically missing OS privilege)"
+//	@Failure		400	{object}	problem.Body	"Neither nameservers nor raw present ('Either nameservers array or raw string is required'), a non-IP nameserver, invalid token values, or a field the platform cannot honor (raw / search_domains / domain / options per the per-OS rules above — refused by name, never silently dropped)"
+//	@Failure		500	{object}	problem.Body	"Failed to write DNS configuration (tool failure, backup or write failure — typically missing OS privilege)"
 //	@Router			/api/system/dns [put]
 func (s *Server) handleUpdateDNS(w http.ResponseWriter, r *http.Request) {
 	var body dnsUpdateRequest
