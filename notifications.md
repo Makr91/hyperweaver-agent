@@ -52,18 +52,6 @@ because the API owns their root. The STARTcloud UI backends cannot take a
 redirect (GitHub Pages issues none, and BoxVault's root links are in
 emails, notifications and badges), so `/` won.
 
-## 4. What joining the rule means here, in order
-
-Why: the steps depend on each other in this order; serving the SPA at `/`
-before the routes move makes the file server shadow the API, and consuming
-a `base: '/'` build before either breaks every asset path.
-
-1. Consume a hyperweaver-ui build made with `base: '/'` (that repository's
-   `notifications.md` section 6 lists its side). Open:
-   `G:\Projects\hyperweaver-ui\vite.config.js:53`; `.ui-version:1`.
-
-The agents move first because the UI cannot own `/` while the API does.
-
 ## 5. Where the contracts live
 
 Why: a change made from memory of a contract drifts from the other UI

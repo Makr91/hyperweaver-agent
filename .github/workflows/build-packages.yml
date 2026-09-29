@@ -37,14 +37,14 @@ jobs:
           go-version-file: go.mod
           cache-dependency-path: go.sum
 
-      - name: Bake Hyperweaver UI artifact
+      - name: Bake STARTcloud UI artifact
         shell: bash
         run: |
           UI_VERSION="$(tr -d ' \r\n' < .ui-version)"
-          echo "Baking hyperweaver-ui v${UI_VERSION}"
+          echo "Baking startcloud-ui v${UI_VERSION}"
           rm -rf internal/webui/dist
           mkdir -p internal/webui/dist
-          curl -fsSL "https://github.com/MarkProminic/hyperweaver-ui/releases/download/v${UI_VERSION}/hyperweaver-ui-${UI_VERSION}.tar.gz" | tar -xz -C internal/webui/dist
+          curl -fsSL "https://github.com/STARTcloud/startcloud-ui/releases/download/v${UI_VERSION}/startcloud-ui-${UI_VERSION}.tar.gz" | tar -xz -C internal/webui/dist
 
       - name: Stage provisioner seed archives
         shell: bash
@@ -198,13 +198,13 @@ jobs:
           go-version-file: go.mod
           cache-dependency-path: go.sum
 
-      - name: Bake Hyperweaver UI artifact
+      - name: Bake STARTcloud UI artifact
         run: |
           UI_VERSION="$(tr -d ' \r\n' < .ui-version)"
-          echo "Baking hyperweaver-ui v${UI_VERSION}"
+          echo "Baking startcloud-ui v${UI_VERSION}"
           rm -rf internal/webui/dist
           mkdir -p internal/webui/dist
-          curl -fsSL "https://github.com/MarkProminic/hyperweaver-ui/releases/download/v${UI_VERSION}/hyperweaver-ui-${UI_VERSION}.tar.gz" | tar -xz -C internal/webui/dist
+          curl -fsSL "https://github.com/STARTcloud/startcloud-ui/releases/download/v${UI_VERSION}/startcloud-ui-${UI_VERSION}.tar.gz" | tar -xz -C internal/webui/dist
 
       - name: Stage provisioner seed archives
         env:
@@ -371,13 +371,13 @@ jobs:
           go-version-file: go.mod
           cache-dependency-path: go.sum
 
-      - name: Bake Hyperweaver UI artifact
+      - name: Bake STARTcloud UI artifact
         run: |
           UI_VERSION="$(tr -d ' \r\n' < .ui-version)"
-          echo "Baking hyperweaver-ui v${UI_VERSION}"
+          echo "Baking startcloud-ui v${UI_VERSION}"
           rm -rf internal/webui/dist
           mkdir -p internal/webui/dist
-          curl -fsSL "https://github.com/MarkProminic/hyperweaver-ui/releases/download/v${UI_VERSION}/hyperweaver-ui-${UI_VERSION}.tar.gz" | tar -xz -C internal/webui/dist
+          curl -fsSL "https://github.com/STARTcloud/startcloud-ui/releases/download/v${UI_VERSION}/startcloud-ui-${UI_VERSION}.tar.gz" | tar -xz -C internal/webui/dist
 
       - name: Stage provisioner seed archives
         env:

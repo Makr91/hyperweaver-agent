@@ -3,7 +3,7 @@
 Production-ready Debian package build for the Hyperweaver Agent, with automated CI/CD via Release Please (`.github/workflows/build-packages.yml`, `build-linux` job).
 
 The web UI is **not** built here — it is consumed as the published
-[hyperweaver-ui](https://github.com/MarkProminic/hyperweaver-ui) release artifact and baked into the
+[startcloud-ui](https://github.com/STARTcloud/startcloud-ui) release artifact and baked into the
 binary via `go:embed` before compilation.
 
 ## What the package installs
@@ -29,7 +29,7 @@ Bake the UI artifact:
 ```bash
 UI_VERSION=$(tr -d ' \r\n' < .ui-version)
 rm -rf internal/webui/dist && mkdir -p internal/webui/dist
-curl -fsSL "https://github.com/MarkProminic/hyperweaver-ui/releases/download/v${UI_VERSION}/hyperweaver-ui-${UI_VERSION}.tar.gz" | tar -xz -C internal/webui/dist
+curl -fsSL "https://github.com/STARTcloud/startcloud-ui/releases/download/v${UI_VERSION}/startcloud-ui-${UI_VERSION}.tar.gz" | tar -xz -C internal/webui/dist
 ```
 
 Stage the provisioner seed archives (a missing asset is tolerated; the build proceeds without it):
