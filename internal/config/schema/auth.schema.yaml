@@ -91,9 +91,9 @@ properties:
         type: array
         items:
           type: string
-        default: [openid, profile, email, integrations, notifications:write]
+        default: [openid, profile, email, integrations, notifications:read, notifications:write]
         title: Scopes
-        description: openid is required and is sent on the silent probe only, the device grant sends the rest; notifications:write lets the agent write a finished task to the person's inbox; every scope must be one the client is registered for at the identity provider
+        description: openid is required and is sent on the silent probe only, the device grant sends the rest; notifications:read reads the person's inbox and favorites for the user menu, notifications:write lets the agent write a finished task to it; every scope must be one the client is registered for at the identity provider
         order: 4
       allowed_users:
         type: array
