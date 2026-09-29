@@ -53,7 +53,7 @@ func underPrefix(path string, prefixes []string) bool {
 // RequiredRole is the central method+path policy (Agent API v1), ported
 // verbatim from the Node agent's middleware/VerifyApiKey.js.
 func RequiredRole(method, path string) string {
-	if path == "/api/api-keys/info" {
+	if path == "/api/api-keys/info" || underPrefix(path, []string{"/api/user"}) {
 		return "viewer"
 	}
 	if underPrefix(path, adminAlwaysPrefixes) {

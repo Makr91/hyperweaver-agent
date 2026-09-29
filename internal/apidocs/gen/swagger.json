@@ -643,6 +643,26 @@
                 },
                 "type": "object"
             },
+            "prefs.Preferences": {
+                "properties": {
+                    "language": {
+                        "type": "string"
+                    },
+                    "mode": {
+                        "type": "string"
+                    },
+                    "motion": {
+                        "type": "string"
+                    },
+                    "theme": {
+                        "type": "string"
+                    },
+                    "timezone": {
+                        "type": "string"
+                    }
+                },
+                "type": "object"
+            },
             "prereqs.Tool": {
                 "properties": {
                     "installed": {
@@ -5917,6 +5937,54 @@
                 },
                 "type": "object"
             },
+            "server.userResponse": {
+                "properties": {
+                    "auth_provider": {
+                        "type": "string"
+                    },
+                    "customer_id": {
+                        "type": "string"
+                    },
+                    "email": {
+                        "type": "string"
+                    },
+                    "id": {
+                        "type": "integer"
+                    },
+                    "name": {
+                        "type": "string"
+                    },
+                    "organizations": {
+                        "items": {
+                            "type": "string"
+                        },
+                        "type": "array",
+                        "uniqueItems": false
+                    },
+                    "preferred_language": {
+                        "type": "string"
+                    },
+                    "preferred_mode": {
+                        "type": "string"
+                    },
+                    "preferred_motion": {
+                        "type": "string"
+                    },
+                    "preferred_theme": {
+                        "type": "string"
+                    },
+                    "preferred_timezone": {
+                        "type": "string"
+                    },
+                    "role": {
+                        "type": "string"
+                    },
+                    "username": {
+                        "type": "string"
+                    }
+                },
+                "type": "object"
+            },
             "server.versionResponse": {
                 "properties": {
                     "arch": {
@@ -8615,10 +8683,10 @@
         },
         "/api/events": {
             "get": {
-                "description": "Minimum role: viewer. The one event stream of the Universal Events Contract, plain WHATWG server-sent events. topics is a comma-separated list of health, tasks, hosts, admin and monitoring; unknown names are ignored, an empty list asks for every topic, and the stream answers the topics the key's role may read, admin left out for a non-admin key, so the ready event's topics list is the subscription that stands; 403 only when nothing is left. The first frame is retry: 3000 followed by the ready event carrying the newest id and the subscribed topics. Every event carries id \u003cepoch-ms\u003e-\u003cseq\u003e, a kebab-case event name and one line of JSON data; a :hb comment line is sent after 25 seconds without a frame. Topic tasks sends task-updated, one task row as GET /api/tasks answers it, when a task is created and on every change of its status, progress_percent, progress_info or error_message. Topic hosts sends stats-updated, the GET /api/stats document, when a machine is created or removed and when one changes status. Topic health sends health, the GET /api/health report, whenever a task ends and the report differs from the last one sent. Topic admin sends restart-required, {required, last_modified_by, last_modified_time}, after every configuration save and backup restore, and {required: false} as the agent restarts; it is subscribed for an admin key alone. Topic monitoring sends cpu-sample {cpu: [sample]} with per_core_parsed, memory-sample {memory: [sample]} and network-sample {usage: [samples]}, the members GET /api/monitoring/system/cpu, /system/memory and /network/usage answer, whenever the collector takes them: on every collector tick while monitoring.storage_enabled, else only on POST /api/monitoring/collect. No topic has a snapshot event. The ring keeps the last 500 events or 5 minutes, whichever is larger: a Last-Event-ID inside it replays every later event of the subscribed topics, one outside it answers a reset event naming the subscribed topics. A task's output and every terminal stay on their WebSockets.",
+                "description": "Minimum role: viewer. The one event stream of the Universal Events Contract, plain WHATWG server-sent events. topics is a comma-separated list of health, tasks, hosts, admin, monitoring and profile; unknown names are ignored, an empty list asks for every topic, and the stream answers the topics the key's role may read, admin left out for a non-admin key, so the ready event's topics list is the subscription that stands; 403 only when nothing is left. The first frame is retry: 3000 followed by the ready event carrying the newest id and the subscribed topics. Every event carries id \u003cepoch-ms\u003e-\u003cseq\u003e, a kebab-case event name and one line of JSON data; a :hb comment line is sent after 25 seconds without a frame. Topic tasks sends task-updated, one task row as GET /api/tasks answers it, when a task is created and on every change of its status, progress_percent, progress_info or error_message. Topic hosts sends stats-updated, the GET /api/stats document, when a machine is created or removed and when one changes status. Topic health sends health, the GET /api/health report, whenever a task ends and the report differs from the last one sent. Topic admin sends restart-required, {required, last_modified_by, last_modified_time}, after every configuration save and backup restore, and {required: false} as the agent restarts; it is subscribed for an admin key alone. Topic monitoring sends cpu-sample {cpu: [sample]} with per_core_parsed, memory-sample {memory: [sample]} and network-sample {usage: [samples]}, the members GET /api/monitoring/system/cpu, /system/memory and /network/usage answer, whenever the collector takes them: on every collector tick while monitoring.storage_enabled, else only on POST /api/monitoring/collect. Topic profile sends profile-updated {} to the person whose preferences a PATCH /api/user/preferences changed, that person alone, on the stream and in a replay. No topic has a snapshot event. The ring keeps the last 500 events or 5 minutes, whichever is larger: a Last-Event-ID inside it replays every later event of the subscribed topics, one outside it answers a reset event naming the subscribed topics. A task's output and every terminal stay on their WebSockets.",
                 "parameters": [
                     {
-                        "description": "Comma-separated topics: health, tasks, hosts, admin, monitoring",
+                        "description": "Comma-separated topics: health, tasks, hosts, admin, monitoring, profile",
                         "in": "query",
                         "name": "topics",
                         "schema": {
@@ -18260,6 +18328,147 @@
                 "summary": "Host terminal (WebSocket)",
                 "tags": [
                     "Console"
+                ]
+            }
+        },
+        "/api/user": {
+            "get": {
+                "description": "Minimum role: viewer. The person the calling key stands for, in the identity provider's profile shape the shared UI reads: id, username and name are the key's, email, auth_provider (\"oidc\") and customer_id come from the federated login that minted the key and are null on a plain key, role is the key's own (admin, operator or viewer), organizations is always empty, and the preferred_* members are the person's stored preferences, null when unset. Preferences are kept per person: by the email of a federated login, else by the key's name.",
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/server.userResponse"
+                                }
+                            }
+                        },
+                        "description": "The person"
+                    },
+                    "401": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/problem.Body"
+                                }
+                            }
+                        },
+                        "description": "Missing credential"
+                    },
+                    "403": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/problem.Body"
+                                }
+                            }
+                        },
+                        "description": "Invalid credential"
+                    }
+                },
+                "summary": "The signed-in person",
+                "tags": [
+                    "Local Login"
+                ]
+            }
+        },
+        "/api/user/preferences": {
+            "get": {
+                "description": "Minimum role: viewer. The five members of the branding contract's write path, language, mode, theme, motion and timezone, each null when unset.",
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/prefs.Preferences"
+                                }
+                            }
+                        },
+                        "description": "The preferences"
+                    },
+                    "401": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/problem.Body"
+                                }
+                            }
+                        },
+                        "description": "Missing credential"
+                    }
+                },
+                "summary": "The signed-in person's preferences",
+                "tags": [
+                    "Local Login"
+                ]
+            },
+            "patch": {
+                "description": "Minimum role: viewer. A merge over the five members language, mode, theme, motion and timezone: a sent member replaces the stored value, an omitted member is unchanged, null or \"\" clears one. Validation: language a well-formed BCP 47 tag, mode light, dark or auto, theme a bare pack name matching ^[a-z0-9-]+$, motion auto or reduce, timezone an IANA zone id; a violation answers 422 with a pointer per failing member and nothing is written. When a stored value changed, profile-updated is sent on the profile topic of the stream to this person alone. Answers the preferences as stored.",
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "oneOf": [
+                                    {
+                                        "type": "object"
+                                    },
+                                    {
+                                        "additionalProperties": {},
+                                        "title": "body",
+                                        "type": "object"
+                                    }
+                                ]
+                            }
+                        }
+                    },
+                    "description": "The members to change",
+                    "required": true
+                },
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/prefs.Preferences"
+                                }
+                            }
+                        },
+                        "description": "The preferences as stored"
+                    },
+                    "400": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/problem.Body"
+                                }
+                            }
+                        },
+                        "description": "Unreadable body"
+                    },
+                    "401": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/problem.Body"
+                                }
+                            }
+                        },
+                        "description": "Missing credential"
+                    },
+                    "422": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/problem.Body"
+                                }
+                            }
+                        },
+                        "description": "A member fails its rule, or is not a preference"
+                    }
+                },
+                "summary": "Write the signed-in person's preferences",
+                "tags": [
+                    "Local Login"
                 ]
             }
         },

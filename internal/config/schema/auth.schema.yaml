@@ -91,7 +91,7 @@ properties:
         type: array
         items:
           type: string
-        default: [openid, profile, email]
+        default: [openid, profile, email, integrations]
         title: Scopes
         description: openid is required and is sent on the silent probe only, the device grant sends the rest; every scope must be one the client is registered for at the identity provider
         order: 4

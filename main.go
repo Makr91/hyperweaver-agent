@@ -77,6 +77,7 @@ import (
 	"github.com/Makr91/hyperweaver-agent/internal/loginitem"
 	"github.com/Makr91/hyperweaver-agent/internal/machines"
 	"github.com/Makr91/hyperweaver-agent/internal/openbrowser"
+	"github.com/Makr91/hyperweaver-agent/internal/prefs"
 	"github.com/Makr91/hyperweaver-agent/internal/protocol"
 	"github.com/Makr91/hyperweaver-agent/internal/provisioner"
 	"github.com/Makr91/hyperweaver-agent/internal/secrets"
@@ -178,6 +179,12 @@ func run() error {
 		return err
 	}
 
+	prefsStore, err := prefs.Open(cfg.PreferencesPath())
+	if err != nil {
+		slog.Error("preference store setup failed", "error", err)
+		return err
+	}
+
 	// First-boot setup token on a headless install: while the agent can still
 	// be bootstrapped (no keys yet), ensure the token exists and print it so a
 	// host admin can read it. It opens the setup page and guards
@@ -258,7 +265,7 @@ func run() error {
 		systems.closeDBs()
 	}
 
-	srv, err := server.New(cfg, keyStore, trayTokens, taskQueue, systems.machines, systems.provisioners, systems.storage, secretsStore, systems.assets, systems.artifactSvc, monitor, systems.dbs, restartArgs, teardown, openUI)
+	srv, err := server.New(cfg, keyStore, trayTokens, taskQueue, systems.machines, systems.provisioners, systems.storage, secretsStore, prefsStore, systems.assets, systems.artifactSvc, monitor, systems.dbs, restartArgs, teardown, openUI)
 	if err != nil {
 		slog.Error("server setup failed", "error", err)
 		return err

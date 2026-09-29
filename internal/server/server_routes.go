@@ -35,6 +35,9 @@ func (s *Server) registerRoutes(mux *http.ServeMux) error {
 	mux.Handle("GET /api/api-keys/info", requireKey(http.HandlerFunc(s.handleKeyInfo)))
 	mux.Handle("DELETE /api/api-keys/{id}", requireKey(http.HandlerFunc(s.handleDeleteKey)))
 	mux.Handle("PUT /api/api-keys/{id}/revoke", requireKey(http.HandlerFunc(s.handleRevokeKey)))
+	mux.Handle("GET /api/user", requireKey(http.HandlerFunc(s.handleUser)))
+	mux.Handle("GET /api/user/preferences", requireKey(http.HandlerFunc(s.handleGetPreferences)))
+	mux.Handle("PATCH /api/user/preferences", requireKey(http.HandlerFunc(s.handlePatchPreferences)))
 
 	// Version / update / prerequisite surfaces (Agent API v1 System group).
 	mux.Handle("GET /api/version", requireKey(http.HandlerFunc(s.handleVersion)))

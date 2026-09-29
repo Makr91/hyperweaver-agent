@@ -31,6 +31,10 @@ func (s *Server) publishRestartRequired(_, _ string, status configengine.Restart
 	})
 }
 
+func (s *Server) publishProfileUpdated(person string) {
+	s.events.publishTo(eventTopicProfile, "profile-updated", struct{}{}, person)
+}
+
 func (s *Server) publishRestartCleared() {
 	s.events.publish(eventTopicAdmin, "restart-required", restartRequiredEvent{Required: false})
 }

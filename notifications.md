@@ -155,23 +155,6 @@ release, an installer and a module path to three different owners.
 | 7 | `.golangci.yml:26-35,47-54` | `gosec` excludes G204 file-wide; `forbidigo` bans `fmt.Print*` | keep both scoped and intentional |
 | 8 | `README.md:75`; `CONTRIBUTING.md:32`; `go.mod:3` | Go 1.24+ in the docs, `go 1.25.0` in `go.mod` | the docs state the `go.mod` version |
 
-## 10. What the shared UI asks of this agent for the local user
-
-Why: the person at a desktop agent is its owner, not a guest; they sign
-in once by the tray and expect the same Profile page every other host of
-the estate draws, their preferences kept for them, and no timer anywhere
-in the shared UI. In Mark's words: "THIS IS NOT A WEB SITE FOR THE
-PUBLIC ... A LOCAL USER RUNNING HYPERWEAVER AGENT ON THEIR LOCAL
-MACHINE, THEY ARE NOT A GUEST, AND SINCE THEY HAVE LOCAL ACCESS THEY
-NEED NO LOGINS, SURE WE CAN MAKE A USER PROFILE END POINT SO WE CAN
-TRACK THE DETAILS FOR THE USER".
-
-| Code file:line | What is | Required change | Deciding source |
-| --- | --- | --- | --- |
-| `internal/server/apikeys.go` (`GET /api/api-keys/info`), `server_routes.go` | the key's profile alone; no `/api/user`, no preferences | `GET /api/user` answering the signed-in person in the identity provider's profile shape the shared UI reads (`id`, `username`, `name`, `email`, `role`, `preferred_language`, `preferred_mode`, `preferred_theme`, `preferred_motion`, `preferred_timezone`), the identity the key was minted with and the preferences stored beside it; `PATCH /api/user/preferences` with the branding contract's write path (`language`, `mode`, `theme`, `motion`, `timezone`, an omitted key unchanged, `null` clearing, a `422` problem body per failing member), stored on this agent for its local user; `profile-updated` on the `profile` topic of the stream when a write changed a column | `preferences-and-branding.md` (Write path; "the account value is authoritative ... a local account with preference columns counts"); `universal-session.md` (the session's `load` reads `/api/user`) |
-| `internal/server/oidc_login.go` (`GET /api/auth/oidc/device-status`) | answers the handle's status at once, `pending` while nothing changed | the brief's own offer, taken: the request stays open until the status leaves `pending` or a wait the agent bounds ends (the RFC's `interval` is a fine bound), then answers the same body; `?wait=0` for the immediate answer; the approved answer still delivered once | `agent-signin-brief.md:229-234`; `universal-session.md` (no timer in the UI); RFC 8628 §3.5 |
-| `internal/server/events.go` (`GET /api/events`) | the `admin` topic answers 403 to a non-admin key | the shared UI opens the one stream with every topic `status.events.topics` lists, so a viewer or operator key gets no stream at all; answer the stream with the topics the key's role may read and leave the others out, 403 only when it may read none | `universal-events.md` (one stream, the topics the status advertises); `src/lib/runtime.js` `connectEventStream` |
-
 ## 11. What the shared UI reads from `GET /api/status` and the host's own row
 
 Why: the shared UI builds every surface from the status payload and from

@@ -23,20 +23,29 @@ const (
 	eventStatsTimeout  = 30 * time.Second
 )
 
-var eventTopics = []string{"health", "tasks", "hosts", "admin", "monitoring"}
+var eventTopics = []string{"health", "tasks", "hosts", "admin", "monitoring", "profile"}
 
-const eventTopicAdmin = "admin"
+const (
+	eventTopicAdmin   = "admin"
+	eventTopicProfile = "profile"
+)
 
 type eventEntry struct {
-	id    string
-	at    time.Time
-	topic string
-	frame []byte
+	id        string
+	at        time.Time
+	topic     string
+	recipient string
+	frame     []byte
 }
 
 type eventSubscriber struct {
-	topics map[string]bool
-	frames chan []byte
+	topics    map[string]bool
+	principal string
+	frames    chan []byte
+}
+
+func (e eventEntry) reaches(subscriber *eventSubscriber) bool {
+	return subscriber.topics[e.topic] && (e.recipient == "" || e.recipient == subscriber.principal)
 }
 
 type eventHub struct {
@@ -164,6 +173,10 @@ func (h *eventHub) trim() {
 }
 
 func (h *eventHub) publish(topic, event string, data any) {
+	h.publishTo(topic, event, data, "")
+}
+
+func (h *eventHub) publishTo(topic, event string, data any, recipient string) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
@@ -173,11 +186,12 @@ func (h *eventHub) publish(topic, event string, data any) {
 		slog.Error("serialize event", "topic", topic, "event", event, "error", err)
 		return
 	}
-	h.ring = append(h.ring, eventEntry{id: id, at: time.Now(), topic: topic, frame: frame})
+	entry := eventEntry{id: id, at: time.Now(), topic: topic, recipient: recipient, frame: frame}
+	h.ring = append(h.ring, entry)
 	h.trim()
 
 	for subscriber := range h.subscribers {
-		if !subscriber.topics[topic] {
+		if !entry.reaches(subscriber) {
 			continue
 		}
 		select {
@@ -189,13 +203,13 @@ func (h *eventHub) publish(topic, event string, data any) {
 	}
 }
 
-func (h *eventHub) replay(topics map[string]bool, lastEventID string) [][]byte {
+func (h *eventHub) replay(subscriber *eventSubscriber, lastEventID string) [][]byte {
 	if lastEventID == "" {
 		return nil
 	}
 	_, _, valid := parseEventID(lastEventID)
 	if !valid || eventIDAfter(h.oldestID(), lastEventID) || eventIDAfter(lastEventID, h.newestID()) {
-		frame, err := eventFrame(h.nextID(), "reset", eventReset{Topics: subscribedTopics(topics)})
+		frame, err := eventFrame(h.nextID(), "reset", eventReset{Topics: subscribedTopics(subscriber.topics)})
 		if err != nil {
 			slog.Error("serialize event", "event", "reset", "error", err)
 			return nil
@@ -204,14 +218,14 @@ func (h *eventHub) replay(topics map[string]bool, lastEventID string) [][]byte {
 	}
 	frames := [][]byte{}
 	for i := range h.ring {
-		if topics[h.ring[i].topic] && eventIDAfter(h.ring[i].id, lastEventID) {
+		if h.ring[i].reaches(subscriber) && eventIDAfter(h.ring[i].id, lastEventID) {
 			frames = append(frames, h.ring[i].frame)
 		}
 	}
 	return frames
 }
 
-func (h *eventHub) subscribe(topics map[string]bool, lastEventID string) (*eventSubscriber, [][]byte) {
+func (h *eventHub) subscribe(topics map[string]bool, principal, lastEventID string) (*eventSubscriber, [][]byte) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
@@ -224,9 +238,9 @@ func (h *eventHub) subscribe(topics map[string]bool, lastEventID string) (*event
 		retry := []byte("retry: " + strconv.Itoa(eventRetryMS) + "\n")
 		opening = append(opening, append(retry, ready...))
 	}
-	opening = append(opening, h.replay(topics, lastEventID)...)
+	subscriber := &eventSubscriber{topics: topics, principal: principal, frames: make(chan []byte, eventBacklog)}
+	opening = append(opening, h.replay(subscriber, lastEventID)...)
 
-	subscriber := &eventSubscriber{topics: topics, frames: make(chan []byte, eventBacklog)}
 	h.subscribers[subscriber] = struct{}{}
 	return subscriber, opening
 }
@@ -265,10 +279,10 @@ func (s *Server) publishStats() {
 }
 
 // @Summary		Event stream (server-sent events)
-// @Description	Minimum role: viewer. The one event stream of the Universal Events Contract, plain WHATWG server-sent events. topics is a comma-separated list of health, tasks, hosts, admin and monitoring; unknown names are ignored, an empty list asks for every topic, and the stream answers the topics the key's role may read, admin left out for a non-admin key, so the ready event's topics list is the subscription that stands; 403 only when nothing is left. The first frame is retry: 3000 followed by the ready event carrying the newest id and the subscribed topics. Every event carries id <epoch-ms>-<seq>, a kebab-case event name and one line of JSON data; a :hb comment line is sent after 25 seconds without a frame. Topic tasks sends task-updated, one task row as GET /api/tasks answers it, when a task is created and on every change of its status, progress_percent, progress_info or error_message. Topic hosts sends stats-updated, the GET /api/stats document, when a machine is created or removed and when one changes status. Topic health sends health, the GET /api/health report, whenever a task ends and the report differs from the last one sent. Topic admin sends restart-required, {required, last_modified_by, last_modified_time}, after every configuration save and backup restore, and {required: false} as the agent restarts; it is subscribed for an admin key alone. Topic monitoring sends cpu-sample {cpu: [sample]} with per_core_parsed, memory-sample {memory: [sample]} and network-sample {usage: [samples]}, the members GET /api/monitoring/system/cpu, /system/memory and /network/usage answer, whenever the collector takes them: on every collector tick while monitoring.storage_enabled, else only on POST /api/monitoring/collect. No topic has a snapshot event. The ring keeps the last 500 events or 5 minutes, whichever is larger: a Last-Event-ID inside it replays every later event of the subscribed topics, one outside it answers a reset event naming the subscribed topics. A task's output and every terminal stay on their WebSockets.
+// @Description	Minimum role: viewer. The one event stream of the Universal Events Contract, plain WHATWG server-sent events. topics is a comma-separated list of health, tasks, hosts, admin, monitoring and profile; unknown names are ignored, an empty list asks for every topic, and the stream answers the topics the key's role may read, admin left out for a non-admin key, so the ready event's topics list is the subscription that stands; 403 only when nothing is left. The first frame is retry: 3000 followed by the ready event carrying the newest id and the subscribed topics. Every event carries id <epoch-ms>-<seq>, a kebab-case event name and one line of JSON data; a :hb comment line is sent after 25 seconds without a frame. Topic tasks sends task-updated, one task row as GET /api/tasks answers it, when a task is created and on every change of its status, progress_percent, progress_info or error_message. Topic hosts sends stats-updated, the GET /api/stats document, when a machine is created or removed and when one changes status. Topic health sends health, the GET /api/health report, whenever a task ends and the report differs from the last one sent. Topic admin sends restart-required, {required, last_modified_by, last_modified_time}, after every configuration save and backup restore, and {required: false} as the agent restarts; it is subscribed for an admin key alone. Topic monitoring sends cpu-sample {cpu: [sample]} with per_core_parsed, memory-sample {memory: [sample]} and network-sample {usage: [samples]}, the members GET /api/monitoring/system/cpu, /system/memory and /network/usage answer, whenever the collector takes them: on every collector tick while monitoring.storage_enabled, else only on POST /api/monitoring/collect. Topic profile sends profile-updated {} to the person whose preferences a PATCH /api/user/preferences changed, that person alone, on the stream and in a replay. No topic has a snapshot event. The ring keeps the last 500 events or 5 minutes, whichever is larger: a Last-Event-ID inside it replays every later event of the subscribed topics, one outside it answers a reset event naming the subscribed topics. A task's output and every terminal stay on their WebSockets.
 // @Tags			Status
 // @Produce		text/event-stream
-// @Param			topics			query	string	false	"Comma-separated topics: health, tasks, hosts, admin, monitoring"
+// @Param			topics			query	string	false	"Comma-separated topics: health, tasks, hosts, admin, monitoring, profile"
 // @Param			Last-Event-ID	header	string	false	"The id of the last frame processed, sent on a reconnect only"
 // @Success		200	"The stream"
 // @Failure		401	{object}	problem.Body	"Missing credential"
@@ -293,7 +307,7 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	subscriber, opening := s.events.subscribe(topics, r.Header.Get("Last-Event-ID"))
+	subscriber, opening := s.events.subscribe(topics, s.personOf(identity), r.Header.Get("Last-Event-ID"))
 	defer s.events.unsubscribe(subscriber)
 
 	write := func(frame []byte) bool {
