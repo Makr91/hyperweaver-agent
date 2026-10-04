@@ -1,6 +1,6 @@
 # Building Hyperweaver Agent Debian Packages
 
-Production-ready Debian package build for the Hyperweaver Agent, with automated CI/CD via Release Please (`.github/workflows/build-packages.yml`, `build-linux` job).
+Production-ready Debian package build for the Hyperweaver Agent, with automated CI/CD via Release Please (`.github/workflows/prod-build.yml`, `build-linux` job).
 
 The web UI is **not** built here — it is consumed as the published
 [startcloud-ui](https://github.com/STARTcloud/startcloud-ui) release artifact and baked into the
@@ -27,7 +27,7 @@ Two ways to run it:
 Bake the UI artifact:
 
 ```bash
-UI_VERSION=$(tr -d ' \r\n' < .ui-version)
+UI_VERSION=$(grep '^version:' packaging/config/ui-version.yaml | awk '{print $2}')
 rm -rf internal/webui/dist && mkdir -p internal/webui/dist
 curl -fsSL "https://github.com/STARTcloud/startcloud-ui/releases/download/v${UI_VERSION}/startcloud-ui-${UI_VERSION}.tar.gz" | tar -xz -C internal/webui/dist
 ```

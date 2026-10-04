@@ -1,6 +1,6 @@
 // Package webui provides the STARTcloud UI artifact as an fs.FS. The dist
 // directory is embedded at build time; the release workflow bakes the
-// published startcloud-ui artifact into it (pinned by .ui-version), while
+// published startcloud-ui artifact into it (pinned by packaging/config/ui-version.yaml), while
 // the committed placeholder keeps development and CI builds compiling
 // without it.
 package webui

@@ -1,4 +1,4 @@
-name: Build Packages
+name: Production Build
 
 # Builds and publishes the Windows, macOS, and Linux applications for a release.
 # Modeled on Super.Human.Installer's release pipeline, simplified for Go:
@@ -10,10 +10,22 @@ name: Build Packages
 on:
   workflow_call:
     inputs:
-      tag_name:
+      version:
+        description: 'Version to build'
         required: true
         type: string
+      tag_name:
+        description: 'GitHub release tag'
+        required: true
+        type: string
+  workflow_dispatch:
+    inputs:
       version:
+        description: 'Version to build'
+        required: true
+        type: string
+      tag_name:
+        description: 'GitHub release tag'
         required: true
         type: string
 
@@ -40,7 +52,7 @@ jobs:
       - name: Bake STARTcloud UI artifact
         shell: bash
         run: |
-          UI_VERSION="$(tr -d ' \r\n' < .ui-version)"
+          UI_VERSION=$(grep '^version:' packaging/config/ui-version.yaml | awk '{print $2}')
           echo "Baking startcloud-ui v${UI_VERSION}"
           rm -rf internal/webui/dist
           mkdir -p internal/webui/dist
@@ -200,7 +212,7 @@ jobs:
 
       - name: Bake STARTcloud UI artifact
         run: |
-          UI_VERSION="$(tr -d ' \r\n' < .ui-version)"
+          UI_VERSION=$(grep '^version:' packaging/config/ui-version.yaml | awk '{print $2}')
           echo "Baking startcloud-ui v${UI_VERSION}"
           rm -rf internal/webui/dist
           mkdir -p internal/webui/dist
@@ -373,7 +385,7 @@ jobs:
 
       - name: Bake STARTcloud UI artifact
         run: |
-          UI_VERSION="$(tr -d ' \r\n' < .ui-version)"
+          UI_VERSION=$(grep '^version:' packaging/config/ui-version.yaml | awk '{print $2}')
           echo "Baking startcloud-ui v${UI_VERSION}"
           rm -rf internal/webui/dist
           mkdir -p internal/webui/dist

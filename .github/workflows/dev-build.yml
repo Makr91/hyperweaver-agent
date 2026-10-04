@@ -1,0 +1,83 @@
+name: Development Build
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        description: 'Development version to build (optional - auto-calculated if not provided)'
+        required: false
+        type: string
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Development version to build (optional - auto-calculated if not provided)'
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  development-release:
+    name: Development release
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      tag_name: ${{ steps.version.outputs.tag_name }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Set development version
+        id: version
+        run: |
+          if [ -n "${{ inputs.version }}" ]; then
+            DEV_VERSION="${{ inputs.version }}"
+            echo "Using provided version: $DEV_VERSION"
+          else
+            CURRENT_VERSION=$(jq -r '."."' .release-please-manifest.json)
+            IFS='.' read -ra VERSION_PARTS <<< "$CURRENT_VERSION"
+            MAJOR=${VERSION_PARTS[0]}
+            MINOR=${VERSION_PARTS[1]}
+            PATCH=${VERSION_PARTS[2]}
+            NEW_PATCH=$((PATCH + 1))
+            DEV_VERSION="${MAJOR}.${MINOR}.${NEW_PATCH}"
+            echo "Current version: $CURRENT_VERSION"
+            echo "Auto-calculated development version: $DEV_VERSION"
+          fi
+          echo "version=$DEV_VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag_name=v${DEV_VERSION}-dev" >> "$GITHUB_OUTPUT"
+
+      - name: Create development pre-release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.version.outputs.version }}
+          RELEASE_TAG: ${{ steps.version.outputs.tag_name }}
+        run: |
+          RELEASE_NOTES="🚧 **Development Release** 🚧
+
+          This is an automated development build from the main branch.
+
+          **Version**: ${VERSION}
+          **Build Date**: $(date -u +%Y-%m-%dT%H:%M:%SZ)
+          **Commit**: ${{ github.sha }}
+
+          ⚠️ **Warning**: This is a development release for testing purposes only. Use production releases for stable deployments.
+
+          ## Packages
+          - \`HyperweaverAgent-Setup.exe\` - Windows installer
+          - \`HyperweaverAgent-Setup.pkg\` - macOS installer
+          - \`hyperweaver-agent_${VERSION}_amd64.deb\` - Debian package"
+
+          gh release delete "$RELEASE_TAG" --yes --cleanup-tag || true
+
+          gh release create "$RELEASE_TAG" --prerelease --target "${{ github.sha }}" --title "$RELEASE_TAG" --notes "$RELEASE_NOTES"
+
+  build-development-packages:
+    name: Packages
+    needs: development-release
+    uses: ./.github/workflows/prod-build.yml
+    with:
+      version: ${{ needs.development-release.outputs.version }}
+      tag_name: ${{ needs.development-release.outputs.tag_name }}
+    secrets: inherit

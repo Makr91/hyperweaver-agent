@@ -90,7 +90,7 @@ go mod tidy
 go build -o hyperweaver-agent .
 ```
 
-Development builds serve a placeholder page at `/`. To bundle the real UI, unpack a [startcloud-ui release artifact](https://github.com/STARTcloud/startcloud-ui/releases) into `internal/webui/dist/` before building (release CI does this automatically, pinned by `.ui-version`), or point `ui.path` at an unpacked copy.
+Development builds serve a placeholder page at `/`. To bundle the real UI, unpack a [startcloud-ui release artifact](https://github.com/STARTcloud/startcloud-ui/releases) into `internal/webui/dist/` before building (release CI does this automatically, pinned by `packaging/config/ui-version.yaml`), or point `ui.path` at an unpacked copy.
 
 For UI development, copy the SPA build into the (gitignored) `ui/` folder and point `ui.path` at it — the agent serves it from disk, so UI changes never require a Go rebuild:
 
