@@ -70,12 +70,24 @@ type Server struct {
 	// handoff (POST /api/protocol/open) shares it exactly.
 	openUI func(query string)
 
-	configSaved func(name string)
+	configSaved   func(name string)
+	unreadChanged func(unread bool)
 }
 
 // SetConfigSaved registers the function run with the file's name after every configuration save and restore.
 func (s *Server) SetConfigSaved(fn func(name string)) {
 	s.configSaved = fn
+}
+
+// SetUnreadChanged registers the function run with true when a notable task ends and false when an inbox write passes through the agent.
+func (s *Server) SetUnreadChanged(fn func(unread bool)) {
+	s.unreadChanged = fn
+}
+
+func (s *Server) markUnread(unread bool) {
+	if s.unreadChanged != nil {
+		s.unreadChanged(unread)
+	}
 }
 
 // New builds the server and its routes.

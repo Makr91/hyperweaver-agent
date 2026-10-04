@@ -143,7 +143,7 @@ var platformFeatures = []string{
 	"swap", "monitoring", "processes", "provisioning",
 	"provisioner-registry", "secrets", "ssh", "templates",
 	"host-launchers", "host-terminal", "hosts-file", "dns",
-	"hostname", "ip-addresses", "network-spaces",
+	"hostname", "ip-addresses", "network-spaces", "devices", "media",
 	"sidebar", "hosts", "footer", "health", "events", "admin", "setup",
 	"update", "search",
 }
@@ -232,7 +232,7 @@ func (s *Server) consoles(ctx context.Context) []string {
 }
 
 // @Summary		Public identity and capabilities
-// @Description	The public status probe. No authentication. role is the package name, hyperweaver-agent, the one member that tells the shared UI it is served by an agent directly. brand, collections, links, ticket, config, events and search are the shared status members: links.api is the path of this agent's API reference while api_docs.enabled is on, ticket is null because GET /api/config/ticket serves the ticket system, config lists the five configuration files (app, auth, db, machines, storage) the /api/config routes serve, and search names GET /api/search and the kinds it answers, artifact among them only while artifact_storage.enabled; the admin and setup tokens name the configuration pages, update the admin's Update row over GET /api/app/updates/check and POST /api/app/updates/apply, and search the navbar search over the search member.
+// @Description	The public status probe. No authentication. role is the package name, hyperweaver-agent, the one member that tells the shared UI it is served by an agent directly. brand, collections, links, ticket, config, events and search are the shared status members: links.api is the path of this agent's API reference while api_docs.enabled is on, ticket is null because GET /api/config/ticket serves the ticket system, config lists the five configuration files (app, auth, db, machines, storage) the /api/config routes serve, and search names GET /api/search and the kinds it answers, artifact among them only while artifact_storage.enabled; the admin and setup tokens name the configuration pages, update the admin's Update row over GET /api/app/updates/check and POST /api/app/updates/apply, search the navbar search over the search member, devices the host's USB device list at GET /api/system/usb, and media the host's disk-medium registry at GET /api/media.
 // @Tags			Status
 // @Produce		json
 // @Success		200	{object}	statusPayload	"Agent identity and capabilities"

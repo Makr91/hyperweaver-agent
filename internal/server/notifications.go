@@ -56,6 +56,7 @@ func (s *Server) pushUnreadCount(identity *auth.Identity) {
 func (s *Server) relayNotificationWrite(w http.ResponseWriter, r *http.Request, path string) {
 	status, relayed := s.relayIssuer(w, r, path, http.NoBody)
 	if relayed && status < http.StatusMultipleChoices {
+		s.markUnread(false)
 		s.pushUnreadCount(auth.FromContext(r.Context()))
 	}
 }

@@ -209,6 +209,7 @@ func run() error {
 	// single-use token in the URL fragment signs the SPA in without a login
 	// screen.
 	openUI := func(query string) {
+		tray.SetUnread(false)
 		url := cfg.LocalURL()
 		if query != "" {
 			url += "?" + query
@@ -417,6 +418,7 @@ func run() error {
 			tray.SetSHIMode(shiMode)
 		}
 	})
+	srv.SetUnreadChanged(tray.SetUnread)
 
 	// Blocks the main goroutine until Quit (macOS requires the tray's event
 	// loop on the main thread).

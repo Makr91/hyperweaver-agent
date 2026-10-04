@@ -269,6 +269,7 @@ func (s *Server) publishTask(task *tasks.Task) {
 	if taskFinished(task.Status) {
 		s.publishHealth()
 		if task.Notify {
+			s.markUnread(true)
 			go s.notifyInbox(task)
 		}
 	}

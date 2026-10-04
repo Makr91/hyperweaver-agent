@@ -5,9 +5,49 @@ package tray
 
 import (
 	"log/slog"
+	"sync"
 
 	"fyne.io/systray"
 )
+
+var look struct {
+	mu      sync.Mutex
+	running bool
+	shiMode bool
+	unread  bool
+}
+
+func applyLook() {
+	icon, err := Icon(look.shiMode, look.unread)
+	if err != nil {
+		slog.Error("prepare tray icon", "error", err)
+		return
+	}
+	systray.SetIcon(icon)
+}
+
+// SetSHIMode swaps the tray image to the mode's mark while the tray runs.
+func SetSHIMode(shiMode bool) {
+	look.mu.Lock()
+	defer look.mu.Unlock()
+	look.shiMode = shiMode
+	if look.running {
+		applyLook()
+	}
+}
+
+// SetUnread draws or clears the red dot on the tray image while the tray runs.
+func SetUnread(unread bool) {
+	look.mu.Lock()
+	defer look.mu.Unlock()
+	if look.unread == unread {
+		return
+	}
+	look.unread = unread
+	if look.running {
+		applyLook()
+	}
+}
 
 // Options configures the tray.
 type Options struct {
@@ -43,22 +83,16 @@ func Quit() {
 	systray.Quit()
 }
 
-// SetSHIMode swaps the tray image to the mode's mark while the tray runs.
-func SetSHIMode(shiMode bool) {
-	icon, err := Icon(shiMode)
-	if err != nil {
-		slog.Error("prepare tray icon", "error", err)
-		return
-	}
-	systray.SetIcon(icon)
-}
-
 func onReady(opts *Options) {
 	// Before any menu exists: opt the popup menus into the OS app theme
 	// (Windows-only mechanism; no-op elsewhere).
 	enableDarkMenus()
 
-	SetSHIMode(opts.SHIMode)
+	look.mu.Lock()
+	look.running = true
+	look.shiMode = opts.SHIMode
+	applyLook()
+	look.mu.Unlock()
 	systray.SetTooltip(opts.Tooltip)
 
 	// Primary/left click opens the app (Mark's ruling 2026-07-08 — the
