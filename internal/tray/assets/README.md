@@ -1,10 +1,10 @@
 # Tray icon assets
 
-The tray icon reuses the Hyperweaver UI's favicon artwork so the tray matches
-what users see in their browser tab. Two binary files live here (committed to
-git, embedded into the binary at build time):
+Four binary files, committed and embedded at build time:
 
-- `icon.ico` — copy of `hyperweaver-ui/public/favicon.ico` (Windows tray + exe icon)
-- `icon.png` — copy of `hyperweaver-ui/public/images/logo192.png` (macOS/Linux tray)
+- `icon.ico` — the Hyperweaver mark, the tray on Windows, the exe and the installer icon
+- `icon.png` — the Hyperweaver 192px mark, the tray on macOS and Linux and the Debian package icon
+- `shi.ico` — the SHI mark, the tray on Windows while `ui.shi_mode` is true
+- `shi.png` — the SHI 192px mark, the tray on macOS and Linux while `ui.shi_mode` is true
 
-When the UI project's artwork changes, re-copy both files.
+The marks are the shared UI's `brand/hyperweaver` and `brand/shi` files.

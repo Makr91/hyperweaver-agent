@@ -11,6 +11,8 @@ import (
 
 // Options configures the tray.
 type Options struct {
+	// SHIMode picks the SHI mark over the Hyperweaver mark at start.
+	SHIMode bool
 	// Title is shown as the disabled first menu row (app name + version).
 	Title string
 	// Tooltip is the icon hover text.
@@ -41,17 +43,22 @@ func Quit() {
 	systray.Quit()
 }
 
+// SetSHIMode swaps the tray image to the mode's mark while the tray runs.
+func SetSHIMode(shiMode bool) {
+	icon, err := Icon(shiMode)
+	if err != nil {
+		slog.Error("prepare tray icon", "error", err)
+		return
+	}
+	systray.SetIcon(icon)
+}
+
 func onReady(opts *Options) {
 	// Before any menu exists: opt the popup menus into the OS app theme
 	// (Windows-only mechanism; no-op elsewhere).
 	enableDarkMenus()
 
-	icon, err := iconBytes()
-	if err != nil {
-		slog.Error("prepare tray icon", "error", err)
-	} else {
-		systray.SetIcon(icon)
-	}
+	SetSHIMode(opts.SHIMode)
 	systray.SetTooltip(opts.Tooltip)
 
 	// Primary/left click opens the app (Mark's ruling 2026-07-08 — the

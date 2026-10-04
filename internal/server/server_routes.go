@@ -20,6 +20,8 @@ func (s *Server) registerRoutes(mux *http.ServeMux) error {
 	// middleware, whose central policy enforces the role model per path.
 	requireKey := auth.Middleware(s.keys, s.oidcMgr.AuthenticateToken)
 	mux.Handle("GET /api/events", requireKey(http.HandlerFunc(s.handleEvents)))
+	mux.Handle("GET "+searchPath, requireKey(http.HandlerFunc(s.handleSearch)))
+	mux.HandleFunc("GET "+openSearchPath, s.handleOpenSearch)
 	mux.HandleFunc("POST /api/api-keys/bootstrap", s.handleBootstrapKey)
 	mux.HandleFunc("POST /api/auth/tray-claim", s.handleTrayClaim)
 	mux.HandleFunc("POST /api/auth/oidc/device-start", s.handleOIDCDeviceStart)
@@ -36,8 +38,6 @@ func (s *Server) registerRoutes(mux *http.ServeMux) error {
 	mux.Handle("DELETE /api/api-keys/{id}", requireKey(http.HandlerFunc(s.handleDeleteKey)))
 	mux.Handle("PUT /api/api-keys/{id}/revoke", requireKey(http.HandlerFunc(s.handleRevokeKey)))
 	mux.Handle("GET /api/user", requireKey(http.HandlerFunc(s.handleUser)))
-	mux.Handle("GET /api/user/preferences", requireKey(http.HandlerFunc(s.handleGetPreferences)))
-	mux.Handle("PATCH /api/user/preferences", requireKey(http.HandlerFunc(s.handlePatchPreferences)))
 	mux.Handle("GET /api/user/favorites", requireKey(http.HandlerFunc(s.handleGetFavorites)))
 	mux.Handle("PUT /api/user/favorites", requireKey(http.HandlerFunc(s.handlePutFavorites)))
 	mux.Handle("GET /api/notifications", requireKey(http.HandlerFunc(s.handleListNotifications)))

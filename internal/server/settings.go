@@ -20,7 +20,12 @@ import (
 const configUploadLimit = 1024 * 1024
 
 func (s *Server) mountConfigRoutes(mux *http.ServeMux, requireKey func(http.Handler) http.Handler) {
-	s.cfg.Engine().SetOnSaved(s.publishRestartRequired)
+	s.cfg.Engine().SetOnSaved(func(name, actor string, status configengine.RestartStatus) {
+		s.publishRestartRequired(name, actor, status)
+		if s.configSaved != nil {
+			go s.configSaved(name)
+		}
+	})
 	s.cfg.Engine().Routes(mux, configengine.Auth{
 		Admin: requireKey,
 		Actor: func(r *http.Request) string {

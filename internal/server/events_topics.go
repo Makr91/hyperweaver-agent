@@ -31,10 +31,6 @@ func (s *Server) publishRestartRequired(_, _ string, status configengine.Restart
 	})
 }
 
-func (s *Server) publishProfileUpdated(person string) {
-	s.events.publishTo(eventTopicProfile, "profile-updated", struct{}{}, person)
-}
-
 func (s *Server) publishUnreadCount(person string, count int) {
 	s.events.publishTo(eventTopicNotifications, "unread-count", unreadCountResponse{Count: count}, person)
 }

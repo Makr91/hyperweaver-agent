@@ -10,31 +10,34 @@ import (
 	xdraw "golang.org/x/image/draw"
 )
 
-// The tray uses the same artwork users see as the Hyperweaver UI favicon.
-// Both files are copied verbatim from the hyperweaver-ui repo's public/
-// assets (favicon.ico and images/logo192.png).
-
 //go:embed assets/icon.ico
-var iconICO []byte
+var hyperweaverICO []byte
 
 //go:embed assets/icon.png
-var iconPNG []byte
+var hyperweaverPNG []byte
 
-// iconBytes returns the tray icon in the format the current OS requires:
-// a real .ico on Windows, PNG elsewhere. macOS menu-bar icons render at
-// their natural pixel size, so the 192px logo is downscaled there.
-func iconBytes() ([]byte, error) {
+//go:embed assets/shi.ico
+var shiICO []byte
+
+//go:embed assets/shi.png
+var shiPNG []byte
+
+// Icon answers the tray image of the mode: the SHI mark while shiMode is true, the Hyperweaver mark otherwise, as a .ico on Windows, a 22px PNG on macOS and the 192px PNG elsewhere.
+func Icon(shiMode bool) ([]byte, error) {
+	ico, mark := hyperweaverICO, hyperweaverPNG
+	if shiMode {
+		ico, mark = shiICO, shiPNG
+	}
 	switch runtime.GOOS {
 	case "windows":
-		return iconICO, nil
+		return ico, nil
 	case "darwin":
-		return scaledPNG(iconPNG, 22)
+		return scaledPNG(mark, 22)
 	default:
-		return iconPNG, nil
+		return mark, nil
 	}
 }
 
-// scaledPNG decodes a PNG and scales it to size x size pixels.
 func scaledPNG(data []byte, size int) ([]byte, error) {
 	src, err := png.Decode(bytes.NewReader(data))
 	if err != nil {

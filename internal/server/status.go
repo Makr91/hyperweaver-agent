@@ -43,6 +43,17 @@ type statusEvents struct {
 	Topics []string `json:"topics" example:"health,tasks,hosts"`
 }
 
+type statusSearch struct {
+	Path  string   `json:"path"  example:"/api/search"`
+	Kinds []string `json:"kinds" example:"machine,task,config,template,artifact"`
+}
+
+var agentBrand = statusBrand{
+	Name:    "Hyperweaver",
+	LogoURL: "/brand/hyperweaver/mark.svg",
+	Repo:    "https://github.com/Makr91/hyperweaver-agent",
+}
+
 type statusPayload struct {
 	Role        string        `json:"role"        example:"hyperweaver-agent"`
 	Brand       statusBrand   `json:"brand"`
@@ -51,6 +62,7 @@ type statusPayload struct {
 	Ticket      *statusTicket `json:"ticket"`
 	Config      []string      `json:"config"`
 	Events      statusEvents  `json:"events"`
+	Search      statusSearch  `json:"search"`
 	Agent       string        `json:"agent"`
 	// virtualbox always; utm joins on macOS agents where utmctl is present and UTM meets the 4.6.5 floor (cached capability probe)
 	Hypervisors        []string `json:"hypervisors"`
@@ -133,6 +145,7 @@ var platformFeatures = []string{
 	"host-launchers", "host-terminal", "hosts-file", "dns",
 	"hostname", "ip-addresses", "network-spaces",
 	"sidebar", "hosts", "footer", "health", "events", "admin", "setup",
+	"update", "search",
 }
 
 // features derives the advertised token list: platform tokens plus the
@@ -219,7 +232,7 @@ func (s *Server) consoles(ctx context.Context) []string {
 }
 
 // @Summary		Public identity and capabilities
-// @Description	The public status probe. No authentication. role is the package name, hyperweaver-agent, the one member that tells the shared UI it is served by an agent directly. brand, collections, links, ticket and config are the shared status members: links.api is the path of this agent's API reference while api_docs.enabled is on, ticket is null because GET /api/config/ticket serves the ticket system, and config lists the five configuration files (app, auth, db, machines, storage) the /api/config routes serve; the admin and setup tokens name the configuration pages.
+// @Description	The public status probe. No authentication. role is the package name, hyperweaver-agent, the one member that tells the shared UI it is served by an agent directly. brand, collections, links, ticket, config, events and search are the shared status members: links.api is the path of this agent's API reference while api_docs.enabled is on, ticket is null because GET /api/config/ticket serves the ticket system, config lists the five configuration files (app, auth, db, machines, storage) the /api/config routes serve, and search names GET /api/search and the kinds it answers, artifact among them only while artifact_storage.enabled; the admin and setup tokens name the configuration pages, update the admin's Update row over GET /api/app/updates/check and POST /api/app/updates/apply, and search the navbar search over the search member.
 // @Tags			Status
 // @Produce		json
 // @Success		200	{object}	statusPayload	"Agent identity and capabilities"
@@ -246,16 +259,13 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 	}
 
 	payload := statusPayload{
-		Role: "hyperweaver-agent",
-		Brand: statusBrand{
-			Name:    "Hyperweaver",
-			LogoURL: "/brand/hyperweaver/mark.svg",
-			Repo:    "https://github.com/Makr91/hyperweaver-agent",
-		},
+		Role:        "hyperweaver-agent",
+		Brand:       agentBrand,
 		Collections: []string{},
 		Links:       links,
 		Config:      config.Names,
 		Events:      statusEvents{Path: "/api/events", Topics: eventTopics},
+		Search:      statusSearch{Path: searchPath, Kinds: s.searchKinds()},
 		Agent:       "hyperweaver-agent",
 		Hypervisors: s.hypervisors(r.Context()),
 		Platform:    runtime.GOOS,

@@ -80,11 +80,6 @@ func (c *Config) ProtocolSecretPath() string {
 	return filepath.Join(c.dir, "protocol.secret")
 }
 
-// PreferencesPath returns the per-person preference store location: preferences.json beside the configuration files.
-func (c *Config) PreferencesPath() string {
-	return filepath.Join(c.dir, "preferences.json")
-}
-
 // SecretsPath returns the global secrets store location: secrets.yaml
 // beside the configuration files (architecture D-C — its own store so the
 // configuration routes keep serving just the configuration documents).
