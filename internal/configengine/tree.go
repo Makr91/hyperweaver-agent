@@ -1,7 +1,9 @@
 package configengine
 
 import (
+	"bytes"
 	"encoding/json"
+	"math"
 	"sort"
 	"strings"
 
@@ -68,6 +70,9 @@ func normalize(value any) any {
 		}
 		return out
 	case uint64:
+		if v > math.MaxInt64 {
+			return float64(v)
+		}
 		return int64(v)
 	case int:
 		return int64(v)
@@ -324,7 +329,7 @@ func leaves(node any, base string) []leaf {
 func changed(before, after any) bool {
 	left, _ := json.Marshal(before)
 	right, _ := json.Marshal(after)
-	return string(left) != string(right)
+	return !bytes.Equal(left, right)
 }
 
 func restartDiff(schema validation.Schema, before, after map[string]any, base string) []RestartEntry {

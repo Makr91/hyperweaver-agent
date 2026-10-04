@@ -1,3 +1,4 @@
+// Package dpop verifies RFC 9449 proof-of-possession proofs: the ES256 proof a request carries, bound to the token it covers and to the method and URL it is sent with.
 package dpop
 
 import (
@@ -143,8 +144,12 @@ func publicKey(key *JWK) (*ecdsa.PublicKey, error) {
 	if len(x) != 32 || len(y) != 32 {
 		return nil, ErrProof
 	}
-	public := &ecdsa.PublicKey{Curve: elliptic.P256(), X: new(big.Int).SetBytes(x), Y: new(big.Int).SetBytes(y)}
-	if !public.Curve.IsOnCurve(public.X, public.Y) {
+	uncompressed := make([]byte, 0, 65)
+	uncompressed = append(uncompressed, 0x04)
+	uncompressed = append(uncompressed, x...)
+	uncompressed = append(uncompressed, y...)
+	public, err := ecdsa.ParseUncompressedPublicKey(elliptic.P256(), uncompressed)
+	if err != nil {
 		return nil, ErrProof
 	}
 	return public, nil

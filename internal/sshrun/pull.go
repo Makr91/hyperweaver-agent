@@ -11,7 +11,6 @@ package sshrun
 import (
 	"context"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -197,10 +196,7 @@ func BuiltinRsyncSyncPull(ctx context.Context, ip string, port int, credentials 
 		return fmt.Errorf("start remote rsync server: %w", serr)
 	}
 
-	if _, rerr := client.Run(ctx, struct {
-		io.Reader
-		io.Writer
-	}{stdout, stdin}, []string{filepath.ToSlash(localDir)}); rerr != nil {
+	if _, rerr := client.Run(ctx, sshPipes{stdout, stdin}, []string{filepath.ToSlash(localDir)}); rerr != nil {
 		_ = stdin.Close()
 		if ctx.Err() != nil {
 			return fmt.Errorf("built-in rsync cancelled or timed out: %w", ctx.Err())

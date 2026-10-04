@@ -83,7 +83,7 @@ Flags: `--config <dir>`, `--headless` (no tray), `--version`.
 
 ## Building from source
 
-Requires Go 1.25.0 (the `go` line of `go.mod`). The tray icon assets under `internal/tray/assets/` are committed and embedded at build time; nothing is copied before a build.
+Requires Go 1.26.6 (the `go` line of `go.mod`). The tray icon assets under `internal/tray/assets/` are committed and embedded at build time; nothing is copied before a build.
 
 ```bash
 go mod tidy

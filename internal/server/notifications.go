@@ -19,25 +19,6 @@ const (
 	pushNotConfiguredDetail = "Browser push is not offered by this agent; the identity provider's own push serves the estate"
 )
 
-type notificationRow struct {
-	ID        string          `json:"id"`
-	Title     json.RawMessage `json:"title"`
-	Body      json.RawMessage `json:"body"`
-	Type      string          `json:"type"`
-	Severity  string          `json:"severity"`
-	Navigate  string          `json:"navigate"`
-	ReadAt    *string         `json:"read_at"`
-	CreatedAt string          `json:"created_at"`
-}
-
-type notificationPage struct {
-	Items      []notificationRow `json:"items"`
-	Page       int               `json:"page"`
-	Size       int               `json:"size"`
-	Total      int               `json:"total"`
-	TotalPages int               `json:"total_pages"`
-}
-
 type unreadCountResponse struct {
 	Count int `json:"count"`
 }
@@ -86,7 +67,7 @@ func (s *Server) relayNotificationWrite(w http.ResponseWriter, r *http.Request, 
 // @Param			page		query	int		false	"Page number"
 // @Param			size		query	int		false	"Page size"
 // @Param			unread_only	query	bool	false	"Unread rows alone"
-// @Success		200	{object}	notificationPage	"The page of rows"
+// @Success		200	{object}	map[string]interface{}	"The page: {items: [{id, title, body, type, severity, navigate, read_at, created_at}], page, size, total, total_pages}"
 // @Failure		404	{object}	problem.Body	"The calling key was not minted by a federated login"
 // @Failure		502	{object}	problem.Body	"Identity provider unreachable"
 // @Failure		503	{object}	problem.Body	"No valid token for the bound account"

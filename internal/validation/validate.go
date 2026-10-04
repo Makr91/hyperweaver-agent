@@ -1,13 +1,15 @@
+// Package validation evaluates values and objects against the JSON Schema documents the configuration files and the request bodies are described by, answering the first failing rule per value as a problem error.
 package validation
 
 import (
+	"bytes"
 	"encoding/json"
 	"strings"
 
 	"github.com/Makr91/hyperweaver-agent/internal/problem"
 )
 
-func refTarget(ref string, document Schema) (Schema, string) {
+func refTarget(ref string, document Schema) (target Schema, name string) {
 	if !strings.HasPrefix(ref, "#/") {
 		return nil, ""
 	}
@@ -24,20 +26,19 @@ func refTarget(ref string, document Schema) (Schema, string) {
 	if !ok {
 		return nil, ""
 	}
-	name := ""
 	if segments[0] == "$defs" && len(segments) > 1 {
 		name = segments[1]
 	}
 	return target, name
 }
 
-func resolve(schema, document Schema) (Schema, string) {
+func resolve(schema, document Schema) (merged Schema, name string) {
 	ref, ok := str(schema, "$ref")
 	if !ok {
 		return schema, ""
 	}
 	target, name := refTarget(ref, document)
-	merged := Schema{}
+	merged = Schema{}
 	for key, value := range target {
 		merged[key] = value
 	}
@@ -131,7 +132,7 @@ func jsonEqual(a, b any) bool {
 	if err != nil {
 		return false
 	}
-	return string(left) == string(right)
+	return bytes.Equal(left, right)
 }
 
 // Visible reports whether a property is evaluated under its dependsOn and showWhen words.

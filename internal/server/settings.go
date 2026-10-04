@@ -184,13 +184,13 @@ func (s *Server) restartSelf() {
 	s.publishRestartCleared()
 	s.teardown()
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
 	done := make(chan error, 1)
 	go func() { done <- s.Shutdown(shutdownCtx) }()
 	close(s.released)
 	if err := <-done; err != nil {
 		slog.Error("restart: shutdown", "error", err)
 	}
+	cancel()
 	slog.Info("hyperweaver-agent restarting")
 	os.Exit(0)
 }

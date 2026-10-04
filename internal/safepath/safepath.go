@@ -46,6 +46,15 @@ func Under(baseDir, name string) (string, error) {
 	return joined, nil
 }
 
+// ReadFile is the one way this agent reads a whole file through a variable path: the path is sanitized first, then read.
+func ReadFile(path string) ([]byte, error) {
+	clean, err := CleanAbs(path)
+	if err != nil {
+		return nil, err
+	}
+	return os.ReadFile(filepath.Clean(clean))
+}
+
 // WriteFile is THE way this agent writes a file — config's atomicWrite,
 // moved here so every content write in every package shares the one shape:
 // sanitize the path, write the bytes to a temp file beside the target

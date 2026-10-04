@@ -41,7 +41,7 @@ func (c *Config) CreateBackup() (*Backup, error) {
 	}
 	backup := &Backup{ID: id, CreatedAt: backupTime(id), Files: []string{}}
 	for _, name := range Names {
-		raw, rerr := os.ReadFile(filepath.Join(c.dir, name+".config.yaml"))
+		raw, rerr := safepath.ReadFile(filepath.Join(c.dir, name+".config.yaml"))
 		if rerr != nil {
 			return nil, fmt.Errorf("read %s for backup: %w", name, rerr)
 		}
@@ -118,7 +118,7 @@ func (c *Config) RestoreBackup(id string) error {
 	}
 	documents := map[string]map[string]any{}
 	for _, name := range Names {
-		raw, rerr := os.ReadFile(filepath.Join(dir, name+".config.yaml"))
+		raw, rerr := safepath.ReadFile(filepath.Join(dir, name+".config.yaml"))
 		if errors.Is(rerr, os.ErrNotExist) {
 			continue
 		}

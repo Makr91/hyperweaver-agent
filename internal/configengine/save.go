@@ -39,7 +39,7 @@ func (e *Engine) prepare(name string, body map[string]any) prepared {
 
 func (e *Engine) writeFile(name string, merged map[string]any) error {
 	target := e.filePath(name)
-	if current, err := os.ReadFile(target); err == nil {
+	if current, err := safepath.ReadFile(target); err == nil {
 		if werr := safepath.WriteFile(target+".bak", current, 0o600); werr != nil {
 			return werr
 		}
@@ -190,7 +190,7 @@ func (e *Engine) SetupComplete() bool {
 
 func (e *Engine) fillSetupToken() {
 	path := e.setupTokenPath()
-	raw, err := os.ReadFile(path)
+	raw, err := safepath.ReadFile(path)
 	if err != nil || strings.TrimSpace(string(raw)) != "" {
 		return
 	}
@@ -210,7 +210,7 @@ func (e *Engine) tokenMatches(token string) bool {
 	if token == "" || e.setupComplete() {
 		return false
 	}
-	raw, err := os.ReadFile(e.setupTokenPath())
+	raw, err := safepath.ReadFile(e.setupTokenPath())
 	if err != nil {
 		return false
 	}

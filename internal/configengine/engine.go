@@ -1,3 +1,4 @@
+// Package configengine loads, validates, serves and writes the configuration files of the config contract: the schema-filled documents, the merge-patch writes, the restart list, the setup token and the routes behind them.
 package configengine
 
 import (
@@ -5,7 +6,6 @@ import (
 	"fmt"
 	"io/fs"
 	"log/slog"
-	"os"
 	"path/filepath"
 	"sync"
 	"time"
@@ -13,6 +13,7 @@ import (
 	"github.com/goccy/go-yaml"
 
 	"github.com/Makr91/hyperweaver-agent/internal/problem"
+	"github.com/Makr91/hyperweaver-agent/internal/safepath"
 	"github.com/Makr91/hyperweaver-agent/internal/validation"
 )
 
@@ -126,7 +127,7 @@ func (e *Engine) readSchema(name string) (validation.Schema, error) {
 }
 
 func (e *Engine) readRaw(name string) (map[string]any, *problem.Error) {
-	raw, err := os.ReadFile(e.filePath(name))
+	raw, err := safepath.ReadFile(e.filePath(name))
 	if err != nil {
 		return nil, &problem.Error{Pointer: "", Rule: "yaml", Params: map[string]any{"message": err.Error()}}
 	}

@@ -384,9 +384,10 @@ func (s *Server) handlePullTemplate(w http.ResponseWriter, r *http.Request) {
 	if meta.BoxName == "" {
 		failures = append(failures, problem.Required("/box_name"))
 	}
-	if meta.Version == "" {
+	switch meta.Version {
+	case "":
 		failures = append(failures, problem.Required("/version"))
-	} else if meta.Version == "latest" {
+	case "latest":
 		failures = append(failures, problem.Rule("/version", "not", map[string]any{}))
 	}
 	if len(failures) > 0 {

@@ -176,11 +176,7 @@ func (s *Server) handleGuestExec(w http.ResponseWriter, r *http.Request) {
 	if timeout > 600 {
 		timeout = 600
 	}
-	pipe, perr := s.machineQGAPipe(machine)
-	if perr != nil {
-		taskError(w, http.StatusInternalServerError, "Failed to resolve the guest-agent channel")
-		return
-	}
+	pipe := s.machineQGAPipe(machine)
 	deadline := time.Now().Add(time.Duration(timeout) * time.Second)
 	for {
 		pollCtx, cancel := context.WithTimeout(r.Context(), 5*time.Second)

@@ -65,6 +65,7 @@ func (r *Registry) familyRoot(name string) string {
 	return ""
 }
 
+// FamilyRoot answers the storage root a family lives in, the default root for a family not found.
 func (r *Registry) FamilyRoot(name string) string {
 	if root := r.familyRoot(name); root != "" {
 		return root
@@ -72,6 +73,7 @@ func (r *Registry) FamilyRoot(name string) string {
 	return r.Dir()
 }
 
+// FamiliesIn answers the names of the families whose collection manifest lies directly under root.
 func (r *Registry) FamiliesIn(root string) []string {
 	entries, err := os.ReadDir(root)
 	if err != nil {
@@ -259,7 +261,7 @@ func (r *Registry) readCollection(root, name string) (*Collection, error) {
 // unreadable or corrupt sidecar degrades to null with a warning — provenance
 // trouble never fails a scan.
 func (r *Registry) readSource(root, name string) *Source {
-	raw, err := os.ReadFile(filepath.Clean(filepath.Join(root, name, sourceFileName)))
+	raw, err := safepath.ReadFile(filepath.Join(root, name, sourceFileName))
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil
 	}

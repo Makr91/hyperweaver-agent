@@ -93,17 +93,17 @@ func bearerOf(r *http.Request) string {
 }
 
 func (e *Engine) setupGuard(next http.HandlerFunc) http.Handler {
-	return http.HandlerFunc(e.setupOpen(func(w http.ResponseWriter, r *http.Request) {
+	return e.setupOpen(func(w http.ResponseWriter, r *http.Request) {
 		if !e.tokenMatches(bearerOf(r)) {
 			problem.Forbidden(w)
 			return
 		}
 		next(w, r)
-	}))
+	})
 }
 
 func (e *Engine) adminOrSetup(auth Auth, next http.HandlerFunc) http.Handler {
-	admin := auth.Admin(http.HandlerFunc(next))
+	admin := auth.Admin(next)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if e.tokenMatches(bearerOf(r)) {
 			next(w, r)
@@ -133,7 +133,7 @@ func (e *Engine) Routes(mux *http.ServeMux, auth Auth, exit func(), uploadLimit 
 	e.auth = auth
 	e.exit = exit
 	e.uploadLimit = uploadLimit
-	admin := func(next http.HandlerFunc) http.Handler { return auth.Admin(http.HandlerFunc(next)) }
+	admin := func(next http.HandlerFunc) http.Handler { return auth.Admin(next) }
 
 	mux.Handle("GET /api/config/restart-status", admin(e.handleRestartStatus))
 	mux.Handle("POST /api/config/restart", admin(e.handleRestart))

@@ -21,13 +21,27 @@ import (
 	"github.com/pkg/sftp"
 )
 
+type nopWriteCloser struct {
+	io.Writer
+}
+
+func (nopWriteCloser) Close() error {
+	return nil
+}
+
+// sshPipes is the rsync client's connection over one SSH session: the session's stdout read, its stdin written, and Close ending the write half.
+type sshPipes struct {
+	io.Reader
+	io.WriteCloser
+}
+
 // stderrOrDiscard adapts an optional StreamFunc to the transports' stderr
 // writer (every remote-rsync surface writes its diagnostics there).
-func stderrOrDiscard(stream StreamFunc) io.Writer {
+func stderrOrDiscard(stream StreamFunc) io.WriteCloser {
 	if stream == nil {
-		return io.Discard
+		return nopWriteCloser{io.Discard}
 	}
-	return streamWriter{stream: "stderr", cb: stream}
+	return nopWriteCloser{streamWriter{stream: "stderr", cb: stream}}
 }
 
 // shellQuoteArgs single-quotes each argument for the remote shell (the same
@@ -99,10 +113,7 @@ func BuiltinRsyncSync(ctx context.Context, ip string, port int, credentials Cred
 
 	// Trailing slash = content sync, the folder contract's semantics.
 	source := strings.TrimSuffix(filepath.ToSlash(localDir), "/") + "/"
-	if _, rerr := client.Run(ctx, struct {
-		io.Reader
-		io.Writer
-	}{stdout, stdin}, []string{source}); rerr != nil {
+	if _, rerr := client.Run(ctx, sshPipes{stdout, stdin}, []string{source}); rerr != nil {
 		_ = stdin.Close()
 		if ctx.Err() != nil {
 			return fmt.Errorf("built-in rsync cancelled or timed out: %w", ctx.Err())

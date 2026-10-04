@@ -18,15 +18,6 @@ const (
 	issuerBodyLimit = 1 << 20
 )
 
-type favoriteEntry struct {
-	ClientID    string `json:"client_id"`
-	ClientName  string `json:"client_name"`
-	IconURL     string `json:"icon_url"`
-	HomeURL     string `json:"home_url"`
-	CustomLabel string `json:"custom_label"`
-	Order       int    `json:"order"`
-}
-
 type favoriteWrite struct {
 	ClientID    string `json:"client_id"`
 	CustomLabel string `json:"custom_label"`
@@ -66,7 +57,7 @@ func (s *Server) relayIssuer(w http.ResponseWriter, r *http.Request, path string
 // @Description	Minimum role: viewer. Relayed to the identity provider's GET /api/user/favorites under the bound account's token, the way a backend host proxies it, so the user menu draws the same list on every host; the issuer's status and body are answered as they came. A key no federated login minted answers 404, and an agent holding no valid token for its bound account answers 503. The favorites token is listed in status.features only while such a token is held.
 // @Tags			Local Login
 // @Produce		json
-// @Success		200	{array}		favoriteEntry	"The ordered favorites"
+// @Success		200	{array}		map[string]interface{}	"The ordered favorites, each {client_id, client_name, icon_url, home_url, custom_label, order}"
 // @Failure		404	{object}	problem.Body	"The calling key was not minted by a federated login"
 // @Failure		502	{object}	problem.Body	"Identity provider unreachable"
 // @Failure		503	{object}	problem.Body	"No valid token for the bound account"
@@ -81,7 +72,7 @@ func (s *Server) handleGetFavorites(w http.ResponseWriter, r *http.Request) {
 // @Accept			json
 // @Produce		json
 // @Param			body	body		[]favoriteWrite	true	"The whole ordered list"
-// @Success		200		{array}		favoriteEntry	"The favorites as stored"
+// @Success		200		{array}		map[string]interface{}	"The favorites as stored, each {client_id, client_name, icon_url, home_url, custom_label, order}"
 // @Failure		400		{object}	problem.Body	"The body is not a JSON array of entries"
 // @Failure		404		{object}	problem.Body	"The calling key was not minted by a federated login"
 // @Failure		502		{object}	problem.Body	"Identity provider unreachable"

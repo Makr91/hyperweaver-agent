@@ -1,3 +1,4 @@
+// Package locations holds the storage paths of machines, provisioners and templates: any number per kind, exactly one default, each item keeping the path it was made in.
 package locations
 
 import (
@@ -7,16 +8,20 @@ import (
 	"sync"
 )
 
+// Kind names what a storage path holds.
 type Kind string
 
+// The three kinds of storage path.
 const (
 	Machines     Kind = "machines"
 	Provisioners Kind = "provisioners"
 	Templates    Kind = "templates"
 )
 
+// BuiltinID is the id of the one path per kind the configuration's root setting names.
 const BuiltinID = "builtin"
 
+// Location is one storage path as the API answers it.
 type Location struct {
 	ID          string `json:"id"`
 	Type        Kind   `json:"type"`
@@ -27,15 +32,18 @@ type Location struct {
 	Builtin     bool   `json:"builtin"`
 }
 
+// Set is the live table of storage paths of every kind, safe for concurrent readers.
 type Set struct {
 	mu     sync.RWMutex
 	byKind map[Kind][]Location
 }
 
+// New builds an empty set.
 func New() *Set {
 	return &Set{byKind: map[Kind][]Location{}}
 }
 
+// ValidKind reports whether value names one of the three kinds.
 func ValidKind(value string) bool {
 	switch Kind(value) {
 	case Machines, Provisioners, Templates:
@@ -45,6 +53,7 @@ func ValidKind(value string) bool {
 	}
 }
 
+// SamePath reports whether two paths name the same folder, case-insensitively on Windows.
 func SamePath(a, b string) bool {
 	a, b = filepath.Clean(a), filepath.Clean(b)
 	if runtime.GOOS == "windows" {
@@ -89,18 +98,21 @@ func normalize(kind Kind, list []Location) []Location {
 	return out
 }
 
+// Replace swaps in the paths of one kind, leaving exactly one enabled default, the built-in path when none is marked.
 func (s *Set) Replace(kind Kind, list []Location) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.byKind[kind] = normalize(kind, list)
 }
 
+// List answers a copy of every path of a kind.
 func (s *Set) List(kind Kind) []Location {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return append([]Location(nil), s.byKind[kind]...)
 }
 
+// Enabled answers the enabled paths of a kind.
 func (s *Set) Enabled(kind Kind) []Location {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -113,6 +125,7 @@ func (s *Set) Enabled(kind Kind) []Location {
 	return out
 }
 
+// Get answers the path of a kind with the given id.
 func (s *Set) Get(kind Kind, id string) (Location, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -124,6 +137,7 @@ func (s *Set) Get(kind Kind, id string) (Location, bool) {
 	return Location{}, false
 }
 
+// Default answers the path new items of a kind land in.
 func (s *Set) Default(kind Kind) (Location, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -135,6 +149,7 @@ func (s *Set) Default(kind Kind) (Location, bool) {
 	return Location{}, false
 }
 
+// DefaultPath answers the folder of the default path of a kind, empty when the kind has none.
 func (s *Set) DefaultPath(kind Kind) string {
 	location, ok := s.Default(kind)
 	if !ok {
@@ -143,6 +158,7 @@ func (s *Set) DefaultPath(kind Kind) string {
 	return location.Path
 }
 
+// Containing answers the deepest path of a kind that holds the given folder.
 func (s *Set) Containing(kind Kind, path string) (Location, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()

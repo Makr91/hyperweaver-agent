@@ -19,7 +19,7 @@ import (
 
 var storagePathSlug = regexp.MustCompile(`[^a-z0-9]+`)
 
-func (s *Server) machinesLocation(id string) (location locations.Location, problem string) {
+func (s *Server) machinesLocation(id string) (location locations.Location, reason string) {
 	if id == "" {
 		found, ok := s.storage.Default(locations.Machines)
 		if !ok {

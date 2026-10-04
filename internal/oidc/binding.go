@@ -23,13 +23,15 @@ type stateFile struct {
 	BoundSubject    string                `json:"bound_subject"`
 	BoundEmail      string                `json:"bound_email"`
 	BoundCustomerID string                `json:"bound_customer_id"`
-	RefreshToken    string                `json:"refresh_token,omitempty"`
 	MintedKeys      map[int64]KeyIdentity `json:"minted_keys"`
 }
+
+const refreshTokenFile = "oidc.refresh"
 
 type binding struct {
 	mu           sync.Mutex
 	storePath    string
+	refreshPath  string
 	allowedUsers []string
 	subject      string
 	email        string
@@ -39,7 +41,12 @@ type binding struct {
 }
 
 func newBinding(storePath string, allowedUsers []string, load bool) *binding {
-	b := &binding{storePath: storePath, allowedUsers: allowedUsers, mintedKeys: map[int64]KeyIdentity{}}
+	b := &binding{
+		storePath:    storePath,
+		refreshPath:  filepath.Join(filepath.Dir(storePath), refreshTokenFile),
+		allowedUsers: allowedUsers,
+		mintedKeys:   map[int64]KeyIdentity{},
+	}
 	if !load {
 		return b
 	}
@@ -51,8 +58,8 @@ func newBinding(storePath string, allowedUsers []string, load bool) *binding {
 	b.subject = state.BoundSubject
 	b.email = state.BoundEmail
 	b.customerID = state.BoundCustomerID
-	b.refreshToken = state.RefreshToken
 	b.mintedKeys = state.MintedKeys
+	b.refreshToken = loadRefreshToken(b.refreshPath)
 	return b
 }
 
@@ -69,11 +76,11 @@ func (b *binding) setRefreshToken(token string) {
 		return
 	}
 	b.refreshToken = token
-	b.saveLocked()
+	b.saveRefreshTokenLocked()
 }
 
 func loadState(path string) (*stateFile, error) {
-	raw, err := os.ReadFile(filepath.Clean(path))
+	raw, err := safepath.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
 		return &stateFile{MintedKeys: map[int64]KeyIdentity{}}, nil
 	}
@@ -90,12 +97,38 @@ func loadState(path string) (*stateFile, error) {
 	return state, nil
 }
 
+func loadRefreshToken(path string) string {
+	raw, err := safepath.ReadFile(path)
+	if err != nil {
+		if !errors.Is(err, os.ErrNotExist) {
+			slog.Warn("oidc refresh token unreadable", "path", path, "error", err)
+		}
+		return ""
+	}
+	return strings.TrimSpace(string(raw))
+}
+
+func (b *binding) saveRefreshTokenLocked() {
+	if b.refreshToken == "" {
+		if err := os.Remove(b.refreshPath); err != nil && !errors.Is(err, os.ErrNotExist) {
+			slog.Error("oidc refresh token removal failed", "error", err)
+		}
+		return
+	}
+	if err := os.MkdirAll(filepath.Dir(b.refreshPath), 0o700); err != nil {
+		slog.Error("oidc refresh token save failed", "error", err)
+		return
+	}
+	if err := safepath.WriteFile(b.refreshPath, []byte(b.refreshToken), 0o600); err != nil {
+		slog.Error("oidc refresh token save failed", "error", err)
+	}
+}
+
 func (b *binding) saveLocked() {
 	state := &stateFile{
 		BoundSubject:    b.subject,
 		BoundEmail:      b.email,
 		BoundCustomerID: b.customerID,
-		RefreshToken:    b.refreshToken,
 		MintedKeys:      b.mintedKeys,
 	}
 	raw, err := json.MarshalIndent(state, "", "  ")

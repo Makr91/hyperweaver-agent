@@ -170,47 +170,50 @@ func (s *Service) CollectOnce(ctx context.Context) map[string]string {
 	failed := ""
 
 	cpu, err := s.sampler.SampleCPU(ctx)
-	if err != nil {
+	switch {
+	case err != nil:
 		results["cpu"] = "failed: " + err.Error()
 		failed = err.Error()
-	} else if s.store != nil {
+	case s.store != nil:
 		if ierr := s.store.InsertCPU(ctx, cpu); ierr != nil {
 			results["cpu"] = "store failed: " + ierr.Error()
 			failed = ierr.Error()
 		} else {
 			results["cpu"] = "collected"
 		}
-	} else {
+	default:
 		results["cpu"] = "sampled"
 	}
 
 	memory, err := s.sampler.SampleMemory(ctx)
-	if err != nil {
+	switch {
+	case err != nil:
 		results["memory"] = "failed: " + err.Error()
 		failed = err.Error()
-	} else if s.store != nil {
+	case s.store != nil:
 		if ierr := s.store.InsertMemory(ctx, memory); ierr != nil {
 			results["memory"] = "store failed: " + ierr.Error()
 			failed = ierr.Error()
 		} else {
 			results["memory"] = "collected"
 		}
-	} else {
+	default:
 		results["memory"] = "sampled"
 	}
 
 	network, err := s.sampler.SampleNetwork(ctx)
-	if err != nil {
+	switch {
+	case err != nil:
 		results["network"] = "failed: " + err.Error()
 		failed = err.Error()
-	} else if s.store != nil {
+	case s.store != nil:
 		if ierr := s.store.InsertNetwork(ctx, network); ierr != nil {
 			results["network"] = "store failed: " + ierr.Error()
 			failed = ierr.Error()
 		} else {
 			results["network"] = "collected"
 		}
-	} else {
+	default:
 		results["network"] = "sampled"
 	}
 

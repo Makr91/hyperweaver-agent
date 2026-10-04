@@ -52,11 +52,7 @@ func (s *Server) handleGuestAgentSetup(w http.ResponseWriter, r *http.Request) {
 		taskError(w, http.StatusInternalServerError, "Failed to read machine state")
 		return
 	}
-	pipe, err := s.machineQGAPipe(machine)
-	if err != nil {
-		taskError(w, http.StatusInternalServerError, "Failed to resolve the guest-agent channel")
-		return
-	}
+	pipe := s.machineQGAPipe(machine)
 
 	doc := map[string]any{
 		"vbox": map[string]any{

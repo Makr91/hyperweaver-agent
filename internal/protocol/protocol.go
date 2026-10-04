@@ -21,8 +21,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
-	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -87,7 +85,7 @@ func URIFromArgs(args []string) (string, bool) {
 
 // ParseAction validates an incoming protocol URI (untrusted input) against
 // the closed action vocabulary and returns the action and its raw query.
-func ParseAction(uri string) (string, string, error) {
+func ParseAction(uri string) (action, query string, err error) {
 	parsed, err := url.Parse(uri)
 	if err != nil {
 		return "", "", fmt.Errorf("invalid protocol URI: %w", err)
@@ -98,15 +96,15 @@ func ParseAction(uri string) (string, string, error) {
 	if parsed.User != nil || parsed.Port() != "" || parsed.Fragment != "" {
 		return "", "", errors.New("protocol URI carries userinfo, a port or a fragment")
 	}
-	action := strings.ToLower(parsed.Hostname())
+	action = strings.ToLower(parsed.Hostname())
 	if action != ActionOpen {
 		return "", "", fmt.Errorf("unsupported protocol action %q", parsed.Host)
 	}
 	if parsed.Path != "" && parsed.Path != "/" {
 		return "", "", fmt.Errorf("unsupported protocol path %q", parsed.Path)
 	}
-	if err := ValidateQuery(parsed.RawQuery); err != nil {
-		return "", "", err
+	if verr := ValidateQuery(parsed.RawQuery); verr != nil {
+		return "", "", verr
 	}
 	return action, parsed.RawQuery, nil
 }
@@ -157,11 +155,7 @@ func WriteSecret(path string) error {
 // for this user (cold start is appropriate); a permission error means an
 // agent runs as a different user (its secret is 0600).
 func ReadSecret(path string) (string, error) {
-	clean, err := safepath.CleanAbs(path)
-	if err != nil {
-		return "", err
-	}
-	raw, err := os.ReadFile(filepath.Clean(clean))
+	raw, err := safepath.ReadFile(path)
 	if err != nil {
 		return "", err
 	}

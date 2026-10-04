@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"html"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -44,7 +45,7 @@ type eventSubscriber struct {
 	frames    chan []byte
 }
 
-func (e eventEntry) reaches(subscriber *eventSubscriber) bool {
+func (e *eventEntry) reaches(subscriber *eventSubscriber) bool {
 	return subscriber.topics[e.topic] && (e.recipient == "" || e.recipient == subscriber.principal)
 }
 
@@ -137,7 +138,7 @@ func eventFrame(id, event string, data any) ([]byte, error) {
 func requestedEventTopics(query string, admin bool) map[string]bool {
 	requested := map[string]bool{}
 	for _, name := range strings.Split(query, ",") {
-		name = strings.TrimSpace(name)
+		name = html.EscapeString(strings.TrimSpace(name))
 		for _, topic := range eventTopics {
 			if name == topic {
 				requested[topic] = true
@@ -225,12 +226,12 @@ func (h *eventHub) replay(subscriber *eventSubscriber, lastEventID string) [][]b
 	return frames
 }
 
-func (h *eventHub) subscribe(topics map[string]bool, principal, lastEventID string) (*eventSubscriber, [][]byte) {
+func (h *eventHub) subscribe(topics map[string]bool, principal, lastEventID string) (subscriber *eventSubscriber, opening [][]byte) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
 	id := h.nextID()
-	opening := [][]byte{}
+	opening = [][]byte{}
 	ready, err := eventFrame(id, "ready", eventReady{ID: id, Topics: subscribedTopics(topics)})
 	if err != nil {
 		slog.Error("serialize event", "event", "ready", "error", err)
@@ -238,7 +239,7 @@ func (h *eventHub) subscribe(topics map[string]bool, principal, lastEventID stri
 		retry := []byte("retry: " + strconv.Itoa(eventRetryMS) + "\n")
 		opening = append(opening, append(retry, ready...))
 	}
-	subscriber := &eventSubscriber{topics: topics, principal: principal, frames: make(chan []byte, eventBacklog)}
+	subscriber = &eventSubscriber{topics: topics, principal: principal, frames: make(chan []byte, eventBacklog)}
 	opening = append(opening, h.replay(subscriber, lastEventID)...)
 
 	h.subscribers[subscriber] = struct{}{}
@@ -310,7 +311,7 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	subscriber, opening := s.events.subscribe(topics, s.personOf(identity), r.Header.Get("Last-Event-ID"))
+	subscriber, opening := s.events.subscribe(topics, s.personOf(identity), html.EscapeString(r.Header.Get("Last-Event-ID")))
 	defer s.events.unsubscribe(subscriber)
 
 	write := func(frame []byte) bool {

@@ -1,3 +1,4 @@
+// Package problem writes RFC 9457 problem documents: the registry types, the rule errors with their pointers, and the sentences a rule renders.
 package problem
 
 import (

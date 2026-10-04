@@ -108,8 +108,8 @@ func probeRunningAgent(selfClient *http.Client, baseURL string) bool {
 // process should exit); false means no agent answered and startup should
 // continue, completing the action once the server is up. The query is the
 // link's, validated, for the cold-start open.
-func handleProtocolInvocation(cfg *config.Config, selfClient *http.Client, uri string) (bool, string, error) {
-	_, query, err := protocol.ParseAction(uri)
+func handleProtocolInvocation(cfg *config.Config, selfClient *http.Client, uri string) (delivered bool, query string, err error) {
+	_, query, err = protocol.ParseAction(uri)
 	if err != nil {
 		return false, "", err
 	}

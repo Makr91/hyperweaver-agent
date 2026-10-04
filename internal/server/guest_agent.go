@@ -40,7 +40,7 @@ func (s *Server) guestAgentGate(handler http.HandlerFunc) http.Handler {
 // machineQGAPipe answers a machine's channel address: the working directory
 // anchors the Unix socket path; Windows pipes derive from the name alone —
 // the same inputs the create wiring used, so they can never disagree.
-func (s *Server) machineQGAPipe(machine *machines.Machine) (string, error) {
+func (s *Server) machineQGAPipe(machine *machines.Machine) string {
 	workdir := ""
 	if machine.Home != nil {
 		workdir = *machine.Home
@@ -49,7 +49,7 @@ func (s *Server) machineQGAPipe(machine *machines.Machine) (string, error) {
 		workdir = filepath.Join(s.storage.DefaultPath(locations.Machines),
 			provisioner.MachineDirName(machine.Name))
 	}
-	return qga.PipePath(workdir, machine.Name), nil
+	return qga.PipePath(workdir, machine.Name)
 }
 
 // guestAgentIP answers the machine's live IPv4 through the guest agent ("" on
@@ -77,10 +77,7 @@ func (s *Server) guestAgentIP(ctx context.Context, machine *machines.Machine) st
 	if !s.cfg.GuestAgent.Enabled {
 		return ""
 	}
-	pipe, err := s.machineQGAPipe(machine)
-	if err != nil {
-		return ""
-	}
+	pipe := s.machineQGAPipe(machine)
 	probeCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
 	ips, err := qga.GuestIPv4s(probeCtx, pipe)
@@ -99,11 +96,7 @@ func (s *Server) guestCommand(w http.ResponseWriter, r *http.Request,
 		taskError(w, http.StatusBadRequest, "Machine is not running")
 		return nil, nil
 	}
-	pipe, err := s.machineQGAPipe(machine)
-	if err != nil {
-		taskError(w, http.StatusInternalServerError, "Failed to resolve the guest-agent channel")
-		return nil, nil
-	}
+	pipe := s.machineQGAPipe(machine)
 	ctx, cancel := context.WithTimeout(r.Context(), timeout)
 	defer cancel()
 	result, err := qga.Do(ctx, pipe, execute, arguments)

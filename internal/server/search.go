@@ -457,12 +457,13 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 
 	found := []searchResult{}
 	if searchInScope(scope) {
-		for _, entry := range s.searchEntries(r.Context(), wanted, identity.Role == "admin") {
-			match, ok := matchSearchFields(entry.fields, words)
+		entries := s.searchEntries(r.Context(), wanted, identity.Role == "admin")
+		for i := range entries {
+			match, ok := matchSearchFields(entries[i].fields, words)
 			if !ok {
 				continue
 			}
-			row := entry.row
+			row := entries[i].row
 			row.Score = match.score
 			row.Matched = match.matched
 			row.Highlight = match.highlight
@@ -479,9 +480,9 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		rows := []searchResult{}
-		for _, row := range found {
-			if row.Kind == kind {
-				rows = append(rows, row)
+		for i := range found {
+			if found[i].Kind == kind {
+				rows = append(rows, found[i])
 			}
 		}
 		if len(rows) == 0 {

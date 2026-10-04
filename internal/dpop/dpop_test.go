@@ -35,15 +35,19 @@ func newSigner(t *testing.T) *signer {
 	if err != nil {
 		t.Fatal(err)
 	}
+	uncompressed, err := key.PublicKey.Bytes()
+	if err != nil {
+		t.Fatal(err)
+	}
 	jwk := &JWK{
 		Kty: "EC", Crv: "P-256",
-		X: base64.RawURLEncoding.EncodeToString(pad32(key.PublicKey.X)),
-		Y: base64.RawURLEncoding.EncodeToString(pad32(key.PublicKey.Y)),
+		X: base64.RawURLEncoding.EncodeToString(uncompressed[1:33]),
+		Y: base64.RawURLEncoding.EncodeToString(uncompressed[33:65]),
 	}
 	return &signer{key: key, jwk: jwk}
 }
 
-func (s *signer) proof(t *testing.T, head map[string]any, body map[string]any) string {
+func (s *signer) proof(t *testing.T, head, body map[string]any) string {
 	t.Helper()
 	if head == nil {
 		head = map[string]any{"typ": "dpop+jwt", "alg": "ES256", "jwk": s.jwk}

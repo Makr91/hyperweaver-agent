@@ -3009,29 +3009,6 @@
                 },
                 "type": "object"
             },
-            "server.favoriteEntry": {
-                "properties": {
-                    "client_id": {
-                        "type": "string"
-                    },
-                    "client_name": {
-                        "type": "string"
-                    },
-                    "custom_label": {
-                        "type": "string"
-                    },
-                    "home_url": {
-                        "type": "string"
-                    },
-                    "icon_url": {
-                        "type": "string"
-                    },
-                    "order": {
-                        "type": "integer"
-                    }
-                },
-                "type": "object"
-            },
             "server.favoriteWrite": {
                 "properties": {
                     "client_id": {
@@ -5352,67 +5329,6 @@
             "server.nextServerIDResponse": {
                 "properties": {
                     "server_id": {
-                        "type": "string"
-                    }
-                },
-                "type": "object"
-            },
-            "server.notificationPage": {
-                "properties": {
-                    "items": {
-                        "items": {
-                            "$ref": "#/components/schemas/server.notificationRow"
-                        },
-                        "type": "array",
-                        "uniqueItems": false
-                    },
-                    "page": {
-                        "type": "integer"
-                    },
-                    "size": {
-                        "type": "integer"
-                    },
-                    "total": {
-                        "type": "integer"
-                    },
-                    "total_pages": {
-                        "type": "integer"
-                    }
-                },
-                "type": "object"
-            },
-            "server.notificationRow": {
-                "properties": {
-                    "body": {
-                        "items": {
-                            "type": "integer"
-                        },
-                        "type": "array",
-                        "uniqueItems": false
-                    },
-                    "created_at": {
-                        "type": "string"
-                    },
-                    "id": {
-                        "type": "string"
-                    },
-                    "navigate": {
-                        "type": "string"
-                    },
-                    "read_at": {
-                        "type": "string"
-                    },
-                    "severity": {
-                        "type": "string"
-                    },
-                    "title": {
-                        "items": {
-                            "type": "integer"
-                        },
-                        "type": "array",
-                        "uniqueItems": false
-                    },
-                    "type": {
                         "type": "string"
                     }
                 },
@@ -16694,11 +16610,12 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "$ref": "#/components/schemas/server.notificationPage"
+                                    "additionalProperties": {},
+                                    "type": "object"
                                 }
                             }
                         },
-                        "description": "The page of rows"
+                        "description": "The page: {items: [{id, title, body, type, severity, navigate, read_at, created_at}], page, size, total, total_pages}"
                     },
                     "404": {
                         "content": {
@@ -20679,13 +20596,14 @@
                             "application/json": {
                                 "schema": {
                                     "items": {
-                                        "$ref": "#/components/schemas/server.favoriteEntry"
+                                        "additionalProperties": {},
+                                        "type": "object"
                                     },
                                     "type": "array"
                                 }
                             }
                         },
-                        "description": "The ordered favorites"
+                        "description": "The ordered favorites, each {client_id, client_name, icon_url, home_url, custom_label, order}"
                     },
                     "404": {
                         "content": {
@@ -20753,13 +20671,14 @@
                             "application/json": {
                                 "schema": {
                                     "items": {
-                                        "$ref": "#/components/schemas/server.favoriteEntry"
+                                        "additionalProperties": {},
+                                        "type": "object"
                                     },
                                     "type": "array"
                                 }
                             }
                         },
-                        "description": "The favorites as stored"
+                        "description": "The favorites as stored, each {client_id, client_name, icon_url, home_url, custom_label, order}"
                     },
                     "400": {
                         "content": {
