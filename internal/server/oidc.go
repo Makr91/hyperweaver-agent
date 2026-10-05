@@ -94,6 +94,7 @@ type silentStartResponse struct {
 type codeStartResponse struct {
 	Handle       string `json:"handle"`
 	AuthorizeURL string `json:"authorize_url"`
+	ManualURL    string `json:"manual_url"`
 	ExpiresIn    int    `json:"expires_in"`
 }
 
@@ -212,7 +213,7 @@ func (s *Server) handleOIDCSilentStart(w http.ResponseWriter, r *http.Request) {
 }
 
 // @Summary		Start a federated code login
-// @Description	Public, rate-limited (shared with device-start: 6 per source address per minute). The RFC 8252 authorization-code login beside the device grant (features advertises it as oidc-code while oidc.enabled): mints state, a PKCE S256 verifier and an agent-side handle, and answers the issuer's interactive authorize URL (no prompt=none) the UI opens in a new tab. A request from a loopback peer names this agent's GET /api/auth/oidc/callback as redirect_uri, so the browser lands back here and the login completes by itself; any other peer names the issuer's /oauth2/code page, where the person copies the shown code (code#state) and pastes it into POST /api/auth/oidc/code. Either way the UI learns the outcome through the held GET /api/auth/oidc/device-status with the handle, exactly as for the device grant; expires_in is the flow's life in seconds and the agent never polls the issuer for it.
+// @Description	Public, rate-limited (shared with device-start: 6 per source address per minute). The RFC 8252 authorization-code login beside the device grant (features advertises it as oidc-code while oidc.enabled): mints state, a PKCE S256 verifier and an agent-side handle, and answers two interactive authorize URLs (no prompt=none) carrying that one state and PKCE challenge. manual_url names the issuer's /oauth2/code page as redirect_uri on every call, where the person copies the shown code (code#state) and pastes it into POST /api/auth/oidc/code; the UI draws it as the copyable fallback. authorize_url, the one the UI opens in a new tab, names this agent's GET /api/auth/oidc/callback as redirect_uri for a loopback peer, so the browser lands back here and the login completes by itself, and equals manual_url for any other peer. Either way the UI learns the outcome through the held GET /api/auth/oidc/device-status with the handle, exactly as for the device grant; expires_in is the flow's life in seconds and the agent never polls the issuer for it.
 // @Tags			Local Login
 // @Produce		json
 // @Success		200	{object}	codeStartResponse	"Code login started"
@@ -229,13 +230,13 @@ func (s *Server) handleOIDCCodeStart(w http.ResponseWriter, r *http.Request) {
 		taskError(w, http.StatusTooManyRequests, "Too many login attempts — try again in a minute")
 		return
 	}
-	handle, authorizeURL, expiresIn, err := s.oidcMgr.StartCode(r.Context(), remoteIsLoopback(r.RemoteAddr))
+	handle, authorizeURL, manualURL, expiresIn, err := s.oidcMgr.StartCode(r.Context(), remoteIsLoopback(r.RemoteAddr))
 	if err != nil {
 		slog.Warn("oidc code start failed", "error", err)
 		taskError(w, http.StatusBadGateway, "Identity provider unreachable: "+err.Error())
 		return
 	}
-	writeJSON(w, codeStartResponse{Handle: handle, AuthorizeURL: authorizeURL, ExpiresIn: expiresIn})
+	writeJSON(w, codeStartResponse{Handle: handle, AuthorizeURL: authorizeURL, ManualURL: manualURL, ExpiresIn: expiresIn})
 }
 
 // @Summary		Redeem a pasted federated login code

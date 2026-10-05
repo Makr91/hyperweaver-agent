@@ -168,8 +168,8 @@ func (m *Manager) ExchangeSilent(ctx context.Context, state, code string) (*Cred
 	return m.client.exchangeSilent(ctx, state, code)
 }
 
-// StartCode mints a state, PKCE verifier and handle for an interactive code login and answers the handle, the authorize URL and the seconds until it expires.
-func (m *Manager) StartCode(ctx context.Context, loopback bool) (handle, authorizeURL string, expiresIn int, err error) {
+// StartCode mints a state, PKCE verifier and handle for an interactive code login and answers the handle, the authorize URL, the manual URL whose redirect_uri is the issuer's code page, and the seconds until it expires.
+func (m *Manager) StartCode(ctx context.Context, loopback bool) (handle, authorizeURL, manualURL string, expiresIn int, err error) {
 	return m.client.startCode(ctx, loopback)
 }
 

@@ -18,35 +18,33 @@ var (
 
 type codeFlow struct {
 	verifier    string
-	redirectURI string
+	callbackURI string
+	codePageURI string
 	handle      string
 	expiresAt   time.Time
 }
 
-func (c *client) startCode(ctx context.Context, loopback bool) (handle, authorizeURL string, expiresIn int, err error) {
+func (c *client) startCode(ctx context.Context, loopback bool) (handle, authorizeURL, manualURL string, expiresIn int, err error) {
 	endpoints, err := c.provider.endpoints(ctx)
 	if err != nil {
-		return "", "", 0, err
+		return "", "", "", 0, err
 	}
 	if endpoints.Authorization == "" {
-		return "", "", 0, errors.New("issuer discovery document carries no authorization_endpoint")
+		return "", "", "", 0, errors.New("issuer discovery document carries no authorization_endpoint")
 	}
 	verifier, challenge, err := pkcePair()
 	if err != nil {
-		return "", "", 0, err
+		return "", "", "", 0, err
 	}
 	state, err := randomHex()
 	if err != nil {
-		return "", "", 0, err
+		return "", "", "", 0, err
 	}
 	handle, err = randomHex()
 	if err != nil {
-		return "", "", 0, err
+		return "", "", "", 0, err
 	}
-	redirectURI := c.redirectURI
-	if !loopback {
-		redirectURI = strings.TrimRight(c.provider.issuer, "/") + "/oauth2/code"
-	}
+	codePageURI := strings.TrimRight(c.provider.issuer, "/") + "/oauth2/code"
 	now := time.Now()
 	expiresAt := now.Add(silentTTL)
 
@@ -57,7 +55,13 @@ func (c *client) startCode(ctx context.Context, loopback bool) (handle, authoriz
 		}
 	}
 	c.sweepFlowsLocked()
-	c.codeFlows[state] = &codeFlow{verifier: verifier, redirectURI: redirectURI, handle: handle, expiresAt: expiresAt}
+	c.codeFlows[state] = &codeFlow{
+		verifier:    verifier,
+		callbackURI: c.redirectURI,
+		codePageURI: codePageURI,
+		handle:      handle,
+		expiresAt:   expiresAt,
+	}
 	c.flows[handle] = &flow{
 		status:    StatusPending,
 		expiresAt: expiresAt,
@@ -66,16 +70,24 @@ func (c *client) startCode(ctx context.Context, loopback bool) (handle, authoriz
 	}
 	c.mu.Unlock()
 
-	query := url.Values{
-		"response_type":         {"code"},
-		"client_id":             {c.clientID},
-		"redirect_uri":          {redirectURI},
-		"scope":                 {c.scope},
-		"state":                 {state},
-		"code_challenge":        {challenge},
-		"code_challenge_method": {"S256"},
+	authorize := func(redirectURI string) string {
+		query := url.Values{
+			"response_type":         {"code"},
+			"client_id":             {c.clientID},
+			"redirect_uri":          {redirectURI},
+			"scope":                 {c.scope},
+			"state":                 {state},
+			"code_challenge":        {challenge},
+			"code_challenge_method": {"S256"},
+		}
+		return endpoints.Authorization + "?" + query.Encode()
 	}
-	return handle, endpoints.Authorization + "?" + query.Encode(), int(silentTTL / time.Second), nil
+	manualURL = authorize(codePageURI)
+	authorizeURL = manualURL
+	if loopback {
+		authorizeURL = authorize(c.redirectURI)
+	}
+	return handle, authorizeURL, manualURL, int(silentTTL / time.Second), nil
 }
 
 func (c *client) codeFlowHandle(state string) (string, bool) {
@@ -106,7 +118,7 @@ func (c *client) exchangeCodeFlow(ctx context.Context, state, code string) (*Cre
 	if pending == nil || time.Now().After(pending.expiresAt) {
 		return nil, errors.New("unknown or expired state")
 	}
-	credential, _, err := c.redeemCodeFlow(ctx, pending, code)
+	credential, _, err := c.redeemCodeFlow(ctx, pending, code, pending.callbackURI)
 	return credential, err
 }
 
@@ -139,12 +151,12 @@ func (c *client) submitCode(ctx context.Context, handle, code, state string) (st
 	}
 	delete(c.codeFlows, key)
 	c.mu.Unlock()
-	_, status, _ := c.redeemCodeFlow(ctx, pending, code)
+	_, status, _ := c.redeemCodeFlow(ctx, pending, code, pending.codePageURI)
 	return status, nil
 }
 
-func (c *client) redeemCodeFlow(ctx context.Context, pending *codeFlow, code string) (*Credential, string, error) {
-	credential, err := c.redeemCode(ctx, code, pending.redirectURI, pending.verifier)
+func (c *client) redeemCodeFlow(ctx context.Context, pending *codeFlow, code, redirectURI string) (*Credential, string, error) {
+	credential, err := c.redeemCode(ctx, code, redirectURI, pending.verifier)
 	if err != nil {
 		status := StatusFailed
 		if errors.Is(err, errNotAllowed) {
