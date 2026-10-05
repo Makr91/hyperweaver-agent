@@ -97,6 +97,7 @@ type updateCheckResponse struct {
 	ReleaseURL      any    `json:"release_url"`
 	ReleaseDate     any    `json:"release_date"`
 	Changelog       any    `json:"changelog"`
+	ReleaseNotes    any    `json:"release_notes"`
 }
 
 func updateUnknown(reason string) updateCheckResponse {
@@ -112,7 +113,7 @@ func updateUnknown(reason string) updateCheckResponse {
 // the configured versioninfo document and compare against the running build.
 //
 //	@Summary		Check for application updates
-//	@Description	Minimum role: viewer. Fetches the configured versioninfo document (updates.versioninfo_url) and compares against the running build. When no URL is configured or the document cannot be fetched or read, the answer is still 200 with update_available false, latest_version null and the reason in message, so a page never draws a failure for a check it could not make.
+//	@Description	Minimum role: viewer. Fetches the configured versioninfo document (updates.versioninfo_url) and compares against the running build; release_url, release_date, changelog and release_notes, the release's own text, come from the document, null when it carries none. When no URL is configured or the document cannot be fetched or read, the answer is still 200 with update_available false, latest_version null and the reason in message, so a page never draws a failure for a check it could not make. A check that finds a newer release, this one or the scheduled one every updates.check_interval_hours, writes one row to the bound person's inbox, once per version, and sends update-available on the admin topic of the event stream.
 //	@Tags			System
 //	@Produce		json
 //	@Success		200	{object}	updateCheckResponse	"Update check result"
@@ -130,6 +131,9 @@ func (s *Server) handleUpdateCheck(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, updateUnknown("Failed to check for updates: "+err.Error()))
 		return
 	}
+	if available {
+		s.announceUpdate(info)
+	}
 
 	writeJSON(w, updateCheckResponse{
 		Success:         true,
@@ -141,6 +145,7 @@ func (s *Server) handleUpdateCheck(w http.ResponseWriter, r *http.Request) {
 		ReleaseURL:      nullable(info.ReleaseURL),
 		ReleaseDate:     nullable(info.ReleaseDate),
 		Changelog:       nullable(info.Changelog),
+		ReleaseNotes:    nullable(info.ReleaseNotes),
 	})
 }
 

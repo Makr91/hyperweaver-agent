@@ -68,6 +68,7 @@ func New(cfg *config.Config, keyStore *keys.Store) *Manager {
 		keyLength:   cfg.APIKeys.KeyLength,
 		flows:       map[string]*flow{},
 		silent:      map[string]*silentFlow{},
+		codeFlows:   map[string]*codeFlow{},
 	}
 	if m.enabled {
 		m.tokens.resume(m.binding.storedRefreshToken())
@@ -165,4 +166,29 @@ func (m *Manager) StartSilent(ctx context.Context) (string, error) {
 // ExchangeSilent trades the callback's code for tokens with the held verifier and completes the login.
 func (m *Manager) ExchangeSilent(ctx context.Context, state, code string) (*Credential, error) {
 	return m.client.exchangeSilent(ctx, state, code)
+}
+
+// StartCode mints a state, PKCE verifier and handle for an interactive code login and answers the handle, the authorize URL and the seconds until it expires.
+func (m *Manager) StartCode(ctx context.Context, loopback bool) (handle, authorizeURL string, expiresIn int, err error) {
+	return m.client.startCode(ctx, loopback)
+}
+
+// CodeFlowHandle answers the handle of the code login a callback state belongs to, false for any other state.
+func (m *Manager) CodeFlowHandle(state string) (string, bool) {
+	return m.client.codeFlowHandle(state)
+}
+
+// RefuseCode forgets a code login's state and settles its handle as denied or failed.
+func (m *Manager) RefuseCode(state, status string) {
+	m.client.refuseCode(state, status)
+}
+
+// ExchangeCode trades the callback's code for tokens with the flow's verifier, completes the login and settles its handle.
+func (m *Manager) ExchangeCode(ctx context.Context, state, code string) (*Credential, error) {
+	return m.client.exchangeCodeFlow(ctx, state, code)
+}
+
+// SubmitCode redeems a pasted code against a pending handle, state being the pasted one or empty, and answers the settled status.
+func (m *Manager) SubmitCode(ctx context.Context, handle, code, state string) (string, error) {
+	return m.client.submitCode(ctx, handle, code, state)
 }

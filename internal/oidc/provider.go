@@ -123,6 +123,9 @@ func discover(ctx context.Context, issuer string) (*providerEndpoints, error) {
 	if derr := json.NewDecoder(io.LimitReader(response.Body, 1<<20)).Decode(endpoints); derr != nil {
 		return nil, fmt.Errorf("discovery document unreadable: %w", derr)
 	}
+	if strings.TrimSuffix(endpoints.Issuer, "/") != strings.TrimSuffix(issuer, "/") {
+		return nil, fmt.Errorf("issuer %s discovery document names issuer %s", issuer, endpoints.Issuer)
+	}
 	if endpoints.DeviceAuthorization == "" {
 		return nil, fmt.Errorf("issuer %s does not advertise a device_authorization_endpoint", issuer)
 	}

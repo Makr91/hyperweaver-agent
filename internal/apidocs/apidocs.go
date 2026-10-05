@@ -177,6 +177,8 @@ var publicPaths = []string{
 	"/api/auth/oidc/device-start",
 	"/api/auth/oidc/device-status",
 	"/api/auth/oidc/silent-start",
+	"/api/auth/oidc/code-start",
+	"/api/auth/oidc/code",
 	"/api/auth/oidc/callback",
 	"/api/protocol/open",
 	"/api/protocol/handoff",

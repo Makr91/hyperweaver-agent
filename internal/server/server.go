@@ -19,6 +19,7 @@ import (
 	"github.com/Makr91/hyperweaver-agent/internal/provisioner"
 	"github.com/Makr91/hyperweaver-agent/internal/secrets"
 	"github.com/Makr91/hyperweaver-agent/internal/tasks"
+	"github.com/Makr91/hyperweaver-agent/internal/updater"
 )
 
 // Server is the agent's HTTP (and optional HTTPS) server.
@@ -36,6 +37,7 @@ type Server struct {
 	assets         *assets.Store
 	artifactSvc    *assets.Service
 	monitor        *monitoring.Service
+	updates        *updater.Service
 	dbs            []DBHandle
 	wsTickets      *wsTickets
 	sshSessions    *sshSessions
@@ -65,6 +67,9 @@ type Server struct {
 	successorExpected bool
 	released          chan struct{}
 
+	updateMu        sync.Mutex
+	updateAnnounced string
+
 	// openUI opens the signed-in UI in the user's browser — the same action a
 	// tray Open click performs, injected by main so the hwa:// protocol
 	// handoff (POST /api/protocol/open) shares it exactly.
@@ -91,7 +96,7 @@ func (s *Server) markUnread(unread bool) {
 }
 
 // New builds the server and its routes.
-func New(cfg *config.Config, keyStore *keys.Store, trayTokens *auth.TrayTokens, taskQueue *tasks.Queue, machineStore *machines.Store, provisioners *provisioner.Registry, storage *locations.Set, secretsStore *secrets.Store, assetsStore *assets.Store, artifactSvc *assets.Service, monitor *monitoring.Service, dbs []DBHandle, restartArgs []string, teardown func(), openUI func(query string)) (*Server, error) {
+func New(cfg *config.Config, keyStore *keys.Store, trayTokens *auth.TrayTokens, taskQueue *tasks.Queue, machineStore *machines.Store, provisioners *provisioner.Registry, storage *locations.Set, secretsStore *secrets.Store, assetsStore *assets.Store, artifactSvc *assets.Service, monitor *monitoring.Service, updates *updater.Service, dbs []DBHandle, restartArgs []string, teardown func(), openUI func(query string)) (*Server, error) {
 	s := &Server{
 		cfg:            cfg,
 		keys:           keyStore,
@@ -104,6 +109,7 @@ func New(cfg *config.Config, keyStore *keys.Store, trayTokens *auth.TrayTokens, 
 		assets:         assetsStore,
 		artifactSvc:    artifactSvc,
 		monitor:        monitor,
+		updates:        updates,
 		dbs:            dbs,
 		wsTickets:      newWsTickets(),
 		sshSessions:    newSSHSessions(),
@@ -124,6 +130,7 @@ func New(cfg *config.Config, keyStore *keys.Store, trayTokens *auth.TrayTokens, 
 	taskQueue.Store().Notify = s.publishTask
 	machineStore.Notify = s.publishStats
 	monitor.SetOnCollected(s.publishSamples)
+	updates.SetOnNewer(s.announceUpdate)
 
 	mux := http.NewServeMux()
 	if err := s.registerRoutes(mux); err != nil {

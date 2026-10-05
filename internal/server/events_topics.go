@@ -3,12 +3,20 @@ package server
 import (
 	"github.com/Makr91/hyperweaver-agent/internal/configengine"
 	"github.com/Makr91/hyperweaver-agent/internal/monitoring"
+	"github.com/Makr91/hyperweaver-agent/internal/updater"
+	"github.com/Makr91/hyperweaver-agent/internal/version"
 )
 
 type restartRequiredEvent struct {
 	Required         bool    `json:"required"`
 	LastModifiedBy   *string `json:"last_modified_by,omitempty"`
 	LastModifiedTime *string `json:"last_modified_time,omitempty"`
+}
+
+type updateAvailableEvent struct {
+	CurrentVersion string `json:"current_version"`
+	LatestVersion  string `json:"latest_version"`
+	ReleaseDate    any    `json:"release_date"`
 }
 
 type cpuSampleEvent struct {
@@ -37,6 +45,27 @@ func (s *Server) publishUnreadCount(person string, count int) {
 
 func (s *Server) publishRestartCleared() {
 	s.events.publish(eventTopicAdmin, "restart-required", restartRequiredEvent{Required: false})
+}
+
+func (s *Server) publishUpdateAvailable(info *updater.Info) {
+	s.events.publish(eventTopicAdmin, "update-available", updateAvailableEvent{
+		CurrentVersion: version.Version,
+		LatestVersion:  info.Version,
+		ReleaseDate:    nullable(info.ReleaseDate),
+	})
+}
+
+func (s *Server) announceUpdate(info *updater.Info) {
+	s.updateMu.Lock()
+	if s.updateAnnounced == info.Version {
+		s.updateMu.Unlock()
+		return
+	}
+	s.updateAnnounced = info.Version
+	s.updateMu.Unlock()
+	s.publishUpdateAvailable(info)
+	s.markUnread(true)
+	go s.notifyUpdateInbox(info.Version)
 }
 
 func (s *Server) publishSamples(cpu *monitoring.CPUSample, memory *monitoring.MemorySample, network []monitoring.NetworkSample) {

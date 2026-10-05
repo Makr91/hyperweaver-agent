@@ -1,11 +1,15 @@
 package server
 
 import (
+	"errors"
 	"log/slog"
 	"net"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
+
+	"github.com/Makr91/hyperweaver-agent/internal/oidc"
 )
 
 const (
@@ -85,6 +89,30 @@ type deviceStatusResponse struct {
 type silentStartResponse struct {
 	// The IdP authorize URL (response_type=code, loopback redirect_uri, S256 PKCE challenge, prompt=none) — navigate the browser here; the agent holds the state and verifier
 	AuthorizeURL string `json:"authorize_url"`
+}
+
+type codeStartResponse struct {
+	Handle       string `json:"handle"`
+	AuthorizeURL string `json:"authorize_url"`
+	ExpiresIn    int    `json:"expires_in"`
+}
+
+type codeExchangeRequest struct {
+	Handle string `json:"handle"`
+	Code   string `json:"code"`
+}
+
+type codeExchangeResponse struct {
+	Status string `json:"status"`
+}
+
+func remoteIsLoopback(remoteAddr string) bool {
+	host, _, err := net.SplitHostPort(remoteAddr)
+	if err != nil {
+		host = remoteAddr
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }
 
 // @Summary		Start a federated device login
@@ -183,13 +211,91 @@ func (s *Server) handleOIDCSilentStart(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, silentStartResponse{AuthorizeURL: authorizeURL})
 }
 
-// @Summary		Silent SSO callback
-// @Description	Browser redirect target of the silent authorize round-trip (registered at the IdP as the loopback redirect_uri) — never called by API clients. Benign IdP answers (login_required, interaction_required, consent_required, access_denied) and EVERY hard failure (unknown/expired state, exchange or validation error, non-bound account) all 302 to /login?sso=unavailable — silent must never strand the browser on an error page. On success the code is exchanged with the held PKCE verifier, the token validated (issuer JWKS, UUID-first identity, TOFU binding), the OIDC admin key minted, and the browser 302s to the /#tray= claim path carrying a single-use grant that answers THAT key — the tray-claim exchange the UI already speaks, now with a federated identity.
+// @Summary		Start a federated code login
+// @Description	Public, rate-limited (shared with device-start: 6 per source address per minute). The RFC 8252 authorization-code login beside the device grant (features advertises it as oidc-code while oidc.enabled): mints state, a PKCE S256 verifier and an agent-side handle, and answers the issuer's interactive authorize URL (no prompt=none) the UI opens in a new tab. A request from a loopback peer names this agent's GET /api/auth/oidc/callback as redirect_uri, so the browser lands back here and the login completes by itself; any other peer names the issuer's /oauth2/code page, where the person copies the shown code (code#state) and pastes it into POST /api/auth/oidc/code. Either way the UI learns the outcome through the held GET /api/auth/oidc/device-status with the handle, exactly as for the device grant; expires_in is the flow's life in seconds and the agent never polls the issuer for it.
 // @Tags			Local Login
-// @Param			state	query	string	false	"The flow id minted at silent-start"
+// @Produce		json
+// @Success		200	{object}	codeStartResponse	"Code login started"
+// @Failure		429	{object}	problem.Body	"Too many login attempts from this address"
+// @Failure		502	{object}	problem.Body	"Identity provider unreachable or without an authorization endpoint"
+// @Failure		503	{object}	problem.Body	"OIDC login is disabled"
+// @Router			/api/auth/oidc/code-start [post]
+func (s *Server) handleOIDCCodeStart(w http.ResponseWriter, r *http.Request) {
+	if !s.cfg.OIDC.Enabled {
+		taskError(w, http.StatusServiceUnavailable, "OIDC login is disabled")
+		return
+	}
+	if !s.oidcStarts.allow(r.RemoteAddr) {
+		taskError(w, http.StatusTooManyRequests, "Too many login attempts — try again in a minute")
+		return
+	}
+	handle, authorizeURL, expiresIn, err := s.oidcMgr.StartCode(r.Context(), remoteIsLoopback(r.RemoteAddr))
+	if err != nil {
+		slog.Warn("oidc code start failed", "error", err)
+		taskError(w, http.StatusBadGateway, "Identity provider unreachable: "+err.Error())
+		return
+	}
+	writeJSON(w, codeStartResponse{Handle: handle, AuthorizeURL: authorizeURL, ExpiresIn: expiresIn})
+}
+
+// @Summary		Redeem a pasted federated login code
+// @Description	Public, rate-limited (shared with device-start). The other-machine half of the code login: the body carries the code-start handle and the code the person copied from the issuer's /oauth2/code page, code#state when that page showed one. The flow must still be pending, and a state that rides along must be the flow's own. The agent exchanges the code with the flow's verifier, validates the token (issuer JWKS, UUID-first identity, TOFU binding), mints the OIDC admin key and settles the handle, then answers {status} alone — approved, denied (the account is not the bound one and not in oidc.allowed_users) or failed; the credential itself is delivered exactly once by the held GET /api/auth/oidc/device-status.
+// @Tags			Local Login
+// @Accept			json
+// @Produce		json
+// @Param			request	body		codeExchangeRequest		true	"The handle and the pasted code"
+// @Success		200		{object}	codeExchangeResponse	"The settled status"
+// @Failure		400		{object}	problem.Body			"Unreadable body, missing handle or code, or a state that is not the flow's"
+// @Failure		404		{object}	problem.Body			"Unknown login handle"
+// @Failure		409		{object}	problem.Body			"The login is no longer pending"
+// @Failure		429		{object}	problem.Body			"Too many attempts from this address"
+// @Failure		503		{object}	problem.Body			"OIDC login is disabled"
+// @Router			/api/auth/oidc/code [post]
+func (s *Server) handleOIDCCode(w http.ResponseWriter, r *http.Request) {
+	if !s.cfg.OIDC.Enabled {
+		taskError(w, http.StatusServiceUnavailable, "OIDC login is disabled")
+		return
+	}
+	if !s.oidcStarts.allow(r.RemoteAddr) {
+		taskError(w, http.StatusTooManyRequests, "Too many login attempts — try again in a minute")
+		return
+	}
+	var body codeExchangeRequest
+	if err := decodeBody(r, &body); err != nil {
+		taskError(w, http.StatusBadRequest, "Invalid JSON body")
+		return
+	}
+	code, state, _ := strings.Cut(strings.TrimSpace(body.Code), "#")
+	if body.Handle == "" || code == "" {
+		taskError(w, http.StatusBadRequest, "Login handle and code required")
+		return
+	}
+	status, err := s.oidcMgr.SubmitCode(r.Context(), body.Handle, code, state)
+	switch {
+	case errors.Is(err, oidc.ErrUnknownHandle):
+		taskError(w, http.StatusNotFound, "Unknown login handle")
+		return
+	case errors.Is(err, oidc.ErrFlowNotPending):
+		taskError(w, http.StatusConflict, "The login is no longer pending")
+		return
+	case errors.Is(err, oidc.ErrStateMismatch):
+		taskError(w, http.StatusBadRequest, "The pasted state does not belong to this login")
+		return
+	}
+	writeJSON(w, codeExchangeResponse{Status: status})
+}
+
+// @Summary		SSO callback
+// @Description	Browser redirect target of both authorize round-trips (registered at the IdP as the loopback redirect_uri) — never called by API clients. When iss rides along (RFC 9207) it must name the configured issuer. A state minted at silent-start takes the silent path: benign IdP answers (login_required, interaction_required, consent_required, access_denied) and EVERY hard failure (unknown/expired state, exchange or validation error, non-bound account) all 302 to /login?sso=unavailable — silent must never strand the browser on an error page. A state minted at code-start on a loopback peer takes the interactive path: error=access_denied settles the handle denied and any other error, iss mismatch or exchange failure settles it failed, each answered with a problem body on this tab while the UI's held GET /api/auth/oidc/device-status learns the status. On success, either path exchanges the code with the held PKCE verifier, validates the token (issuer JWKS, UUID-first identity, TOFU binding), mints the OIDC admin key, and 302s the browser to the /#tray= claim path carrying a single-use grant that answers THAT key — the tray-claim exchange the UI already speaks, now with a federated identity.
+// @Tags			Local Login
+// @Param			state	query	string	false	"The flow id minted at silent-start or code-start"
 // @Param			code	query	string	false	"The IdP's authorization code"
-// @Param			error	query	string	false	"The IdP's OAuth error (login_required and friends bounce benignly)"
-// @Success		302	"To /#tray=<one-time grant> on success; to /login?sso=unavailable otherwise"
+// @Param			iss		query	string	false	"The IdP's issuer identifier (RFC 9207), refused when it is not the configured one"
+// @Param			error	query	string	false	"The IdP's OAuth error (login_required and friends bounce benignly on the silent path)"
+// @Success		302	"To /#tray=<one-time grant> on success; to /login?sso=unavailable on a silent-path failure"
+// @Failure		400	{object}	problem.Body	"Code path: iss mismatch or no code"
+// @Failure		403	{object}	problem.Body	"Code path: the person denied the login at the IdP"
+// @Failure		502	{object}	problem.Body	"Code path: the IdP refused the login or the exchange failed"
 // @Router			/api/auth/oidc/callback [get]
 func (s *Server) handleOIDCCallback(w http.ResponseWriter, r *http.Request) {
 	unavailable := func() {
@@ -200,6 +306,17 @@ func (s *Server) handleOIDCCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	query := r.URL.Query()
+	iss := query.Get("iss")
+	issMismatch := iss != "" && strings.TrimRight(iss, "/") != strings.TrimRight(s.oidcMgr.Issuer(), "/")
+	if _, isCode := s.oidcMgr.CodeFlowHandle(query.Get("state")); isCode {
+		s.codeCallback(w, r, query.Get("state"), query.Get("code"), query.Get("error"), issMismatch)
+		return
+	}
+	if issMismatch {
+		slog.Warn("oidc callback iss does not name the configured issuer", "iss", iss)
+		unavailable()
+		return
+	}
 	if oauthError := query.Get("error"); oauthError != "" {
 		slog.Info("oidc silent probe answered without a session", "error", oauthError)
 		unavailable()
@@ -223,5 +340,39 @@ func (s *Server) handleOIDCCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	slog.Info("oidc silent login succeeded", "entity_id", credential.EntityID, "name", credential.Name)
+	http.Redirect(w, r, "/#tray="+grant, http.StatusFound)
+}
+
+func (s *Server) codeCallback(w http.ResponseWriter, r *http.Request, state, code, oauthError string, issMismatch bool) {
+	switch {
+	case issMismatch:
+		s.oidcMgr.RefuseCode(state, oidc.StatusFailed)
+		taskError(w, http.StatusBadRequest, "The callback's iss does not name the configured issuer")
+		return
+	case oauthError == "access_denied":
+		s.oidcMgr.RefuseCode(state, oidc.StatusDenied)
+		taskError(w, http.StatusForbidden, "Login denied at the identity provider")
+		return
+	case oauthError != "":
+		s.oidcMgr.RefuseCode(state, oidc.StatusFailed)
+		taskError(w, http.StatusBadGateway, "Identity provider refused the login: "+oauthError)
+		return
+	case code == "":
+		s.oidcMgr.RefuseCode(state, oidc.StatusFailed)
+		taskError(w, http.StatusBadRequest, "Authorization code required")
+		return
+	}
+	credential, err := s.oidcMgr.ExchangeCode(r.Context(), state, code)
+	if err != nil {
+		slog.Warn("oidc code callback failed", "error", err)
+		taskError(w, http.StatusBadGateway, "Login failed: "+err.Error())
+		return
+	}
+	grant, err := s.trayTokens.MintForKey(credential.APIKey)
+	if err != nil {
+		slog.Error("oidc code handoff mint failed", "error", err)
+		taskError(w, http.StatusInternalServerError, "Login handoff failed")
+		return
+	}
 	http.Redirect(w, r, "/#tray="+grant, http.StatusFound)
 }

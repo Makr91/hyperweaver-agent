@@ -16,7 +16,6 @@ import (
 	"github.com/Makr91/hyperweaver-agent/internal/config"
 	"github.com/Makr91/hyperweaver-agent/internal/machines"
 	"github.com/Makr91/hyperweaver-agent/internal/problem"
-	"github.com/Makr91/hyperweaver-agent/internal/tasks"
 )
 
 const (
@@ -29,7 +28,7 @@ const (
 	openSearchPath     = "/opensearch.xml"
 )
 
-var searchKindOrder = []string{"machine", "task", "config", "template", "artifact"}
+var searchKindOrder = []string{"machine", "config", "template", "artifact"}
 
 type searchCount struct {
 	Value    int    `json:"value"`
@@ -86,7 +85,7 @@ type searchMatch struct {
 }
 
 func (s *Server) searchKinds() []string {
-	kinds := []string{"machine", "task", "config", "template"}
+	kinds := []string{"machine", "config", "template"}
 	if s.cfg.ArtifactStorage.Enabled {
 		kinds = append(kinds, "artifact")
 	}
@@ -138,35 +137,6 @@ func (s *Server) machineEntries(ctx context.Context) []searchEntry {
 				{field: "name", text: machine.Name},
 				{field: "notes", text: notes},
 				{field: "tags", text: strings.Join(tags, " ")},
-			},
-			row: row,
-		})
-	}
-	return entries
-}
-
-func (s *Server) taskEntries(ctx context.Context) []searchEntry {
-	list, err := s.tasks.Store().List(ctx, &tasks.ListFilter{Limit: searchListLimit})
-	if err != nil {
-		slog.Warn("search: list tasks", "error", err)
-		return nil
-	}
-	entries := make([]searchEntry, 0, len(list))
-	for _, task := range list {
-		title := task.Operation + " " + task.MachineName
-		errorText := ""
-		if task.ErrorMessage != nil {
-			errorText = *task.ErrorMessage
-		}
-		row := searchRow("task", task.ID, title, task.Status)
-		row.Name = ""
-		row.Anchor = task.ID
-		row.Facets["status"] = task.Status
-		entries = append(entries, searchEntry{
-			fields: []searchField{
-				{field: "title", text: title},
-				{field: "machine", text: task.MachineName},
-				{field: "error", text: errorText},
 			},
 			row: row,
 		})
@@ -255,9 +225,6 @@ func (s *Server) searchEntries(ctx context.Context, kinds map[string]bool, admin
 	entries := []searchEntry{}
 	if kinds["machine"] {
 		entries = append(entries, s.machineEntries(ctx)...)
-	}
-	if kinds["task"] {
-		entries = append(entries, s.taskEntries(ctx)...)
 	}
 	if kinds["config"] {
 		entries = append(entries, s.configEntries(admin)...)
@@ -417,11 +384,11 @@ func (s *Server) parseSearchKinds(raw string) (named, kinds []string) {
 }
 
 // @Summary		Search this agent
-// @Description	Minimum role: viewer. The navbar contract's search over this agent's own rows: machine (name, notes, tags), task (operation and machine, machine name, error), config (file name and schema title, admin keys alone, as the configuration routes are admin-only), template (organization/box, version, architecture, provider, source) and artifact (filename, role, type, version; only while artifact_storage.enabled, when the kind is listed). Every word of q matches case-insensitively as a substring; a hit carries kind, id (a natural key per kind: the machine name, the task id, the file name, the template id, the artifact id), the locator members as deep as the hit goes (anchor the task, template or artifact id for the page's hash; version, provider and architecture on a template), score (3 the name equal to q, 2 a prefix, 1 every word inside the name, 0 another field), title, subtitle, matched, highlight as rune offsets into the matched field, and facets (status on a machine or task, file_type on an artifact). Results sort by score, then the match's position in the title, then title, then id; counts carry one exact value per kind. scope org:<name> or collection:<key> matches nothing here, an agent's rows belonging to no organization and no collection; any other scope is ignored. Each kind answers at most limit rows (1 to 50, default 5); while kinds names exactly one kind, after pages it and next is the cursor of the following page, else next is null. The answer carries Cache-Control: no-store.
+// @Description	Minimum role: viewer. The navbar contract's search over this agent's own rows: machine (name, notes, tags), config (file name and schema title, admin keys alone, as the configuration routes are admin-only), template (organization/box, version, architecture, provider, source) and artifact (filename, role, type, version; only while artifact_storage.enabled, when the kind is listed). Every word of q matches case-insensitively as a substring; a hit carries kind, id (a natural key per kind: the machine name, the file name, the template id, the artifact id), the locator members as deep as the hit goes (anchor the template or artifact id for the page's hash; version, provider and architecture on a template), score (3 the name equal to q, 2 a prefix, 1 every word inside the name, 0 another field), title, subtitle, matched, highlight as rune offsets into the matched field, and facets (status on a machine, file_type on an artifact). Results sort by score, then the match's position in the title, then title, then id; counts carry one exact value per kind. scope org:<name> or collection:<key> matches nothing here, an agent's rows belonging to no organization and no collection; any other scope is ignored. Each kind answers at most limit rows (1 to 50, default 5); while kinds names exactly one kind, after pages it and next is the cursor of the following page, else next is null. The answer carries Cache-Control: no-store.
 // @Tags			Status
 // @Produce		json
 // @Param			q		query		string			true	"The text searched for, 2 to 200 characters"
-// @Param			kinds	query		string			false	"Comma-separated kinds: machine, task, config, template, artifact; absent asks every kind"
+// @Param			kinds	query		string			false	"Comma-separated kinds: machine, config, template, artifact; absent asks every kind"
 // @Param			scope	query		string			false	"org:<name> or collection:<key>"
 // @Param			limit	query		int				false	"Rows per kind, 1 to 50, default 5"
 // @Param			after	query		string			false	"The cursor a previous answer's next carried, honoured while kinds names one kind"

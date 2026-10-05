@@ -76,7 +76,8 @@ type oidcConfig struct {
 type UpdatesConfig struct {
 	// VersionInfoURL points at a JSON document {version, releaseUrl,
 	// releaseDate, changelog}; empty disables update checking.
-	VersionInfoURL string `yaml:"versioninfo_url" json:"versioninfo_url"`
+	VersionInfoURL     string `yaml:"versioninfo_url"      json:"versioninfo_url"`
+	CheckIntervalHours int    `yaml:"check_interval_hours" json:"check_interval_hours"`
 }
 
 // APIDocsConfig controls the interactive Agent API documentation (Swagger UI

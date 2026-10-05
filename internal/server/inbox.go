@@ -8,15 +8,18 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"time"
 
 	"github.com/Makr91/hyperweaver-agent/internal/tasks"
+	"github.com/Makr91/hyperweaver-agent/internal/version"
 )
 
 const (
 	inboxNotifyPath = "/api/notify"
 	inboxTimeout    = 15 * time.Second
+	updatePagePath  = "hosts/self/agent/update"
 )
 
 type inboxNotification struct {
@@ -99,25 +102,54 @@ func (s *Server) notifyInbox(task *tasks.Task) {
 		},
 		Recipient: inboxRecipient{UserUUID: subject},
 	}
+	if s.writeInbox(&write, "task_id", task.ID) {
+		slog.Info("task written to the person's inbox", "task_id", task.ID, "operation", task.Operation, "status", task.Status)
+	}
+}
+
+func (s *Server) notifyUpdateInbox(latestVersion string) {
+	subject := s.oidcMgr.BoundSubject()
+	if subject == "" || s.oidcMgr.BearerToken() == "" {
+		return
+	}
+	hostname, _ := os.Hostname()
+	write := inboxWrite{
+		IdempotencyKey: "hyperweaver-agent:update:" + latestVersion,
+		Type:           "SYSTEM",
+		Severity:       "INFO",
+		Notification: inboxNotification{
+			Title:    "Hyperweaver Agent " + latestVersion + " is available",
+			Body:     hostname,
+			Navigate: s.cfg.LocalURL() + updatePagePath,
+			Tag:      "hyperweaver-agent-update",
+		},
+		Recipient: inboxRecipient{UserUUID: subject},
+	}
+	if s.writeInbox(&write, "latest_version", latestVersion) {
+		slog.Info("update written to the person's inbox", "current_version", version.Version, "latest_version", latestVersion)
+	}
+}
+
+func (s *Server) writeInbox(write *inboxWrite, attrs ...any) bool {
 	raw, err := json.Marshal(write)
 	if err != nil {
-		slog.Warn("inbox write serialize failed", "error", err, "task_id", task.ID)
-		return
+		slog.Warn("inbox write serialize failed", append([]any{"error", err}, attrs...)...)
+		return false
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), inboxTimeout)
 	defer cancel()
 	response, err := s.oidcMgr.IssuerRequest(ctx, http.MethodPost, inboxNotifyPath, bytes.NewReader(raw), "application/json")
 	if err != nil {
-		slog.Warn("inbox write failed", "error", err, "task_id", task.ID)
-		return
+		slog.Warn("inbox write failed", append([]any{"error", err}, attrs...)...)
+		return false
 	}
 	defer func() {
 		_ = response.Body.Close()
 	}()
 	if response.StatusCode >= http.StatusMultipleChoices {
 		detail, _ := io.ReadAll(io.LimitReader(response.Body, 2048))
-		slog.Warn("inbox write refused", "status", response.StatusCode, "task_id", task.ID, "detail", strings.TrimSpace(string(detail)))
-		return
+		slog.Warn("inbox write refused", append([]any{"status", response.StatusCode, "detail", strings.TrimSpace(string(detail))}, attrs...)...)
+		return false
 	}
-	slog.Info("task written to the person's inbox", "task_id", task.ID, "operation", task.Operation, "status", task.Status)
+	return true
 }

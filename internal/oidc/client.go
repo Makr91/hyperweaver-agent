@@ -58,6 +58,35 @@ type client struct {
 	keyLength   int
 	flows       map[string]*flow
 	silent      map[string]*silentFlow
+	codeFlows   map[string]*codeFlow
+}
+
+var errNotAllowed = errors.New("account is not the bound account and not in oidc.allowed_users")
+
+func randomHex() (string, error) {
+	raw := make([]byte, 32)
+	if _, err := rand.Read(raw); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(raw), nil
+}
+
+func pkcePair() (verifier, challenge string, err error) {
+	rawVerifier := make([]byte, 64)
+	if _, err = rand.Read(rawVerifier); err != nil {
+		return "", "", err
+	}
+	verifier = base64.RawURLEncoding.EncodeToString(rawVerifier)
+	digest := sha256.Sum256([]byte(verifier))
+	return verifier, base64.RawURLEncoding.EncodeToString(digest[:]), nil
+}
+
+func (c *client) sweepFlowsLocked() {
+	for existing, entry := range c.flows {
+		if time.Now().After(entry.expiresAt.Add(10 * time.Minute)) {
+			delete(c.flows, existing)
+		}
+	}
 }
 
 func (c *client) start(ctx context.Context) (string, *DeviceAuthorization, error) {
@@ -69,19 +98,14 @@ func (c *client) start(ctx context.Context) (string, *DeviceAuthorization, error
 	if err != nil {
 		return "", nil, err
 	}
-	raw := make([]byte, 32)
-	if _, rerr := rand.Read(raw); rerr != nil {
-		return "", nil, rerr
+	handle, err := randomHex()
+	if err != nil {
+		return "", nil, err
 	}
-	handle := hex.EncodeToString(raw)
 	expiresAt := time.Now().Add(time.Duration(authorization.ExpiresIn) * time.Second)
 
 	c.mu.Lock()
-	for existing, entry := range c.flows {
-		if time.Now().After(entry.expiresAt.Add(10 * time.Minute)) {
-			delete(c.flows, existing)
-		}
-	}
+	c.sweepFlowsLocked()
 	c.flows[handle] = &flow{
 		status:    StatusPending,
 		expiresAt: expiresAt,
@@ -128,8 +152,24 @@ func (c *client) status(handle string) (string, *Credential, bool) {
 	case StatusExpired:
 		delete(c.flows, handle)
 		return StatusExpired, nil, true
+	case StatusPending:
+		if time.Now().After(entry.expiresAt) {
+			delete(c.flows, handle)
+			return StatusExpired, nil, true
+		}
+		return StatusPending, nil, true
 	default:
 		return entry.status, nil, true
+	}
+}
+
+func (c *client) approve(handle string, credential *Credential) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if entry := c.flows[handle]; entry != nil && entry.status == StatusPending {
+		entry.status = StatusApproved
+		entry.credential = credential
+		close(entry.changed)
 	}
 }
 
@@ -218,13 +258,7 @@ func (c *client) finish(handle string, endpoints *providerEndpoints, answer *tok
 		c.setStatus(handle, StatusFailed)
 		return
 	}
-	c.mu.Lock()
-	if entry := c.flows[handle]; entry != nil && entry.status == StatusPending {
-		entry.status = StatusApproved
-		entry.credential = credential
-		close(entry.changed)
-	}
-	c.mu.Unlock()
+	c.approve(handle, credential)
 	slog.Info("oidc device login succeeded", "entity_id", credential.EntityID, "name", credential.Name)
 }
 
@@ -271,19 +305,14 @@ func (c *client) startSilent(ctx context.Context) (string, error) {
 		return "", errors.New("issuer discovery document carries no authorization_endpoint")
 	}
 
-	rawVerifier := make([]byte, 64)
-	if _, rerr := rand.Read(rawVerifier); rerr != nil {
-		return "", rerr
+	verifier, challenge, err := pkcePair()
+	if err != nil {
+		return "", err
 	}
-	verifier := base64.RawURLEncoding.EncodeToString(rawVerifier)
-	digest := sha256.Sum256([]byte(verifier))
-	challenge := base64.RawURLEncoding.EncodeToString(digest[:])
-
-	rawState := make([]byte, 32)
-	if _, rerr := rand.Read(rawState); rerr != nil {
-		return "", rerr
+	state, err := randomHex()
+	if err != nil {
+		return "", err
 	}
-	state := hex.EncodeToString(rawState)
 
 	c.mu.Lock()
 	for existing, entry := range c.silent {
@@ -315,12 +344,15 @@ func (c *client) exchangeSilent(ctx context.Context, state, code string) (*Crede
 	if pending == nil || time.Now().After(pending.expiresAt) {
 		return nil, errors.New("unknown or expired state")
 	}
+	return c.redeemCode(ctx, code, c.redirectURI, pending.verifier)
+}
 
+func (c *client) redeemCode(ctx context.Context, code, redirectURI, verifier string) (*Credential, error) {
 	endpoints, err := c.provider.endpoints(ctx)
 	if err != nil {
 		return nil, err
 	}
-	answer, err := exchangeCode(ctx, endpoints, c.clientID, code, c.redirectURI, pending.verifier)
+	answer, err := exchangeCode(ctx, endpoints, c.clientID, code, redirectURI, verifier)
 	if err != nil {
 		return nil, err
 	}
@@ -349,7 +381,7 @@ func (c *client) exchangeSilent(ctx context.Context, state, code string) (*Crede
 		return nil, err
 	}
 	if !c.binding.allowed(claims) {
-		return nil, errors.New("account is not the bound account and not in oidc.allowed_users")
+		return nil, errNotAllowed
 	}
 	return c.completeLogin(claims, answer)
 }

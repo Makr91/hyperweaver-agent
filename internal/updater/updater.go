@@ -22,6 +22,7 @@ type Info struct {
 	ReleaseURL   string `json:"releaseUrl"`
 	ReleaseDate  string `json:"releaseDate"`
 	Changelog    string `json:"changelog"`
+	ReleaseNotes string `json:"releaseNotes"`
 	WindowsURL   string `json:"windowsUrl"`
 	MacOSURL     string `json:"macosUrl"`
 	LinuxURL     string `json:"linuxUrl"`

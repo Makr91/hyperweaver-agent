@@ -134,22 +134,22 @@ func matchProcesses(ctx context.Context, user string, command *regexp.Regexp) ([
 // user/command filters, detailed statistics on request.
 //
 //	@Summary		List processes
-//	@Description	Minimum role: viewer. Bare array response. detailed=true adds CPU/memory statistics (process-lifetime CPU percentage — instant, no sampling wait).
+//	@Description	Minimum role: viewer. Bare array response. detailed=true adds CPU/memory statistics (process-lifetime CPU percentage — instant, no sampling wait). limit absent or 0 answers every process; a positive limit answers at most that many rows.
 //	@Tags			Processes
 //	@Produce		json
 //	@Param			user		query	string	false	"Filter by username"
 //	@Param			command		query	string	false	"Filter by command pattern (regex)"
 //	@Param			detailed	query	bool	false	"Add CPU and memory statistics"	default(false)
-//	@Param			limit		query	int		false	"Maximum rows to return"		minimum(1)	maximum(1000)	default(100)
+//	@Param			limit		query	int		false	"Maximum rows to return; absent or 0 answers every process"	minimum(0)	default(0)
 //	@Success		200	{array}		processInfo		"Processes"
 //	@Failure		400	{object}	problem.Body	"Invalid command pattern"
 //	@Router			/api/system/processes [get]
 func (s *Server) handleListProcesses(w http.ResponseWriter, r *http.Request) {
 	query := r.URL.Query()
 	detailed := query.Get("detailed") == "true"
-	limit := 100
+	limit := 0
 	if raw := query.Get("limit"); raw != "" {
-		if parsed, err := strconv.Atoi(raw); err == nil && parsed >= 1 && parsed <= 1000 {
+		if parsed, err := strconv.Atoi(raw); err == nil && parsed > 0 {
 			limit = parsed
 		}
 	}
@@ -170,7 +170,7 @@ func (s *Server) handleListProcesses(w http.ResponseWriter, r *http.Request) {
 		errorResponse(w, http.StatusInternalServerError, "Failed to retrieve processes", err.Error())
 		return
 	}
-	if len(matched) > limit {
+	if limit > 0 && len(matched) > limit {
 		matched = matched[:limit]
 	}
 

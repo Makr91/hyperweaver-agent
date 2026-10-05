@@ -1989,6 +1989,39 @@
                 },
                 "type": "object"
             },
+            "server.codeExchangeRequest": {
+                "properties": {
+                    "code": {
+                        "type": "string"
+                    },
+                    "handle": {
+                        "type": "string"
+                    }
+                },
+                "type": "object"
+            },
+            "server.codeExchangeResponse": {
+                "properties": {
+                    "status": {
+                        "type": "string"
+                    }
+                },
+                "type": "object"
+            },
+            "server.codeStartResponse": {
+                "properties": {
+                    "authorize_url": {
+                        "type": "string"
+                    },
+                    "expires_in": {
+                        "type": "integer"
+                    },
+                    "handle": {
+                        "type": "string"
+                    }
+                },
+                "type": "object"
+            },
             "server.cpuEntry": {
                 "properties": {
                     "model": {
@@ -6775,7 +6808,6 @@
                     "kinds": {
                         "example": [
                             "machine",
-                            "task",
                             "config",
                             "template",
                             "artifact"
@@ -7394,6 +7426,7 @@
                         "type": "string"
                     },
                     "release_date": {},
+                    "release_notes": {},
                     "release_url": {},
                     "success": {
                         "type": "boolean"
@@ -8414,7 +8447,7 @@
         },
         "/api/app/updates/check": {
             "get": {
-                "description": "Minimum role: viewer. Fetches the configured versioninfo document (updates.versioninfo_url) and compares against the running build. When no URL is configured or the document cannot be fetched or read, the answer is still 200 with update_available false, latest_version null and the reason in message, so a page never draws a failure for a check it could not make.",
+                "description": "Minimum role: viewer. Fetches the configured versioninfo document (updates.versioninfo_url) and compares against the running build; release_url, release_date, changelog and release_notes, the release's own text, come from the document, null when it carries none. When no URL is configured or the document cannot be fetched or read, the answer is still 200 with update_available false, latest_version null and the reason in message, so a page never draws a failure for a check it could not make. A check that finds a newer release, this one or the scheduled one every updates.check_interval_hours, writes one row to the bound person's inbox, once per version, and sends update-available on the admin topic of the event stream.",
                 "responses": {
                     "200": {
                         "content": {
@@ -9436,10 +9469,10 @@
         },
         "/api/auth/oidc/callback": {
             "get": {
-                "description": "Browser redirect target of the silent authorize round-trip (registered at the IdP as the loopback redirect_uri) — never called by API clients. Benign IdP answers (login_required, interaction_required, consent_required, access_denied) and EVERY hard failure (unknown/expired state, exchange or validation error, non-bound account) all 302 to /login?sso=unavailable — silent must never strand the browser on an error page. On success the code is exchanged with the held PKCE verifier, the token validated (issuer JWKS, UUID-first identity, TOFU binding), the OIDC admin key minted, and the browser 302s to the /#tray= claim path carrying a single-use grant that answers THAT key — the tray-claim exchange the UI already speaks, now with a federated identity.",
+                "description": "Browser redirect target of both authorize round-trips (registered at the IdP as the loopback redirect_uri) — never called by API clients. When iss rides along (RFC 9207) it must name the configured issuer. A state minted at silent-start takes the silent path: benign IdP answers (login_required, interaction_required, consent_required, access_denied) and EVERY hard failure (unknown/expired state, exchange or validation error, non-bound account) all 302 to /login?sso=unavailable — silent must never strand the browser on an error page. A state minted at code-start on a loopback peer takes the interactive path: error=access_denied settles the handle denied and any other error, iss mismatch or exchange failure settles it failed, each answered with a problem body on this tab while the UI's held GET /api/auth/oidc/device-status learns the status. On success, either path exchanges the code with the held PKCE verifier, validates the token (issuer JWKS, UUID-first identity, TOFU binding), mints the OIDC admin key, and 302s the browser to the /#tray= claim path carrying a single-use grant that answers THAT key — the tray-claim exchange the UI already speaks, now with a federated identity.",
                 "parameters": [
                     {
-                        "description": "The flow id minted at silent-start",
+                        "description": "The flow id minted at silent-start or code-start",
                         "in": "query",
                         "name": "state",
                         "schema": {
@@ -9455,7 +9488,15 @@
                         }
                     },
                     {
-                        "description": "The IdP's OAuth error (login_required and friends bounce benignly)",
+                        "description": "The IdP's issuer identifier (RFC 9207), refused when it is not the configured one",
+                        "in": "query",
+                        "name": "iss",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    {
+                        "description": "The IdP's OAuth error (login_required and friends bounce benignly on the silent path)",
                         "in": "query",
                         "name": "error",
                         "schema": {
@@ -9465,10 +9506,182 @@
                 ],
                 "responses": {
                     "302": {
-                        "description": "To /#tray=\u003cone-time grant\u003e on success; to /login?sso=unavailable otherwise"
+                        "description": "To /#tray=\u003cone-time grant\u003e on success; to /login?sso=unavailable on a silent-path failure"
+                    },
+                    "400": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/problem.Body"
+                                }
+                            }
+                        },
+                        "description": "Code path: iss mismatch or no code"
+                    },
+                    "403": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/problem.Body"
+                                }
+                            }
+                        },
+                        "description": "Code path: the person denied the login at the IdP"
+                    },
+                    "502": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/problem.Body"
+                                }
+                            }
+                        },
+                        "description": "Code path: the IdP refused the login or the exchange failed"
                     }
                 },
-                "summary": "Silent SSO callback",
+                "summary": "SSO callback",
+                "tags": [
+                    "Local Login"
+                ]
+            }
+        },
+        "/api/auth/oidc/code": {
+            "post": {
+                "description": "Public, rate-limited (shared with device-start). The other-machine half of the code login: the body carries the code-start handle and the code the person copied from the issuer's /oauth2/code page, code#state when that page showed one. The flow must still be pending, and a state that rides along must be the flow's own. The agent exchanges the code with the flow's verifier, validates the token (issuer JWKS, UUID-first identity, TOFU binding), mints the OIDC admin key and settles the handle, then answers {status} alone — approved, denied (the account is not the bound one and not in oidc.allowed_users) or failed; the credential itself is delivered exactly once by the held GET /api/auth/oidc/device-status.",
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "oneOf": [
+                                    {
+                                        "type": "object"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/server.codeExchangeRequest",
+                                        "summary": "request",
+                                        "description": "The handle and the pasted code"
+                                    }
+                                ]
+                            }
+                        }
+                    },
+                    "description": "The handle and the pasted code",
+                    "required": true
+                },
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/server.codeExchangeResponse"
+                                }
+                            }
+                        },
+                        "description": "The settled status"
+                    },
+                    "400": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/problem.Body"
+                                }
+                            }
+                        },
+                        "description": "Unreadable body, missing handle or code, or a state that is not the flow's"
+                    },
+                    "404": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/problem.Body"
+                                }
+                            }
+                        },
+                        "description": "Unknown login handle"
+                    },
+                    "409": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/problem.Body"
+                                }
+                            }
+                        },
+                        "description": "The login is no longer pending"
+                    },
+                    "429": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/problem.Body"
+                                }
+                            }
+                        },
+                        "description": "Too many attempts from this address"
+                    },
+                    "503": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/problem.Body"
+                                }
+                            }
+                        },
+                        "description": "OIDC login is disabled"
+                    }
+                },
+                "summary": "Redeem a pasted federated login code",
+                "tags": [
+                    "Local Login"
+                ]
+            }
+        },
+        "/api/auth/oidc/code-start": {
+            "post": {
+                "description": "Public, rate-limited (shared with device-start: 6 per source address per minute). The RFC 8252 authorization-code login beside the device grant (features advertises it as oidc-code while oidc.enabled): mints state, a PKCE S256 verifier and an agent-side handle, and answers the issuer's interactive authorize URL (no prompt=none) the UI opens in a new tab. A request from a loopback peer names this agent's GET /api/auth/oidc/callback as redirect_uri, so the browser lands back here and the login completes by itself; any other peer names the issuer's /oauth2/code page, where the person copies the shown code (code#state) and pastes it into POST /api/auth/oidc/code. Either way the UI learns the outcome through the held GET /api/auth/oidc/device-status with the handle, exactly as for the device grant; expires_in is the flow's life in seconds and the agent never polls the issuer for it.",
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/server.codeStartResponse"
+                                }
+                            }
+                        },
+                        "description": "Code login started"
+                    },
+                    "429": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/problem.Body"
+                                }
+                            }
+                        },
+                        "description": "Too many login attempts from this address"
+                    },
+                    "502": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/problem.Body"
+                                }
+                            }
+                        },
+                        "description": "Identity provider unreachable or without an authorization endpoint"
+                    },
+                    "503": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/problem.Body"
+                                }
+                            }
+                        },
+                        "description": "OIDC login is disabled"
+                    }
+                },
+                "summary": "Start a federated code login",
                 "tags": [
                     "Local Login"
                 ]
@@ -10435,7 +10648,7 @@
         },
         "/api/events": {
             "get": {
-                "description": "Minimum role: viewer. The one event stream of the Universal Events Contract, plain WHATWG server-sent events. topics is a comma-separated list of health, tasks, hosts, admin, monitoring, profile and notifications; unknown names are ignored, an empty list asks for every topic, and the stream answers the topics the key's role may read, admin left out for a non-admin key, so the ready event's topics list is the subscription that stands; 403 only when nothing is left. The first frame is retry: 3000 followed by the ready event carrying the newest id and the subscribed topics. Every event carries id \u003cepoch-ms\u003e-\u003cseq\u003e, a kebab-case event name and one line of JSON data; a :hb comment line is sent after 25 seconds without a frame. Topic tasks sends task-updated, one task row as GET /api/tasks answers it, when a task is created and on every change of its status, progress_percent, progress_info or error_message. Topic hosts sends stats-updated, the GET /api/stats document, when a machine is created or removed and when one changes status. Topic health sends health, the GET /api/health report, whenever a task ends and the report differs from the last one sent. Topic admin sends restart-required, {required, last_modified_by, last_modified_time}, after every configuration save and backup restore, and {required: false} as the agent restarts; it is subscribed for an admin key alone. Topic monitoring sends cpu-sample {cpu: [sample]} with per_core_parsed, memory-sample {memory: [sample]} and network-sample {usage: [samples]}, the members GET /api/monitoring/system/cpu, /api/system/memory and /api/network/usage answer, whenever the collector takes them: on every collector tick while monitoring.storage_enabled, else only on POST /api/monitoring/collect. Topic profile is the person's profile topic of the contract; this agent keeps no preferences, so it sends nothing on it. Topic notifications sends unread-count {count} to the person whose inbox write the agent relayed to the identity provider, read back from the issuer after the write, that person alone. No topic has a snapshot event. The ring keeps the last 500 events or 5 minutes, whichever is larger: a Last-Event-ID inside it replays every later event of the subscribed topics, one outside it answers a reset event naming the subscribed topics. A task's output and every terminal stay on their WebSockets.",
+                "description": "Minimum role: viewer. The one event stream of the Universal Events Contract, plain WHATWG server-sent events. topics is a comma-separated list of health, tasks, hosts, admin, monitoring, profile and notifications; unknown names are ignored, an empty list asks for every topic, and the stream answers the topics the key's role may read, admin left out for a non-admin key, so the ready event's topics list is the subscription that stands; 403 only when nothing is left. The first frame is retry: 3000 followed by the ready event carrying the newest id and the subscribed topics. Every event carries id \u003cepoch-ms\u003e-\u003cseq\u003e, a kebab-case event name and one line of JSON data; a :hb comment line is sent after 25 seconds without a frame. Topic tasks sends task-updated, one task row as GET /api/tasks answers it, when a task is created and on every change of its status, progress_percent, progress_info or error_message. Topic hosts sends stats-updated, the GET /api/stats document, when a machine is created or removed and when one changes status. Topic health sends health, the GET /api/health report, whenever a task ends and the report differs from the last one sent. Topic admin sends restart-required, {required, last_modified_by, last_modified_time}, after every configuration save and backup restore, and {required: false} as the agent restarts; it is subscribed for an admin key alone. Topic admin also sends update-available {current_version, latest_version, release_date} when a check finds a newer release. Topic monitoring sends cpu-sample {cpu: [sample]} with per_core_parsed, memory-sample {memory: [sample]} and network-sample {usage: [samples]}, the members GET /api/monitoring/system/cpu, /api/system/memory and /api/network/usage answer, whenever the collector takes them: on every collector tick while monitoring.storage_enabled, else only on POST /api/monitoring/collect. Topic profile is the person's profile topic of the contract; this agent keeps no preferences, so it sends nothing on it. Topic notifications sends unread-count {count} to the person whose inbox write the agent relayed to the identity provider, read back from the issuer after the write, that person alone. No topic has a snapshot event. The ring keeps the last 500 events or 5 minutes, whichever is larger: a Last-Event-ID inside it replays every later event of the subscribed topics, one outside it answers a reset event naming the subscribed topics. A task's output and every terminal stay on their WebSockets.",
                 "parameters": [
                     {
                         "description": "Comma-separated topics: health, tasks, hosts, admin, monitoring, profile, notifications",
@@ -17726,7 +17939,7 @@
         },
         "/api/search": {
             "get": {
-                "description": "Minimum role: viewer. The navbar contract's search over this agent's own rows: machine (name, notes, tags), task (operation and machine, machine name, error), config (file name and schema title, admin keys alone, as the configuration routes are admin-only), template (organization/box, version, architecture, provider, source) and artifact (filename, role, type, version; only while artifact_storage.enabled, when the kind is listed). Every word of q matches case-insensitively as a substring; a hit carries kind, id (a natural key per kind: the machine name, the task id, the file name, the template id, the artifact id), the locator members as deep as the hit goes (anchor the task, template or artifact id for the page's hash; version, provider and architecture on a template), score (3 the name equal to q, 2 a prefix, 1 every word inside the name, 0 another field), title, subtitle, matched, highlight as rune offsets into the matched field, and facets (status on a machine or task, file_type on an artifact). Results sort by score, then the match's position in the title, then title, then id; counts carry one exact value per kind. scope org:\u003cname\u003e or collection:\u003ckey\u003e matches nothing here, an agent's rows belonging to no organization and no collection; any other scope is ignored. Each kind answers at most limit rows (1 to 50, default 5); while kinds names exactly one kind, after pages it and next is the cursor of the following page, else next is null. The answer carries Cache-Control: no-store.",
+                "description": "Minimum role: viewer. The navbar contract's search over this agent's own rows: machine (name, notes, tags), config (file name and schema title, admin keys alone, as the configuration routes are admin-only), template (organization/box, version, architecture, provider, source) and artifact (filename, role, type, version; only while artifact_storage.enabled, when the kind is listed). Every word of q matches case-insensitively as a substring; a hit carries kind, id (a natural key per kind: the machine name, the file name, the template id, the artifact id), the locator members as deep as the hit goes (anchor the template or artifact id for the page's hash; version, provider and architecture on a template), score (3 the name equal to q, 2 a prefix, 1 every word inside the name, 0 another field), title, subtitle, matched, highlight as rune offsets into the matched field, and facets (status on a machine, file_type on an artifact). Results sort by score, then the match's position in the title, then title, then id; counts carry one exact value per kind. scope org:\u003cname\u003e or collection:\u003ckey\u003e matches nothing here, an agent's rows belonging to no organization and no collection; any other scope is ignored. Each kind answers at most limit rows (1 to 50, default 5); while kinds names exactly one kind, after pages it and next is the cursor of the following page, else next is null. The answer carries Cache-Control: no-store.",
                 "parameters": [
                     {
                         "description": "The text searched for, 2 to 200 characters",
@@ -17738,7 +17951,7 @@
                         }
                     },
                     {
-                        "description": "Comma-separated kinds: machine, task, config, template, artifact; absent asks every kind",
+                        "description": "Comma-separated kinds: machine, config, template, artifact; absent asks every kind",
                         "in": "query",
                         "name": "kinds",
                         "schema": {
@@ -18297,7 +18510,7 @@
         },
         "/api/status": {
             "get": {
-                "description": "The public status probe. No authentication. role is the package name, hyperweaver-agent, the one member that tells the shared UI it is served by an agent directly. brand, collections, links, ticket, config, events and search are the shared status members: links.api is the path of this agent's API reference while api_docs.enabled is on, ticket is null because GET /api/config/ticket serves the ticket system, config lists the five configuration files (app, auth, db, machines, storage) the /api/config routes serve, and search names GET /api/search and the kinds it answers, artifact among them only while artifact_storage.enabled; the admin and setup tokens name the configuration pages, update the admin's Update row over GET /api/app/updates/check and POST /api/app/updates/apply, search the navbar search over the search member, devices the host's USB device list at GET /api/system/usb, and media the host's disk-medium registry at GET /api/media.",
+                "description": "The public status probe. No authentication. role is the package name, hyperweaver-agent, the one member that tells the shared UI it is served by an agent directly. brand, collections, links, ticket, config, events and search are the shared status members: links.api is the path of this agent's API reference while api_docs.enabled is on, ticket is null because GET /api/config/ticket serves the ticket system, config lists the five configuration files (app, auth, db, machines, storage) the /api/config routes serve, and search names GET /api/search and the kinds it answers, artifact among them only while artifact_storage.enabled; the admin and setup tokens name the configuration pages, update the admin's Update row over GET /api/app/updates/check and POST /api/app/updates/apply, search the navbar search over the search member, devices the host's USB device list at GET /api/system/usb, media the host's disk-medium registry at GET /api/media, and oidc-code, present while oidc.enabled, the RFC 8252 authorization-code login over POST /api/auth/oidc/code-start and POST /api/auth/oidc/code beside the device grant, auth staying {apikey, oidc}.",
                 "responses": {
                     "200": {
                         "content": {
@@ -19084,7 +19297,7 @@
         },
         "/api/system/processes": {
             "get": {
-                "description": "Minimum role: viewer. Bare array response. detailed=true adds CPU/memory statistics (process-lifetime CPU percentage — instant, no sampling wait).",
+                "description": "Minimum role: viewer. Bare array response. detailed=true adds CPU/memory statistics (process-lifetime CPU percentage — instant, no sampling wait). limit absent or 0 answers every process; a positive limit answers at most that many rows.",
                 "parameters": [
                     {
                         "description": "Filter by username",
@@ -19112,13 +19325,12 @@
                         }
                     },
                     {
-                        "description": "Maximum rows to return",
+                        "description": "Maximum rows to return; absent or 0 answers every process",
                         "in": "query",
                         "name": "limit",
                         "schema": {
-                            "default": 100,
-                            "maximum": 1000,
-                            "minimum": 1,
+                            "default": 0,
+                            "minimum": 0,
                             "type": "integer"
                         }
                     }

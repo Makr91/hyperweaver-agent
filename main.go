@@ -247,9 +247,13 @@ func run() error {
 	reconciler := systems.reconciler
 	monitor := systems.monitor
 
+	updateChecks := updater.NewService(cfg.Updates.VersionInfoURL, version.Version,
+		time.Duration(cfg.Updates.CheckIntervalHours)*time.Hour)
+
 	stopServices := func() {
 		systems.snapshots.Stop()
 		systems.artifactSvc.Stop()
+		updateChecks.Stop()
 		monitor.Stop()
 		reconciler.Stop()
 		taskQueue.Stop()
@@ -259,7 +263,7 @@ func run() error {
 		systems.closeDBs()
 	}
 
-	srv, err := server.New(cfg, keyStore, trayTokens, taskQueue, systems.machines, systems.provisioners, systems.storage, secretsStore, systems.assets, systems.artifactSvc, monitor, systems.dbs, restartArgs, teardown, openUI)
+	srv, err := server.New(cfg, keyStore, trayTokens, taskQueue, systems.machines, systems.provisioners, systems.storage, secretsStore, systems.assets, systems.artifactSvc, monitor, updateChecks, systems.dbs, restartArgs, teardown, openUI)
 	if err != nil {
 		slog.Error("server setup failed", "error", err)
 		return err
@@ -310,6 +314,7 @@ func run() error {
 	taskQueue.Start()
 	reconciler.Start()
 	monitor.Start()
+	updateChecks.Start()
 	systems.artifactSvc.Start()
 	systems.snapshots.Start()
 

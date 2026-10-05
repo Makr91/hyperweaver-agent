@@ -221,6 +221,16 @@ properties:
         title: Version document URL
         description: JSON document with version, releaseUrl, releaseDate and changelog; empty disables update checking
         order: 1
+      check_interval_hours:
+        type: integer
+        minimum: 1
+        maximum: 168
+        default: 24
+        title: Update check interval
+        description: Hours between scheduled update checks
+        order: 2
+        requiresRestart: true
+        restartReason: the scheduled checker is built at boot
   api_docs:
     type: object
     section: application
