@@ -142,11 +142,18 @@ properties:
               default: false
               title: Default
               order: 4
+            auth:
+              type: string
+              enum: [none, oidc]
+              default: none
+              title: Authentication
+              description: oidc sends the bound account's access token as Bearer on the catalog read and its downloads; none sends nothing
+              order: 5
             ca_file:
               type: string
               default: ''
               title: CA bundle
-              order: 5
+              order: 6
   artifact_storage:
     type: object
     section: artifacts

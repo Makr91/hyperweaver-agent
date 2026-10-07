@@ -93,9 +93,9 @@ func (m *ImportMetadata) Validate() error {
 // RegisterExecutors wires the provisioner operations into the task queue.
 // gitToken resolves a git_api_keys secret by name ("" when absent) — a
 // function, not the store, so this package stays uncoupled from the secrets
-// package. catalogSources are the configured catalogs the install executor
-// resolves against.
-func RegisterExecutors(queue *tasks.Queue, registry *Registry, gitToken func(name string) string, catalogSources []CatalogSource) {
+// package. catalogSources answers the configured catalogs as they stand at
+// each install, so a source added while the agent runs serves the next one.
+func RegisterExecutors(queue *tasks.Queue, registry *Registry, gitToken func(name string) string, catalogSources func() []CatalogSource) {
 	e := &executors{queue: queue, registry: registry, gitToken: gitToken, catalogSources: catalogSources}
 	queue.Register(OpImport, tasks.Executor{Run: e.importPackage})
 	queue.Register(OpExport, tasks.Executor{Run: e.exportVersion})
@@ -108,7 +108,7 @@ type executors struct {
 	queue          *tasks.Queue
 	registry       *Registry
 	gitToken       func(name string) string
-	catalogSources []CatalogSource
+	catalogSources func() []CatalogSource
 }
 
 // importPackage executes one provisioner_import task: parse the request and

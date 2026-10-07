@@ -70,15 +70,17 @@ func templateSourceList(cfg *config.Config) []machines.TemplateSource {
 }
 
 func catalogSourceList(cfg *config.Config) []provisioner.CatalogSource {
-	sources := make([]provisioner.CatalogSource, 0, len(cfg.CatalogSources.Sources))
-	for _, id := range sortedKeys(cfg.CatalogSources.Sources) {
-		source := cfg.CatalogSources.Sources[id]
+	configured := cfg.LiveCatalogSources()
+	sources := make([]provisioner.CatalogSource, 0, len(configured))
+	for _, id := range sortedKeys(configured) {
+		source := configured[id]
 		sources = append(sources, provisioner.CatalogSource{
 			ID:      id,
 			Name:    source.DisplayName,
 			URL:     source.URL,
 			Enabled: source.Enabled,
 			Default: source.Default,
+			Auth:    source.Auth,
 			CAFile:  source.CAFile,
 		})
 	}
@@ -249,7 +251,8 @@ func setupTasks(cfg *config.Config, secretsStore *secrets.Store) (*agentSystems,
 		return nil, err
 	}
 	provisioners := provisioner.NewRegistry(storage)
-	provisioner.RegisterExecutors(queue, provisioners, secretsStore.GitToken, catalogSourceList(cfg))
+	provisioner.RegisterExecutors(queue, provisioners, secretsStore.GitToken,
+		func() []provisioner.CatalogSource { return catalogSourceList(cfg) })
 
 	// The merged artifact system (artifact_storage.enabled): typed storage
 	// locations + the hash-verified registry every mounted file passes

@@ -63,19 +63,21 @@ var queryKeys = map[string]bool{
 	"provisioner":         true,
 	"provisioner_version": true,
 	"provisioner_url":     true,
+	"provisioner_catalog": true,
 }
 
 // forwardTimeout bounds the whole handoff attempt; the target is loopback.
 const forwardTimeout = 3 * time.Second
 
-// URIFromArgs returns the first hwa:// URI among the positional command-line
-// arguments — how the OS hands an invocation to a newly spawned process on
-// Windows (registry command "%1") and Linux (.desktop Exec %u).
+// URIFromArgs returns the first protocol URI among the positional command-line
+// arguments, <scheme>://<action> or the RFC 8252 section 7.1 form
+// <scheme>:/<action>, how the OS hands an invocation to a newly spawned
+// process on Windows (registry command "%1") and Linux (.desktop Exec %u).
 func URIFromArgs(args []string) (string, bool) {
 	for _, arg := range args {
 		lowered := strings.ToLower(arg)
 		for _, scheme := range schemes {
-			if strings.HasPrefix(lowered, scheme+"://") {
+			if strings.HasPrefix(lowered, scheme+":/") {
 				return arg, true
 			}
 		}
@@ -84,7 +86,9 @@ func URIFromArgs(args []string) (string, bool) {
 }
 
 // ParseAction validates an incoming protocol URI (untrusted input) against
-// the closed action vocabulary and returns the action and its raw query.
+// the closed action vocabulary and returns the action and its raw query. The
+// action is the authority of <scheme>://<action>?<query> or the one path
+// segment of <scheme>:/<action>?<query>.
 func ParseAction(uri string) (action, query string, err error) {
 	parsed, err := url.Parse(uri)
 	if err != nil {
@@ -97,11 +101,16 @@ func ParseAction(uri string) (action, query string, err error) {
 		return "", "", errors.New("protocol URI carries userinfo, a port or a fragment")
 	}
 	action = strings.ToLower(parsed.Hostname())
-	if action != ActionOpen {
-		return "", "", fmt.Errorf("unsupported protocol action %q", parsed.Host)
+	rest := parsed.Path
+	if parsed.Host == "" {
+		action = strings.ToLower(strings.TrimPrefix(parsed.Path, "/"))
+		rest = ""
 	}
-	if parsed.Path != "" && parsed.Path != "/" {
-		return "", "", fmt.Errorf("unsupported protocol path %q", parsed.Path)
+	if action != ActionOpen {
+		return "", "", fmt.Errorf("unsupported protocol action %q", action)
+	}
+	if rest != "" && rest != "/" {
+		return "", "", fmt.Errorf("unsupported protocol path %q", rest)
 	}
 	if verr := ValidateQuery(parsed.RawQuery); verr != nil {
 		return "", "", verr

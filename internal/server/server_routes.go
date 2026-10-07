@@ -368,7 +368,9 @@ func (s *Server) registerRoutes(mux *http.ServeMux) error {
 	// browse configured catalogs and install from them.
 	mux.Handle("POST /api/provisioning/provisioners/{name}/versions/{version}/export", requireKey(http.HandlerFunc(s.handleExportProvisionerVersion)))
 	mux.Handle("GET /api/provisioning/catalog", requireKey(http.HandlerFunc(s.handleGetCatalog)))
+	mux.Handle("GET /api/provisioning/catalog/health", requireKey(http.HandlerFunc(s.handleCatalogHealth)))
 	mux.Handle("GET /api/provisioning/catalog/sources", requireKey(http.HandlerFunc(s.handleListCatalogSources)))
+	mux.Handle("POST /api/provisioning/catalog/sources", requireKey(http.HandlerFunc(s.handleCreateCatalogSource)))
 	mux.Handle("POST /api/provisioning/catalog/install", requireKey(http.HandlerFunc(s.handleCatalogInstall)))
 
 	// The merged artifact system (the `artifacts` token, config-gated by

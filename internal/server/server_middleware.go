@@ -55,6 +55,9 @@ func corsMiddleware(cfg *config.CORSConfig, next http.Handler) http.Handler {
 					headers.Add("Vary", "Access-Control-Request-Headers")
 				}
 				headers.Set("Access-Control-Allow-Headers", allowHeaders)
+				if r.Header.Get("Access-Control-Request-Private-Network") == "true" {
+					headers.Set("Access-Control-Allow-Private-Network", "true")
+				}
 			}
 			w.WriteHeader(http.StatusNoContent)
 			return

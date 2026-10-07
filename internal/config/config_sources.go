@@ -1,6 +1,8 @@
 // Package config loads and provides the agent's YAML configuration.
 package config
 
+import "encoding/json"
+
 // TemplateSourceConfig is one configured box registry
 // (Vagrant/BoxVault-compatible download API).
 type TemplateSourceConfig struct {
@@ -40,6 +42,8 @@ type CatalogSourceConfig struct {
 	URL         string `yaml:"url"          json:"url"`
 	Enabled     bool   `yaml:"enabled"      json:"enabled"`
 	Default     bool   `yaml:"default"      json:"default"`
+	// Auth is none or oidc; oidc sends the bound account's access token as Bearer on the catalog read and its downloads.
+	Auth string `yaml:"auth" json:"auth"`
 	// CAFile adds a PEM CA bundle to the trust store for this catalog —
 	// self-hosted forks behind private CAs. Verification always stays on.
 	CAFile string `yaml:"ca_file" json:"ca_file"`
@@ -49,4 +53,17 @@ type CatalogSourceConfig struct {
 // template-sources pattern).
 type CatalogSourcesConfig struct {
 	Sources map[string]CatalogSourceConfig `yaml:"sources" json:"sources"`
+}
+
+// LiveCatalogSources answers the catalog sources as the engine holds them now, keyed by id, so a write through the configuration routes is read on the next use without a restart.
+func (c *Config) LiveCatalogSources() map[string]CatalogSourceConfig {
+	raw, err := json.Marshal(c.engine.GetAt("storage", "/catalog_sources/sources"))
+	if err != nil {
+		return c.CatalogSources.Sources
+	}
+	sources := map[string]CatalogSourceConfig{}
+	if uerr := json.Unmarshal(raw, &sources); uerr != nil {
+		return c.CatalogSources.Sources
+	}
+	return sources
 }

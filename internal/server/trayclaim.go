@@ -112,7 +112,7 @@ func (s *Server) handleTrayClaim(w http.ResponseWriter, r *http.Request) {
 type protocolOpenRequest struct {
 	// Contents of the running agent's protocol.secret file
 	Secret string `json:"secret" binding:"required"`
-	// The link's raw query, the deploy vocabulary alone (create=machine with box or provisioner members); the UI lands on /?query
+	// The link's raw query, the deploy vocabulary alone (create=machine with the box members, or the provisioner members with provisioner_catalog); the UI lands on /?query
 	Query string `json:"query,omitempty"`
 }
 
@@ -129,7 +129,7 @@ type protocolOpenResponse struct {
 // fresh browser tab this agent opens, never in this response.
 //
 //	@Summary		hwa:// single-instance handoff
-//	@Description	Public but secret-gated: when the OS spawns a fresh agent process for an hwa://open invocation (Windows registry handler, Linux .desktop handler), that process forwards the action here and exits. The per-boot secret file (0600, beside the running agent's config) authenticates it — web pages cannot read local files, so possession proves a local same-user process. On success the running agent opens the signed-in UI in the user's browser, exactly like a tray Open click; a query carried by the link (the deploy vocabulary: create=machine with box, box_version, box_arch, box_url or provisioner, provisioner_version, provisioner_url) lands on /?query so the hosts page opens the create wizard seeded, any other key refused 400.
+//	@Description	Public but secret-gated: when the OS spawns a fresh agent process for a protocol invocation, <scheme>://open?<query> or the RFC 8252 section 7.1 form <scheme>:/open?<query> under hwa, hyperweaver-agent or com.startcloud.hyperweaver-agent (Windows registry handler, Linux .desktop handler), that process forwards the action here and exits. The per-boot secret file (0600, beside the running agent's config) authenticates it — web pages cannot read local files, so possession proves a local same-user process. On success the running agent opens the signed-in UI in the user's browser, exactly like a tray Open click; a query carried by the link (the deploy vocabulary of at most 2048 bytes: create=machine with box, box_version, box_arch, box_url or provisioner, provisioner_version, provisioner_url, provisioner_catalog, the URL of the catalog document the family came from) lands on /?query so the hosts page opens the create wizard seeded, any other key refused 400.
 //	@Tags			Local Login
 //	@Accept			json
 //	@Produce		json

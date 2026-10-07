@@ -2,36 +2,54 @@ package server
 
 import (
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"sort"
+	"strconv"
+	"strings"
 
 	"github.com/Makr91/hyperweaver-agent/internal/auth"
+	"github.com/Makr91/hyperweaver-agent/internal/config"
+	"github.com/Makr91/hyperweaver-agent/internal/problem"
 	"github.com/Makr91/hyperweaver-agent/internal/provisioner"
 	"github.com/Makr91/hyperweaver-agent/internal/tasks"
 )
 
-// catalogSourceList converts the configured catalogs into the provisioner
-// package's source shape.
+// catalogSourceList converts the configured catalogs, as the engine holds
+// them now, into the provisioner package's source shape.
 func (s *Server) catalogSourceList() []provisioner.CatalogSource {
-	ids := make([]string, 0, len(s.cfg.CatalogSources.Sources))
-	for id := range s.cfg.CatalogSources.Sources {
+	configured := s.cfg.LiveCatalogSources()
+	ids := make([]string, 0, len(configured))
+	for id := range configured {
 		ids = append(ids, id)
 	}
 	sort.Strings(ids)
 	sources := make([]provisioner.CatalogSource, 0, len(ids))
 	for _, id := range ids {
-		source := s.cfg.CatalogSources.Sources[id]
+		source := configured[id]
 		sources = append(sources, provisioner.CatalogSource{
 			ID:      id,
 			Name:    source.DisplayName,
 			URL:     source.URL,
 			Enabled: source.Enabled,
 			Default: source.Default,
+			Auth:    source.Auth,
 			CAFile:  source.CAFile,
 		})
 	}
 	return sources
+}
+
+// catalogFailure answers a catalog read that failed: 401 authentication when the source needs a signed-in account, 502 otherwise.
+func catalogFailure(w http.ResponseWriter, source *provisioner.CatalogSource, err error) {
+	if errors.Is(err, provisioner.ErrCatalogAuth) {
+		problem.Detail(w, http.StatusUnauthorized, err.Error())
+		return
+	}
+	slog.Error("fetch provisioner catalog", "source", source.Name, "error", err)
+	taskError(w, http.StatusBadGateway, err.Error())
 }
 
 // catalogSourceRow is one entry of GET /api/provisioning/catalog/sources.
@@ -77,17 +95,18 @@ func (s *Server) handleListCatalogSources(w http.ResponseWriter, _ *http.Request
 }
 
 // handleGetCatalog fetches one catalog's document live (?source= names a
-// configured catalog; empty = the default) — parsed, format_version-gated,
-// relayed with the source name.
+// configured catalog; empty = the default), format_version-gated, relayed
+// verbatim.
 //
 //	@Summary		Browse a provisioner catalog
-//	@Description	Minimum role: viewer. Fetches the source's catalog.json LIVE (?source= names a configured catalog; empty = the default), validates format_version 1, and relays the parsed document: {name, format_version, updated, provisioners: [{name, repo, description, versions: [{version, artifacts: [{url, checksum_type, checksum}]}]}]} — versions semver-DESC, artifact URLs OPAQUE (release tags carry slashes; never parse or construct them). Versions may disappear between fetches when an author deletes a release.
+//	@Description	Minimum role: viewer. Fetches the source's catalog.json LIVE (?source= names a configured catalog; empty = the default), validates format_version 1, and relays the document verbatim with every member the catalog publishes: {name, format_version, updated, provisioners: [{name, repo, description, versions: [{version, released_at, artifacts: [{url, checksum_type, checksum}]}]}]} — versions semver-DESC, artifact URLs OPAQUE (release tags carry slashes; never parse or construct them). Versions may disappear between fetches when an author deletes a release. An oidc source is read under the bound account's access token; with none held, or the catalog refusing it, the answer is 401 with the authentication problem type.
 //	@Tags			Provisioning
 //	@Produce		json
 //	@Param			source	query	string	false	"A configured catalog source's id; empty = the default"
-//	@Success		200	{object}	provisioner.CatalogDocument	"The catalog document — the parsed catalog.json IS the response (no envelope; the resolved source rides /api/provisioning/catalog/sources)"
-//	@Failure		404	"No such (or no default) enabled catalog source"
-//	@Failure		502	"Catalog unreachable, unparseable, or wrong format_version"
+//	@Success		200	{object}	provisioner.CatalogDocument	"The catalog document — catalog.json IS the response (no envelope; the resolved source rides /api/provisioning/catalog/sources)"
+//	@Failure		401	{object}	problem.Body	"The source needs a signed-in account"
+//	@Failure		404	{object}	problem.Body	"No such (or no default) enabled catalog source"
+//	@Failure		502	{object}	problem.Body	"Catalog unreachable, unparseable, or wrong format_version"
 //	@Router			/api/provisioning/catalog [get]
 func (s *Server) handleGetCatalog(w http.ResponseWriter, r *http.Request) {
 	source, err := provisioner.FindCatalogSource(s.catalogSourceList(), r.URL.Query().Get("source"))
@@ -95,16 +114,143 @@ func (s *Server) handleGetCatalog(w http.ResponseWriter, r *http.Request) {
 		taskError(w, http.StatusNotFound, err.Error())
 		return
 	}
-	document, err := provisioner.FetchCatalog(r.Context(), source)
+	document, _, err := provisioner.FetchCatalogVerbatim(r.Context(), source)
 	if err != nil {
-		slog.Error("fetch provisioner catalog", "source", source.Name, "error", err)
-		taskError(w, http.StatusBadGateway, err.Error())
+		catalogFailure(w, source, err)
 		return
 	}
-	// Parsed relay, the shared wire (UI's 2026-07-17 flag — the wrap was a
-	// bug on BOTH agents once): the catalog document IS the response; the
-	// resolved source rides /api/provisioning/catalog/sources, never an envelope.
 	writeJSON(w, document)
+}
+
+// @Summary		A provisioner catalog's health document
+// @Description	Minimum role: viewer. Fetches the source's health.json LIVE, the URL beside the catalog's (catalog.json becoming health.json, /catalog becoming /health), and relays it verbatim: {name, format_version, updated, provisioners: {<family>: {repo, tier, presentation, rules, failed_rules, health}}}. 404 while the source publishes none. An oidc source is read under the bound account's access token; with none held, or the catalog refusing it, the answer is 401 with the authentication problem type.
+// @Tags			Provisioning
+// @Produce		json
+// @Param			source	query	string	false	"A configured catalog source's id; empty = the default"
+// @Success		200	{object}	map[string]interface{}	"The health document verbatim"
+// @Failure		401	{object}	problem.Body	"The source needs a signed-in account"
+// @Failure		404	{object}	problem.Body	"No such (or no default) enabled catalog source, or the source publishes no health document"
+// @Failure		502	{object}	problem.Body	"Catalog unreachable or the document is not JSON"
+// @Router			/api/provisioning/catalog/health [get]
+func (s *Server) handleCatalogHealth(w http.ResponseWriter, r *http.Request) {
+	source, err := provisioner.FindCatalogSource(s.catalogSourceList(), r.URL.Query().Get("source"))
+	if err != nil {
+		taskError(w, http.StatusNotFound, err.Error())
+		return
+	}
+	document, err := provisioner.FetchCatalogHealth(r.Context(), source)
+	if errors.Is(err, provisioner.ErrCatalogHealthMissing) {
+		taskError(w, http.StatusNotFound, err.Error())
+		return
+	}
+	if err != nil {
+		catalogFailure(w, source, err)
+		return
+	}
+	writeJSON(w, document)
+}
+
+type createCatalogSourceRequest struct {
+	DisplayName string `json:"display_name"`
+	// The catalog document's URL, fetched as given
+	URL string `json:"url"`
+	// none or oidc; absent means none
+	Auth string `json:"auth"`
+}
+
+type createCatalogSourceResponse struct {
+	Success bool             `json:"success"`
+	Source  catalogSourceRow `json:"source"`
+}
+
+func (s *Server) catalogSourceID(displayName string) string {
+	id := strings.Trim(storagePathSlug.ReplaceAllString(strings.ToLower(displayName), "_"), "_")
+	if id == "" || !config.ValidStoragePathID(id) {
+		id = "catalog"
+	}
+	configured := s.cfg.LiveCatalogSources()
+	candidate := id
+	for n := 2; ; n++ {
+		if _, taken := configured[candidate]; !taken {
+			return candidate
+		}
+		candidate = id + "_" + strconv.Itoa(n)
+	}
+}
+
+// @Summary		Add a provisioner catalog source
+// @Description	Minimum role: operator. Adds a catalog to catalog_sources.sources in the storage configuration file, keyed by an id derived from display_name, enabled and not the default; auth is none or oidc, oidc sending the bound account's access token as Bearer on the catalog read and its downloads. It takes effect at once, no restart: the sources list, the catalog read and the next catalog install read it.
+// @Tags			Provisioning
+// @Accept			json
+// @Produce		json
+// @Param			body	body		createCatalogSourceRequest	true	"The new source"
+// @Success		201		{object}	createCatalogSourceResponse	"Source added: {success, source: {id, name, url, default}}"
+// @Failure		400		{object}	problem.Body	"Unreadable body"
+// @Failure		409		{object}	problem.Body	"A source of that url is already present (unique at /url); source carries it"
+// @Failure		422		{object}	problem.Body	"display_name or url missing (required); url not an http(s) URL (format uri at /url); auth outside none, oidc (enum at /auth)"
+// @Router			/api/provisioning/catalog/sources [post]
+func (s *Server) handleCreateCatalogSource(w http.ResponseWriter, r *http.Request) {
+	var body createCatalogSourceRequest
+	if err := decodeBody(r, &body); err != nil {
+		problem.BadRequest(w)
+		return
+	}
+	failures := []problem.Error{}
+	if body.DisplayName == "" {
+		failures = append(failures, problem.Required("/display_name"))
+	}
+	switch parsed, err := url.Parse(body.URL); {
+	case body.URL == "":
+		failures = append(failures, problem.Required("/url"))
+	case err != nil || parsed.Host == "" || (parsed.Scheme != "https" && parsed.Scheme != "http"):
+		failures = append(failures, problem.Rule("/url", "format", map[string]any{"format": "uri"}))
+	}
+	if body.Auth == "" {
+		body.Auth = provisioner.CatalogAuthNone
+	}
+	if body.Auth != provisioner.CatalogAuthNone && body.Auth != provisioner.CatalogAuthOIDC {
+		failures = append(failures, problem.Enum("/auth", provisioner.CatalogAuthNone, provisioner.CatalogAuthOIDC))
+	}
+	if len(failures) > 0 {
+		problem.Invalid(w, failures...)
+		return
+	}
+	for _, existing := range s.catalogSourceList() {
+		if existing.URL == body.URL {
+			problem.Send(w, http.StatusConflict, "conflict", "", "A catalog source with this url is already present",
+				[]problem.Error{problem.Unique("/url", "catalog_sources")},
+				map[string]any{"source": catalogSourceRow{
+					ID: existing.ID, Name: existing.Name, URL: existing.URL, Default: existing.Default,
+				}})
+			return
+		}
+	}
+
+	id := s.catalogSourceID(body.DisplayName)
+	previous := s.cfg.CatalogSources.Sources
+	sources := make(map[string]config.CatalogSourceConfig, len(previous)+1)
+	for key, entry := range s.cfg.LiveCatalogSources() {
+		sources[key] = entry
+	}
+	sources[id] = config.CatalogSourceConfig{
+		DisplayName: body.DisplayName,
+		URL:         body.URL,
+		Enabled:     true,
+		Auth:        body.Auth,
+	}
+	s.cfg.CatalogSources.Sources = sources
+	if err := s.cfg.MergeAndSave(map[string]any{"catalog_sources": s.cfg.CatalogSources}); err != nil {
+		s.cfg.CatalogSources.Sources = previous
+		slog.Error("save catalog source", "id", id, "error", err)
+		taskError(w, http.StatusInternalServerError, "Failed to save the catalog source")
+		return
+	}
+	slog.Info("catalog source added", "id", id, "url", body.URL, "auth", body.Auth,
+		"by", auth.FromContext(r.Context()).Name)
+	writeJSONStatus(w, http.StatusCreated, createCatalogSourceResponse{
+		Success: true,
+		Source:  catalogSourceRow{ID: id, Name: body.DisplayName, URL: body.URL, Default: false},
+	})
 }
 
 // handleCatalogInstall queues provisioner_catalog_install: download the

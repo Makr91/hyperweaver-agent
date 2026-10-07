@@ -9,6 +9,7 @@ package provisioner
 // are OPAQUE (release tags carry slashes — never parse or construct them).
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"crypto/tls"
@@ -51,7 +52,39 @@ type CatalogSource struct {
 	URL     string `json:"url"`
 	Enabled bool   `json:"enabled"`
 	Default bool   `json:"default"`
+	Auth    string `json:"auth"`
 	CAFile  string `json:"-"`
+}
+
+// The auth a catalog source carries: none sends nothing, oidc sends the bound account's access token as Bearer.
+const (
+	CatalogAuthNone = "none"
+	CatalogAuthOIDC = "oidc"
+)
+
+// catalogDocumentLimit bounds one catalog or health document read.
+const catalogDocumentLimit = 16 << 20
+
+var oidcTokenSource func() string
+
+// SetOIDCTokenSource wires the bound account's access token for catalog sources whose auth is oidc.
+func SetOIDCTokenSource(source func() string) {
+	oidcTokenSource = source
+}
+
+// ErrCatalogAuth is answered when an oidc source has no token to send or the catalog refused the one sent.
+var ErrCatalogAuth = errors.New("the catalog requires a signed-in account")
+
+// ErrCatalogHealthMissing is answered when the source publishes no health document.
+var ErrCatalogHealthMissing = errors.New("the catalog publishes no health document")
+
+type catalogStatusError struct {
+	source string
+	status int
+}
+
+func (e *catalogStatusError) Error() string {
+	return fmt.Sprintf("catalog %s answered HTTP %d", e.source, e.status)
 }
 
 // CatalogArtifact is one downloadable asset of a catalog version.
@@ -63,8 +96,9 @@ type CatalogArtifact struct {
 
 // CatalogVersion is one published version (semver-DESC in the document).
 type CatalogVersion struct {
-	Version   string            `json:"version"`
-	Artifacts []CatalogArtifact `json:"artifacts"`
+	Version    string            `json:"version"`
+	ReleasedAt string            `json:"released_at,omitempty"`
+	Artifacts  []CatalogArtifact `json:"artifacts"`
 }
 
 // CatalogFamily is one admitted provisioner family.
@@ -132,14 +166,32 @@ func catalogClient(source *CatalogSource, timeout time.Duration) (*http.Client, 
 	return client, nil
 }
 
-// FetchCatalog downloads and validates one source's catalog.json: HTTP 200,
-// parseable JSON, format_version exactly 1 (the consumption contract's gate).
-func FetchCatalog(ctx context.Context, source *CatalogSource) (*CatalogDocument, error) {
+// catalogRequest builds one GET against the source, Bearer with the bound account's token for an oidc source.
+func catalogRequest(ctx context.Context, source *CatalogSource, target string) (*http.Request, error) {
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, target, http.NoBody)
+	if err != nil {
+		return nil, err
+	}
+	if source.Auth == CatalogAuthOIDC {
+		token := ""
+		if oidcTokenSource != nil {
+			token = oidcTokenSource()
+		}
+		if token == "" {
+			return nil, ErrCatalogAuth
+		}
+		request.Header.Set("Authorization", "Bearer "+token)
+	}
+	return request, nil
+}
+
+// fetchCatalogDocument reads one document of the source verbatim.
+func fetchCatalogDocument(ctx context.Context, source *CatalogSource, target string) ([]byte, error) {
 	client, err := catalogClient(source, catalogFetchTimeout)
 	if err != nil {
 		return nil, err
 	}
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, source.URL, http.NoBody)
+	request, err := catalogRequest(ctx, source, target)
 	if err != nil {
 		return nil, err
 	}
@@ -151,16 +203,86 @@ func FetchCatalog(ctx context.Context, source *CatalogSource) (*CatalogDocument,
 		_ = response.Body.Close()
 	}()
 	if response.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("catalog %s answered HTTP %d", source.Name, response.StatusCode)
+		refused := response.StatusCode == http.StatusUnauthorized || response.StatusCode == http.StatusForbidden
+		if refused && source.Auth == CatalogAuthOIDC {
+			return nil, fmt.Errorf("%w: catalog %s answered HTTP %d", ErrCatalogAuth, source.Name, response.StatusCode)
+		}
+		return nil, &catalogStatusError{source: source.Name, status: response.StatusCode}
 	}
+	raw, err := io.ReadAll(io.LimitReader(response.Body, catalogDocumentLimit))
+	if err != nil {
+		return nil, fmt.Errorf("read catalog %s: %w", source.Name, err)
+	}
+	return raw, nil
+}
 
-	document := &CatalogDocument{}
-	if derr := json.NewDecoder(response.Body).Decode(document); derr != nil {
-		return nil, fmt.Errorf("parse catalog %s: %w", source.Name, derr)
+// decodeDocument parses one JSON document into a map with every member and number kept as published.
+func decodeDocument(raw []byte) (map[string]any, error) {
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.UseNumber()
+	document := map[string]any{}
+	if err := decoder.Decode(&document); err != nil {
+		return nil, err
+	}
+	return document, nil
+}
+
+// FetchCatalogVerbatim downloads one source's catalog.json and validates it, parseable JSON with format_version exactly 1, answering the document with every member the catalog publishes beside the parsed one.
+func FetchCatalogVerbatim(ctx context.Context, source *CatalogSource) (verbatim map[string]any, document *CatalogDocument, err error) {
+	raw, err := fetchCatalogDocument(ctx, source, source.URL)
+	if err != nil {
+		return nil, nil, err
+	}
+	document = &CatalogDocument{}
+	if derr := json.Unmarshal(raw, document); derr != nil {
+		return nil, nil, fmt.Errorf("parse catalog %s: %w", source.Name, derr)
 	}
 	if document.FormatVersion != catalogFormatVersion {
-		return nil, fmt.Errorf("catalog %s is format_version %d — this agent speaks %d",
+		return nil, nil, fmt.Errorf("catalog %s is format_version %d — this agent speaks %d",
 			source.Name, document.FormatVersion, catalogFormatVersion)
+	}
+	verbatim, err = decodeDocument(raw)
+	if err != nil {
+		return nil, nil, fmt.Errorf("parse catalog %s: %w", source.Name, err)
+	}
+	return verbatim, document, nil
+}
+
+// FetchCatalog downloads and validates one source's catalog.json: HTTP 200,
+// parseable JSON, format_version exactly 1 (the consumption contract's gate).
+func FetchCatalog(ctx context.Context, source *CatalogSource) (*CatalogDocument, error) {
+	_, document, err := FetchCatalogVerbatim(ctx, source)
+	return document, err
+}
+
+// catalogHealthURL derives the health document's URL from the catalog's: catalog.json becomes health.json, a /catalog path becomes /health.
+func catalogHealthURL(catalogURL string) (string, bool) {
+	switch {
+	case strings.HasSuffix(catalogURL, "/catalog.json"):
+		return strings.TrimSuffix(catalogURL, "catalog.json") + "health.json", true
+	case strings.HasSuffix(catalogURL, "/catalog"):
+		return strings.TrimSuffix(catalogURL, "catalog") + "health", true
+	}
+	return "", false
+}
+
+// FetchCatalogHealth downloads one source's health.json with every member as published; ErrCatalogHealthMissing while the source publishes none.
+func FetchCatalogHealth(ctx context.Context, source *CatalogSource) (map[string]any, error) {
+	target, ok := catalogHealthURL(source.URL)
+	if !ok {
+		return nil, ErrCatalogHealthMissing
+	}
+	raw, err := fetchCatalogDocument(ctx, source, target)
+	var status *catalogStatusError
+	if errors.As(err, &status) && status.status == http.StatusNotFound {
+		return nil, ErrCatalogHealthMissing
+	}
+	if err != nil {
+		return nil, err
+	}
+	document, err := decodeDocument(raw)
+	if err != nil {
+		return nil, fmt.Errorf("parse catalog %s health: %w", source.Name, err)
 	}
 	return document, nil
 }
@@ -186,7 +308,7 @@ func (e *executors) catalogInstall(ctx context.Context, task *tasks.Task, out *t
 	if err := json.Unmarshal(task.Metadata, &meta); err != nil {
 		return fmt.Errorf("parse catalog install metadata: %w", err)
 	}
-	source, err := FindCatalogSource(e.catalogSources, meta.SourceName)
+	source, err := FindCatalogSource(e.catalogSources(), meta.SourceName)
 	if err != nil {
 		return err
 	}
@@ -276,7 +398,7 @@ func downloadVerified(ctx context.Context, source *CatalogSource, assetURL, dest
 	if err != nil {
 		return "", 0, err
 	}
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, assetURL, http.NoBody)
+	request, err := catalogRequest(ctx, source, assetURL)
 	if err != nil {
 		return "", 0, err
 	}
