@@ -14,8 +14,11 @@ func (s *Server) liveIntervalSeconds() int64 {
 }
 
 func (s *Server) topicSubscribersChanged(topic string, _ bool) {
-	if topic == eventTopicMonitoring {
+	switch topic {
+	case eventTopicMonitoring:
 		s.syncLiveSampling(false)
+	case eventTopicNotifications:
+		s.syncHubStream()
 	}
 }
 

@@ -113,13 +113,7 @@ func (t *tokenSource) refreshOnce(refreshToken string) bool {
 	}
 	if answer.Error == "invalid_grant" {
 		slog.Warn("oidc refresh token revoked — log in again to restore federated access")
-		t.mu.Lock()
-		t.accessToken = ""
-		t.refreshToken = ""
-		t.expiry = time.Time{}
-		t.refreshing = false
-		t.mu.Unlock()
-		t.persist("")
+		t.clear()
 		return false
 	}
 	if answer.Error != "" || answer.AccessToken == "" {
@@ -136,6 +130,16 @@ func (t *tokenSource) refreshOnce(refreshToken string) bool {
 	t.mu.Unlock()
 	t.persist(rotated)
 	return true
+}
+
+func (t *tokenSource) clear() {
+	t.mu.Lock()
+	t.accessToken = ""
+	t.refreshToken = ""
+	t.expiry = time.Time{}
+	t.refreshing = false
+	t.mu.Unlock()
+	t.persist("")
 }
 
 func (t *tokenSource) refreshBackoff() bool {

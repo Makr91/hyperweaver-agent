@@ -44,15 +44,59 @@ func formatTime(t time.Time) string {
 	return t.UTC().Format(timeLayout)
 }
 
+// The events a write to a person's inbox sends on the notifications topic.
+const (
+	EventCreated   = "notification-created"
+	EventRead      = "notification-read"
+	EventUnread    = "notification-unread"
+	EventDismissed = "notification-dismissed"
+	EventReadAll   = "inbox-read-all"
+	EventCleared   = "inbox-cleared"
+)
+
+// OriginLocal marks a row of this store; a row the identity provider's hub holds is marked hub.
+const OriginLocal = "local"
+
+// Change is one write to a person's inbox: the event it sends and the event's data.
+type Change struct {
+	Event string
+	Data  any
+}
+
+// ReadChange is the data of notification-read.
+type ReadChange struct {
+	ID     any       `json:"id"`
+	ReadAt time.Time `json:"read_at"`
+}
+
+// IDChange is the data of notification-unread and notification-dismissed.
+type IDChange struct {
+	ID any `json:"id"`
+}
+
+// ReadAllChange is the data of inbox-read-all.
+type ReadAllChange struct {
+	ReadAt time.Time `json:"read_at"`
+}
+
+// ClearedChange is the data of inbox-cleared.
+type ClearedChange struct{}
+
 // Store persists notifications in agent.sqlite.
 type Store struct {
 	db     *sql.DB
-	Notify func(person string)
+	Notify func(person string, change Change)
 }
 
 // NewStore wraps the opened agent database.
 func NewStore(database *sql.DB) *Store {
 	return &Store{db: database}
+}
+
+func (s *Store) notify(person string, change Change) {
+	if s.Notify != nil {
+		s.Notify(person, change)
+	}
 }
 
 // Row is one notification as the inbox routes answer it.
@@ -65,6 +109,7 @@ type Row struct {
 	Navigate  string     `json:"navigate"`
 	ReadAt    *time.Time `json:"read_at"`
 	CreatedAt time.Time  `json:"created_at"`
+	Origin    string     `json:"origin"`
 }
 
 // Write is the content of one notification to store.
@@ -81,7 +126,7 @@ type Write struct {
 const rowColumns = `id, title, body, type, severity, navigate, read_at, created_at`
 
 func scanRow(row interface{ Scan(...any) error }) (*Row, error) {
-	var r Row
+	r := Row{Origin: OriginLocal}
 	var createdAt string
 	var readAt sql.NullString
 	err := row.Scan(&r.ID, &r.Title, &r.Body, &r.Type, &r.Severity, &r.Navigate, &readAt, &createdAt)
@@ -146,10 +191,11 @@ func (s *Store) Create(ctx context.Context, person string, write *Write) (row *R
 	if err != nil {
 		return nil, false, err
 	}
-	if s.Notify != nil {
-		s.Notify(person)
+	created = storedID == id
+	if created {
+		s.notify(person, Change{Event: EventCreated, Data: row})
 	}
-	return row, storedID == id, nil
+	return row, created, nil
 }
 
 func (s *Store) get(ctx context.Context, person, id string) (*Row, error) {
@@ -215,7 +261,17 @@ func (s *Store) MarkRead(ctx context.Context, person, id string) error {
 	if err != nil {
 		return err
 	}
-	return requireRow(res)
+	if rerr := requireRow(res); rerr != nil {
+		return rerr
+	}
+	row, err := s.get(ctx, person, id)
+	if err != nil {
+		return err
+	}
+	if row.ReadAt != nil {
+		s.notify(person, Change{Event: EventRead, Data: ReadChange{ID: id, ReadAt: *row.ReadAt}})
+	}
+	return nil
 }
 
 // MarkUnread puts the person's notification back to unread.
@@ -225,14 +281,22 @@ func (s *Store) MarkUnread(ctx context.Context, person, id string) error {
 	if err != nil {
 		return err
 	}
-	return requireRow(res)
+	if rerr := requireRow(res); rerr != nil {
+		return rerr
+	}
+	s.notify(person, Change{Event: EventUnread, Data: IDChange{ID: id}})
+	return nil
 }
 
 // MarkAllRead records every unread notification of the person as read.
 func (s *Store) MarkAllRead(ctx context.Context, person string) error {
-	_, err := s.db.ExecContext(ctx, `UPDATE notifications
-		SET read_at = ? WHERE person = ? AND read_at IS NULL`, formatTime(time.Now()), person)
-	return err
+	readAt := time.Now().UTC()
+	if _, err := s.db.ExecContext(ctx, `UPDATE notifications
+		SET read_at = ? WHERE person = ? AND read_at IS NULL`, formatTime(readAt), person); err != nil {
+		return err
+	}
+	s.notify(person, Change{Event: EventReadAll, Data: ReadAllChange{ReadAt: readAt}})
+	return nil
 }
 
 // Delete removes the person's notification.
@@ -241,13 +305,20 @@ func (s *Store) Delete(ctx context.Context, person, id string) error {
 	if err != nil {
 		return err
 	}
-	return requireRow(res)
+	if rerr := requireRow(res); rerr != nil {
+		return rerr
+	}
+	s.notify(person, Change{Event: EventDismissed, Data: IDChange{ID: id}})
+	return nil
 }
 
 // DeleteAll removes every notification of the person.
 func (s *Store) DeleteAll(ctx context.Context, person string) error {
-	_, err := s.db.ExecContext(ctx, `DELETE FROM notifications WHERE person = ?`, person)
-	return err
+	if _, err := s.db.ExecContext(ctx, `DELETE FROM notifications WHERE person = ?`, person); err != nil {
+		return err
+	}
+	s.notify(person, Change{Event: EventCleared, Data: ClearedChange{}})
+	return nil
 }
 
 func requireRow(res sql.Result) error {

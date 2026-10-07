@@ -112,6 +112,8 @@ type Interface struct {
 	State      string   `json:"state"`
 	MACAddress string   `json:"macaddress"`
 	Addresses  []string `json:"addresses"`
+	// The adapter's name as VirtualBox's bridged interfaces list it, on Windows the adapter description; absent for an interface VirtualBox does not list
+	Description string `json:"description,omitempty"`
 }
 
 // Sampler reads live telemetry. Rate values (CPU percentages, network bps)

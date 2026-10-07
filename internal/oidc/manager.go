@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"log/slog"
 	"net/http"
 	"path/filepath"
 	"strings"
@@ -136,6 +137,39 @@ func (m *Manager) BoundSubject() string {
 	m.binding.mu.Lock()
 	defer m.binding.mu.Unlock()
 	return m.binding.subject
+}
+
+// BoundEmail answers the email of the account the agent is bound to, empty while unbound.
+func (m *Manager) BoundEmail() string {
+	m.binding.mu.Lock()
+	defer m.binding.mu.Unlock()
+	return m.binding.email
+}
+
+// EndGrant forgets the bound account's tokens after the issuer ended the grant; the account signs in again to restore federated access.
+func (m *Manager) EndGrant() {
+	slog.Warn("the identity provider ended the bound account's grant — log in again to restore federated access")
+	m.tokens.clear()
+}
+
+var streamClient = &http.Client{}
+
+// IssuerStream opens one server-sent event stream at the issuer under the bound account's Bearer token, resuming after lastEventID when one is given; the caller closes the body and ends the stream through ctx.
+func (m *Manager) IssuerStream(ctx context.Context, path, lastEventID string) (*http.Response, error) {
+	token := m.tokens.bearer()
+	if token == "" {
+		return nil, ErrNoToken
+	}
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(m.provider.issuer, "/")+path, http.NoBody)
+	if err != nil {
+		return nil, err
+	}
+	request.Header.Set("Authorization", "Bearer "+token)
+	request.Header.Set("Accept", "text/event-stream")
+	if lastEventID != "" {
+		request.Header.Set("Last-Event-ID", lastEventID)
+	}
+	return streamClient.Do(request)
 }
 
 // IdentityForKey answers the federated account a key was minted for, false for a plain key.

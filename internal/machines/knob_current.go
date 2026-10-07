@@ -26,7 +26,8 @@ import (
 // machine): only the DB-held keys answer. file carries the .vbox settings
 // (nil when unreadable) — it fills the knobs showvminfo never emits; in
 // that format absence means DEFAULT, so those fill in as real values.
-func KnobCurrent(machine *Machine, raw map[string]string, osTypeID string, file *vbox.MachineSettings) map[string]any {
+// bridged maps a bridge adapter's VirtualBox name to its OS interface name.
+func KnobCurrent(machine *Machine, raw map[string]string, osTypeID string, file *vbox.MachineSettings, bridged map[string]string) map[string]any {
 	current := map[string]any{}
 
 	settings := ParseConfiguration(machine).Section("settings")
@@ -104,7 +105,7 @@ func KnobCurrent(machine *Machine, raw map[string]string, osTypeID string, file 
 	firmware := firmwareCurrent(raw)
 	recording := recordingCurrent(raw)
 	vrde := vrdeCurrent(raw)
-	nics := nicsCurrent(raw)
+	nics := nicsCurrent(raw, bridged)
 	if file != nil {
 		applySettingsFile(file, cpu, audio, usb, platform, firmware, recording, vrde, nics)
 	}

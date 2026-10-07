@@ -377,35 +377,6 @@
                 },
                 "type": "object"
             },
-            "inbox.Row": {
-                "properties": {
-                    "body": {
-                        "type": "string"
-                    },
-                    "created_at": {
-                        "type": "string"
-                    },
-                    "id": {
-                        "type": "string"
-                    },
-                    "navigate": {
-                        "type": "string"
-                    },
-                    "read_at": {
-                        "type": "string"
-                    },
-                    "severity": {
-                        "type": "string"
-                    },
-                    "title": {
-                        "type": "string"
-                    },
-                    "type": {
-                        "type": "string"
-                    }
-                },
-                "type": "object"
-            },
             "locations.Kind": {
                 "enum": [
                     "machines",
@@ -755,6 +726,10 @@
                         "uniqueItems": false
                     },
                     "class": {
+                        "type": "string"
+                    },
+                    "description": {
+                        "description": "The adapter's name as VirtualBox's bridged interfaces list it, on Windows the adapter description; absent for an interface VirtualBox does not list",
                         "type": "string"
                     },
                     "link": {
@@ -5432,9 +5407,7 @@
             "server.notificationsPage": {
                 "properties": {
                     "items": {
-                        "items": {
-                            "$ref": "#/components/schemas/inbox.Row"
-                        },
+                        "items": {},
                         "type": "array",
                         "uniqueItems": false
                     },
@@ -10734,7 +10707,7 @@
         },
         "/api/events": {
             "get": {
-                "description": "Minimum role: viewer. The one event stream of the Universal Events Contract, plain WHATWG server-sent events. topics is a comma-separated list of health, tasks, hosts, admin, monitoring, profile and notifications; unknown names are ignored, an empty list asks for every topic, and the stream answers the topics the key's role may read, admin left out for a non-admin key, so the ready event's topics list is the subscription that stands; 403 only when nothing is left. The first frame is retry: 3000 followed by the ready event carrying the newest id and the subscribed topics. Every event carries id \u003cepoch-ms\u003e-\u003cseq\u003e, a kebab-case event name and one line of JSON data; a :hb comment line is sent after 25 seconds without a frame. Topic tasks sends task-updated, one task row as GET /api/tasks answers it, when a task is created and on every change of its status, progress_percent, progress_info or error_message. Topic hosts sends stats-updated, the GET /api/stats document, when a machine is created or removed and when one changes status. Topic health sends health, the GET /api/health report, whenever a task ends and the report differs from the last one sent. Topic admin sends restart-required, {required, last_modified_by, last_modified_time}, after every configuration save and backup restore, and {required: false} as the agent restarts; it is subscribed for an admin key alone. Topic admin also sends update-available {current_version, latest_version, release_date} when a check finds a newer release. Topic monitoring sends cpu-sample {cpu: [sample]} with per_core_parsed, memory-sample {memory: [sample]} and network-sample {usage: [samples]}, the members GET /api/monitoring/system/cpu, /api/system/memory and /api/network/usage answer, whenever the agent takes them: every monitoring.live_interval seconds while at least one client is subscribed to the topic, whether or not storage is on, and nothing while none is; on every collector tick while monitoring.storage_enabled; and on POST /api/monitoring/collect. A live sample is one event in the ring like any other. Topic profile is the person's profile topic of the contract; this agent keeps no preferences, so it sends nothing on it. Topic notifications sends unread-count {count}, the person's unread rows in the agent's local inbox, to that person alone after every row written for them and after every read, unread, read-all, delete and delete-all they send. No topic has a snapshot event. The ring keeps the last 500 events or 5 minutes, whichever is larger: a Last-Event-ID inside it replays every later event of the subscribed topics, one outside it answers a reset event naming the subscribed topics. A task's output and every terminal stay on their WebSockets.",
+                "description": "Minimum role: viewer. The one event stream of the Universal Events Contract, plain WHATWG server-sent events. topics is a comma-separated list of health, tasks, hosts, admin, monitoring, profile and notifications; unknown names are ignored, an empty list asks for every topic, and the stream answers the topics the key's role may read, admin left out for a non-admin key, so the ready event's topics list is the subscription that stands; 403 only when nothing is left. The first frame is retry: 3000 followed by the ready event carrying the newest id and the subscribed topics. Every event carries id \u003cepoch-ms\u003e-\u003cseq\u003e, a kebab-case event name and one line of JSON data; a :hb comment line is sent after 25 seconds without a frame. Topic tasks sends task-updated, one task row as GET /api/tasks answers it, when a task is created and on every change of its status, progress_percent, progress_info or error_message. Topic hosts sends stats-updated, the GET /api/stats document, when a machine is created or removed and when one changes status. Topic health sends health, the GET /api/health report, whenever a task ends and the report differs from the last one sent. Topic admin sends restart-required, {required, last_modified_by, last_modified_time}, after every configuration save and backup restore, and {required: false} as the agent restarts; it is subscribed for an admin key alone. Topic admin also sends update-available {current_version, latest_version, release_date} when a check finds a newer release. Topic monitoring sends cpu-sample {cpu: [sample]} with per_core_parsed, memory-sample {memory: [sample]} and network-sample {usage: [samples]}, the members GET /api/monitoring/system/cpu, /api/system/memory and /api/network/usage answer, whenever the agent takes them: every monitoring.live_interval seconds while at least one client is subscribed to the topic, whether or not storage is on, and nothing while none is; on every collector tick while monitoring.storage_enabled; and on POST /api/monitoring/collect. A live sample is one event in the ring like any other. Topic profile is the person's profile topic of the contract; this agent keeps no preferences, so it sends nothing on it. Topic notifications sends, to the one person whose inbox changed, notification-created (the row as GET /api/notifications answers it), notification-read {id, read_at}, notification-unread {id}, notification-dismissed {id}, inbox-read-all {read_at} and inbox-cleared {}, each followed by unread-count {count}, the person's unread rows, the local inbox's and, for the account the agent is bound to, the hub's. For the bound account, while at least one client here is subscribed to the topic, the agent also holds the identity provider's stream open on its session and notifications topics under the account's token and relays the notifications topic to that person: the hub's notification-created row arrives marked origin hub, its unread-count, ready and reset each send this agent's combined unread-count, and every other event of the topic passes as it came; the hub's session-terminated ends the bound account's grant on the agent, and the account signs in again. No topic has a snapshot event. The ring keeps the last 500 events or 5 minutes, whichever is larger: a Last-Event-ID inside it replays every later event of the subscribed topics, one outside it answers a reset event naming the subscribed topics. A task's output and every terminal stay on their WebSockets.",
                 "parameters": [
                     {
                         "description": "Comma-separated topics: health, tasks, hosts, admin, monitoring, profile, notifications",
@@ -12192,7 +12165,7 @@
                 ]
             },
             "get": {
-                "description": "Minimum role: viewer. Live-checks VirtualBox (updating the registry on drift) and returns the record, its live configuration, pending tasks, and knob_current — the current values in PUT's own vocabulary (the Edit-surface prefill). configuration carries nat_forwards, the NAT port-forward rules as the rows GET /api/machines/{machineName}/config answers ({name, protocol, host_ip, host_port, guest_ip, guest_port, adapter}), read from the live view and from the last reconciled copy when the hypervisor does not answer.",
+                "description": "Minimum role: viewer. Live-checks VirtualBox (updating the registry on drift) and returns the record, its live configuration, pending tasks, and knob_current — the current values in PUT's own vocabulary (the Edit-surface prefill); a bridged adapter's knob_current.nics[] entry carries interface, the OS interface name GET /api/monitoring/network/interfaces answers as link, joined through VirtualBox's bridged interfaces list by MAC address and then IP address. configuration carries nat_forwards, the NAT port-forward rules as the rows GET /api/machines/{machineName}/config answers ({name, protocol, host_ip, host_port, guest_ip, guest_port, adapter}), read from the live view and from the last reconciled copy when the hypervisor does not answer.",
                 "parameters": [
                     {
                         "description": "Machine name",
@@ -15513,7 +15486,7 @@
         },
         "/api/monitoring/network/interfaces": {
             "get": {
-                "description": "Minimum role: viewer. Live configuration view (name, MTU, state, MAC, addresses). dladm-only fields (over, speed, vid, zone) have no analog and are absent.",
+                "description": "Minimum role: viewer. Live configuration view (name, MTU, state, MAC, addresses). description is the adapter's name as VirtualBox's bridged interfaces list it, on Windows the adapter description a machine's bridgeadapter carries, absent for an interface VirtualBox does not list. dladm-only fields (over, speed, vid, zone) have no analog and are absent.",
                 "parameters": [
                     {
                         "description": "Maximum rows",
@@ -16831,7 +16804,7 @@
         },
         "/api/notifications": {
             "delete": {
-                "description": "Minimum role: viewer. Removes every row of the person's local inbox; the unread count follows on the stream.",
+                "description": "Minimum role: viewer. Removes every row, the hub's cleared at the identity provider first for the bound account; inbox-cleared {} and then unread-count follow on the stream.",
                 "responses": {
                     "204": {
                         "description": "Cleared"
@@ -16863,7 +16836,7 @@
                 ]
             },
             "get": {
-                "description": "Minimum role: viewer. One page of the local inbox of the person the calling key stands for, newest first: page counts from 0, size is 20 unless given and at most 100, and unread_only keeps the unread rows alone.",
+                "description": "Minimum role: viewer. One page of the inbox of the person the calling key stands for, newest first: page counts from 0, size is 20 unless given and at most 100, and unread_only keeps the unread rows alone. The rows are the agent's local inbox, origin local, and, for the account the agent is bound to while it holds that account's token, the identity provider's hub rows, origin hub, each keeping the hub's own numeric id; total counts both.",
                 "parameters": [
                     {
                         "description": "Page number, counted from 0",
@@ -16899,7 +16872,7 @@
                                 }
                             }
                         },
-                        "description": "The page: {items: [{id, title, body, type, severity, navigate, read_at, created_at}], page, size, total, total_pages}"
+                        "description": "The page: {items: [{id, title, body, type, severity, navigate, read_at, created_at, origin}], page, size, total, total_pages}; a hub row carries every member the hub answers"
                     },
                     "401": {
                         "content": {
@@ -16930,7 +16903,7 @@
         },
         "/api/notifications/read-all": {
             "post": {
-                "description": "Minimum role: viewer. Records every unread row of the person's local inbox as read; the unread count follows on the stream.",
+                "description": "Minimum role: viewer. Records every unread row as read, the hub's forwarded to the identity provider first for the bound account; inbox-read-all {read_at} and then unread-count follow on the stream.",
                 "responses": {
                     "204": {
                         "description": "Marked"
@@ -16964,7 +16937,7 @@
         },
         "/api/notifications/unread-count": {
             "get": {
-                "description": "Minimum role: viewer. How many rows of the person's local inbox are unread.",
+                "description": "Minimum role: viewer. How many rows of the person's inbox are unread, the local rows and, for the bound account while its token is held, the hub's.",
                 "responses": {
                     "200": {
                         "content": {
@@ -17026,7 +16999,7 @@
         },
         "/api/notifications/{id}": {
             "delete": {
-                "description": "Minimum role: viewer. Removes the row from the person's local inbox; the unread count follows on the stream.",
+                "description": "Minimum role: viewer. Removes the row, a hub row dismissed at the identity provider; notification-dismissed {id} and then unread-count follow on the stream.",
                 "parameters": [
                     {
                         "description": "The notification id",
@@ -17051,6 +17024,16 @@
                             }
                         },
                         "description": "No such row in the person's inbox"
+                    },
+                    "502": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/problem.Body"
+                                }
+                            }
+                        },
+                        "description": "Identity provider unreachable"
                     }
                 },
                 "summary": "Delete one notification",
@@ -17061,7 +17044,7 @@
         },
         "/api/notifications/{id}/read": {
             "post": {
-                "description": "Minimum role: viewer. Records the person's local inbox row as read; the unread count follows as unread-count on the notifications topic of the stream to this person.",
+                "description": "Minimum role: viewer. Records the row as read: a local row in the agent's store, a hub row (a numeric id) forwarded to the identity provider. notification-read {id, read_at} and then unread-count follow on the notifications topic of the stream to this person.",
                 "parameters": [
                     {
                         "description": "The notification id",
@@ -17086,6 +17069,16 @@
                             }
                         },
                         "description": "No such row in the person's inbox"
+                    },
+                    "502": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/problem.Body"
+                                }
+                            }
+                        },
+                        "description": "Identity provider unreachable"
                     }
                 },
                 "summary": "Mark one notification read",
@@ -17096,7 +17089,7 @@
         },
         "/api/notifications/{id}/unread": {
             "post": {
-                "description": "Minimum role: viewer. Puts the person's local inbox row back to unread; the unread count follows on the stream.",
+                "description": "Minimum role: viewer. Puts the row back to unread, a hub row forwarded to the identity provider; notification-unread {id} and then unread-count follow on the stream.",
                 "parameters": [
                     {
                         "description": "The notification id",
@@ -17121,6 +17114,16 @@
                             }
                         },
                         "description": "No such row in the person's inbox"
+                    },
+                    "502": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/problem.Body"
+                                }
+                            }
+                        },
+                        "description": "Identity provider unreachable"
                     }
                 },
                 "summary": "Mark one notification unread",

@@ -2,17 +2,33 @@ package machines
 
 import "strconv"
 
+// HasBridgedNIC reports whether any enabled adapter of the machine is bridged.
+func HasBridgedNIC(raw map[string]string) bool {
+	for adapter := 1; adapter <= maxNICSlots; adapter++ {
+		if raw["nic"+strconv.Itoa(adapter)] == "bridged" {
+			return true
+		}
+	}
+	return false
+}
+
 // nicsCurrent builds the per-adapter tuning list (PUT's nics[] vocabulary)
 // for every enabled adapter. promisc/boot_prio/bandwidth_group never emit
 // machinereadable — unknowable, omitted.
-func nicsCurrent(raw map[string]string) []any {
+func nicsCurrent(raw, bridged map[string]string) []any {
 	nics := []any{}
 	for adapter := 1; adapter <= maxNICSlots; adapter++ {
 		n := strconv.Itoa(adapter)
-		if attachment, ok := raw["nic"+n]; !ok || attachment == "none" {
+		attachment, ok := raw["nic"+n]
+		if !ok || attachment == "none" {
 			continue
 		}
 		entry := map[string]any{"adapter": adapter}
+		if attachment == "bridged" {
+			if link := bridged[raw["bridgeadapter"+n]]; link != "" {
+				entry["interface"] = link
+			}
+		}
 		if cable, ok := raw["cableconnected"+n]; ok {
 			entry["cable_connected"] = cable
 		}

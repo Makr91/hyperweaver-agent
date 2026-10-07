@@ -41,6 +41,7 @@ type Server struct {
 	monitor        *monitoring.Service
 	live           *monitoring.LiveSampler
 	liveMu         sync.Mutex
+	hub            *hubStream
 	updates        *updater.Service
 	dbs            []DBHandle
 	wsTickets      *wsTickets
@@ -88,7 +89,7 @@ func (s *Server) SetConfigSaved(fn func(name string)) {
 	s.configSaved = fn
 }
 
-// SetUnreadChanged registers the function run with true when a row is written to the local inbox and false when a person's unread count reaches 0.
+// SetUnreadChanged registers the function run with true when a row reaches a person's inbox and false when a person's unread count reaches 0.
 func (s *Server) SetUnreadChanged(fn func(unread bool)) {
 	s.unreadChanged = fn
 }
@@ -115,6 +116,7 @@ func New(cfg *config.Config, keyStore *keys.Store, trayTokens *auth.TrayTokens, 
 		artifactSvc:    artifactSvc,
 		monitor:        monitor,
 		live:           monitoring.NewLiveSampler(monitor.Sampler()),
+		hub:            newHubStream(),
 		updates:        updates,
 		dbs:            dbs,
 		wsTickets:      newWsTickets(),

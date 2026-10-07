@@ -23,7 +23,7 @@ type monitoringInterfacesResponse struct {
 }
 
 // @Summary		Network interfaces
-// @Description	Minimum role: viewer. Live configuration view (name, MTU, state, MAC, addresses). dladm-only fields (over, speed, vid, zone) have no analog and are absent.
+// @Description	Minimum role: viewer. Live configuration view (name, MTU, state, MAC, addresses). description is the adapter's name as VirtualBox's bridged interfaces list it, on Windows the adapter description a machine's bridgeadapter carries, absent for an interface VirtualBox does not list. dladm-only fields (over, speed, vid, zone) have no analog and are absent.
 // @Tags			Host Monitoring
 // @Produce		json
 // @Param			limit	query	int		false	"Maximum rows"	default(100)
@@ -40,6 +40,7 @@ func (s *Server) handleMonitoringInterfaces(w http.ResponseWriter, r *http.Reque
 		errorResponse(w, http.StatusInternalServerError, "Failed to get network interfaces", err.Error())
 		return
 	}
+	s.describeInterfaces(r.Context(), interfaces)
 
 	if state := r.URL.Query().Get("state"); state != "" {
 		filtered := interfaces[:0]

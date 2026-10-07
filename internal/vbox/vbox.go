@@ -157,13 +157,15 @@ func ShowVMInfo(ctx context.Context, vboxManage, nameOrUUID string) (*Info, erro
 // BridgedIf is one `list bridgedifs` block: the name plus the fields the
 // picker filters on (Status/Wireless — macOS lists pseudo and down
 // interfaces) and the darwin hostonlynet-backing exclusion matches by
-// (IPAddress/NetworkMask).
+// (IPAddress/NetworkMask), and the HardwareAddress that joins it to the OS
+// interface of the same adapter.
 type BridgedIf struct {
-	Name        string
-	IPAddress   string
-	NetworkMask string
-	Status      string
-	Wireless    bool
+	Name            string
+	IPAddress       string
+	NetworkMask     string
+	HardwareAddress string
+	Status          string
+	Wireless        bool
 }
 
 // ListBridgedIfs parses `VBoxManage list bridgedifs` — Key: value blocks per
@@ -195,6 +197,10 @@ func ListBridgedIfs(ctx context.Context, vboxManage string) ([]BridgedIf, error)
 		case "NetworkMask":
 			if current != nil {
 				current.NetworkMask = value
+			}
+		case "HardwareAddress":
+			if current != nil {
+				current.HardwareAddress = value
 			}
 		case "Status":
 			if current != nil {

@@ -150,7 +150,7 @@ type machineDetailsResponse struct {
 // tasks.
 //
 //	@Summary		Machine details
-//	@Description	Minimum role: viewer. Live-checks VirtualBox (updating the registry on drift) and returns the record, its live configuration, pending tasks, and knob_current — the current values in PUT's own vocabulary (the Edit-surface prefill). configuration carries nat_forwards, the NAT port-forward rules as the rows GET /api/machines/{machineName}/config answers ({name, protocol, host_ip, host_port, guest_ip, guest_port, adapter}), read from the live view and from the last reconciled copy when the hypervisor does not answer.
+//	@Description	Minimum role: viewer. Live-checks VirtualBox (updating the registry on drift) and returns the record, its live configuration, pending tasks, and knob_current — the current values in PUT's own vocabulary (the Edit-surface prefill); a bridged adapter's knob_current.nics[] entry carries interface, the OS interface name GET /api/monitoring/network/interfaces answers as link, joined through VirtualBox's bridged interfaces list by MAC address and then IP address. configuration carries nat_forwards, the NAT port-forward rules as the rows GET /api/machines/{machineName}/config answers ({name, protocol, host_ip, host_port, guest_ip, guest_port, adapter}), read from the live view and from the last reconciled copy when the hypervisor does not answer.
 //	@Tags			Machine Management
 //	@Produce		json
 //	@Param			machineName	path	string	true	"Machine name"
@@ -266,7 +266,7 @@ func (s *Server) handleMachineDetails(w http.ResponseWriter, r *http.Request) {
 		PendingTasks:     active,
 		SystemStatus:     systemStatus,
 		WebAddress:       webAddress,
-		KnobCurrent:      machines.KnobCurrent(fresh, liveRaw, osTypeID, settingsFile),
+		KnobCurrent:      machines.KnobCurrent(fresh, liveRaw, osTypeID, settingsFile, s.bridgedInterfaceNames(r.Context(), liveRaw)),
 		PendingChanges:   pendingChanges,
 	})
 }

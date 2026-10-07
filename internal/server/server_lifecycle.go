@@ -184,5 +184,6 @@ func (s *Server) Shutdown(ctx context.Context) error {
 		}
 	}
 	s.stopLiveSampling()
+	s.stopHubStream()
 	return err
 }

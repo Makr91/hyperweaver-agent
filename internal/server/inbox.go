@@ -178,14 +178,24 @@ func (s *Server) writeProviderInbox(write *inbox.Write, attrs ...any) bool {
 	return true
 }
 
-func (s *Server) publishInbox(person string) {
+func (s *Server) publishInbox(person string, change inbox.Change) {
+	s.events.publishTo(eventTopicNotifications, change.Event, change.Data, person)
+	go s.publishUnread(person, change.Event == inbox.EventCreated)
+}
+
+func (s *Server) publishUnread(person string, created bool) {
 	ctx, cancel := context.WithTimeout(context.Background(), inboxTimeout)
 	defer cancel()
-	count, err := s.inbox.UnreadCount(ctx, person)
+	count, err := s.unreadCount(ctx, person)
 	if err != nil {
 		slog.Warn("unread count read failed", "error", err, "person", person)
 		return
 	}
 	s.publishUnreadCount(person, count)
-	s.markUnread(true)
+	switch {
+	case created:
+		s.markUnread(true)
+	case count == 0:
+		s.markUnread(false)
+	}
 }
