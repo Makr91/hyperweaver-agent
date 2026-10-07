@@ -53,7 +53,7 @@ func underPrefix(path string, prefixes []string) bool {
 // RequiredRole is the central method+path policy (Agent API v1), ported
 // verbatim from the Node agent's middleware/VerifyApiKey.js.
 func RequiredRole(method, path string) string {
-	if path == "/api/api-keys/info" || underPrefix(path, []string{"/api/user"}) {
+	if path == "/api/api-keys/info" || path == "/api/auth/logout" || underPrefix(path, []string{"/api/user"}) {
 		return "viewer"
 	}
 	if underPrefix(path, adminAlwaysPrefixes) {
@@ -155,13 +155,44 @@ func WriteMsg(w http.ResponseWriter, status int, msg string) {
 // TokenValidator authenticates an identity-provider token under its scheme; nil identity with the refusal's reason.
 type TokenValidator func(r *http.Request, scheme Scheme, token string) (*Identity, error)
 
+func identityOf(k *keys.Key) *Identity {
+	return &Identity{ID: k.ID, Name: k.Name, Description: k.Description, Role: k.Role}
+}
+
+var crossOrigin http.CrossOriginProtection
+
+func sessionIdentity(w http.ResponseWriter, r *http.Request, store *keys.Store, sessions *Sessions, handle string) *Identity {
+	keyID, known := sessions.Key(handle)
+	var key *keys.Key
+	if known {
+		if found, err := store.Get(keyID); err == nil && found.IsActive {
+			key = found
+		}
+	}
+	if key == nil {
+		if err := sessions.End(handle); err != nil {
+			alog().Error("session end failed", "error", err)
+		}
+		ClearSessionCookie(w)
+		Unauthorized(w, "", "", "The session has ended - sign in again")
+		return nil
+	}
+	if err := crossOrigin.Check(r); err != nil {
+		WriteMsg(w, http.StatusForbidden, "Cross-origin request refused: "+err.Error())
+		return nil
+	}
+	return identityOf(key)
+}
+
 // Middleware validates the credential and enforces the role policy, mirroring
 // the Node agent's verifyApiKey: 401 missing credential, 403 invalid, 403
 // insufficient role. API keys (hw_-prefixed) authenticate against the key
 // store; a JWT-shaped credential goes to the TokenValidator instead (the
-// OIDC resource-server door — nil validator disables it). On success the
-// identity is attached to the context.
-func Middleware(store *keys.Store, tokens TokenValidator) func(http.Handler) http.Handler {
+// OIDC resource-server door — nil validator disables it). A request with no
+// credential header is read from the browser session cookie, every method
+// but GET, HEAD and OPTIONS passing the Sec-Fetch-Site and Origin cross-origin
+// check. On success the identity is attached to the context.
+func Middleware(store *keys.Store, tokens TokenValidator, sessions *Sessions) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			scheme, credential, cerr := Credential(r)
@@ -173,8 +204,17 @@ func Middleware(store *keys.Store, tokens TokenValidator) func(http.Handler) htt
 				Unauthorized(w, "", "", "Authorization scheme must be Bearer or DPoP")
 				return
 			case credential == "":
-				Unauthorized(w, "", "",
-					"API key required - provide either X-API-Key header or Authorization: Bearer header")
+				session, serr := r.Cookie(SessionCookie)
+				if serr != nil || session.Value == "" {
+					Unauthorized(w, "", "",
+						"API key required - provide either X-API-Key header or Authorization: Bearer header")
+					return
+				}
+				identity := sessionIdentity(w, r, store, sessions, session.Value)
+				if identity == nil {
+					return
+				}
+				authorize(w, r, next, identity)
 				return
 			}
 
@@ -210,29 +250,26 @@ func Middleware(store *keys.Store, tokens TokenValidator) func(http.Handler) htt
 					WriteMsg(w, http.StatusForbidden, "Invalid API key")
 					return
 				}
-				identity = &Identity{
-					ID:          match.ID,
-					Name:        match.Name,
-					Description: match.Description,
-					Role:        match.Role,
-				}
+				identity = identityOf(match)
 			}
-
-			needed := RequiredRole(r.Method, r.URL.Path)
-			if roleLevels[identity.Role] < roleLevels[needed] {
-				alog().Warn("credential role insufficient for request",
-					"entity_name", identity.Name,
-					"role", identity.Role,
-					"required_role", needed,
-					"request_path", r.URL.Path,
-					"request_method", r.Method,
-				)
-				WriteMsg(w, http.StatusForbidden,
-					"Insufficient role: this operation requires '"+needed+"' (key role: '"+identity.Role+"')")
-				return
-			}
-
-			next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), contextKey{}, identity)))
+			authorize(w, r, next, identity)
 		})
 	}
+}
+
+func authorize(w http.ResponseWriter, r *http.Request, next http.Handler, identity *Identity) {
+	needed := RequiredRole(r.Method, r.URL.Path)
+	if roleLevels[identity.Role] < roleLevels[needed] {
+		alog().Warn("credential role insufficient for request",
+			"entity_name", identity.Name,
+			"role", identity.Role,
+			"required_role", needed,
+			"request_path", r.URL.Path,
+			"request_method", r.Method,
+		)
+		WriteMsg(w, http.StatusForbidden,
+			"Insufficient role: this operation requires '"+needed+"' (key role: '"+identity.Role+"')")
+		return
+	}
+	next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), contextKey{}, identity)))
 }

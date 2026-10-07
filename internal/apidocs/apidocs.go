@@ -174,6 +174,7 @@ var publicPaths = []string{
 	"/api/rules",
 	"/api/api-keys/bootstrap",
 	"/api/auth/tray-claim",
+	"/api/auth/session",
 	"/api/auth/oidc/device-start",
 	"/api/auth/oidc/device-status",
 	"/api/auth/oidc/silent-start",

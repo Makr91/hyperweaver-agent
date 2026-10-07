@@ -28,6 +28,7 @@ type Server struct {
 	cfg            *config.Config
 	keys           *keys.Store
 	trayTokens     *auth.TrayTokens
+	sessions       *auth.Sessions
 	oidcMgr        *oidc.Manager
 	oidcStarts     *startLimiter
 	tasks          *tasks.Queue
@@ -101,11 +102,12 @@ func (s *Server) markUnread(unread bool) {
 }
 
 // New builds the server and its routes.
-func New(cfg *config.Config, keyStore *keys.Store, trayTokens *auth.TrayTokens, taskQueue *tasks.Queue, machineStore *machines.Store, inboxStore *inbox.Store, provisioners *provisioner.Registry, storage *locations.Set, secretsStore *secrets.Store, assetsStore *assets.Store, artifactSvc *assets.Service, monitor *monitoring.Service, updates *updater.Service, dbs []DBHandle, restartArgs []string, teardown func(), openUI func(query string)) (*Server, error) {
+func New(cfg *config.Config, keyStore *keys.Store, trayTokens *auth.TrayTokens, sessions *auth.Sessions, taskQueue *tasks.Queue, machineStore *machines.Store, inboxStore *inbox.Store, provisioners *provisioner.Registry, storage *locations.Set, secretsStore *secrets.Store, assetsStore *assets.Store, artifactSvc *assets.Service, monitor *monitoring.Service, updates *updater.Service, dbs []DBHandle, restartArgs []string, teardown func(), openUI func(query string)) (*Server, error) {
 	s := &Server{
 		cfg:            cfg,
 		keys:           keyStore,
 		trayTokens:     trayTokens,
+		sessions:       sessions,
 		tasks:          taskQueue,
 		machines:       machineStore,
 		inbox:          inboxStore,

@@ -190,6 +190,11 @@ func run() error {
 	}
 
 	trayTokens := auth.NewTrayTokens()
+	sessions, err := auth.OpenSessions(cfg.SessionStorePath())
+	if err != nil {
+		slog.Error("session store setup failed", "error", err)
+		return err
+	}
 
 	// A restart's successor asks its predecessor to release the port and
 	// databases before this process overwrites the secret or opens anything.
@@ -263,7 +268,7 @@ func run() error {
 		systems.closeDBs()
 	}
 
-	srv, err := server.New(cfg, keyStore, trayTokens, taskQueue, systems.machines, systems.inbox, systems.provisioners, systems.storage, secretsStore, systems.assets, systems.artifactSvc, monitor, updateChecks, systems.dbs, restartArgs, teardown, openUI)
+	srv, err := server.New(cfg, keyStore, trayTokens, sessions, taskQueue, systems.machines, systems.inbox, systems.provisioners, systems.storage, secretsStore, systems.assets, systems.artifactSvc, monitor, updateChecks, systems.dbs, restartArgs, teardown, openUI)
 	if err != nil {
 		slog.Error("server setup failed", "error", err)
 		return err

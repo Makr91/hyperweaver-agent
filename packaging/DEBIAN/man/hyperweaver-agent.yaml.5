@@ -656,6 +656,8 @@ Beside the configuration files the agent also keeps
 (first-key claim token, 0600),
 .Pa keys.json
 (hashed API keys, 0600),
+.Pa sessions.json
+(browser sessions, each a digest of its cookie handle mapped to its key, 0600),
 .Pa protocol.secret
 (per-boot hwa:// handoff secret, 0600),
 .Pa secrets.yaml

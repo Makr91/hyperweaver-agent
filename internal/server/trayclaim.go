@@ -39,24 +39,34 @@ type trayClaimRequest struct {
 	Token string `json:"token" binding:"required"`
 }
 
-type trayClaimResponse struct {
-	APIKey  string `json:"api_key"`
-	Message string `json:"message"`
+func (s *Server) keyAlive(id int64) bool {
+	k, err := s.keys.Get(id)
+	return err == nil && k.IsActive
 }
 
-// handleTrayClaim exchanges a tray one-time token for a fresh admin API key.
-// Public route: the token itself is the credential — minted seconds earlier
-// by the local user's physical tray click, single-use, 60s TTL. This is what
-// lets a desktop user open a signed-in UI without ever seeing a login or the
-// setup token (which remains the headless/remote path).
+func (s *Server) openSession(w http.ResponseWriter, keyID int64) bool {
+	handle, err := s.sessions.Create(keyID, s.keyAlive)
+	if err != nil {
+		slog.Error("session creation failed", "error", err, "entity_id", keyID)
+		auth.WriteMsg(w, http.StatusInternalServerError, "The session could not be opened")
+		return false
+	}
+	auth.SetSessionCookie(w, handle)
+	return true
+}
+
+// handleTrayClaim exchanges a tray one-time token for a browser session on a
+// fresh admin key. Public route: the token itself is the credential — minted
+// seconds earlier by the local user's physical tray click, single-use, 60s
+// TTL. This is what lets a desktop user open a signed-in UI without ever
+// seeing a login or the setup token (which remains the headless/remote path).
 //
-//	@Summary		Exchange a tray one-time token for an admin API key
-//	@Description	Public: the token itself is the credential — minted seconds earlier by the local user's physical tray Open click (or an hwa:// protocol invocation, or the silent-SSO callback's handoff), carried in the URL fragment, single-use, 60-second TTL. This is how a desktop user gets a signed-in UI without ever seeing a login screen. A silent-SSO grant answers the OIDC-minted admin key (named for the federated account); plain tray grants mint a fresh key named after the local OS account. Each tray-key mint also REAPS older tray-handoff keys beyond the newest 5 (every Open mints a key and nothing else retires them; unbounded piles make the cold-boot bcrypt scan crawl) — a browser tab holding a reaped key re-signs-in via the tray.
+//	@Summary		Exchange a tray one-time token for a browser session
+//	@Description	Public: the token itself is the credential — minted seconds earlier by the local user's physical tray Open click (or a protocol invocation, or the SSO callback's handoff), carried in the URL fragment, single-use, 60-second TTL. The answer is 204 with the browser session cookie set, __Host-hwa_session (HttpOnly; Secure; SameSite=Strict; Path=/, an opaque handle mapped to the key); the key itself never reaches the page. An SSO grant opens the session on the OIDC-minted admin key (named for the federated account); a plain tray grant mints a fresh admin key named after the local OS account. Each tray-key mint also REAPS older tray-handoff keys beyond the newest 5, and a session on a reaped key answers 401 and signs in again through the tray.
 //	@Tags			Local Login
 //	@Accept			json
-//	@Produce		json
 //	@Param			request	body		trayClaimRequest	true	"Tray claim request"
-//	@Success		200		{object}	trayClaimResponse	"The admin key (SSO-minted when the grant carries one, else fresh and named after the local OS account)"
+//	@Success		204		"Session opened, cookie set"
 //	@Failure		400		{object}	problem.Body		"Missing token"
 //	@Failure		403		{object}	problem.Body		"Unknown, expired, or already-used token"
 //	@Router			/api/auth/tray-claim [post]
@@ -72,12 +82,11 @@ func (s *Server) handleTrayClaim(w http.ResponseWriter, r *http.Request) {
 		auth.WriteMsg(w, http.StatusForbidden, "Invalid or expired tray token")
 		return
 	}
-	if boundKey != "" {
-		slog.Info("silent-sso handoff key claimed")
-		writeJSON(w, trayClaimResponse{
-			APIKey:  boundKey,
-			Message: "Login successful",
-		})
+	if boundKey != 0 {
+		slog.Info("sso handoff key claimed", "entity_id", boundKey)
+		if s.openSession(w, boundKey) {
+			w.WriteHeader(http.StatusNoContent)
+		}
 		return
 	}
 
@@ -102,11 +111,61 @@ func (s *Server) handleTrayClaim(w http.ResponseWriter, r *http.Request) {
 	} else if removed > 0 {
 		slog.Info("stale tray keys pruned", "removed", removed)
 	}
+	if s.openSession(w, entity.ID) {
+		w.WriteHeader(http.StatusNoContent)
+	}
+}
 
-	writeJSON(w, trayClaimResponse{
-		APIKey:  apiKey,
-		Message: "Tray login successful",
-	})
+type sessionRequest struct {
+	// The API key a person pastes
+	APIKey string `json:"api_key"`
+}
+
+// @Summary		Open a browser session for a pasted API key
+// @Description	Public: the body's key is verified like any credential and the answer is 204 with the browser session cookie set, __Host-hwa_session (HttpOnly; Secure; SameSite=Strict; Path=/); 401 for a key the agent does not know or that is revoked. The page keeps no key and sends no token: every later request rides the cookie, and every method but GET, HEAD and OPTIONS must arrive same-origin, judged by the browser's Sec-Fetch-Site header with Origin against Host as the fallback, else 403.
+// @Tags			Local Login
+// @Accept			json
+// @Param			request	body	sessionRequest	true	"The pasted key"
+// @Success		204	"Session opened, cookie set"
+// @Failure		400	{object}	problem.Body	"Missing key"
+// @Failure		401	{object}	problem.Body	"Unknown or revoked key"
+// @Router			/api/auth/session [post]
+func (s *Server) handleSession(w http.ResponseWriter, r *http.Request) {
+	var body sessionRequest
+	if err := decodeBody(r, &body); err != nil || body.APIKey == "" {
+		auth.WriteMsg(w, http.StatusBadRequest, "API key required")
+		return
+	}
+	match, err := s.keys.Verify(body.APIKey)
+	if err != nil {
+		slog.Error("session key validation failed", "error", err)
+		auth.WriteMsg(w, http.StatusInternalServerError, "API key validation failed")
+		return
+	}
+	if match == nil {
+		auth.Unauthorized(w, "", "", "Unknown or revoked API key")
+		return
+	}
+	if s.openSession(w, match.ID) {
+		w.WriteHeader(http.StatusNoContent)
+	}
+}
+
+// @Summary		End the browser session
+// @Description	Minimum role: viewer. Forgets the session the __Host-hwa_session cookie names and clears the cookie with Max-Age=0; the key behind it stays. Sent with the cookie, it must arrive same-origin like every write.
+// @Tags			Local Login
+// @Success		204	"Session ended, cookie cleared"
+// @Failure		401	{object}	problem.Body	"No live session or credential"
+// @Failure		403	{object}	problem.Body	"Cross-origin request"
+// @Router			/api/auth/logout [post]
+func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
+	if session, err := r.Cookie(auth.SessionCookie); err == nil && session.Value != "" {
+		if eerr := s.sessions.End(session.Value); eerr != nil {
+			slog.Error("session end failed", "error", eerr)
+		}
+	}
+	auth.ClearSessionCookie(w)
+	w.WriteHeader(http.StatusNoContent)
 }
 
 type protocolOpenRequest struct {

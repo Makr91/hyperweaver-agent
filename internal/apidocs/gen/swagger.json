@@ -2829,10 +2829,6 @@
             },
             "server.deviceStatusResponse": {
                 "properties": {
-                    "api_key": {
-                        "description": "approved only, delivered exactly once: the minted local admin API key",
-                        "type": "string"
-                    },
                     "entity_id": {
                         "description": "approved only: the minted key's entity id",
                         "type": "integer"
@@ -6571,6 +6567,15 @@
                 },
                 "type": "object"
             },
+            "server.sessionRequest": {
+                "properties": {
+                    "api_key": {
+                        "description": "The API key a person pastes",
+                        "type": "string"
+                    }
+                },
+                "type": "object"
+            },
             "server.silentStartResponse": {
                 "properties": {
                     "authorize_url": {
@@ -7362,17 +7367,6 @@
                 "required": [
                     "token"
                 ],
-                "type": "object"
-            },
-            "server.trayClaimResponse": {
-                "properties": {
-                    "api_key": {
-                        "type": "string"
-                    },
-                    "message": {
-                        "type": "string"
-                    }
-                },
                 "type": "object"
             },
             "server.unattendedDetectResponse": {
@@ -9526,6 +9520,40 @@
                 ]
             }
         },
+        "/api/auth/logout": {
+            "post": {
+                "description": "Minimum role: viewer. Forgets the session the __Host-hwa_session cookie names and clears the cookie with Max-Age=0; the key behind it stays. Sent with the cookie, it must arrive same-origin like every write.",
+                "responses": {
+                    "204": {
+                        "description": "Session ended, cookie cleared"
+                    },
+                    "401": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/problem.Body"
+                                }
+                            }
+                        },
+                        "description": "No live session or credential"
+                    },
+                    "403": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/problem.Body"
+                                }
+                            }
+                        },
+                        "description": "Cross-origin request"
+                    }
+                },
+                "summary": "End the browser session",
+                "tags": [
+                    "Local Login"
+                ]
+            }
+        },
         "/api/auth/oidc/callback": {
             "get": {
                 "description": "Browser redirect target of both authorize round-trips (registered at the IdP as the loopback redirect_uri) — never called by API clients. When iss rides along (RFC 9207) it must name the configured issuer. A state minted at silent-start takes the silent path: benign IdP answers (login_required, interaction_required, consent_required, access_denied) and EVERY hard failure (unknown/expired state, exchange or validation error, non-bound account) all 302 to /login?sso=unavailable — silent must never strand the browser on an error page. A state minted at code-start on a loopback peer takes the interactive path: error=access_denied settles the handle denied and any other error, iss mismatch or exchange failure settles it failed, each answered with a problem body on this tab while the UI's held GET /api/auth/oidc/device-status learns the status. On success, either path exchanges the code with the held PKCE verifier, validates the token (issuer JWKS, UUID-first identity, TOFU binding), mints the OIDC admin key, and 302s the browser to the /#tray= claim path carrying a single-use grant that answers THAT key — the tray-claim exchange the UI already speaks, now with a federated identity.",
@@ -9799,7 +9827,7 @@
         },
         "/api/auth/oidc/device-status": {
             "get": {
-                "description": "Public. While the flow is pending the request stays open until the status changes or the grant's own interval elapses, then answers; wait=0 answers at once. So a client asks again as soon as an answer arrives and never on a timer. Answers {status} while the flow runs: pending; denied = the ACCOUNT was refused (the human clicked Deny at the identity provider, or the account is not the bound one and not in oidc.allowed_users); expired; failed = the agent could not complete the exchange or validation (identity-provider outage, token rejected — the agent log names the cause; trying again is reasonable). On approval, EXACTLY ONCE, the full credential body {status: \"approved\", api_key, entity_id, name, role, message} — the minted local admin API key the UI stores in its normal auth slot. After that one delivery (and after the first expired answer) the handle is forgotten and further polls answer 404. Identity comes from the id_token when the provider mints one, else the ACCESS token's claims (Spring Authorization Server's device grant issues no id_token) — validated against the issuer's JWKS either way, account id = UUID claim with sub fallback.",
+                "description": "Public. While the flow is pending the request stays open until the status changes or the grant's own interval elapses, then answers; wait=0 answers at once. So a client asks again as soon as an answer arrives and never on a timer. Answers {status} while the flow runs: pending; denied = the ACCOUNT was refused (the human clicked Deny at the identity provider, or the account is not the bound one and not in oidc.allowed_users); expired; failed = the agent could not complete the exchange or validation (identity-provider outage, token rejected — the agent log names the cause; trying again is reasonable). On approval, EXACTLY ONCE, {status: \"approved\", entity_id, name, role, message} with the browser session cookie __Host-hwa_session (HttpOnly) set on the answer for the minted local admin key; the key itself never reaches the page. After that one delivery (and after the first expired answer) the handle is forgotten and further polls answer 404. Identity comes from the id_token when the provider mints one, else the ACCESS token's claims (Spring Authorization Server's device grant issues no id_token) — validated against the issuer's JWKS either way, account id = UUID claim with sub fallback.",
                 "parameters": [
                     {
                         "description": "The device-start answer's opaque flow id",
@@ -9908,9 +9936,63 @@
                 ]
             }
         },
+        "/api/auth/session": {
+            "post": {
+                "description": "Public: the body's key is verified like any credential and the answer is 204 with the browser session cookie set, __Host-hwa_session (HttpOnly; Secure; SameSite=Strict; Path=/); 401 for a key the agent does not know or that is revoked. The page keeps no key and sends no token: every later request rides the cookie, and every method but GET, HEAD and OPTIONS must arrive same-origin, judged by the browser's Sec-Fetch-Site header with Origin against Host as the fallback, else 403.",
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "oneOf": [
+                                    {
+                                        "type": "object"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/server.sessionRequest",
+                                        "summary": "request",
+                                        "description": "The pasted key"
+                                    }
+                                ]
+                            }
+                        }
+                    },
+                    "description": "The pasted key",
+                    "required": true
+                },
+                "responses": {
+                    "204": {
+                        "description": "Session opened, cookie set"
+                    },
+                    "400": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/problem.Body"
+                                }
+                            }
+                        },
+                        "description": "Missing key"
+                    },
+                    "401": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/problem.Body"
+                                }
+                            }
+                        },
+                        "description": "Unknown or revoked key"
+                    }
+                },
+                "summary": "Open a browser session for a pasted API key",
+                "tags": [
+                    "Local Login"
+                ]
+            }
+        },
         "/api/auth/tray-claim": {
             "post": {
-                "description": "Public: the token itself is the credential — minted seconds earlier by the local user's physical tray Open click (or an hwa:// protocol invocation, or the silent-SSO callback's handoff), carried in the URL fragment, single-use, 60-second TTL. This is how a desktop user gets a signed-in UI without ever seeing a login screen. A silent-SSO grant answers the OIDC-minted admin key (named for the federated account); plain tray grants mint a fresh key named after the local OS account. Each tray-key mint also REAPS older tray-handoff keys beyond the newest 5 (every Open mints a key and nothing else retires them; unbounded piles make the cold-boot bcrypt scan crawl) — a browser tab holding a reaped key re-signs-in via the tray.",
+                "description": "Public: the token itself is the credential — minted seconds earlier by the local user's physical tray Open click (or a protocol invocation, or the SSO callback's handoff), carried in the URL fragment, single-use, 60-second TTL. The answer is 204 with the browser session cookie set, __Host-hwa_session (HttpOnly; Secure; SameSite=Strict; Path=/, an opaque handle mapped to the key); the key itself never reaches the page. An SSO grant opens the session on the OIDC-minted admin key (named for the federated account); a plain tray grant mints a fresh admin key named after the local OS account. Each tray-key mint also REAPS older tray-handoff keys beyond the newest 5, and a session on a reaped key answers 401 and signs in again through the tray.",
                 "requestBody": {
                     "content": {
                         "application/json": {
@@ -9932,15 +10014,8 @@
                     "required": true
                 },
                 "responses": {
-                    "200": {
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/server.trayClaimResponse"
-                                }
-                            }
-                        },
-                        "description": "The admin key (SSO-minted when the grant carries one, else fresh and named after the local OS account)"
+                    "204": {
+                        "description": "Session opened, cookie set"
                     },
                     "400": {
                         "content": {
@@ -9963,7 +10038,7 @@
                         "description": "Unknown, expired, or already-used token"
                     }
                 },
-                "summary": "Exchange a tray one-time token for an admin API key",
+                "summary": "Exchange a tray one-time token for a browser session",
                 "tags": [
                     "Local Login"
                 ]

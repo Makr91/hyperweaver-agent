@@ -74,6 +74,12 @@ func (c *Config) KeyStorePath() string {
 	return filepath.Join(c.dir, "keys.json")
 }
 
+// SessionStorePath returns the browser session store location: sessions.json
+// beside the configuration files.
+func (c *Config) SessionStorePath() string {
+	return filepath.Join(c.dir, "sessions.json")
+}
+
 // ProtocolSecretPath returns the hwa:// handoff-secret location:
 // protocol.secret beside the configuration files.
 func (c *Config) ProtocolSecretPath() string {

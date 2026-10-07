@@ -74,8 +74,6 @@ type deviceStartResponse struct {
 type deviceStatusResponse struct {
 	// pending | approved | denied | expired | failed
 	Status string `json:"status"`
-	// approved only, delivered exactly once: the minted local admin API key
-	APIKey string `json:"api_key,omitempty"`
 	// approved only: the minted key's entity id
 	EntityID int64 `json:"entity_id,omitempty"`
 	// approved only: the minted key's name (the account's email, or its subject)
@@ -151,7 +149,7 @@ func (s *Server) handleOIDCDeviceStart(w http.ResponseWriter, r *http.Request) {
 }
 
 // @Summary		Poll a federated device login
-// @Description	Public. While the flow is pending the request stays open until the status changes or the grant's own interval elapses, then answers; wait=0 answers at once. So a client asks again as soon as an answer arrives and never on a timer. Answers {status} while the flow runs: pending; denied = the ACCOUNT was refused (the human clicked Deny at the identity provider, or the account is not the bound one and not in oidc.allowed_users); expired; failed = the agent could not complete the exchange or validation (identity-provider outage, token rejected — the agent log names the cause; trying again is reasonable). On approval, EXACTLY ONCE, the full credential body {status: "approved", api_key, entity_id, name, role, message} — the minted local admin API key the UI stores in its normal auth slot. After that one delivery (and after the first expired answer) the handle is forgotten and further polls answer 404. Identity comes from the id_token when the provider mints one, else the ACCESS token's claims (Spring Authorization Server's device grant issues no id_token) — validated against the issuer's JWKS either way, account id = UUID claim with sub fallback.
+// @Description	Public. While the flow is pending the request stays open until the status changes or the grant's own interval elapses, then answers; wait=0 answers at once. So a client asks again as soon as an answer arrives and never on a timer. Answers {status} while the flow runs: pending; denied = the ACCOUNT was refused (the human clicked Deny at the identity provider, or the account is not the bound one and not in oidc.allowed_users); expired; failed = the agent could not complete the exchange or validation (identity-provider outage, token rejected — the agent log names the cause; trying again is reasonable). On approval, EXACTLY ONCE, {status: "approved", entity_id, name, role, message} with the browser session cookie __Host-hwa_session (HttpOnly) set on the answer for the minted local admin key; the key itself never reaches the page. After that one delivery (and after the first expired answer) the handle is forgotten and further polls answer 404. Identity comes from the id_token when the provider mints one, else the ACCESS token's claims (Spring Authorization Server's device grant issues no id_token) — validated against the issuer's JWKS either way, account id = UUID claim with sub fallback.
 // @Tags			Local Login
 // @Produce		json
 // @Param			handle	query	string	true	"The device-start answer's opaque flow id"
@@ -176,7 +174,9 @@ func (s *Server) handleOIDCDeviceStatus(w http.ResponseWriter, r *http.Request) 
 	}
 	response := deviceStatusResponse{Status: status}
 	if credential != nil {
-		response.APIKey = credential.APIKey
+		if !s.openSession(w, credential.EntityID) {
+			return
+		}
 		response.EntityID = credential.EntityID
 		response.Name = credential.Name
 		response.Role = credential.Role
@@ -334,7 +334,7 @@ func (s *Server) handleOIDCCallback(w http.ResponseWriter, r *http.Request) {
 		unavailable()
 		return
 	}
-	grant, err := s.trayTokens.MintForKey(credential.APIKey)
+	grant, err := s.trayTokens.MintForKey(credential.EntityID)
 	if err != nil {
 		slog.Error("oidc silent handoff mint failed", "error", err)
 		unavailable()
@@ -369,7 +369,7 @@ func (s *Server) codeCallback(w http.ResponseWriter, r *http.Request, state, cod
 		taskError(w, http.StatusBadGateway, "Login failed: "+err.Error())
 		return
 	}
-	grant, err := s.trayTokens.MintForKey(credential.APIKey)
+	grant, err := s.trayTokens.MintForKey(credential.EntityID)
 	if err != nil {
 		slog.Error("oidc code handoff mint failed", "error", err)
 		taskError(w, http.StatusInternalServerError, "Login handoff failed")

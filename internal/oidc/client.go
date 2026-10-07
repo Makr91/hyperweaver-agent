@@ -23,7 +23,6 @@ const (
 
 // Credential is the local API key a completed login minted.
 type Credential struct {
-	APIKey   string
 	EntityID int64
 	Name     string
 	Role     string
@@ -287,7 +286,6 @@ func (c *client) completeLogin(claims *identityClaims, answer *tokenAnswer) (*Cr
 	})
 	c.tokens.set(answer)
 	return &Credential{
-		APIKey:   apiKey,
 		EntityID: entity.ID,
 		Name:     entity.Name,
 		Role:     entity.Role,
