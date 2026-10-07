@@ -122,7 +122,7 @@ type monitoringStatusResponse struct {
 }
 
 // @Summary		Monitoring service status
-// @Description	Minimum role: viewer.
+// @Description	Minimum role: viewer. config carries storage_enabled (boolean) and, as numbers of seconds or days, live_interval, collection_interval and retention_days, in both modes.
 // @Tags			Host Monitoring
 // @Produce		json
 // @Success		200	{object}	monitoringStatusResponse	"Service status"
@@ -137,6 +137,7 @@ func (s *Server) handleMonitoringStatus(w http.ResponseWriter, _ *http.Request) 
 		IsInitialized: true,
 		Config: map[string]any{
 			"storage_enabled":     s.cfg.Monitoring.StorageEnabled,
+			"live_interval":       s.liveIntervalSeconds(),
 			"collection_interval": s.cfg.Monitoring.CollectionInterval,
 			"retention_days":      s.cfg.Monitoring.RetentionDays,
 		},

@@ -150,34 +150,44 @@ func (s *Store) InsertNetwork(ctx context.Context, samples []NetworkSample) erro
 	return nil
 }
 
-// HistoryFilter selects stored samples.
+// HistoryFilter selects stored samples within a span.
 type HistoryFilter struct {
 	Since *time.Time
+	Until *time.Time
 	Link  string // network only
-	Limit int
 }
 
-func (f *HistoryFilter) limit() int {
-	if f.Limit <= 0 {
-		return 100
+func (f *HistoryFilter) spanClauses() (clauses []string, args []any) {
+	clauses = []string{}
+	args = []any{}
+	if f.Since != nil {
+		clauses = append(clauses, "scan_timestamp >= ?")
+		args = append(args, formatTime(*f.Since))
 	}
-	return f.Limit
+	if f.Until != nil {
+		clauses = append(clauses, "scan_timestamp <= ?")
+		args = append(args, formatTime(*f.Until))
+	}
+	return clauses, args
 }
 
-// CPUHistory returns stored CPU samples, newest first.
+func finishSpanQuery(query *strings.Builder, clauses []string) {
+	if len(clauses) > 0 {
+		query.WriteString(" WHERE ")
+		query.WriteString(strings.Join(clauses, " AND "))
+	}
+	query.WriteString(" ORDER BY scan_timestamp ASC")
+}
+
+// CPUHistory returns the stored CPU samples of the span, oldest first.
 func (s *Store) CPUHistory(ctx context.Context, f *HistoryFilter) ([]CPUSample, error) {
 	var query strings.Builder
 	query.WriteString(`SELECT host, cpu_count, cpu_utilization_pct, user_pct,
 		system_pct, idle_pct, load_avg_1min, load_avg_5min, load_avg_15min,
 		processes_running, processes_blocked, per_core_data, io_delay_pct,
 		scan_timestamp FROM cpu_samples`)
-	args := []any{}
-	if f.Since != nil {
-		query.WriteString(" WHERE scan_timestamp >= ?")
-		args = append(args, formatTime(*f.Since))
-	}
-	query.WriteString(" ORDER BY scan_timestamp DESC LIMIT ?")
-	args = append(args, f.limit())
+	clauses, args := f.spanClauses()
+	finishSpanQuery(&query, clauses)
 
 	rows, err := s.cpuDB.QueryContext(ctx, query.String(), args...)
 	if err != nil {
@@ -217,20 +227,15 @@ func (s *Store) CPUHistory(ctx context.Context, f *HistoryFilter) ([]CPUSample, 
 	return samples, rows.Err()
 }
 
-// MemoryHistory returns stored memory samples, newest first.
+// MemoryHistory returns the stored memory samples of the span, oldest first.
 func (s *Store) MemoryHistory(ctx context.Context, f *HistoryFilter) ([]MemorySample, error) {
 	var query strings.Builder
 	query.WriteString(`SELECT host, total_memory_bytes, available_memory_bytes,
 		used_memory_bytes, free_memory_bytes, memory_utilization_pct,
 		swap_total_bytes, swap_used_bytes, swap_free_bytes, swap_utilization_pct,
 		scan_timestamp FROM memory_samples`)
-	args := []any{}
-	if f.Since != nil {
-		query.WriteString(" WHERE scan_timestamp >= ?")
-		args = append(args, formatTime(*f.Since))
-	}
-	query.WriteString(" ORDER BY scan_timestamp DESC LIMIT ?")
-	args = append(args, f.limit())
+	clauses, args := f.spanClauses()
+	finishSpanQuery(&query, clauses)
 
 	rows, err := s.memoryDB.QueryContext(ctx, query.String(), args...)
 	if err != nil {
@@ -259,28 +264,18 @@ func (s *Store) MemoryHistory(ctx context.Context, f *HistoryFilter) ([]MemorySa
 	return samples, rows.Err()
 }
 
-// NetworkHistory returns stored network samples, newest first.
+// NetworkHistory returns the stored network samples of the span, oldest first.
 func (s *Store) NetworkHistory(ctx context.Context, f *HistoryFilter) ([]NetworkSample, error) {
 	var query strings.Builder
 	query.WriteString(`SELECT host, link, ipackets, rbytes, ierrors, opackets,
 		obytes, oerrors, rx_bps, tx_bps, rx_mbps, tx_mbps, time_delta_seconds,
 		scan_timestamp FROM network_samples`)
-	clauses := []string{}
-	args := []any{}
-	if f.Since != nil {
-		clauses = append(clauses, "scan_timestamp >= ?")
-		args = append(args, formatTime(*f.Since))
-	}
+	clauses, args := f.spanClauses()
 	if f.Link != "" {
 		clauses = append(clauses, "link = ?")
 		args = append(args, f.Link)
 	}
-	if len(clauses) > 0 {
-		query.WriteString(" WHERE ")
-		query.WriteString(strings.Join(clauses, " AND "))
-	}
-	query.WriteString(" ORDER BY scan_timestamp DESC LIMIT ?")
-	args = append(args, f.limit())
+	finishSpanQuery(&query, clauses)
 
 	rows, err := s.networkDB.QueryContext(ctx, query.String(), args...)
 	if err != nil {

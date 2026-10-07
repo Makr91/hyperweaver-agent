@@ -23,10 +23,10 @@ func stripCores(samples []monitoring.CPUSample, includeCores bool) []monitoring.
 
 // cpuSamples answers the mode split: stored history when storage is enabled,
 // the single live sample otherwise.
-func (s *Server) cpuSamples(r *http.Request, q monitoringQuery) ([]monitoring.CPUSample, string, error) {
+func (s *Server) cpuSamples(r *http.Request, span monitoringSpan) ([]monitoring.CPUSample, string, error) {
 	if s.monitor.StorageEnabled() {
 		samples, err := s.monitor.Store().CPUHistory(r.Context(),
-			&monitoring.HistoryFilter{Since: q.since, Limit: q.limit})
+			&monitoring.HistoryFilter{Since: span.since, Until: span.until})
 		return samples, "stored", err
 	}
 	sample, err := s.monitor.Sampler().SampleCPU(r.Context())
@@ -49,21 +49,21 @@ type cpuStatsResponse struct {
 }
 
 // @Summary		CPU statistics
-// @Description	Minimum role: viewer. Realtime mode (storage disabled, the default): one live sample; since is effectively ignored. Storage mode: stored samples, newest first.
+// @Description	Minimum role: viewer. Realtime mode (storage disabled, the default): the one sample taken right now; since and until are ignored. Storage mode: every stored sample in the since/until span, oldest first.
 // @Tags			Host Monitoring
 // @Produce		json
-// @Param			limit			query	int		false	"Maximum samples"	default(100)
-// @Param			since			query	string	false	"Stored samples at or after this time (storage mode)"
+// @Param			since			query	string	false	"Stored samples at or after this time, RFC 3339 (storage mode)"
+// @Param			until			query	string	false	"Stored samples at or before this time, RFC 3339 (storage mode)"
 // @Param			include_cores	query	bool	false	"Include the per_core_parsed array on every sample"	default(false)
 // @Success		200	{object}	cpuStatsResponse	"CPU statistics"
 // @Failure		500	{object}	problem.Body		"Failed to get CPU statistics"
 // @Router			/api/monitoring/system/cpu [get]
 func (s *Server) handleMonitoringCPU(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
-	q := parseMonitoringQuery(r)
+	span := parseMonitoringSpan(r)
 	includeCores := r.URL.Query().Get("include_cores") == "true"
 
-	samples, strategy, err := s.cpuSamples(r, q)
+	samples, strategy, err := s.cpuSamples(r, span)
 	if err != nil {
 		errorResponse(w, http.StatusInternalServerError, "Failed to get CPU statistics", err.Error())
 		return
@@ -78,7 +78,7 @@ func (s *Server) handleMonitoringCPU(w http.ResponseWriter, r *http.Request) {
 		QueryTime:     queryTimeSince(start),
 	}
 	if len(samples) > 0 {
-		response.Latest = &samples[0]
+		response.Latest = &samples[len(samples)-1]
 	}
 	writeJSON(w, response)
 }
@@ -96,23 +96,23 @@ type memoryStatsResponse struct {
 }
 
 // @Summary		Memory statistics
-// @Description	Minimum role: viewer. Realtime mode: one live sample; storage mode: stored samples, newest first.
+// @Description	Minimum role: viewer. Realtime mode: the one sample taken right now; since and until are ignored. Storage mode: every stored sample in the since/until span, oldest first.
 // @Tags			Host Monitoring
 // @Produce		json
-// @Param			limit	query	int		false	"Maximum samples"	default(100)
-// @Param			since	query	string	false	"Stored samples at or after this time (storage mode)"
+// @Param			since	query	string	false	"Stored samples at or after this time, RFC 3339 (storage mode)"
+// @Param			until	query	string	false	"Stored samples at or before this time, RFC 3339 (storage mode)"
 // @Success		200	{object}	memoryStatsResponse	"Memory statistics"
 // @Failure		500	{object}	problem.Body		"Failed to get memory statistics"
 // @Router			/api/monitoring/system/memory [get]
 func (s *Server) handleMonitoringMemory(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
-	q := parseMonitoringQuery(r)
+	span := parseMonitoringSpan(r)
 
 	var samples []monitoring.MemorySample
 	var strategy string
 	if s.monitor.StorageEnabled() {
 		stored, err := s.monitor.Store().MemoryHistory(r.Context(),
-			&monitoring.HistoryFilter{Since: q.since, Limit: q.limit})
+			&monitoring.HistoryFilter{Since: span.since, Until: span.until})
 		if err != nil {
 			errorResponse(w, http.StatusInternalServerError, "Failed to get memory statistics", err.Error())
 			return
@@ -135,7 +135,7 @@ func (s *Server) handleMonitoringMemory(w http.ResponseWriter, r *http.Request) 
 		QueryTime:     queryTimeSince(start),
 	}
 	if len(samples) > 0 {
-		response.Latest = &samples[0]
+		response.Latest = &samples[len(samples)-1]
 	}
 	writeJSON(w, response)
 }
@@ -201,15 +201,15 @@ func loadEntry(sample *monitoring.CPUSample) loadMetricsEntry {
 // @Description	Minimum role: viewer. Load averages and process activity reshaped for charting. Load averages are zeros on Windows; run-queue counts are Linux-only — absent counters stay zero, honestly.
 // @Tags			Host Monitoring
 // @Produce		json
-// @Param			limit	query	int		false	"Maximum entries"	default(100)
-// @Param			since	query	string	false	"Stored samples at or after this time (storage mode)"
+// @Param			since	query	string	false	"Stored samples at or after this time, RFC 3339 (storage mode)"
+// @Param			until	query	string	false	"Stored samples at or before this time, RFC 3339 (storage mode)"
 // @Success		200	{object}	loadMetricsResponse	"Load metrics"
 // @Failure		500	{object}	problem.Body		"Failed to get system load metrics"
 // @Router			/api/monitoring/system/load [get]
 func (s *Server) handleMonitoringLoad(w http.ResponseWriter, r *http.Request) {
-	q := parseMonitoringQuery(r)
+	span := parseMonitoringSpan(r)
 
-	samples, _, err := s.cpuSamples(r, q)
+	samples, _, err := s.cpuSamples(r, span)
 	if err != nil {
 		errorResponse(w, http.StatusInternalServerError, "Failed to get system load metrics", err.Error())
 		return
@@ -230,7 +230,7 @@ func (s *Server) handleMonitoringLoad(w http.ResponseWriter, r *http.Request) {
 		},
 	}
 	if len(entries) > 0 {
-		response.Latest = &entries[0]
+		response.Latest = &entries[len(entries)-1]
 	}
 	writeJSON(w, response)
 }

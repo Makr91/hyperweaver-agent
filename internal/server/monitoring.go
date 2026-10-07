@@ -14,10 +14,9 @@ import (
 // zpool-iostat disk IO, netstat routes) have no analog on this host and are
 // deliberately absent.
 
-// monitoringQuery carries the common history query parameters.
+// monitoringQuery carries the paged listings' limit parameter.
 type monitoringQuery struct {
 	limit int
-	since *time.Time
 }
 
 func parseMonitoringQuery(r *http.Request) monitoringQuery {
@@ -27,12 +26,27 @@ func parseMonitoringQuery(r *http.Request) monitoringQuery {
 			q.limit = parsed
 		}
 	}
+	return q
+}
+
+type monitoringSpan struct {
+	since *time.Time
+	until *time.Time
+}
+
+func parseMonitoringSpan(r *http.Request) monitoringSpan {
+	span := monitoringSpan{}
 	if raw := r.URL.Query().Get("since"); raw != "" {
 		if parsed, err := time.Parse(time.RFC3339, raw); err == nil {
-			q.since = &parsed
+			span.since = &parsed
 		}
 	}
-	return q
+	if raw := r.URL.Query().Get("until"); raw != "" {
+		if parsed, err := time.Parse(time.RFC3339, raw); err == nil {
+			span.until = &parsed
+		}
+	}
+	return span
 }
 
 // monitoringSamplingMeta is the time-series sampling metadata block (the

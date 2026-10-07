@@ -19,6 +19,8 @@ type MonitoringConfig struct {
 	// RetentionDays: stored samples older than this are deleted by the
 	// periodic cleanup.
 	RetentionDays int `yaml:"retention_days" json:"retention_days"`
+	// LiveInterval is seconds between the samples pushed on the event stream while a client is subscribed.
+	LiveInterval int `yaml:"live_interval" json:"live_interval"`
 }
 
 // HostPowerConfig gates the host power-management surface (/api/system/host/*,

@@ -70,11 +70,11 @@ type Task struct {
 	ProgressInfo json.RawMessage `json:"progress_info"`
 	// ALWAYS null on the wire (list AND detail — the converged task wire); GET /api/tasks/{taskId}/output and the /api/tasks/{taskId}/stream WebSocket are the output channels; storage stays TEXT
 	Output json.RawMessage `json:"output"`
-	// True when the task's end is written to the bound person's inbox at the identity provider; set by the request that queued it, else by the operation kind
+	// True when the task's end is written to the inbox of the person whose key created it, in the agent's local inbox and, while the agent holds a token for its bound account, at the identity provider; set by the request that queued it, else by the operation kind
 	Notify bool `json:"notify"`
 }
 
-// NotableOperations are the operation kinds whose end is written to the bound person's inbox unless the request says otherwise.
+// NotableOperations are the operation kinds whose end is written to the person's inbox unless the request says otherwise.
 var NotableOperations = map[string]bool{
 	"machine_create_orchestration":    true,
 	"machine_provision_orchestration": true,

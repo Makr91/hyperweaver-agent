@@ -183,5 +183,6 @@ func (s *Server) Shutdown(ctx context.Context) error {
 			err = errors.Join(err, herr)
 		}
 	}
+	s.stopLiveSampling()
 	return err
 }

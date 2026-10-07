@@ -104,25 +104,25 @@ type networkUsageResponse struct {
 }
 
 // @Summary		Network usage
-// @Description	Minimum role: viewer. Per-interface counters with computed rates. Realtime mode: one live observation per interface; storage mode: stored samples, newest first.
+// @Description	Minimum role: viewer. Per-interface counters with computed rates. Realtime mode: the one observation per interface taken right now; since and until are ignored. Storage mode: every stored sample in the since/until span, oldest first.
 // @Tags			Host Monitoring
 // @Produce		json
-// @Param			limit	query	int		false	"Maximum samples"	default(100)
-// @Param			since	query	string	false	"Stored samples at or after this time (storage mode)"
+// @Param			since	query	string	false	"Stored samples at or after this time, RFC 3339 (storage mode)"
+// @Param			until	query	string	false	"Stored samples at or before this time, RFC 3339 (storage mode)"
 // @Param			link	query	string	false	"Filter by interface name"
 // @Success		200	{object}	networkUsageResponse	"Network usage"
 // @Failure		500	{object}	problem.Body			"Failed to get network usage"
 // @Router			/api/monitoring/network/usage [get]
 func (s *Server) handleMonitoringNetworkUsage(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
-	q := parseMonitoringQuery(r)
+	span := parseMonitoringSpan(r)
 	link := r.URL.Query().Get("link")
 
 	var samples []monitoring.NetworkSample
 	var strategy string
 	if s.monitor.StorageEnabled() {
 		stored, err := s.monitor.Store().NetworkHistory(r.Context(),
-			&monitoring.HistoryFilter{Since: q.since, Link: link, Limit: q.limit})
+			&monitoring.HistoryFilter{Since: span.since, Until: span.until, Link: link})
 		if err != nil {
 			errorResponse(w, http.StatusInternalServerError, "Failed to get network usage", err.Error())
 			return

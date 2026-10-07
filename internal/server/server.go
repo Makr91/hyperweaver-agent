@@ -11,6 +11,7 @@ import (
 	"github.com/Makr91/hyperweaver-agent/internal/assets"
 	"github.com/Makr91/hyperweaver-agent/internal/auth"
 	"github.com/Makr91/hyperweaver-agent/internal/config"
+	"github.com/Makr91/hyperweaver-agent/internal/inbox"
 	"github.com/Makr91/hyperweaver-agent/internal/keys"
 	"github.com/Makr91/hyperweaver-agent/internal/locations"
 	"github.com/Makr91/hyperweaver-agent/internal/machines"
@@ -31,12 +32,15 @@ type Server struct {
 	oidcStarts     *startLimiter
 	tasks          *tasks.Queue
 	machines       *machines.Store
+	inbox          *inbox.Store
 	provisioners   *provisioner.Registry
 	storage        *locations.Set
 	secrets        *secrets.Store
 	assets         *assets.Store
 	artifactSvc    *assets.Service
 	monitor        *monitoring.Service
+	live           *monitoring.LiveSampler
+	liveMu         sync.Mutex
 	updates        *updater.Service
 	dbs            []DBHandle
 	wsTickets      *wsTickets
@@ -84,7 +88,7 @@ func (s *Server) SetConfigSaved(fn func(name string)) {
 	s.configSaved = fn
 }
 
-// SetUnreadChanged registers the function run with true when a notable task ends and false when an inbox write passes through the agent.
+// SetUnreadChanged registers the function run with true when a row is written to the local inbox and false when a person's unread count reaches 0.
 func (s *Server) SetUnreadChanged(fn func(unread bool)) {
 	s.unreadChanged = fn
 }
@@ -96,19 +100,21 @@ func (s *Server) markUnread(unread bool) {
 }
 
 // New builds the server and its routes.
-func New(cfg *config.Config, keyStore *keys.Store, trayTokens *auth.TrayTokens, taskQueue *tasks.Queue, machineStore *machines.Store, provisioners *provisioner.Registry, storage *locations.Set, secretsStore *secrets.Store, assetsStore *assets.Store, artifactSvc *assets.Service, monitor *monitoring.Service, updates *updater.Service, dbs []DBHandle, restartArgs []string, teardown func(), openUI func(query string)) (*Server, error) {
+func New(cfg *config.Config, keyStore *keys.Store, trayTokens *auth.TrayTokens, taskQueue *tasks.Queue, machineStore *machines.Store, inboxStore *inbox.Store, provisioners *provisioner.Registry, storage *locations.Set, secretsStore *secrets.Store, assetsStore *assets.Store, artifactSvc *assets.Service, monitor *monitoring.Service, updates *updater.Service, dbs []DBHandle, restartArgs []string, teardown func(), openUI func(query string)) (*Server, error) {
 	s := &Server{
 		cfg:            cfg,
 		keys:           keyStore,
 		trayTokens:     trayTokens,
 		tasks:          taskQueue,
 		machines:       machineStore,
+		inbox:          inboxStore,
 		provisioners:   provisioners,
 		storage:        storage,
 		secrets:        secretsStore,
 		assets:         assetsStore,
 		artifactSvc:    artifactSvc,
 		monitor:        monitor,
+		live:           monitoring.NewLiveSampler(monitor.Sampler()),
 		updates:        updates,
 		dbs:            dbs,
 		wsTickets:      newWsTickets(),
@@ -129,7 +135,10 @@ func New(cfg *config.Config, keyStore *keys.Store, trayTokens *auth.TrayTokens, 
 	machines.SetOIDCTokenSource(s.oidcMgr.BearerToken)
 	taskQueue.Store().Notify = s.publishTask
 	machineStore.Notify = s.publishStats
+	inboxStore.Notify = s.publishInbox
 	monitor.SetOnCollected(s.publishSamples)
+	s.live.SetOnSampled(s.publishSamples)
+	s.events.onTopicSubscribers = s.topicSubscribersChanged
 	updates.SetOnNewer(s.announceUpdate)
 
 	mux := http.NewServeMux()

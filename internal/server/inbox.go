@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Makr91/hyperweaver-agent/internal/inbox"
 	"github.com/Makr91/hyperweaver-agent/internal/tasks"
 	"github.com/Makr91/hyperweaver-agent/internal/version"
 )
@@ -85,53 +86,76 @@ func (s *Server) taskNavigate(task *tasks.Task) string {
 	return base + "hosts/self/machines/" + url.PathEscape(task.MachineName)
 }
 
-func (s *Server) notifyInbox(task *tasks.Task) {
-	subject := s.oidcMgr.BoundSubject()
-	if subject == "" || s.oidcMgr.BearerToken() == "" {
-		return
-	}
-	write := inboxWrite{
+func (s *Server) taskWrite(task *tasks.Task) *inbox.Write {
+	return &inbox.Write{
 		IdempotencyKey: "hyperweaver-agent:task:" + task.ID,
 		Type:           "SYSTEM",
 		Severity:       taskSeverity(task),
-		Notification: inboxNotification{
-			Title:    taskTitle(task),
-			Body:     taskBody(task),
-			Navigate: s.taskNavigate(task),
-			Tag:      "hyperweaver-agent-task",
-		},
-		Recipient: inboxRecipient{UserUUID: subject},
+		Title:          taskTitle(task),
+		Body:           taskBody(task),
+		Navigate:       s.taskNavigate(task),
+		Tag:            "hyperweaver-agent-task",
 	}
-	if s.writeInbox(&write, "task_id", task.ID) {
+}
+
+func (s *Server) updateWrite(latestVersion string) *inbox.Write {
+	hostname, _ := os.Hostname()
+	return &inbox.Write{
+		IdempotencyKey: "hyperweaver-agent:update:" + latestVersion,
+		Type:           "SYSTEM",
+		Severity:       "INFO",
+		Title:          "Hyperweaver Agent " + latestVersion + " is available",
+		Body:           hostname,
+		Navigate:       s.cfg.LocalURL() + updatePagePath,
+		Tag:            "hyperweaver-agent-update",
+	}
+}
+
+func (s *Server) notifyInbox(task *tasks.Task) {
+	write := s.taskWrite(task)
+	for _, person := range s.personsOfKeyName(task.CreatedBy) {
+		s.writeLocalInbox(person, write, "task_id", task.ID)
+	}
+	if s.writeProviderInbox(write, "task_id", task.ID) {
 		slog.Info("task written to the person's inbox", "task_id", task.ID, "operation", task.Operation, "status", task.Status)
 	}
 }
 
 func (s *Server) notifyUpdateInbox(latestVersion string) {
-	subject := s.oidcMgr.BoundSubject()
-	if subject == "" || s.oidcMgr.BearerToken() == "" {
-		return
+	write := s.updateWrite(latestVersion)
+	for _, person := range s.personsOfActiveKeys() {
+		s.writeLocalInbox(person, write, "latest_version", latestVersion)
 	}
-	hostname, _ := os.Hostname()
-	write := inboxWrite{
-		IdempotencyKey: "hyperweaver-agent:update:" + latestVersion,
-		Type:           "SYSTEM",
-		Severity:       "INFO",
-		Notification: inboxNotification{
-			Title:    "Hyperweaver Agent " + latestVersion + " is available",
-			Body:     hostname,
-			Navigate: s.cfg.LocalURL() + updatePagePath,
-			Tag:      "hyperweaver-agent-update",
-		},
-		Recipient: inboxRecipient{UserUUID: subject},
-	}
-	if s.writeInbox(&write, "latest_version", latestVersion) {
+	if s.writeProviderInbox(write, "latest_version", latestVersion) {
 		slog.Info("update written to the person's inbox", "current_version", version.Version, "latest_version", latestVersion)
 	}
 }
 
-func (s *Server) writeInbox(write *inboxWrite, attrs ...any) bool {
-	raw, err := json.Marshal(write)
+func (s *Server) writeLocalInbox(person string, write *inbox.Write, attrs ...any) {
+	ctx, cancel := context.WithTimeout(context.Background(), inboxTimeout)
+	defer cancel()
+	if _, _, err := s.inbox.Create(ctx, person, write); err != nil {
+		slog.Warn("local inbox write failed", append([]any{"error", err, "person", person}, attrs...)...)
+	}
+}
+
+func (s *Server) writeProviderInbox(write *inbox.Write, attrs ...any) bool {
+	subject := s.oidcMgr.BoundSubject()
+	if subject == "" || s.oidcMgr.BearerToken() == "" {
+		return false
+	}
+	raw, err := json.Marshal(inboxWrite{
+		IdempotencyKey: write.IdempotencyKey,
+		Type:           write.Type,
+		Severity:       write.Severity,
+		Notification: inboxNotification{
+			Title:    write.Title,
+			Body:     write.Body,
+			Navigate: write.Navigate,
+			Tag:      write.Tag,
+		},
+		Recipient: inboxRecipient{UserUUID: subject},
+	})
 	if err != nil {
 		slog.Warn("inbox write serialize failed", append([]any{"error", err}, attrs...)...)
 		return false
@@ -152,4 +176,16 @@ func (s *Server) writeInbox(write *inboxWrite, attrs ...any) bool {
 		return false
 	}
 	return true
+}
+
+func (s *Server) publishInbox(person string) {
+	ctx, cancel := context.WithTimeout(context.Background(), inboxTimeout)
+	defer cancel()
+	count, err := s.inbox.UnreadCount(ctx, person)
+	if err != nil {
+		slog.Warn("unread count read failed", "error", err, "person", person)
+		return
+	}
+	s.publishUnreadCount(person, count)
+	s.markUnread(true)
 }

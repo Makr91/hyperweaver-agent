@@ -28,10 +28,48 @@ func (s *Server) personOf(identity *auth.Identity) string {
 	if identity == nil {
 		return ""
 	}
-	if minted, ok := s.oidcMgr.IdentityForKey(identity.ID); ok && minted.Email != "" {
+	return s.personOfKey(identity.ID, identity.Name)
+}
+
+func (s *Server) personOfKey(id int64, name string) string {
+	if minted, ok := s.oidcMgr.IdentityForKey(id); ok && minted.Email != "" {
 		return minted.Email
 	}
-	return identity.Name
+	return name
+}
+
+func (s *Server) personsOfActiveKeys() []string {
+	seen := map[string]bool{}
+	persons := []string{}
+	for _, k := range s.keys.List() {
+		if !k.IsActive {
+			continue
+		}
+		person := s.personOfKey(k.ID, k.Name)
+		if person == "" || seen[person] {
+			continue
+		}
+		seen[person] = true
+		persons = append(persons, person)
+	}
+	return persons
+}
+
+func (s *Server) personsOfKeyName(name string) []string {
+	person := ""
+	for _, k := range s.keys.List() {
+		if !k.IsActive || k.Name != name {
+			continue
+		}
+		if minted, ok := s.oidcMgr.IdentityForKey(k.ID); ok && minted.Email != "" {
+			return []string{minted.Email}
+		}
+		person = k.Name
+	}
+	if person != "" {
+		return []string{person}
+	}
+	return s.personsOfActiveKeys()
 }
 
 func optional(value string) *string {

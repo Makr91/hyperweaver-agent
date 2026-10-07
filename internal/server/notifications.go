@@ -1,156 +1,209 @@
 package server
 
 import (
-	"context"
-	"encoding/json"
-	"io"
+	"errors"
 	"log/slog"
 	"net/http"
-	"net/url"
-	"time"
+	"strconv"
 
 	"github.com/Makr91/hyperweaver-agent/internal/auth"
+	"github.com/Makr91/hyperweaver-agent/internal/inbox"
 	"github.com/Makr91/hyperweaver-agent/internal/problem"
 )
 
 const (
-	notificationsPath       = "/api/notifications"
-	unreadCountTimeout      = 10 * time.Second
-	pushNotConfiguredDetail = "Browser push is not offered by this agent; the identity provider's own push serves the estate"
+	notificationsDefaultSize = 20
+	notificationsMaxSize     = 100
+	pushNotConfiguredDetail  = "Browser push is not offered by this agent; the identity provider's own push serves the estate"
 )
 
 type unreadCountResponse struct {
 	Count int `json:"count"`
 }
 
-func notificationPath(r *http.Request, segments ...string) string {
-	path := notificationsPath
-	for _, segment := range segments {
-		path += "/" + url.PathEscape(segment)
-	}
-	if r.URL.RawQuery != "" {
-		path += "?" + r.URL.RawQuery
-	}
-	return path
+type notificationsPage struct {
+	Items      []*inbox.Row `json:"items"`
+	Page       int          `json:"page"`
+	Size       int          `json:"size"`
+	Total      int          `json:"total"`
+	TotalPages int          `json:"total_pages"`
 }
 
-func (s *Server) pushUnreadCount(identity *auth.Identity) {
-	ctx, cancel := context.WithTimeout(context.Background(), unreadCountTimeout)
-	defer cancel()
-	response, err := s.oidcMgr.IssuerRequest(ctx, http.MethodGet, notificationsPath+"/unread-count", http.NoBody, "")
-	if err != nil {
-		slog.Warn("unread count refresh failed", "error", err)
-		return
+func (s *Server) inboxPerson(w http.ResponseWriter, r *http.Request) (person string, ok bool) {
+	person = s.personOf(auth.FromContext(r.Context()))
+	if person == "" {
+		problem.Detail(w, http.StatusInternalServerError, "The calling key stands for no person")
+		return "", false
 	}
-	defer func() {
-		_ = response.Body.Close()
-	}()
-	var count unreadCountResponse
-	if response.StatusCode != http.StatusOK || json.NewDecoder(io.LimitReader(response.Body, issuerBodyLimit)).Decode(&count) != nil {
-		slog.Warn("unread count refresh answered no count", "status", response.StatusCode)
-		return
-	}
-	s.publishUnreadCount(s.personOf(identity), count.Count)
+	return person, true
 }
 
-func (s *Server) relayNotificationWrite(w http.ResponseWriter, r *http.Request, path string) {
-	status, relayed := s.relayIssuer(w, r, path, http.NoBody)
-	if relayed && status < http.StatusMultipleChoices {
+func (s *Server) inboxWritten(w http.ResponseWriter, r *http.Request, person string, err error) {
+	switch {
+	case errors.Is(err, inbox.ErrNotFound):
+		problem.NotFound(w)
+		return
+	case err != nil:
+		slog.Error("inbox write failed", "error", err, "person", person, "path", r.URL.Path)
+		problem.Detail(w, http.StatusInternalServerError, "The inbox could not be written")
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+	count, cerr := s.inbox.UnreadCount(r.Context(), person)
+	if cerr != nil {
+		slog.Warn("unread count read failed", "error", cerr, "person", person)
+		return
+	}
+	s.publishUnreadCount(person, count)
+	if count == 0 {
 		s.markUnread(false)
-		s.pushUnreadCount(auth.FromContext(r.Context()))
 	}
+}
+
+func pageParams(r *http.Request) (page, size int) {
+	query := r.URL.Query()
+	page, _ = strconv.Atoi(query.Get("page"))
+	if page < 0 {
+		page = 0
+	}
+	size, _ = strconv.Atoi(query.Get("size"))
+	if size < 1 {
+		size = notificationsDefaultSize
+	}
+	if size > notificationsMaxSize {
+		size = notificationsMaxSize
+	}
+	return page, size
 }
 
 // @Summary		The signed-in person's inbox
-// @Description	Minimum role: viewer. Relayed to the identity provider's GET /api/notifications under the bound account's token with page, size and unread_only passed through, the way a backend host proxies the hub; the issuer's status and body are answered as they came. A key no federated login minted answers 404, no valid token 503. The notifications token is listed in status.features only while such a token is held.
+// @Description	Minimum role: viewer. One page of the local inbox of the person the calling key stands for, newest first: page counts from 0, size is 20 unless given and at most 100, and unread_only keeps the unread rows alone.
 // @Tags			Local Login
 // @Produce		json
-// @Param			page		query	int		false	"Page number"
-// @Param			size		query	int		false	"Page size"
+// @Param			page		query	int		false	"Page number, counted from 0"
+// @Param			size		query	int		false	"Page size, 20 unless given, at most 100"
 // @Param			unread_only	query	bool	false	"Unread rows alone"
-// @Success		200	{object}	map[string]interface{}	"The page: {items: [{id, title, body, type, severity, navigate, read_at, created_at}], page, size, total, total_pages}"
-// @Failure		404	{object}	problem.Body	"The calling key was not minted by a federated login"
-// @Failure		502	{object}	problem.Body	"Identity provider unreachable"
-// @Failure		503	{object}	problem.Body	"No valid token for the bound account"
+// @Success		200	{object}	notificationsPage	"The page: {items: [{id, title, body, type, severity, navigate, read_at, created_at}], page, size, total, total_pages}"
+// @Failure		401	{object}	problem.Body	"Missing credential"
+// @Failure		403	{object}	problem.Body	"Invalid credential"
 // @Router			/api/notifications [get]
 func (s *Server) handleListNotifications(w http.ResponseWriter, r *http.Request) {
-	s.relayIssuer(w, r, notificationPath(r), http.NoBody)
+	person, ok := s.inboxPerson(w, r)
+	if !ok {
+		return
+	}
+	page, size := pageParams(r)
+	unreadOnly, _ := strconv.ParseBool(r.URL.Query().Get("unread_only"))
+	rows, total, err := s.inbox.List(r.Context(), person, page, size, unreadOnly)
+	if err != nil {
+		slog.Error("inbox list failed", "error", err, "person", person)
+		problem.Detail(w, http.StatusInternalServerError, "The inbox could not be read")
+		return
+	}
+	writeJSON(w, notificationsPage{
+		Items:      rows,
+		Page:       page,
+		Size:       size,
+		Total:      total,
+		TotalPages: (total + size - 1) / size,
+	})
 }
 
 // @Summary		The signed-in person's unread count
-// @Description	Minimum role: viewer. Relayed to the identity provider's GET /api/notifications/unread-count under the bound account's token.
+// @Description	Minimum role: viewer. How many rows of the person's local inbox are unread.
 // @Tags			Local Login
 // @Produce		json
 // @Success		200	{object}	unreadCountResponse	"The count"
-// @Failure		404	{object}	problem.Body	"The calling key was not minted by a federated login"
-// @Failure		502	{object}	problem.Body	"Identity provider unreachable"
-// @Failure		503	{object}	problem.Body	"No valid token for the bound account"
+// @Failure		401	{object}	problem.Body	"Missing credential"
+// @Failure		403	{object}	problem.Body	"Invalid credential"
 // @Router			/api/notifications/unread-count [get]
 func (s *Server) handleUnreadCount(w http.ResponseWriter, r *http.Request) {
-	s.relayIssuer(w, r, notificationPath(r, "unread-count"), http.NoBody)
+	person, ok := s.inboxPerson(w, r)
+	if !ok {
+		return
+	}
+	count, err := s.inbox.UnreadCount(r.Context(), person)
+	if err != nil {
+		slog.Error("unread count read failed", "error", err, "person", person)
+		problem.Detail(w, http.StatusInternalServerError, "The inbox could not be read")
+		return
+	}
+	writeJSON(w, unreadCountResponse{Count: count})
 }
 
 // @Summary		Mark one notification read
-// @Description	Minimum role: viewer. Relayed to the identity provider's POST /api/notifications/{id}/read; afterwards the unread count is read again and sent as unread-count on the notifications topic of the stream to this person.
+// @Description	Minimum role: viewer. Records the person's local inbox row as read; the unread count follows as unread-count on the notifications topic of the stream to this person.
 // @Tags			Local Login
 // @Param			id	path	string	true	"The notification id"
 // @Success		204	"Marked"
-// @Failure		404	{object}	problem.Body	"The calling key was not minted by a federated login, or the issuer knows no such row"
-// @Failure		502	{object}	problem.Body	"Identity provider unreachable"
-// @Failure		503	{object}	problem.Body	"No valid token for the bound account"
+// @Failure		404	{object}	problem.Body	"No such row in the person's inbox"
 // @Router			/api/notifications/{id}/read [post]
 func (s *Server) handleMarkNotificationRead(w http.ResponseWriter, r *http.Request) {
-	s.relayNotificationWrite(w, r, notificationPath(r, r.PathValue("id"), "read"))
+	person, ok := s.inboxPerson(w, r)
+	if !ok {
+		return
+	}
+	s.inboxWritten(w, r, person, s.inbox.MarkRead(r.Context(), person, r.PathValue("id")))
 }
 
 // @Summary		Mark one notification unread
-// @Description	Minimum role: viewer. Relayed to the identity provider's POST /api/notifications/{id}/unread; the unread count follows on the stream.
+// @Description	Minimum role: viewer. Puts the person's local inbox row back to unread; the unread count follows on the stream.
 // @Tags			Local Login
 // @Param			id	path	string	true	"The notification id"
 // @Success		204	"Marked"
-// @Failure		404	{object}	problem.Body	"The calling key was not minted by a federated login, or the issuer knows no such row"
-// @Failure		502	{object}	problem.Body	"Identity provider unreachable"
-// @Failure		503	{object}	problem.Body	"No valid token for the bound account"
+// @Failure		404	{object}	problem.Body	"No such row in the person's inbox"
 // @Router			/api/notifications/{id}/unread [post]
 func (s *Server) handleMarkNotificationUnread(w http.ResponseWriter, r *http.Request) {
-	s.relayNotificationWrite(w, r, notificationPath(r, r.PathValue("id"), "unread"))
+	person, ok := s.inboxPerson(w, r)
+	if !ok {
+		return
+	}
+	s.inboxWritten(w, r, person, s.inbox.MarkUnread(r.Context(), person, r.PathValue("id")))
 }
 
 // @Summary		Mark every notification read
-// @Description	Minimum role: viewer. Relayed to the identity provider's POST /api/notifications/read-all; the unread count follows on the stream.
+// @Description	Minimum role: viewer. Records every unread row of the person's local inbox as read; the unread count follows on the stream.
 // @Tags			Local Login
 // @Success		204	"Marked"
-// @Failure		404	{object}	problem.Body	"The calling key was not minted by a federated login"
-// @Failure		502	{object}	problem.Body	"Identity provider unreachable"
-// @Failure		503	{object}	problem.Body	"No valid token for the bound account"
+// @Failure		401	{object}	problem.Body	"Missing credential"
+// @Failure		403	{object}	problem.Body	"Invalid credential"
 // @Router			/api/notifications/read-all [post]
 func (s *Server) handleMarkAllNotificationsRead(w http.ResponseWriter, r *http.Request) {
-	s.relayNotificationWrite(w, r, notificationPath(r, "read-all"))
+	person, ok := s.inboxPerson(w, r)
+	if !ok {
+		return
+	}
+	s.inboxWritten(w, r, person, s.inbox.MarkAllRead(r.Context(), person))
 }
 
 // @Summary		Delete one notification
-// @Description	Minimum role: viewer. Relayed to the identity provider's DELETE /api/notifications/{id}; the unread count follows on the stream.
+// @Description	Minimum role: viewer. Removes the row from the person's local inbox; the unread count follows on the stream.
 // @Tags			Local Login
 // @Param			id	path	string	true	"The notification id"
 // @Success		204	"Deleted"
-// @Failure		404	{object}	problem.Body	"The calling key was not minted by a federated login, or the issuer knows no such row"
-// @Failure		502	{object}	problem.Body	"Identity provider unreachable"
-// @Failure		503	{object}	problem.Body	"No valid token for the bound account"
+// @Failure		404	{object}	problem.Body	"No such row in the person's inbox"
 // @Router			/api/notifications/{id} [delete]
 func (s *Server) handleDeleteNotification(w http.ResponseWriter, r *http.Request) {
-	s.relayNotificationWrite(w, r, notificationPath(r, r.PathValue("id")))
+	person, ok := s.inboxPerson(w, r)
+	if !ok {
+		return
+	}
+	s.inboxWritten(w, r, person, s.inbox.Delete(r.Context(), person, r.PathValue("id")))
 }
 
 // @Summary		Clear the signed-in person's inbox
-// @Description	Minimum role: viewer. Relayed to the identity provider's DELETE /api/notifications; the unread count follows on the stream.
+// @Description	Minimum role: viewer. Removes every row of the person's local inbox; the unread count follows on the stream.
 // @Tags			Local Login
 // @Success		204	"Cleared"
-// @Failure		404	{object}	problem.Body	"The calling key was not minted by a federated login"
-// @Failure		502	{object}	problem.Body	"Identity provider unreachable"
-// @Failure		503	{object}	problem.Body	"No valid token for the bound account"
+// @Failure		401	{object}	problem.Body	"Missing credential"
+// @Failure		403	{object}	problem.Body	"Invalid credential"
 // @Router			/api/notifications [delete]
 func (s *Server) handleDeleteAllNotifications(w http.ResponseWriter, r *http.Request) {
-	s.relayNotificationWrite(w, r, notificationPath(r))
+	person, ok := s.inboxPerson(w, r)
+	if !ok {
+		return
+	}
+	s.inboxWritten(w, r, person, s.inbox.DeleteAll(r.Context(), person))
 }
 
 // @Summary		Browser push is not offered

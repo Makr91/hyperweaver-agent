@@ -12,6 +12,7 @@ import (
 	"github.com/Makr91/hyperweaver-agent/internal/db"
 	"github.com/Makr91/hyperweaver-agent/internal/hostname"
 	"github.com/Makr91/hyperweaver-agent/internal/hostpower"
+	"github.com/Makr91/hyperweaver-agent/internal/inbox"
 	"github.com/Makr91/hyperweaver-agent/internal/locations"
 	"github.com/Makr91/hyperweaver-agent/internal/machines"
 	"github.com/Makr91/hyperweaver-agent/internal/monitoring"
@@ -30,6 +31,7 @@ import (
 type agentSystems struct {
 	queue        *tasks.Queue
 	machines     *machines.Store
+	inbox        *inbox.Store
 	provisioners *provisioner.Registry
 	storage      *locations.Set
 	assets       *assets.Store
@@ -161,6 +163,7 @@ func setupTasks(cfg *config.Config, secretsStore *secrets.Store) (*agentSystems,
 	agentMigrations = append(agentMigrations, assets.MergeMigrations...)
 	agentMigrations = append(agentMigrations, machines.ProfileTombstone...)
 	agentMigrations = append(agentMigrations, machines.HypervisorMigration...)
+	agentMigrations = append(agentMigrations, inbox.Migrations...)
 	agentDB, err := openDB(agentPath, agentMigrations)
 	if err != nil {
 		_ = tasksDB.Close()
@@ -171,7 +174,7 @@ func setupTasks(cfg *config.Config, secretsStore *secrets.Store) (*agentSystems,
 	// them all, and the closer releases them in reverse-open order.
 	handles := []server.DBHandle{
 		{Name: "tasks.sqlite", Path: tasksPath, DB: tasksDB, Tables: []string{"tasks"}},
-		{Name: "agent.sqlite", Path: agentPath, DB: agentDB, Tables: []string{"machines", "artifacts", "artifact_locations", "templates"}},
+		{Name: "agent.sqlite", Path: agentPath, DB: agentDB, Tables: []string{"machines", "artifacts", "artifact_locations", "templates", "notifications"}},
 	}
 	closer := func() {
 		for i := len(handles) - 1; i >= 0; i-- {
@@ -286,6 +289,7 @@ func setupTasks(cfg *config.Config, secretsStore *secrets.Store) (*agentSystems,
 	}
 
 	machineStore := machines.NewStore(agentDB)
+	inboxStore := inbox.NewStore(agentDB)
 	reconciler := machines.NewReconciler(machineStore, store,
 		cfg.Machines.AutoDiscovery,
 		time.Duration(cfg.Machines.DiscoveryInterval)*time.Second,
@@ -358,6 +362,7 @@ func setupTasks(cfg *config.Config, secretsStore *secrets.Store) (*agentSystems,
 	return &agentSystems{
 		queue:        queue,
 		machines:     machineStore,
+		inbox:        inboxStore,
 		provisioners: provisioners,
 		storage:      storage,
 		assets:       assetsStore,

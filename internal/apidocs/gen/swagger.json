@@ -377,6 +377,35 @@
                 },
                 "type": "object"
             },
+            "inbox.Row": {
+                "properties": {
+                    "body": {
+                        "type": "string"
+                    },
+                    "created_at": {
+                        "type": "string"
+                    },
+                    "id": {
+                        "type": "string"
+                    },
+                    "navigate": {
+                        "type": "string"
+                    },
+                    "read_at": {
+                        "type": "string"
+                    },
+                    "severity": {
+                        "type": "string"
+                    },
+                    "title": {
+                        "type": "string"
+                    },
+                    "type": {
+                        "type": "string"
+                    }
+                },
+                "type": "object"
+            },
             "locations.Kind": {
                 "enum": [
                     "machines",
@@ -5370,6 +5399,30 @@
                 },
                 "type": "object"
             },
+            "server.notificationsPage": {
+                "properties": {
+                    "items": {
+                        "items": {
+                            "$ref": "#/components/schemas/inbox.Row"
+                        },
+                        "type": "array",
+                        "uniqueItems": false
+                    },
+                    "page": {
+                        "type": "integer"
+                    },
+                    "size": {
+                        "type": "integer"
+                    },
+                    "total": {
+                        "type": "integer"
+                    },
+                    "total_pages": {
+                        "type": "integer"
+                    }
+                },
+                "type": "object"
+            },
             "server.openMachineDirectoryResponse": {
                 "properties": {
                     "directory": {
@@ -7881,7 +7934,7 @@
                         "uniqueItems": false
                     },
                     "notify": {
-                        "description": "True when the task's end is written to the bound person's inbox at the identity provider; set by the request that queued it, else by the operation kind",
+                        "description": "True when the task's end is written to the inbox of the person whose key created it, in the agent's local inbox and, while the agent holds a token for its bound account, at the identity provider; set by the request that queued it, else by the operation kind",
                         "type": "boolean"
                     },
                     "operation": {
@@ -10651,7 +10704,7 @@
         },
         "/api/events": {
             "get": {
-                "description": "Minimum role: viewer. The one event stream of the Universal Events Contract, plain WHATWG server-sent events. topics is a comma-separated list of health, tasks, hosts, admin, monitoring, profile and notifications; unknown names are ignored, an empty list asks for every topic, and the stream answers the topics the key's role may read, admin left out for a non-admin key, so the ready event's topics list is the subscription that stands; 403 only when nothing is left. The first frame is retry: 3000 followed by the ready event carrying the newest id and the subscribed topics. Every event carries id \u003cepoch-ms\u003e-\u003cseq\u003e, a kebab-case event name and one line of JSON data; a :hb comment line is sent after 25 seconds without a frame. Topic tasks sends task-updated, one task row as GET /api/tasks answers it, when a task is created and on every change of its status, progress_percent, progress_info or error_message. Topic hosts sends stats-updated, the GET /api/stats document, when a machine is created or removed and when one changes status. Topic health sends health, the GET /api/health report, whenever a task ends and the report differs from the last one sent. Topic admin sends restart-required, {required, last_modified_by, last_modified_time}, after every configuration save and backup restore, and {required: false} as the agent restarts; it is subscribed for an admin key alone. Topic admin also sends update-available {current_version, latest_version, release_date} when a check finds a newer release. Topic monitoring sends cpu-sample {cpu: [sample]} with per_core_parsed, memory-sample {memory: [sample]} and network-sample {usage: [samples]}, the members GET /api/monitoring/system/cpu, /api/system/memory and /api/network/usage answer, whenever the collector takes them: on every collector tick while monitoring.storage_enabled, else only on POST /api/monitoring/collect. Topic profile is the person's profile topic of the contract; this agent keeps no preferences, so it sends nothing on it. Topic notifications sends unread-count {count} to the person whose inbox write the agent relayed to the identity provider, read back from the issuer after the write, that person alone. No topic has a snapshot event. The ring keeps the last 500 events or 5 minutes, whichever is larger: a Last-Event-ID inside it replays every later event of the subscribed topics, one outside it answers a reset event naming the subscribed topics. A task's output and every terminal stay on their WebSockets.",
+                "description": "Minimum role: viewer. The one event stream of the Universal Events Contract, plain WHATWG server-sent events. topics is a comma-separated list of health, tasks, hosts, admin, monitoring, profile and notifications; unknown names are ignored, an empty list asks for every topic, and the stream answers the topics the key's role may read, admin left out for a non-admin key, so the ready event's topics list is the subscription that stands; 403 only when nothing is left. The first frame is retry: 3000 followed by the ready event carrying the newest id and the subscribed topics. Every event carries id \u003cepoch-ms\u003e-\u003cseq\u003e, a kebab-case event name and one line of JSON data; a :hb comment line is sent after 25 seconds without a frame. Topic tasks sends task-updated, one task row as GET /api/tasks answers it, when a task is created and on every change of its status, progress_percent, progress_info or error_message. Topic hosts sends stats-updated, the GET /api/stats document, when a machine is created or removed and when one changes status. Topic health sends health, the GET /api/health report, whenever a task ends and the report differs from the last one sent. Topic admin sends restart-required, {required, last_modified_by, last_modified_time}, after every configuration save and backup restore, and {required: false} as the agent restarts; it is subscribed for an admin key alone. Topic admin also sends update-available {current_version, latest_version, release_date} when a check finds a newer release. Topic monitoring sends cpu-sample {cpu: [sample]} with per_core_parsed, memory-sample {memory: [sample]} and network-sample {usage: [samples]}, the members GET /api/monitoring/system/cpu, /api/system/memory and /api/network/usage answer, whenever the agent takes them: every monitoring.live_interval seconds while at least one client is subscribed to the topic, whether or not storage is on, and nothing while none is; on every collector tick while monitoring.storage_enabled; and on POST /api/monitoring/collect. A live sample is one event in the ring like any other. Topic profile is the person's profile topic of the contract; this agent keeps no preferences, so it sends nothing on it. Topic notifications sends unread-count {count}, the person's unread rows in the agent's local inbox, to that person alone after every row written for them and after every read, unread, read-all, delete and delete-all they send. No topic has a snapshot event. The ring keeps the last 500 events or 5 minutes, whichever is larger: a Last-Event-ID inside it replays every later event of the subscribed topics, one outside it answers a reset event naming the subscribed topics. A task's output and every terminal stay on their WebSockets.",
                 "parameters": [
                     {
                         "description": "Comma-separated topics: health, tasks, hosts, admin, monitoring, profile, notifications",
@@ -15564,21 +15617,20 @@
         },
         "/api/monitoring/network/usage": {
             "get": {
-                "description": "Minimum role: viewer. Per-interface counters with computed rates. Realtime mode: one live observation per interface; storage mode: stored samples, newest first.",
+                "description": "Minimum role: viewer. Per-interface counters with computed rates. Realtime mode: the one observation per interface taken right now; since and until are ignored. Storage mode: every stored sample in the since/until span, oldest first.",
                 "parameters": [
                     {
-                        "description": "Maximum samples",
+                        "description": "Stored samples at or after this time, RFC 3339 (storage mode)",
                         "in": "query",
-                        "name": "limit",
+                        "name": "since",
                         "schema": {
-                            "default": 100,
-                            "type": "integer"
+                            "type": "string"
                         }
                     },
                     {
-                        "description": "Stored samples at or after this time (storage mode)",
+                        "description": "Stored samples at or before this time, RFC 3339 (storage mode)",
                         "in": "query",
-                        "name": "since",
+                        "name": "until",
                         "schema": {
                             "type": "string"
                         }
@@ -15622,7 +15674,7 @@
         },
         "/api/monitoring/status": {
             "get": {
-                "description": "Minimum role: viewer.",
+                "description": "Minimum role: viewer. config carries storage_enabled (boolean) and, as numbers of seconds or days, live_interval, collection_interval and retention_days, in both modes.",
                 "responses": {
                     "200": {
                         "content": {
@@ -15674,21 +15726,20 @@
         },
         "/api/monitoring/system/cpu": {
             "get": {
-                "description": "Minimum role: viewer. Realtime mode (storage disabled, the default): one live sample; since is effectively ignored. Storage mode: stored samples, newest first.",
+                "description": "Minimum role: viewer. Realtime mode (storage disabled, the default): the one sample taken right now; since and until are ignored. Storage mode: every stored sample in the since/until span, oldest first.",
                 "parameters": [
                     {
-                        "description": "Maximum samples",
+                        "description": "Stored samples at or after this time, RFC 3339 (storage mode)",
                         "in": "query",
-                        "name": "limit",
+                        "name": "since",
                         "schema": {
-                            "default": 100,
-                            "type": "integer"
+                            "type": "string"
                         }
                     },
                     {
-                        "description": "Stored samples at or after this time (storage mode)",
+                        "description": "Stored samples at or before this time, RFC 3339 (storage mode)",
                         "in": "query",
-                        "name": "since",
+                        "name": "until",
                         "schema": {
                             "type": "string"
                         }
@@ -15736,18 +15787,17 @@
                 "description": "Minimum role: viewer. Load averages and process activity reshaped for charting. Load averages are zeros on Windows; run-queue counts are Linux-only — absent counters stay zero, honestly.",
                 "parameters": [
                     {
-                        "description": "Maximum entries",
+                        "description": "Stored samples at or after this time, RFC 3339 (storage mode)",
                         "in": "query",
-                        "name": "limit",
+                        "name": "since",
                         "schema": {
-                            "default": 100,
-                            "type": "integer"
+                            "type": "string"
                         }
                     },
                     {
-                        "description": "Stored samples at or after this time (storage mode)",
+                        "description": "Stored samples at or before this time, RFC 3339 (storage mode)",
                         "in": "query",
-                        "name": "since",
+                        "name": "until",
                         "schema": {
                             "type": "string"
                         }
@@ -15783,21 +15833,20 @@
         },
         "/api/monitoring/system/memory": {
             "get": {
-                "description": "Minimum role: viewer. Realtime mode: one live sample; storage mode: stored samples, newest first.",
+                "description": "Minimum role: viewer. Realtime mode: the one sample taken right now; since and until are ignored. Storage mode: every stored sample in the since/until span, oldest first.",
                 "parameters": [
                     {
-                        "description": "Maximum samples",
+                        "description": "Stored samples at or after this time, RFC 3339 (storage mode)",
                         "in": "query",
-                        "name": "limit",
+                        "name": "since",
                         "schema": {
-                            "default": 100,
-                            "type": "integer"
+                            "type": "string"
                         }
                     },
                     {
-                        "description": "Stored samples at or after this time (storage mode)",
+                        "description": "Stored samples at or before this time, RFC 3339 (storage mode)",
                         "in": "query",
-                        "name": "since",
+                        "name": "until",
                         "schema": {
                             "type": "string"
                         }
@@ -16752,12 +16801,12 @@
         },
         "/api/notifications": {
             "delete": {
-                "description": "Minimum role: viewer. Relayed to the identity provider's DELETE /api/notifications; the unread count follows on the stream.",
+                "description": "Minimum role: viewer. Removes every row of the person's local inbox; the unread count follows on the stream.",
                 "responses": {
                     "204": {
                         "description": "Cleared"
                     },
-                    "404": {
+                    "401": {
                         "content": {
                             "application/json": {
                                 "schema": {
@@ -16765,9 +16814,9 @@
                                 }
                             }
                         },
-                        "description": "The calling key was not minted by a federated login"
+                        "description": "Missing credential"
                     },
-                    "502": {
+                    "403": {
                         "content": {
                             "application/json": {
                                 "schema": {
@@ -16775,17 +16824,7 @@
                                 }
                             }
                         },
-                        "description": "Identity provider unreachable"
-                    },
-                    "503": {
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/problem.Body"
-                                }
-                            }
-                        },
-                        "description": "No valid token for the bound account"
+                        "description": "Invalid credential"
                     }
                 },
                 "summary": "Clear the signed-in person's inbox",
@@ -16794,10 +16833,10 @@
                 ]
             },
             "get": {
-                "description": "Minimum role: viewer. Relayed to the identity provider's GET /api/notifications under the bound account's token with page, size and unread_only passed through, the way a backend host proxies the hub; the issuer's status and body are answered as they came. A key no federated login minted answers 404, no valid token 503. The notifications token is listed in status.features only while such a token is held.",
+                "description": "Minimum role: viewer. One page of the local inbox of the person the calling key stands for, newest first: page counts from 0, size is 20 unless given and at most 100, and unread_only keeps the unread rows alone.",
                 "parameters": [
                     {
-                        "description": "Page number",
+                        "description": "Page number, counted from 0",
                         "in": "query",
                         "name": "page",
                         "schema": {
@@ -16805,7 +16844,7 @@
                         }
                     },
                     {
-                        "description": "Page size",
+                        "description": "Page size, 20 unless given, at most 100",
                         "in": "query",
                         "name": "size",
                         "schema": {
@@ -16826,14 +16865,13 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "additionalProperties": {},
-                                    "type": "object"
+                                    "$ref": "#/components/schemas/server.notificationsPage"
                                 }
                             }
                         },
                         "description": "The page: {items: [{id, title, body, type, severity, navigate, read_at, created_at}], page, size, total, total_pages}"
                     },
-                    "404": {
+                    "401": {
                         "content": {
                             "application/json": {
                                 "schema": {
@@ -16841,9 +16879,9 @@
                                 }
                             }
                         },
-                        "description": "The calling key was not minted by a federated login"
+                        "description": "Missing credential"
                     },
-                    "502": {
+                    "403": {
                         "content": {
                             "application/json": {
                                 "schema": {
@@ -16851,17 +16889,7 @@
                                 }
                             }
                         },
-                        "description": "Identity provider unreachable"
-                    },
-                    "503": {
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/problem.Body"
-                                }
-                            }
-                        },
-                        "description": "No valid token for the bound account"
+                        "description": "Invalid credential"
                     }
                 },
                 "summary": "The signed-in person's inbox",
@@ -16872,12 +16900,12 @@
         },
         "/api/notifications/read-all": {
             "post": {
-                "description": "Minimum role: viewer. Relayed to the identity provider's POST /api/notifications/read-all; the unread count follows on the stream.",
+                "description": "Minimum role: viewer. Records every unread row of the person's local inbox as read; the unread count follows on the stream.",
                 "responses": {
                     "204": {
                         "description": "Marked"
                     },
-                    "404": {
+                    "401": {
                         "content": {
                             "application/json": {
                                 "schema": {
@@ -16885,9 +16913,9 @@
                                 }
                             }
                         },
-                        "description": "The calling key was not minted by a federated login"
+                        "description": "Missing credential"
                     },
-                    "502": {
+                    "403": {
                         "content": {
                             "application/json": {
                                 "schema": {
@@ -16895,17 +16923,7 @@
                                 }
                             }
                         },
-                        "description": "Identity provider unreachable"
-                    },
-                    "503": {
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/problem.Body"
-                                }
-                            }
-                        },
-                        "description": "No valid token for the bound account"
+                        "description": "Invalid credential"
                     }
                 },
                 "summary": "Mark every notification read",
@@ -16916,7 +16934,7 @@
         },
         "/api/notifications/unread-count": {
             "get": {
-                "description": "Minimum role: viewer. Relayed to the identity provider's GET /api/notifications/unread-count under the bound account's token.",
+                "description": "Minimum role: viewer. How many rows of the person's local inbox are unread.",
                 "responses": {
                     "200": {
                         "content": {
@@ -16928,7 +16946,7 @@
                         },
                         "description": "The count"
                     },
-                    "404": {
+                    "401": {
                         "content": {
                             "application/json": {
                                 "schema": {
@@ -16936,9 +16954,9 @@
                                 }
                             }
                         },
-                        "description": "The calling key was not minted by a federated login"
+                        "description": "Missing credential"
                     },
-                    "502": {
+                    "403": {
                         "content": {
                             "application/json": {
                                 "schema": {
@@ -16946,17 +16964,7 @@
                                 }
                             }
                         },
-                        "description": "Identity provider unreachable"
-                    },
-                    "503": {
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/problem.Body"
-                                }
-                            }
-                        },
-                        "description": "No valid token for the bound account"
+                        "description": "Invalid credential"
                     }
                 },
                 "summary": "The signed-in person's unread count",
@@ -16988,7 +16996,7 @@
         },
         "/api/notifications/{id}": {
             "delete": {
-                "description": "Minimum role: viewer. Relayed to the identity provider's DELETE /api/notifications/{id}; the unread count follows on the stream.",
+                "description": "Minimum role: viewer. Removes the row from the person's local inbox; the unread count follows on the stream.",
                 "parameters": [
                     {
                         "description": "The notification id",
@@ -17012,27 +17020,7 @@
                                 }
                             }
                         },
-                        "description": "The calling key was not minted by a federated login, or the issuer knows no such row"
-                    },
-                    "502": {
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/problem.Body"
-                                }
-                            }
-                        },
-                        "description": "Identity provider unreachable"
-                    },
-                    "503": {
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/problem.Body"
-                                }
-                            }
-                        },
-                        "description": "No valid token for the bound account"
+                        "description": "No such row in the person's inbox"
                     }
                 },
                 "summary": "Delete one notification",
@@ -17043,7 +17031,7 @@
         },
         "/api/notifications/{id}/read": {
             "post": {
-                "description": "Minimum role: viewer. Relayed to the identity provider's POST /api/notifications/{id}/read; afterwards the unread count is read again and sent as unread-count on the notifications topic of the stream to this person.",
+                "description": "Minimum role: viewer. Records the person's local inbox row as read; the unread count follows as unread-count on the notifications topic of the stream to this person.",
                 "parameters": [
                     {
                         "description": "The notification id",
@@ -17067,27 +17055,7 @@
                                 }
                             }
                         },
-                        "description": "The calling key was not minted by a federated login, or the issuer knows no such row"
-                    },
-                    "502": {
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/problem.Body"
-                                }
-                            }
-                        },
-                        "description": "Identity provider unreachable"
-                    },
-                    "503": {
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/problem.Body"
-                                }
-                            }
-                        },
-                        "description": "No valid token for the bound account"
+                        "description": "No such row in the person's inbox"
                     }
                 },
                 "summary": "Mark one notification read",
@@ -17098,7 +17066,7 @@
         },
         "/api/notifications/{id}/unread": {
             "post": {
-                "description": "Minimum role: viewer. Relayed to the identity provider's POST /api/notifications/{id}/unread; the unread count follows on the stream.",
+                "description": "Minimum role: viewer. Puts the person's local inbox row back to unread; the unread count follows on the stream.",
                 "parameters": [
                     {
                         "description": "The notification id",
@@ -17122,27 +17090,7 @@
                                 }
                             }
                         },
-                        "description": "The calling key was not minted by a federated login, or the issuer knows no such row"
-                    },
-                    "502": {
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/problem.Body"
-                                }
-                            }
-                        },
-                        "description": "Identity provider unreachable"
-                    },
-                    "503": {
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/problem.Body"
-                                }
-                            }
-                        },
-                        "description": "No valid token for the bound account"
+                        "description": "No such row in the person's inbox"
                     }
                 },
                 "summary": "Mark one notification unread",
@@ -18513,7 +18461,7 @@
         },
         "/api/status": {
             "get": {
-                "description": "The public status probe. No authentication. role is the package name, hyperweaver-agent, the one member that tells the shared UI it is served by an agent directly. brand, collections, links, ticket, config, events and search are the shared status members: links.api is the path of this agent's API reference while api_docs.enabled is on, ticket is null because GET /api/config/ticket serves the ticket system, config lists the five configuration files (app, auth, db, machines, storage) the /api/config routes serve, and search names GET /api/search and the kinds it answers, artifact among them only while artifact_storage.enabled; the admin and setup tokens name the configuration pages, update the admin's Update row over GET /api/app/updates/check and POST /api/app/updates/apply, search the navbar search over the search member, devices the host's USB device list at GET /api/system/usb, media the host's disk-medium registry at GET /api/media, and oidc-code, present while oidc.enabled, the RFC 8252 authorization-code login over POST /api/auth/oidc/code-start and POST /api/auth/oidc/code beside the device grant, auth staying {apikey, oidc}.",
+                "description": "The public status probe. No authentication. role is the package name, hyperweaver-agent, the one member that tells the shared UI it is served by an agent directly. brand, collections, links, ticket, config, events and search are the shared status members: links.api is the path of this agent's API reference while api_docs.enabled is on, ticket is null because GET /api/config/ticket serves the ticket system, config lists the five configuration files (app, auth, db, machines, storage) the /api/config routes serve, and search names GET /api/search and the kinds it answers, artifact among them only while artifact_storage.enabled; the admin and setup tokens name the configuration pages, update the admin's Update row over GET /api/app/updates/check and POST /api/app/updates/apply, search the navbar search over the search member, devices the host's USB device list at GET /api/system/usb, media the host's disk-medium registry at GET /api/media, and oidc-code, present while oidc.enabled, the RFC 8252 authorization-code login over POST /api/auth/oidc/code-start and POST /api/auth/oidc/code beside the device grant, auth staying {apikey, oidc}; notifications, always present, names the agent's local inbox under /api/notifications, which every key reads for the person it stands for, and favorites is present only while the agent holds a valid token for its bound account.",
                 "responses": {
                     "200": {
                         "content": {

@@ -24,21 +24,21 @@ type favoriteWrite struct {
 	Order       int    `json:"order"`
 }
 
-func (s *Server) relayIssuer(w http.ResponseWriter, r *http.Request, path string, body io.Reader) (int, bool) {
+func (s *Server) relayIssuer(w http.ResponseWriter, r *http.Request, path string, body io.Reader) {
 	identity := auth.FromContext(r.Context())
 	if _, bound := s.oidcMgr.IdentityForKey(identity.ID); !bound {
 		problem.NotFound(w)
-		return 0, false
+		return
 	}
 	response, err := s.oidcMgr.IssuerRequest(r.Context(), r.Method, path, body, r.Header.Get("Content-Type"))
 	if errors.Is(err, oidc.ErrNoToken) {
 		problem.Detail(w, http.StatusServiceUnavailable, "The agent holds no valid token for the bound account; sign in again")
-		return 0, false
+		return
 	}
 	if err != nil {
 		slog.Warn("issuer relay failed", "error", err, "method", r.Method, "path", path)
 		problem.Detail(w, http.StatusBadGateway, "Identity provider unreachable: "+err.Error())
-		return 0, false
+		return
 	}
 	defer func() {
 		_ = response.Body.Close()
@@ -50,7 +50,6 @@ func (s *Server) relayIssuer(w http.ResponseWriter, r *http.Request, path string
 	if _, cerr := io.Copy(w, io.LimitReader(response.Body, issuerBodyLimit)); cerr != nil {
 		slog.Warn("issuer relay write failed", "error", cerr, "path", path)
 	}
-	return response.StatusCode, true
 }
 
 // @Summary		The signed-in person's favorites

@@ -64,7 +64,6 @@ func (s *Server) announceUpdate(info *updater.Info) {
 	s.updateAnnounced = info.Version
 	s.updateMu.Unlock()
 	s.publishUpdateAvailable(info)
-	s.markUnread(true)
 	go s.notifyUpdateInbox(info.Version)
 }
 

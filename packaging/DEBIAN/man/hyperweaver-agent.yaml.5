@@ -107,6 +107,10 @@ the agent is API-only and the root path serves a small JSON info document.
 .It Cm path
 Optional directory to serve the UI from instead of the copy embedded in the
 binary (default: empty = embedded)
+.It Cm shi_mode
+Boolean switching the UI to the Super.Human.Installer theme and the tray
+icon to the SHI mark; advertised as shi_mode on GET /api/status and applied
+on save (default: false)
 .El
 .Ss browser
 Browser launching (desktop mode only).
@@ -171,6 +175,9 @@ Application update checking.
 URL of the remote versioninfo JSON document (version, releaseUrl,
 releaseDate, changelog) the update check compares against. Empty disables
 update checking.
+.It Cm check_interval_hours
+Hours between scheduled update checks after the one at start, 1-168
+(default: 24)
 .El
 .Ss api_docs
 Interactive API documentation.
@@ -602,6 +609,10 @@ operating system live (default: false).
 .It Cm collection_interval
 Seconds between collector samples when storage is enabled, 5-3600
 (default: 60)
+.It Cm live_interval
+Seconds between the samples pushed on the event stream's monitoring topic
+while at least one client is subscribed to it, 1-60; applied on save, no
+restart (default: 5)
 .It Cm retention_days
 Stored samples older than this many days are deleted by the periodic
 cleanup, 1-365 (default: 7)

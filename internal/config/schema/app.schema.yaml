@@ -487,13 +487,21 @@ properties:
         order: 2
         requiresRestart: true
         restartReason: the collector is built at boot
+      live_interval:
+        type: integer
+        minimum: 1
+        maximum: 60
+        default: 5
+        title: Live sample interval
+        description: Seconds between the samples pushed on the event stream's monitoring topic while a client is subscribed to it
+        order: 3
       retention_days:
         type: integer
         minimum: 1
         maximum: 365
         default: 7
         title: Retention (days)
-        order: 3
+        order: 4
   host_power:
     type: object
     section: host
