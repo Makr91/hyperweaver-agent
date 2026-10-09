@@ -56,22 +56,33 @@ const secretHexLength = 64
 
 const maxQueryLength = 2048
 
-var queryKeys = map[string]bool{
-	"create":              true,
-	"box":                 true,
-	"box_version":         true,
-	"box_arch":            true,
-	"box_url":             true,
-	"provisioner":         true,
-	"provisioner_version": true,
-	"provisioner_url":     true,
-	"provisioner_catalog": true,
+const (
+	wordMachine     = "machine"
+	wordProvisioner = "provisioner"
+	wordTemplate    = "template"
+	wordSource      = "source"
+)
+
+var boxKeys = []string{"box", "box_version", "box_arch", "box_url"}
+
+var provisionerKeys = []string{"provisioner", "provisioner_version", "provisioner_url", "provisioner_catalog"}
+
+var wordKeys = map[string][]string{
+	wordMachine:     append(append([]string{}, boxKeys...), provisionerKeys...),
+	wordProvisioner: provisionerKeys,
+	wordTemplate:    boxKeys,
+	wordSource:      {"provisioner_catalog", "box_url"},
 }
 
 var boxProviderKey = regexp.MustCompile(`^box_[a-z0-9_-]+$`)
 
-func knownQueryKey(key string) bool {
-	return queryKeys[key] || boxProviderKey.MatchString(key)
+func wordAdmits(word, key string) bool {
+	for _, admitted := range wordKeys[word] {
+		if key == admitted {
+			return true
+		}
+	}
+	return word == wordMachine && boxProviderKey.MatchString(key)
 }
 
 // forwardTimeout bounds the whole handoff attempt; the target is loopback.
@@ -126,7 +137,7 @@ func ParseAction(uri string) (action, query string, err error) {
 	return action, parsed.RawQuery, nil
 }
 
-// ValidateQuery refuses a query longer than 2048 bytes, one with a key outside the deploy vocabulary (the fixed keys and the box_<provider> family), or one whose create is not machine.
+// ValidateQuery refuses a query longer than 2048 bytes, one without create, one whose create is not machine, provisioner, template or source, one with a key outside that word's keys (box_<provider> under machine alone), a key given more than once, or a source query not carrying exactly one of provisioner_catalog and box_url.
 func ValidateQuery(raw string) error {
 	if raw == "" {
 		return nil
@@ -139,15 +150,21 @@ func ValidateQuery(raw string) error {
 		return fmt.Errorf("invalid protocol query: %w", err)
 	}
 	for key, entries := range values {
-		if !knownQueryKey(key) {
-			return fmt.Errorf("unsupported protocol query key %q", key)
-		}
 		if len(entries) != 1 {
 			return fmt.Errorf("protocol query key %q given more than once", key)
 		}
 	}
-	if values.Has("create") && values.Get("create") != "machine" {
-		return fmt.Errorf("unsupported protocol create %q", values.Get("create"))
+	word := values.Get("create")
+	if _, known := wordKeys[word]; !known {
+		return fmt.Errorf("unsupported protocol create %q", word)
+	}
+	for key := range values {
+		if key != "create" && !wordAdmits(word, key) {
+			return fmt.Errorf("unsupported protocol query key %q under create=%s", key, word)
+		}
+	}
+	if word == wordSource && len(values) != 2 {
+		return errors.New("a source query carries exactly one of provisioner_catalog and box_url")
 	}
 	return nil
 }
