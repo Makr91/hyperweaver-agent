@@ -16,7 +16,7 @@ The agent follows the LedFx model: it runs quietly in the OS system tray (Window
 - **Embedded STARTcloud UI**: the published [startcloud-ui](https://github.com/STARTcloud/startcloud-ui) artifact, the one shared UI of the estate, is baked into release binaries and served at `/` (docs at `/docs`, the API under `/api`).
 - **Agent API v1 identity**: public `GET /api/status` advertising role, hypervisor, platform, and capability tokens.
 - **Provisioning engine**: `Hosts.yml` generation, native `VBoxManage` machine creation and orchestration through the task queue, the SHI-format provisioner package registry and catalog install, hash-verified installer artifacts. Vagrant is never executed; externally created Vagrant projects are discovered read-only.
-- **API-key auth with tray token handoff**: `POST /api/api-keys/bootstrap`, `POST /api/auth/tray-claim`, the `hwa://` protocol handler.
+- **API-key auth with tray token handoff**: `POST /api/api-keys/bootstrap`, `POST /api/auth/tray-claim`, the `hwa://open` protocol link (the scheme names `hyperweaver-agent` and `com.startcloud.hyperweaver-agent` are accepted in its place).
 - **Machine consoles**: SSH terminal sessions, the VNC websockify bridge (`GET /api/machines/{name}/vnc/websockify`), the browser-RDP bridge (`GET /api/machines/{name}/rdp-bridge`), framebuffer screenshots.
 - **BoxVault integration**: box-template registry with remote registry discovery (`GET /api/templates/sources`, `GET /api/templates/remote/{source}`), seeded with STARTcloud BoxVault.
 - **OIDC federation**: RFC 8628 device login and the loopback silent flow (`/api/auth/oidc/*`), advertised as `oidc` in `GET /api/status` when `oidc.enabled`.

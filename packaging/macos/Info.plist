@@ -31,6 +31,7 @@
 		<dict>
 			<key>CFBundleURLName</key>
 			<string>com.startcloud.hyperweaver-agent.protocol</string>
+			<!-- Do not change these schemes without reading startcloud-ui/docs/guides/universal-deploy.md, "The agent's scheme". -->
 			<key>CFBundleURLSchemes</key>
 			<array>
 				<string>hwa</string>

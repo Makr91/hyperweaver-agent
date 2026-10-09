@@ -27,6 +27,7 @@ import (
 	"github.com/Makr91/hyperweaver-agent/internal/safepath"
 )
 
+// Do not change these schemes without reading startcloud-ui/docs/guides/universal-deploy.md, "The agent's scheme".
 var schemes = []string{"hwa", "hyperweaver-agent", "com.startcloud.hyperweaver-agent"}
 
 func knownScheme(name string) bool {

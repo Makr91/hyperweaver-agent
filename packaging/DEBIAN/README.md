@@ -12,7 +12,7 @@ binary via `go:embed` before compilation.
 - `/usr/share/hyperweaver-agent/config/{app,auth,db,machines,storage}.config.yaml` — the seed configuration files (from `internal/config/seed/`); `postinst` copies each to `/etc/hyperweaver-agent/<name>.config.yaml` when absent and creates `/etc/hyperweaver-agent/setup.token`
 - `/etc/hyperweaver-agent/ssl/root-ca.crt`, `ca.crt`, `ca.key` — the STARTcloud PKI fetched from the `core_provisioner` release pinned in `driver.version`; `postinst` plants `root-ca.crt` under `/usr/local/share/ca-certificates/hyperweaver/` and runs `update-ca-certificates`
 - `/etc/systemd/system/hyperweaver-agent.service` — headless service unit
-- `/usr/share/applications/hyperweaver-agent.desktop` — desktop launcher for tray mode
+- `/usr/share/applications/hyperweaver-agent.desktop` — desktop launcher for tray mode and the `x-scheme-handler` registration of the three URL schemes; the `desktop-file-utils` dpkg trigger rebuilds `mimeinfo.cache` at install, so `hwa://open` resolves at once
 - `/usr/share/icons/hicolor/192x192/apps/hyperweaver-agent.png` — launcher/tray icon
 - `/usr/share/man/man8/hyperweaver-agent.8.gz`, `/usr/share/man/man5/hyperweaver-agent.yaml.5.gz` — manual pages
 - `/usr/share/hyperweaver-agent/provisioners-seed/*.tar.gz` — provisioner seed archives when the release assets were fetched; extracted by the agent on startup
@@ -101,7 +101,7 @@ Version: ${VERSION}
 Section: misc
 Priority: optional
 Architecture: ${ARCH}
-Depends: adduser, ca-certificates
+Depends: adduser, ca-certificates, desktop-file-utils
 Maintainer: Makr91 <makr91@users.noreply.github.com>
 Description: Hyperweaver Agent - VirtualBox host-agent
  Single-binary host-agent with a system-tray icon that serves the

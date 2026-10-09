@@ -495,7 +495,7 @@ jobs:
           Section: misc
           Priority: optional
           Architecture: ${ARCH}
-          Depends: adduser, ca-certificates
+          Depends: adduser, ca-certificates, desktop-file-utils
           Maintainer: Makr91 <makr91@users.noreply.github.com>
           Description: Hyperweaver Agent - VirtualBox host-agent
            Single-binary host-agent with a system-tray icon that serves the

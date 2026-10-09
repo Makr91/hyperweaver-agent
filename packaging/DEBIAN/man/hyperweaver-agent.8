@@ -25,12 +25,13 @@ runs in one of two modes:
 Desktop (tray) mode: the default. A native system-tray icon offers Open
 (launch the web UI in the default or configured browser), a Troubleshooting
 submenu (Open Log File, Open Config Folder, Open Data Folder, Restart
-Agent) and Quit. The three custom URL schemes
-.Ql hwa:// ,
-.Ql hyperweaver-agent://
+Agent) and Quit. The custom URL link
+.Ql hwa://open
+opens the signed-in UI the same way; the scheme names
+.Ql hyperweaver-agent
 and
-.Ql com.startcloud.hyperweaver-agent://
-open the signed-in UI the same way.
+.Ql com.startcloud.hyperweaver-agent
+are accepted in its place.
 .It
 Headless service mode
 .Pq Fl -headless :
@@ -96,9 +97,16 @@ documentation site, when present in the UI artifact, is served at
 and the interactive Agent API documentation (Swagger UI) at
 .Pa /api-docs .
 .Sh PROTOCOL HANDLER
-Desktop installs register the
-.Ql hwa://
-custom URL scheme.
+Desktop installs register the custom URL schemes
+.Ql hwa ,
+.Ql hyperweaver-agent
+and
+.Ql com.startcloud.hyperweaver-agent .
+A sender writes
+.Ql hwa://open ;
+the other two names and the host-less form
+.Ql hwa:/open
+are accepted alike.
 .Ql hwa://open
 behaves exactly like the tray Open action: the running agent opens the
 signed-in web UI in the user's browser. On Windows and Linux the OS spawns a

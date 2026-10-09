@@ -8,4 +8,5 @@ Terminal=false
 Categories=System;Utility;
 Keywords=hyperweaver;virtualbox;vagrant;vm;
 StartupNotify=false
+# Do not change these schemes without reading startcloud-ui/docs/guides/universal-deploy.md, "The agent's scheme".
 MimeType=x-scheme-handler/hwa;x-scheme-handler/hyperweaver-agent;x-scheme-handler/com.startcloud.hyperweaver-agent;

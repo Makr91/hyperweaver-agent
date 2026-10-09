@@ -56,6 +56,7 @@ Source: "..\provisioners-seed\*"; DestDir: "{app}\provisioners-seed"; Flags: ign
 ; Windows, Windows spawns the agent with the URI as an argument, and that
 ; process forwards the action to the running instance (single-instance
 ; handoff). HKA resolves to HKLM for admin installs, HKCU otherwise.
+; Do not change these schemes without reading startcloud-ui/docs/guides/universal-deploy.md, "The agent's scheme".
 Root: HKA; Subkey: "Software\Classes\hwa"; ValueType: string; ValueName: ""; ValueData: "URL:Hyperweaver Agent Protocol"; Flags: uninsdeletekey
 Root: HKA; Subkey: "Software\Classes\hwa"; ValueType: string; ValueName: "URL Protocol"; ValueData: ""
 Root: HKA; Subkey: "Software\Classes\hwa\DefaultIcon"; ValueType: string; ValueName: ""; ValueData: "{app}\{#AppExeName},0"
