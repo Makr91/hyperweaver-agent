@@ -7470,6 +7470,14 @@
             },
             "server.updateCheckResponse": {
                 "properties": {
+                    "assets": {
+                        "description": "The release's files from the document's platform URLs and checksumsUrl, null while it carries no URL",
+                        "items": {
+                            "$ref": "#/components/schemas/updater.Asset"
+                        },
+                        "type": "array",
+                        "uniqueItems": false
+                    },
                     "changelog": {},
                     "current_version": {
                         "type": "string"
@@ -7974,6 +7982,23 @@
                     },
                     "updatedAt": {
                         "description": "Last modification — the since query parameter compares against this",
+                        "type": "string"
+                    }
+                },
+                "type": "object"
+            },
+            "updater.Asset": {
+                "properties": {
+                    "checksum": {
+                        "type": "string"
+                    },
+                    "name": {
+                        "type": "string"
+                    },
+                    "size": {
+                        "type": "integer"
+                    },
+                    "url": {
                         "type": "string"
                     }
                 },
@@ -8500,7 +8525,7 @@
         },
         "/api/app/updates/check": {
             "get": {
-                "description": "Minimum role: viewer. Fetches the configured versioninfo document (updates.versioninfo_url) and compares against the running build; release_url, release_date, changelog and release_notes, the release's own text, come from the document, null when it carries none. When no URL is configured or the document cannot be fetched or read, the answer is still 200 with update_available false, latest_version null and the reason in message, so a page never draws a failure for a check it could not make. A check that finds a newer release, this one or the scheduled one every updates.check_interval_hours, writes one row to the bound person's inbox, once per version, and sends update-available on the admin topic of the event stream.",
+                "description": "Minimum role: viewer. Fetches the configured versioninfo document (updates.versioninfo_url) and compares against the running build; release_url, release_date, changelog and release_notes, the release's own text, come from the document, null when it carries none; assets lists the release's files, one {name, url, size, checksum} per platform URL and the checksums URL the document carries, size from the file's own Content-Length and checksum from the release's SHA256SUMS.txt, each null where unknown, assets itself null while the document carries no URL. When no URL is configured or the document cannot be fetched or read, the answer is still 200 with update_available false, latest_version null and the reason in message, so a page never draws a failure for a check it could not make. A check that finds a newer release, this one or the scheduled one every updates.check_interval_hours, writes one row to the bound person's inbox, once per version, and sends update-available on the admin topic of the event stream.",
                 "responses": {
                     "200": {
                         "content": {
@@ -17280,7 +17305,7 @@
         },
         "/api/protocol/open": {
             "post": {
-                "description": "Public but secret-gated: when the OS spawns a fresh agent process for a protocol invocation, \u003cscheme\u003e://open?\u003cquery\u003e or the RFC 8252 section 7.1 form \u003cscheme\u003e:/open?\u003cquery\u003e under hwa, hyperweaver-agent or com.startcloud.hyperweaver-agent (Windows registry handler, Linux .desktop handler), that process forwards the action here and exits. The per-boot secret file (0600, beside the running agent's config) authenticates it — web pages cannot read local files, so possession proves a local same-user process. On success the running agent opens the signed-in UI in the user's browser, exactly like a tray Open click; a query carried by the link (the deploy vocabulary of at most 2048 bytes: create=machine with box, box_version, box_arch, box_url or provisioner, provisioner_version, provisioner_url, provisioner_catalog, the URL of the catalog document the family came from) lands on /?query so the hosts page opens the create wizard seeded, any other key refused 400.",
+                "description": "Public but secret-gated: when the OS spawns a fresh agent process for a protocol invocation, \u003cscheme\u003e://open?\u003cquery\u003e or the RFC 8252 section 7.1 form \u003cscheme\u003e:/open?\u003cquery\u003e under hwa, hyperweaver-agent or com.startcloud.hyperweaver-agent (Windows registry handler, Linux .desktop handler), that process forwards the action here and exits. The per-boot secret file (0600, beside the running agent's config) authenticates it — web pages cannot read local files, so possession proves a local same-user process. On success the running agent opens the signed-in UI in the user's browser, exactly like a tray Open click; a query carried by the link (the deploy vocabulary of at most 2048 bytes: create=machine with box, box_version, box_arch, box_url or provisioner, provisioner_version, provisioner_url, provisioner_catalog, the URL of the catalog document the family came from, and the box_\u003cprovider\u003e family, box_virtualbox, box_utm and the like, the box the version is verified with on that provider as organization/name@version@architecture@url) lands on /?query so the hosts page opens the create wizard seeded, any other key refused 400.",
                 "requestBody": {
                     "content": {
                         "application/json": {

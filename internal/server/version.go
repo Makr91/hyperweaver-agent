@@ -98,6 +98,8 @@ type updateCheckResponse struct {
 	ReleaseDate     any    `json:"release_date"`
 	Changelog       any    `json:"changelog"`
 	ReleaseNotes    any    `json:"release_notes"`
+	// The release's files from the document's platform URLs and checksumsUrl, null while it carries no URL
+	Assets []updater.Asset `json:"assets"`
 }
 
 func updateUnknown(reason string) updateCheckResponse {
@@ -113,7 +115,7 @@ func updateUnknown(reason string) updateCheckResponse {
 // the configured versioninfo document and compare against the running build.
 //
 //	@Summary		Check for application updates
-//	@Description	Minimum role: viewer. Fetches the configured versioninfo document (updates.versioninfo_url) and compares against the running build; release_url, release_date, changelog and release_notes, the release's own text, come from the document, null when it carries none. When no URL is configured or the document cannot be fetched or read, the answer is still 200 with update_available false, latest_version null and the reason in message, so a page never draws a failure for a check it could not make. A check that finds a newer release, this one or the scheduled one every updates.check_interval_hours, writes one row to the bound person's inbox, once per version, and sends update-available on the admin topic of the event stream.
+//	@Description	Minimum role: viewer. Fetches the configured versioninfo document (updates.versioninfo_url) and compares against the running build; release_url, release_date, changelog and release_notes, the release's own text, come from the document, null when it carries none; assets lists the release's files, one {name, url, size, checksum} per platform URL and the checksums URL the document carries, size from the file's own Content-Length and checksum from the release's SHA256SUMS.txt, each null where unknown, assets itself null while the document carries no URL. When no URL is configured or the document cannot be fetched or read, the answer is still 200 with update_available false, latest_version null and the reason in message, so a page never draws a failure for a check it could not make. A check that finds a newer release, this one or the scheduled one every updates.check_interval_hours, writes one row to the bound person's inbox, once per version, and sends update-available on the admin topic of the event stream.
 //	@Tags			System
 //	@Produce		json
 //	@Success		200	{object}	updateCheckResponse	"Update check result"
@@ -146,6 +148,7 @@ func (s *Server) handleUpdateCheck(w http.ResponseWriter, r *http.Request) {
 		ReleaseDate:     nullable(info.ReleaseDate),
 		Changelog:       nullable(info.Changelog),
 		ReleaseNotes:    nullable(info.ReleaseNotes),
+		Assets:          info.Assets(r.Context()),
 	})
 }
 

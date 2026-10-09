@@ -1,7 +1,6 @@
 package updater
 
 import (
-	"bufio"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -15,7 +14,6 @@ import (
 	"path"
 	"runtime"
 	"strings"
-	"time"
 
 	"github.com/Makr91/hyperweaver-agent/internal/procattr"
 	"github.com/Makr91/hyperweaver-agent/internal/safepath"
@@ -125,35 +123,12 @@ func (e *applyExecutor) apply(ctx context.Context, _ *tasks.Task, out *tasks.Out
 // fetchChecksum reads the release's SHA256SUMS.txt and returns filename's
 // digest.
 func fetchChecksum(ctx context.Context, checksumsURL, filename string) (string, error) {
-	if checksumsURL == "" {
-		return "", errors.New("the versioninfo document carries no checksumsUrl — refusing an unverifiable update")
-	}
-	reqCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
-	defer cancel()
-	req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, checksumsURL, http.NoBody)
+	sums, err := fetchChecksums(ctx, checksumsURL)
 	if err != nil {
 		return "", err
 	}
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return "", err
-	}
-	defer func() {
-		_ = resp.Body.Close()
-	}()
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("checksums fetch returned %s", resp.Status)
-	}
-
-	scanner := bufio.NewScanner(resp.Body)
-	for scanner.Scan() {
-		fields := strings.Fields(scanner.Text())
-		if len(fields) == 2 && fields[1] == filename {
-			return fields[0], nil
-		}
-	}
-	if err := scanner.Err(); err != nil {
-		return "", err
+	if sum, ok := sums[filename]; ok {
+		return sum, nil
 	}
 	return "", fmt.Errorf("SHA256SUMS.txt has no entry for %s", filename)
 }

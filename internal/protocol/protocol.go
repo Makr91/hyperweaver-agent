@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strings"
 	"time"
 
@@ -65,6 +66,12 @@ var queryKeys = map[string]bool{
 	"provisioner_version": true,
 	"provisioner_url":     true,
 	"provisioner_catalog": true,
+}
+
+var boxProviderKey = regexp.MustCompile(`^box_[a-z0-9_-]+$`)
+
+func knownQueryKey(key string) bool {
+	return queryKeys[key] || boxProviderKey.MatchString(key)
 }
 
 // forwardTimeout bounds the whole handoff attempt; the target is loopback.
@@ -119,7 +126,7 @@ func ParseAction(uri string) (action, query string, err error) {
 	return action, parsed.RawQuery, nil
 }
 
-// ValidateQuery refuses a query longer than 2048 bytes, one with a key outside the deploy vocabulary, or one whose create is not machine.
+// ValidateQuery refuses a query longer than 2048 bytes, one with a key outside the deploy vocabulary (the fixed keys and the box_<provider> family), or one whose create is not machine.
 func ValidateQuery(raw string) error {
 	if raw == "" {
 		return nil
@@ -132,7 +139,7 @@ func ValidateQuery(raw string) error {
 		return fmt.Errorf("invalid protocol query: %w", err)
 	}
 	for key, entries := range values {
-		if !queryKeys[key] {
+		if !knownQueryKey(key) {
 			return fmt.Errorf("unsupported protocol query key %q", key)
 		}
 		if len(entries) != 1 {
