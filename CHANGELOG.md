@@ -1,5 +1,29 @@
 # Changelog
 
+## [0.3.0](https://github.com/Makr91/hyperweaver-agent/compare/v0.2.0...v0.3.0) (2026-10-10)
+
+
+### Features
+
+* a local inbox on the agent in agent.sqlite, every notable task end and newer release written for the signed-in person and copied to the identity provider for a bound account, the seven inbox routes and unread-count on the stream serving it for every key, notifications a platform token and favorites listed for a bound account alone; the monitoring chart feed live apart from storage, cpu, memory and network samples pushed every monitoring.live_interval seconds while a client is subscribed, history routes taking since and until oldest first, live_interval on the monitoring status ([d44fb1f](https://github.com/Makr91/hyperweaver-agent/commit/d44fb1f662cf8898896245277d08cd5bb65d77c0))
+* a scheduled update check at start and every updates.check_interval_hours with jitter, a newer release written to the person's inbox and sent as update-available on the admin topic, release_notes on the check from the release body, the task kind out of search, the discovery document's issuer verified, and GET /api/system/processes answering every process ([acb4664](https://github.com/Makr91/hyperweaver-agent/commit/acb4664982695572f77c3e845883fbed2cd51a9c))
+* deploy from a catalog lands in the create wizard with the provisioner installed, the reverse-domain scheme in its single-slash form, provisioner_catalog in the deploy vocabulary, Private Network Access granted on the preflight, catalog sources added through the API and read live by the sources list, the catalog read and the install executor, oidc source auth sending the bound account's token, and the catalog and health documents relayed verbatim ([62fefc3](https://github.com/Makr91/hyperweaver-agent/commit/62fefc3187438c5ccad5342c9b00562c3ecb69b6))
+* POST /api/auth/oidc/code-start answers manual_url, the provider's code-page authorize URL beside the loopback one, the callback and the pasted code each exchanged on their own redirect_uri ([e2c8067](https://github.com/Makr91/hyperweaver-agent/commit/e2c8067683e8297fe03d8283fafea703269b0c16))
+* the inbox live and the hub's rows visible on this host, every inbox write sending its row event and the unread count on the notifications topic, the bound account's hub rows merged into the list and its reads, dismissals and clears forwarded to the identity provider, the issuer's stream relayed while a browser here holds the topic and a revoked grant ending the account's tokens, and a bridged adapter joined to its interface row by MAC through VirtualBox's bridged interfaces list ([1eada3b](https://github.com/Makr91/hyperweaver-agent/commit/1eada3b468023b9799f072840457fccd48db0eab))
+
+
+### Bug Fixes
+
+* browser session cookie in place of the page-held API key — __Host-hwa_session HttpOnly/Secure/SameSite=Strict mapped to a key in sessions.json, tray-claim and approved device-status set it, POST /api/auth/session and /api/auth/logout, cookie accepted on every /api route and the stream, cross-origin writes refused by net/http CrossOriginProtection ([e4c659a](https://github.com/Makr91/hyperweaver-agent/commit/e4c659a3fccfcf456f223117f60dd74205fa37f5))
+* bump startcloud-ui to v0.57.0 ([985b687](https://github.com/Makr91/hyperweaver-agent/commit/985b68758604c8391e18a2104ad381a96d43a1cc))
+* bump startcloud-ui to v0.57.0 ([ea4e6b1](https://github.com/Makr91/hyperweaver-agent/commit/ea4e6b1250ea19e1b938e1523cf1d856201a6dbd))
+* every linter finding corrected in code, file reads through safepath, the refresh token in its own file, the deprecated curve check replaced, Go at 1.26.6 and every module at its newest release so the vulnerability scan passes, the devices and media tokens listed for the pages the UI grows over them, and a red dot on the tray icon from a notable task's end until the UI is opened ([3d67928](https://github.com/Makr91/hyperweaver-agent/commit/3d67928c52d688d748f6ed56c49f703077e6c200))
+* ignoring notificaitons ([9811c28](https://github.com/Makr91/hyperweaver-agent/commit/9811c28c2e0d6d5e3497539d7e1fb19adf83b383))
+* list rules in the status features so the shared UI reads GET /api/rules before sign-in ([f6d0b47](https://github.com/Makr91/hyperweaver-agent/commit/f6d0b473103d706ff1d72490e5c6bdf8d7f5d502))
+* scheme guard line beside every protocol scheme list, hwa://open named as the sender's link in the man page and README, desktop-file-utils dependency so the Debian trigger registers the x-scheme-handlers at install ([afcb528](https://github.com/Makr91/hyperweaver-agent/commit/afcb528218c5f93efebdd7dabb4fe37659062f5d))
+* update check answers the release's assets with size and checksum, hwa open admits the box_&lt;provider&gt; query family ([21ed5bd](https://github.com/Makr91/hyperweaver-agent/commit/21ed5bd5200fdee38172866989dbcf4ec3bc6dc9))
+* update check answers the release's assets with size and checksum, hwa open reads the word under create and admits each word's keys alone, machine, provisioner, template and source ([5518085](https://github.com/Makr91/hyperweaver-agent/commit/55180851cfba5cc20b7f0b5b0f1b36067b53fead))
+
 ## [0.2.0](https://github.com/Makr91/hyperweaver-agent/compare/v0.1.4...v0.2.0) (2026-10-04)
 
 
