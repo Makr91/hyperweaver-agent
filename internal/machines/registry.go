@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -135,4 +136,19 @@ func RegistryHTTPClient(source *TemplateSource) *http.Client {
 // RegistryToken exposes the source's credential for the key named createdBy, that key's account's token, else the bound account's, before the source's API key, for the server's catalog proxy.
 func RegistryToken(source *TemplateSource, createdBy string) string {
 	return registryToken(source, createdBy)
+}
+
+// RegistryFetch sends one GET to the enabled source sourceID names at path, Bearer the credential of the key named createdBy under the registry ladder; the caller closes the body.
+func RegistryFetch(ctx context.Context, sources []TemplateSource, sourceID, createdBy, path string) (*http.Response, error) {
+	source, err := findTemplateSource(sources, sourceID)
+	if err != nil {
+		return nil, err
+	}
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(source.URL, "/")+path, http.NoBody)
+	if err != nil {
+		return nil, err
+	}
+	setRegistryAuth(request, registryToken(source, createdBy))
+	request.Header.Set("Accept", "application/json")
+	return registryHTTPClient(source).Do(request)
 }

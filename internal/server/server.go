@@ -137,7 +137,7 @@ func New(cfg *config.Config, keyStore *keys.Store, trayTokens *auth.TrayTokens, 
 	s.oidcMgr = oidc.New(cfg, keyStore)
 	s.oidcStarts = newStartLimiter()
 	machines.SetOIDCTokenSource(s.oidcMgr.BearerTokenFor)
-	provisioner.SetOIDCTokenSource(s.oidcMgr.BearerTokenFor)
+	provisioner.SetOIDCTokenSource(cfg.OIDC.Issuer, s.oidcMgr.ResourceTokenFor, s.oidcMgr.ForgetResourceToken)
 	inboxStore.System = agentBrand.Name
 	taskQueue.Store().Notify = s.publishTask
 	machineStore.Notify = s.publishStats

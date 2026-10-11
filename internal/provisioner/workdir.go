@@ -43,17 +43,17 @@ var installerSubdirs = []string{"archives", "fixpack", "hotfix", "core"}
 // ssls subtrees — the ssl role's expected working-copy tree, pre-seeded.
 var sslSubdirs = []string{"ca", "crt", "key", "csr", "jks", "kyr", "pfx", "combined"}
 
-// InstallerFile is one cache-verified file to mount into the working copy's
-// installers/<role>/<subdir>/ tree (Mark's ruling 2026-07-06: only files
-// whose SHA-256 checked out reach a machine).
+// installerArchives is the one subtree every kind of a role's file mounts under, installers/<role>/archives/<file>, where the provisioner's playbooks read them.
+const installerArchives = "archives"
+
+// InstallerFile is one cached file to mount into the working copy's installers/<role>/archives/ tree.
 type InstallerFile struct {
-	// SourcePath is the verified cache location.
+	// SourcePath is the cache location.
 	SourcePath string
-	// Role/Subdir/Filename place the mount (installers/<role>/<subdir>/<file>).
+	// Role and Filename place the mount (installers/<role>/archives/<file>).
 	Role     string
-	Subdir   string
 	Filename string
-	// SHA256 is the verified hash a copied mount must reproduce.
+	// SHA256 is the hash the cache recorded, which a copied mount must reproduce.
 	SHA256 string
 }
 
@@ -137,16 +137,15 @@ func Materialize(in *MaterializeInput) error {
 	return materializeSSLs(dir, in.CACertPath, in.CAKeyPath)
 }
 
-// mountInstallerFiles places the cache-verified files into
-// installers/<role>/<subdir>/. Same-volume mounts hard-link (SHI's
-// hard-link/copy behavior — instant, no duplicate space); cross-volume falls
-// back to a hash-verified streaming copy. An existing hard link to the same
-// cache file is left in place.
+// mountInstallerFiles places the cached files into installers/<role>/archives/.
+// Same-volume mounts hard-link (SHI's hard-link/copy behavior — instant, no
+// duplicate space); cross-volume falls back to a hash-verified streaming copy.
+// An existing hard link to the same cache file is left in place.
 func mountInstallerFiles(dir string, files []InstallerFile) error {
 	for i := range files {
 		file := &files[i]
 		target, err := safepath.Under(dir,
-			filepath.Join("installers", file.Role, file.Subdir, file.Filename))
+			filepath.Join("installers", file.Role, installerArchives, file.Filename))
 		if err != nil {
 			return err
 		}

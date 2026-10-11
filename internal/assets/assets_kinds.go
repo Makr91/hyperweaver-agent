@@ -17,6 +17,17 @@ const (
 	KindHotfix    = "hotfix"
 )
 
+// kindInterimFix is BoxVault's name for a hotfix on its download files; it is read as KindHotfix on every route that takes a kind.
+const kindInterimFix = "interim-fix"
+
+// NormalizeKind answers the artifact type a request names, interim-fix read as hotfix.
+func NormalizeKind(kind string) string {
+	if kind == kindInterimFix {
+		return KindHotfix
+	}
+	return kind
+}
+
 // ErrNotFound is returned when no artifact or location matches the request.
 var ErrNotFound = errors.New("artifact not found")
 
@@ -55,17 +66,4 @@ func RoleKeyed(kind string) bool {
 		return true
 	}
 	return false
-}
-
-// WorkdirSubdir maps a cache kind to its mount directory inside a working
-// copy's installers/<role>/ tree (SHI's observed archives/fixpack/hotfix).
-func WorkdirSubdir(kind string) string {
-	switch kind {
-	case KindFixpack:
-		return "fixpack"
-	case KindHotfix:
-		return "hotfix"
-	default:
-		return "archives"
-	}
 }

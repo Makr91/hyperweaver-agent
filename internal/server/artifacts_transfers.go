@@ -102,7 +102,7 @@ type downloadArtifactRequest struct {
 	// Role is required when the destination is an installer-family location.
 	Role     string `json:"role"`
 	Filename string `json:"filename"`
-	// Checksum is the expected SHA-256 (64 hex chars).
+	// Checksum is the expected digest under checksum_algorithm, md5, sha1, sha256 (the default), sha384 or sha512.
 	Checksum          string `json:"checksum"`
 	ChecksumAlgorithm string `json:"checksum_algorithm"`
 	OverwriteExisting bool   `json:"overwrite_existing"`
@@ -113,13 +113,13 @@ type downloadArtifactRequest struct {
 // handleArtifactDownloadFromURL: POST /api/artifacts/download (async task).
 //
 //	@Summary		Download a URL into a storage location
-//	@Description	Minimum role: operator. Queues artifact_download: streamed with live progress ({downloaded_mb, total_mb, speed_mbps, eta_seconds} in progress_info), hashed DURING the stream, verified against checksum when given (mismatch discards the file — never promoted, no auto-retry). role is REQUIRED when the destination is an installer-family location. resource_name names a custom_resource_url secret whose Basic-auth pair authenticates the fetch.
+//	@Description	Minimum role: operator. Queues artifact_download: streamed with live progress ({downloaded_mb, total_mb, speed_mbps, eta_seconds} in progress_info), hashed DURING the stream, verified against checksum under checksum_algorithm when given, md5, sha1, sha256 (the default), sha384 or sha512 (mismatch discards the file — never promoted, no auto-retry); the agent's own sha256 stays the artifact's checksum and the given one is recorded beside it as given_checksum with given_algorithm, a sha256 also becoming the row's expectation. role is REQUIRED when the destination is an installer-family location. resource_name names a custom_resource_url secret whose Basic-auth pair authenticates the fetch.
 //	@Tags			Artifacts
 //	@Accept			json
 //	@Produce		json
 //	@Param			body	body	downloadArtifactRequest	true	"Download source URL and destination"
 //	@Success		202	"Download task queued"
-//	@Failure		400	"Invalid url/filename/checksum, missing role, disabled location, or non-sha256 algorithm"
+//	@Failure		400	"Invalid url/filename/checksum, missing role, disabled location, or an unknown algorithm"
 //	@Failure		404	"Storage location not found"
 //	@Failure		503	"Artifact storage is disabled"
 //	@Router			/api/artifacts/download [post]
@@ -129,13 +129,9 @@ func (s *Server) handleArtifactDownloadFromURL(w http.ResponseWriter, r *http.Re
 		taskError(w, http.StatusBadRequest, "Invalid JSON body")
 		return
 	}
-	if body.ChecksumAlgorithm != "" && body.ChecksumAlgorithm != "sha256" {
-		taskError(w, http.StatusBadRequest, "checksum_algorithm must be sha256 (the system's one algorithm)")
-		return
-	}
 	meta := assets.DownloadMetadata{
 		URL: body.URL, LocationID: body.StoragePathID, Role: body.Role,
-		Filename: body.Filename, Checksum: body.Checksum,
+		Filename: body.Filename, Checksum: body.Checksum, ChecksumAlgorithm: body.ChecksumAlgorithm,
 		OverwriteExisting: body.OverwriteExisting, ResourceName: body.ResourceName,
 	}
 	if err := meta.Validate(); err != nil {
@@ -195,13 +191,13 @@ type prepareUploadResponse struct {
 // prepared task and the upload URL (zoneweaver's two-step upload).
 //
 //	@Summary		Prepare an artifact upload
-//	@Description	Minimum role: operator. Mints an artifact_upload task in PREPARED status (the queue never dispatches it) and returns the upload URL — zoneweaver's two-step upload for large files. The prepared task dies on agent restart; size is capped by artifact_storage.max_upload_gb.
+//	@Description	Minimum role: operator. Mints an artifact_upload task in PREPARED status (the queue never dispatches it) and returns the upload URL — zoneweaver's two-step upload for large files. checksum with checksum_algorithm, md5, sha1, sha256 (the default), sha384 or sha512, is verified once the file lands, the agent's own sha256 staying the artifact's checksum and the given one recorded beside it. The prepared task dies on agent restart; size is capped by artifact_storage.max_upload_gb.
 //	@Tags			Artifacts
 //	@Accept			json
 //	@Produce		json
 //	@Param			body	body	prepareUploadRequest	true	"Upload filename, size, and destination"
 //	@Success		200	{object}	prepareUploadResponse	"Upload prepared"
-//	@Failure		400	"Missing fields, unusable filename, over the size cap, disabled location, or missing role"
+//	@Failure		400	"Missing fields, unusable filename or checksum, over the size cap, disabled location, or missing role"
 //	@Failure		404	"Storage location not found"
 //	@Failure		503	"Artifact storage is disabled"
 //	@Router			/api/artifacts/upload/prepare [post]
@@ -219,8 +215,9 @@ func (s *Server) handlePrepareArtifactUpload(w http.ResponseWriter, r *http.Requ
 		taskError(w, http.StatusBadRequest, "filename is not usable")
 		return
 	}
-	if body.ChecksumAlgorithm != "" && body.ChecksumAlgorithm != "sha256" {
-		taskError(w, http.StatusBadRequest, "checksum_algorithm must be sha256 (the system's one algorithm)")
+	body.ChecksumAlgorithm = assets.NormalizeAlgorithm(body.ChecksumAlgorithm)
+	if err := assets.ValidateChecksum(body.Checksum, body.ChecksumAlgorithm); err != nil {
+		taskError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	maxBytes := int64(s.cfg.ArtifactStorage.MaxUploadGB) << 30
@@ -249,7 +246,8 @@ func (s *Server) handlePrepareArtifactUpload(w http.ResponseWriter, r *http.Requ
 
 	raw, err := json.Marshal(assets.UploadMetadata{
 		OriginalName: body.Filename, Size: body.Size, LocationID: location.ID,
-		Role: body.Role, Checksum: body.Checksum, OverwriteExisting: body.OverwriteExisting,
+		Role: body.Role, Checksum: body.Checksum, ChecksumAlgorithm: body.ChecksumAlgorithm,
+		OverwriteExisting: body.OverwriteExisting,
 	})
 	if err != nil {
 		taskError(w, http.StatusInternalServerError, "Failed to prepare upload")

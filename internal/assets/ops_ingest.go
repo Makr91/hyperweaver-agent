@@ -2,8 +2,6 @@ package assets
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -27,9 +25,9 @@ type DownloadMetadata struct {
 	// Role is required when the destination is a role-keyed location.
 	Role     string `json:"role,omitempty"`
 	Filename string `json:"filename,omitempty"`
-	// Checksum is the expected SHA-256 (the system's one algorithm); a
-	// mismatch discards the download.
+	// Checksum is the expected digest under ChecksumAlgorithm; a mismatch discards the download.
 	Checksum          string `json:"checksum,omitempty"`
+	ChecksumAlgorithm string `json:"checksum_algorithm,omitempty"`
 	OverwriteExisting bool   `json:"overwrite_existing,omitempty"`
 	// ResourceName names a custom_resource_url secret whose Basic-auth pair
 	// authenticates the download; credentials never enter task metadata.
@@ -51,25 +49,11 @@ func (m *DownloadMetadata) Validate() error {
 	if !ValidFilename(m.Filename) {
 		return errors.New("filename is not usable (set filename explicitly)")
 	}
-	if m.Checksum != "" && !isHexSHA256(m.Checksum) {
-		return errors.New("checksum must be a 64-character hex SHA-256 digest")
-	}
-	return nil
+	m.ChecksumAlgorithm = NormalizeAlgorithm(m.ChecksumAlgorithm)
+	return ValidateChecksum(m.Checksum, m.ChecksumAlgorithm)
 }
 
-func isHexSHA256(s string) bool {
-	if len(s) != 64 {
-		return false
-	}
-	for _, r := range s {
-		if (r < '0' || r > '9') && (r < 'a' || r > 'f') && (r < 'A' || r > 'F') {
-			return false
-		}
-	}
-	return true
-}
-
-// download streams a URL into a location: temp file, SHA-256 computed DURING
+// download streams a URL into a location: temp file, hashes computed DURING
 // the stream, verify-then-promote (a mismatch deletes the temp file and
 // fails — never promoted, no auto-retry; SHI's exact rules).
 func (e *executors) download(ctx context.Context, task *tasks.Task, out *tasks.OutputWriter) error {
@@ -125,33 +109,61 @@ func (e *executors) download(ctx context.Context, task *tasks.Task, out *tasks.O
 		return fmt.Errorf("download failed: HTTP %s", response.Status)
 	}
 
-	temp := target + ".download"
-	sha, size, err := e.streamToFile(task.ID, response.Body, temp, response.ContentLength)
+	return e.landStream(ctx, task, out, &landing{
+		location: location, role: meta.Role, filename: meta.Filename, target: target,
+		body: response.Body, total: response.ContentLength, sourceURL: meta.URL,
+		checksum: meta.Checksum, algorithm: meta.ChecksumAlgorithm,
+	})
+}
+
+// landing is one verified stream into a location.
+type landing struct {
+	location  *Location
+	role      string
+	filename  string
+	target    string
+	body      io.Reader
+	total     int64
+	sourceURL string
+	checksum  string
+	algorithm string
+}
+
+// landStream hashes the body into a temp file, verifies the given checksum under its algorithm, promotes the file, records the sha256 expectation when the checksum was a sha256, and registers the row with the given checksum beside the agent's own.
+func (e *executors) landStream(ctx context.Context, task *tasks.Task, out *tasks.OutputWriter, land *landing) error {
+	temp := land.target + ".download"
+	hashes, size, err := e.streamToFile(task.ID, land.body, temp, land.total, land.algorithm)
 	if err != nil {
 		_ = os.Remove(temp)
 		return err
 	}
-	if meta.Checksum != "" && !strings.EqualFold(sha, meta.Checksum) {
+	if land.checksum != "" && !hashes.Matches(land.checksum) {
 		_ = os.Remove(temp)
-		return fmt.Errorf("hash mismatch: downloaded %s, expected %s — file discarded", sha, meta.Checksum)
+		return fmt.Errorf("%s mismatch: downloaded %s, expected %s — file discarded", land.algorithm, hashes.Given(), land.checksum)
 	}
-	if rerr := os.Rename(temp, target); rerr != nil {
+	if rerr := os.Rename(temp, land.target); rerr != nil {
 		_ = os.Remove(temp)
 		return rerr
 	}
-	if meta.Checksum != "" {
-		if serr := e.store.SetExpectation(ctx, location.ID, meta.Role, location.Type, meta.Filename, meta.Checksum); serr != nil {
+	sha := hashes.SHA256()
+	if land.checksum != "" && land.algorithm == AlgorithmSHA256 {
+		if serr := e.store.SetExpectation(ctx, land.location.ID, land.role, land.location.Type, land.filename, land.checksum); serr != nil {
 			out.Write("stderr", "record expectation failed: "+serr.Error()+"\n")
 		}
 	}
-	artifact, err := e.store.RecordIngested(ctx, &Ingested{
-		LocationID: location.ID, Role: meta.Role, Kind: location.Type,
-		Filename: meta.Filename, Path: target, SHA256: sha, Size: size, SourceURL: meta.URL,
-	})
+	ingested := &Ingested{
+		LocationID: land.location.ID, Role: land.role, Kind: land.location.Type,
+		Filename: land.filename, Path: land.target, SHA256: sha, Size: size, SourceURL: land.sourceURL,
+	}
+	if land.checksum != "" {
+		ingested.GivenChecksum = strings.ToLower(land.checksum)
+		ingested.GivenAlgorithm = land.algorithm
+	}
+	artifact, err := e.store.RecordIngested(ctx, ingested)
 	if err != nil {
 		return err
 	}
-	if rerr := e.store.RefreshLocationStats(ctx, location.ID); rerr != nil {
+	if rerr := e.store.RefreshLocationStats(ctx, land.location.ID); rerr != nil {
 		out.Write("stderr", "location stats refresh failed: "+rerr.Error()+"\n")
 	}
 	if !artifact.Verified() {
@@ -165,10 +177,10 @@ func (e *executors) download(ctx context.Context, task *tasks.Task, out *tasks.O
 
 // streamToFile lands the body at path through the shared streaming writer,
 // hashing as it goes and reporting progress roughly once per second.
-func (e *executors) streamToFile(taskID string, body io.Reader, path string, total int64) (sha string, size int64, err error) {
-	hasher := sha256.New()
+func (e *executors) streamToFile(taskID string, body io.Reader, path string, total int64, algorithm string) (hashes *Hashes, size int64, err error) {
+	hashes = NewHashes(algorithm)
 	counter := &progressReader{
-		reader: io.TeeReader(body, hasher),
+		reader: io.TeeReader(body, hashes.Writer()),
 		total:  total,
 		start:  time.Now(),
 		report: func(written, totalBytes int64, elapsed time.Duration) {
@@ -177,10 +189,10 @@ func (e *executors) streamToFile(taskID string, body io.Reader, path string, tot
 	}
 	written, err := safepath.WriteFileFrom(path, counter, 0o600)
 	if err != nil {
-		return "", 0, err
+		return nil, 0, err
 	}
 	e.reportDownloadProgress(taskID, written, total, time.Since(counter.start))
-	return hex.EncodeToString(hasher.Sum(nil)), written, nil
+	return hashes, written, nil
 }
 
 // progressReader counts bytes flowing through a download and fires the
@@ -238,14 +250,15 @@ type UploadMetadata struct {
 	LocationID        string `json:"storage_location_id"`
 	Role              string `json:"role,omitempty"`
 	Checksum          string `json:"checksum,omitempty"`
+	ChecksumAlgorithm string `json:"checksum_algorithm,omitempty"`
 	OverwriteExisting bool   `json:"overwrite_existing,omitempty"`
 	FinalPath         string `json:"final_path,omitempty"`
 	UploadCompleted   bool   `json:"upload_completed,omitempty"`
 }
 
 // uploadProcess finishes an upload the HTTP handler already landed at its
-// final path: hash, verify a user-supplied checksum (mismatch deletes the
-// file and fails), register.
+// final path: hash, verify a user-supplied checksum under its algorithm
+// (mismatch deletes the file and fails), register.
 func (e *executors) uploadProcess(ctx context.Context, task *tasks.Task, out *tasks.OutputWriter) error {
 	var meta UploadMetadata
 	if err := parseMetadata(task, &meta); err != nil {
@@ -258,27 +271,34 @@ func (e *executors) uploadProcess(ctx context.Context, task *tasks.Task, out *ta
 	if err != nil {
 		return err
 	}
+	algorithm := NormalizeAlgorithm(meta.ChecksumAlgorithm)
 
 	e.progress(task.ID, 50, map[string]any{"status": "calculating_checksum"})
-	sha, size, err := HashFile(meta.FinalPath)
+	hashes, size, err := HashFileWith(meta.FinalPath, algorithm)
 	if err != nil {
 		return fmt.Errorf("hash uploaded file: %w", err)
 	}
-	if meta.Checksum != "" && !strings.EqualFold(sha, meta.Checksum) {
+	sha := hashes.SHA256()
+	if meta.Checksum != "" && !hashes.Matches(meta.Checksum) {
 		_ = os.Remove(meta.FinalPath)
-		return fmt.Errorf("checksum verification failed: expected %s, got %s — file discarded", meta.Checksum, sha)
+		return fmt.Errorf("%s verification failed: expected %s, got %s — file discarded", algorithm, meta.Checksum, hashes.Given())
 	}
-	if meta.Checksum != "" {
+	if meta.Checksum != "" && algorithm == AlgorithmSHA256 {
 		if serr := e.store.SetExpectation(ctx, location.ID, meta.Role, location.Type, meta.OriginalName, meta.Checksum); serr != nil {
 			out.Write("stderr", "record expectation failed: "+serr.Error()+"\n")
 		}
 	}
 
 	e.progress(task.ID, 80, map[string]any{"status": "registering"})
-	artifact, err := e.store.RecordIngested(ctx, &Ingested{
+	ingested := &Ingested{
 		LocationID: location.ID, Role: meta.Role, Kind: location.Type,
 		Filename: meta.OriginalName, Path: meta.FinalPath, SHA256: sha, Size: size,
-	})
+	}
+	if meta.Checksum != "" {
+		ingested.GivenChecksum = strings.ToLower(meta.Checksum)
+		ingested.GivenAlgorithm = algorithm
+	}
+	artifact, err := e.store.RecordIngested(ctx, ingested)
 	if err != nil {
 		return err
 	}

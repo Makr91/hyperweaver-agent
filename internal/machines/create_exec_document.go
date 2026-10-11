@@ -58,9 +58,12 @@ func (e *executors) prepareDocument(ctx context.Context, task *tasks.Task, out *
 	}
 
 	settings := effectiveSettings(ctx, e.env, spec)
-	mounts, roles, err := e.resolveInstallerFiles(ctx, spec, out)
+	mounts, roles, warnings, err := e.resolveInstallerFiles(ctx, spec, out)
 	if err != nil {
 		return err
+	}
+	if len(warnings) > 0 {
+		e.taskProgressWarnings(task, 20, "resolving_installer_files", warnings)
 	}
 	rendered, err := provisioner.RenderHostsFile(&provisioner.GenerateInput{
 		Version:  version,

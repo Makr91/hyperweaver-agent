@@ -93,7 +93,7 @@ func (s *Server) handleListArtifacts(w http.ResponseWriter, r *http.Request) {
 		limit = 50
 	}
 	filter := assets.ListFilter{
-		Kind:       query.Get("type"),
+		Kind:       assets.NormalizeKind(query.Get("type")),
 		LocationID: query.Get("storage_path_id"),
 		Role:       query.Get("role"),
 		Search:     query.Get("search"),

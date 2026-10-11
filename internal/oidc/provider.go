@@ -174,11 +174,36 @@ func startDeviceAuthorization(ctx context.Context, endpoints *providerEndpoints,
 }
 
 type tokenAnswer struct {
-	AccessToken  string `json:"access_token"`
-	RefreshToken string `json:"refresh_token"`
-	IDToken      string `json:"id_token"`
-	ExpiresIn    int    `json:"expires_in"`
-	Error        string `json:"error"`
+	AccessToken      string `json:"access_token"`
+	RefreshToken     string `json:"refresh_token"`
+	IDToken          string `json:"id_token"`
+	ExpiresIn        int    `json:"expires_in"`
+	Error            string `json:"error"`
+	ErrorDescription string `json:"error_description"`
+}
+
+func (a *tokenAnswer) refusal() string {
+	if a.ErrorDescription != "" {
+		return a.Error + ": " + a.ErrorDescription
+	}
+	return a.Error
+}
+
+const (
+	exchangeGrantURN = "urn:ietf:params:oauth:grant-type:token-exchange"
+	accessTypeURN    = "urn:ietf:params:oauth:token-type:access_token"
+)
+
+func exchangeToken(ctx context.Context, endpoints *providerEndpoints, clientID, subjectToken, resource string) (*tokenAnswer, error) {
+	form := url.Values{
+		"grant_type":           {exchangeGrantURN},
+		"subject_token":        {subjectToken},
+		"subject_token_type":   {accessTypeURN},
+		"requested_token_type": {accessTypeURN},
+		"resource":             {resource},
+		"client_id":            {clientID},
+	}
+	return tokenCall(ctx, endpoints.Token, form)
 }
 
 func pollToken(ctx context.Context, endpoints *providerEndpoints, clientID, deviceCode string) (*tokenAnswer, error) {

@@ -2,10 +2,20 @@ package oidc
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"log/slog"
 	"sync"
 	"time"
 )
+
+// ErrExchangeRefused is answered when the identity provider refuses to exchange the held token for a resource.
+var ErrExchangeRefused = errors.New("the identity provider refused the token exchange")
+
+type resourceToken struct {
+	accessToken string
+	expiry      time.Time
+}
 
 type tokenSource struct {
 	mu           sync.Mutex
@@ -18,6 +28,7 @@ type tokenSource struct {
 	refreshToken string
 	expiry       time.Time
 	refreshing   bool
+	resources    map[string]resourceToken
 }
 
 func (t *tokenSource) bearer() string {
@@ -27,6 +38,49 @@ func (t *tokenSource) bearer() string {
 		return ""
 	}
 	return t.accessToken
+}
+
+func (t *tokenSource) tokenFor(ctx context.Context, resource string) (string, error) {
+	t.mu.Lock()
+	cached, held := t.resources[resource]
+	subject := t.accessToken
+	if time.Now().After(t.expiry) {
+		subject = ""
+	}
+	t.mu.Unlock()
+	if held && time.Now().Before(cached.expiry) {
+		return cached.accessToken, nil
+	}
+	if subject == "" {
+		return "", ErrNoToken
+	}
+	endpoints, err := t.provider.endpoints(ctx)
+	if err != nil {
+		return "", err
+	}
+	answer, err := exchangeToken(ctx, endpoints, t.clientID, subject, resource)
+	if err != nil {
+		return "", err
+	}
+	if answer.Error != "" || answer.AccessToken == "" {
+		return "", fmt.Errorf("%w for %s: %s", ErrExchangeRefused, resource, answer.refusal())
+	}
+	t.mu.Lock()
+	if t.resources == nil {
+		t.resources = map[string]resourceToken{}
+	}
+	t.resources[resource] = resourceToken{
+		accessToken: answer.AccessToken,
+		expiry:      time.Now().Add(time.Duration(answer.ExpiresIn) * time.Second),
+	}
+	t.mu.Unlock()
+	return answer.AccessToken, nil
+}
+
+func (t *tokenSource) forget(resource string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	delete(t.resources, resource)
 }
 
 func (t *tokenSource) set(answer *tokenAnswer) {
@@ -138,6 +192,7 @@ func (t *tokenSource) clear() {
 	t.refreshToken = ""
 	t.expiry = time.Time{}
 	t.refreshing = false
+	t.resources = nil
 	t.mu.Unlock()
 	t.persist("")
 }

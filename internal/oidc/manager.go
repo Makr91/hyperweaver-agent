@@ -85,10 +85,9 @@ func New(cfg *config.Config, keyStore *keys.Store) *Manager {
 	return m
 }
 
-// BearerTokenFor answers the access token a registry or catalog read runs under for the key named createdBy: the account that key's SSO login minted it for while its token is held, else the bound account's token; empty createdBy or a plain key answers the bound account's.
-func (m *Manager) BearerTokenFor(createdBy string) string {
+func (m *Manager) sourceFor(createdBy string) *tokenSource {
 	if createdBy == "" {
-		return m.tokens.bearer()
+		return m.tokens
 	}
 	bound := m.binding.boundSubject()
 	for _, key := range m.client.keys.List() {
@@ -100,13 +99,28 @@ func (m *Manager) BearerTokenFor(createdBy string) string {
 			continue
 		}
 		if identity.Subject == bound {
-			return m.tokens.bearer()
+			return m.tokens
 		}
-		if token := m.client.keyToken(key.ID); token != "" {
-			return token
+		if source := m.client.keySource(key.ID); source != nil && source.bearer() != "" {
+			return source
 		}
 	}
-	return m.tokens.bearer()
+	return m.tokens
+}
+
+// BearerTokenFor answers the access token a registry or catalog read runs under for the key named createdBy: the account that key's SSO login minted it for while its token is held, else the bound account's token; empty createdBy or a plain key answers the bound account's.
+func (m *Manager) BearerTokenFor(createdBy string) string {
+	return m.sourceFor(createdBy).bearer()
+}
+
+// ResourceTokenFor answers an access token minted for the resource identifier by an RFC 8693 exchange of the token BearerTokenFor answers for createdBy, kept per resource until it expires; ErrNoToken while no account token is held, ErrExchangeRefused when the identity provider refuses.
+func (m *Manager) ResourceTokenFor(ctx context.Context, createdBy, resource string) (string, error) {
+	return m.sourceFor(createdBy).tokenFor(ctx, resource)
+}
+
+// ForgetResourceToken drops the token kept for the resource on createdBy's account, so the next read exchanges again.
+func (m *Manager) ForgetResourceToken(createdBy, resource string) {
+	m.sourceFor(createdBy).forget(resource)
 }
 
 func deviceScopeOf(scopes []string) string {

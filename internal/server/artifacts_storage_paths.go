@@ -131,6 +131,7 @@ func (s *Server) handleCreateStoragePath(w http.ResponseWriter, r *http.Request)
 	if body.Path == "" {
 		failures = append(failures, problem.Required("/path"))
 	}
+	body.Type = assets.NormalizeKind(body.Type)
 	switch {
 	case body.Type == "":
 		failures = append(failures, problem.Required("/type"))

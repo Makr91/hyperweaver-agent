@@ -47,6 +47,8 @@ type artifactDocument struct {
 	Checksum          string                   `json:"checksum"`
 	ChecksumAlgorithm string                   `json:"checksum_algorithm"`
 	ChecksumVerified  *bool                    `json:"checksum_verified"`
+	GivenChecksum     string                   `json:"given_checksum,omitempty"`
+	GivenAlgorithm    string                   `json:"given_algorithm,omitempty"`
 	FileExists        bool                     `json:"file_exists"`
 	Verified          bool                     `json:"verified"`
 	DiscoveredAt      time.Time                `json:"discovered_at"`
@@ -73,8 +75,10 @@ func artifactJSON(a *assets.Artifact, location *assets.Location) artifactDocumen
 		Extension:         a.Extension(),
 		MimeType:          a.MimeType(),
 		Checksum:          a.SHA256,
-		ChecksumAlgorithm: "sha256",
+		ChecksumAlgorithm: assets.AlgorithmSHA256,
 		ChecksumVerified:  a.ChecksumVerified(),
+		GivenChecksum:     a.GivenChecksum,
+		GivenAlgorithm:    a.GivenAlgorithm,
 		FileExists:        a.Exists,
 		Verified:          a.Verified(),
 		DiscoveredAt:      a.CreatedAt,

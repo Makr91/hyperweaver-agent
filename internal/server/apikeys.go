@@ -306,7 +306,7 @@ type deleteKeyResponse struct {
 }
 
 // @Summary		Permanently delete an API key
-// @Description	Minimum role: admin. Deleting the last active admin key is refused (lockout guard).
+// @Description	Minimum role: admin. Deleting the last active admin key is refused (lockout guard). The host shells and SSH sessions the key started end while no socket is attached to them.
 // @Tags			API Keys
 // @Produce		json
 // @Param			id	path	int	true	"API key id"
@@ -338,6 +338,7 @@ func (s *Server) handleDeleteKey(w http.ResponseWriter, r *http.Request) {
 	}
 	slog.Info("api key deleted", "name", entity.Name,
 		"deleted_by", auth.FromContext(r.Context()).Name)
+	s.endIdleSessionsOfKey(entity.Name)
 
 	writeJSON(w, deleteKeyResponse{
 		Message:  "API key deleted successfully",
@@ -353,7 +354,7 @@ type revokeKeyResponse struct {
 }
 
 // @Summary		Deactivate an API key
-// @Description	Minimum role: admin. Revoking the last active admin key is refused (lockout guard).
+// @Description	Minimum role: admin. Revoking the last active admin key is refused (lockout guard). The host shells and SSH sessions the key started end while no socket is attached to them.
 // @Tags			API Keys
 // @Produce		json
 // @Param			id	path	int	true	"API key id"
@@ -385,6 +386,7 @@ func (s *Server) handleRevokeKey(w http.ResponseWriter, r *http.Request) {
 	}
 	slog.Info("api key revoked", "name", entity.Name,
 		"revoked_by", auth.FromContext(r.Context()).Name)
+	s.endIdleSessionsOfKey(entity.Name)
 
 	writeJSON(w, revokeKeyResponse{
 		Message:  "API key revoked successfully",

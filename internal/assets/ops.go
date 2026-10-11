@@ -57,12 +57,12 @@ type DeleteFolderMetadata struct {
 	Force           bool   `json:"force"`
 }
 
-// RegisterExecutors wires the artifact operations into the task queue.
-func RegisterExecutors(queue *tasks.Queue, store *Store, resourceAuth ResourceAuth, hcl HCLTokens, extensions map[string][]string) {
+// RegisterExecutors wires the artifact operations into the task queue; registryFetch reads a box registry as the person for the registry download.
+func RegisterExecutors(queue *tasks.Queue, store *Store, resourceAuth ResourceAuth, hcl HCLTokens, extensions map[string][]string, registryFetch RegistryFetch) {
 	if len(extensions) == 0 {
 		extensions = DefaultExtensions()
 	}
-	e := &executors{queue: queue, store: store, resourceAuth: resourceAuth, hcl: hcl, extensions: extensions}
+	e := &executors{queue: queue, store: store, resourceAuth: resourceAuth, hcl: hcl, extensions: extensions, registryFetch: registryFetch}
 	queue.Register(OpScan, tasks.Executor{Run: e.scan})
 	queue.Register(OpDownload, tasks.Executor{Run: e.download})
 	queue.Register(OpUpload, tasks.Executor{Run: e.uploadProcess})
@@ -71,14 +71,16 @@ func RegisterExecutors(queue *tasks.Queue, store *Store, resourceAuth ResourceAu
 	queue.Register(OpDeleteFiles, tasks.Executor{Run: e.deleteFiles})
 	queue.Register(OpDeleteFolder, tasks.Executor{Run: e.deleteFolder})
 	queue.Register(OpHCLDownload, tasks.Executor{Run: e.hclDownload})
+	queue.Register(OpRegistryDownload, tasks.Executor{Run: e.registryDownload})
 }
 
 type executors struct {
-	queue        *tasks.Queue
-	store        *Store
-	resourceAuth ResourceAuth
-	hcl          HCLTokens
-	extensions   map[string][]string
+	queue         *tasks.Queue
+	store         *Store
+	resourceAuth  ResourceAuth
+	hcl           HCLTokens
+	extensions    map[string][]string
+	registryFetch RegistryFetch
 }
 
 // progress records progress on the task row.

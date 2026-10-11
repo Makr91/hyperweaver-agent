@@ -56,7 +56,7 @@ type CatalogSource struct {
 	CAFile  string `json:"-"`
 }
 
-// The auth a catalog source carries: none sends nothing, oidc sends the reading account's access token as Bearer, the account of the key that asked, else the bound account's.
+// The auth a catalog source carries: none sends nothing, oidc sends as Bearer an access token minted for the catalog's resource identifier, the one its protected resource metadata names, from the account of the key that asked, else the bound account's.
 const (
 	CatalogAuthNone = "none"
 	CatalogAuthOIDC = "oidc"
@@ -64,16 +64,6 @@ const (
 
 // catalogDocumentLimit bounds one catalog or health document read.
 const catalogDocumentLimit = 16 << 20
-
-var oidcTokenSource func(createdBy string) string
-
-// SetOIDCTokenSource wires the federated access token an oidc catalog source is read with: the account of the key named createdBy, else the bound account's.
-func SetOIDCTokenSource(source func(createdBy string) string) {
-	oidcTokenSource = source
-}
-
-// ErrCatalogAuth is answered when an oidc source has no token to send or the catalog refused the one sent.
-var ErrCatalogAuth = errors.New("the catalog requires a signed-in account")
 
 // ErrCatalogHealthMissing is answered when the source publishes no health document.
 var ErrCatalogHealthMissing = errors.New("the catalog publishes no health document")
@@ -166,25 +156,6 @@ func catalogClient(source *CatalogSource, timeout time.Duration) (*http.Client, 
 	return client, nil
 }
 
-// catalogRequest builds one GET against the source, Bearer with the token of the key createdBy's account, else the bound account's, for an oidc source.
-func catalogRequest(ctx context.Context, source *CatalogSource, target, createdBy string) (*http.Request, error) {
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, target, http.NoBody)
-	if err != nil {
-		return nil, err
-	}
-	if source.Auth == CatalogAuthOIDC {
-		token := ""
-		if oidcTokenSource != nil {
-			token = oidcTokenSource(createdBy)
-		}
-		if token == "" {
-			return nil, ErrCatalogAuth
-		}
-		request.Header.Set("Authorization", "Bearer "+token)
-	}
-	return request, nil
-}
-
 // fetchCatalogDocument reads one document of the source verbatim as the key createdBy's account.
 func fetchCatalogDocument(ctx context.Context, source *CatalogSource, target, createdBy string) ([]byte, error) {
 	client, err := catalogClient(source, catalogFetchTimeout)
@@ -203,8 +174,8 @@ func fetchCatalogDocument(ctx context.Context, source *CatalogSource, target, cr
 		_ = response.Body.Close()
 	}()
 	if response.StatusCode != http.StatusOK {
-		refused := response.StatusCode == http.StatusUnauthorized || response.StatusCode == http.StatusForbidden
-		if refused && source.Auth == CatalogAuthOIDC {
+		if catalogRefused(response.StatusCode) && source.Auth == CatalogAuthOIDC {
+			forgetCatalogCredentials(source, createdBy)
 			return nil, fmt.Errorf("%w: catalog %s answered HTTP %d", ErrCatalogAuth, source.Name, response.StatusCode)
 		}
 		return nil, &catalogStatusError{source: source.Name, status: response.StatusCode}
@@ -411,6 +382,10 @@ func downloadVerified(ctx context.Context, source *CatalogSource, assetURL, dest
 		_ = response.Body.Close()
 	}()
 	if response.StatusCode != http.StatusOK {
+		if catalogRefused(response.StatusCode) && source.Auth == CatalogAuthOIDC {
+			forgetCatalogCredentials(source, createdBy)
+			return "", 0, fmt.Errorf("%w: asset download answered HTTP %d", ErrCatalogAuth, response.StatusCode)
+		}
 		return "", 0, fmt.Errorf("asset download answered HTTP %d", response.StatusCode)
 	}
 

@@ -2,6 +2,7 @@ package server
 
 import (
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 	"os"
@@ -20,13 +21,14 @@ import (
 // streamed download into the kind's default location).
 //
 //	@Summary		Download a file from the HCL portal
-//	@Description	Minimum role: operator. Queues an hcl_download task (SHI's HCLDownloader flow): exchanges the named hcl_download_portal_api_keys secret's refresh token (the ROTATED token is persisted back immediately — SHI's critical rule), looks the file up in the HCL catalog by EXACT name (the catalog's sha256 is authoritative and overwrites the expectation), streams the verified download into the kind's DEFAULT location (the built-in cache). Failures carry contextual guidance (expired key vs un-accepted HCL license); no auto-retry.
+//	@Description	Minimum role: operator. Queues an hcl_download task (SHI's HCLDownloader flow): exchanges the named hcl_download_portal_api_keys secret's refresh token (the ROTATED token is persisted back immediately — SHI's critical rule), looks the file up in the HCL catalog by EXACT name (the catalog's sha256 is authoritative and overwrites the expectation), streams the verified download into the location storage_path_id names, one of the kind's type, or the kind's default location while it is absent. kind interim-fix is read as hotfix. Failures carry contextual guidance (expired key vs un-accepted HCL license); no auto-retry.
 //	@Tags			Artifacts
 //	@Accept			json
 //	@Produce		json
-//	@Param			body	body	assets.HCLDownloadMetadata	true	"HCL portal key, filename, role, and kind"
+//	@Param			body	body	assets.HCLDownloadMetadata	true	"HCL portal key, filename, role, kind and optional storage_path_id"
 //	@Success		202	"HCL download task queued"
-//	@Failure		400	"Invalid key_name/role/kind/filename"
+//	@Failure		400	"Invalid key_name/role/kind/filename, or a location disabled or of another type"
+//	@Failure		404	"Storage location not found"
 //	@Failure		503	"Artifact storage is disabled"
 //	@Router			/api/artifacts/hcl-download [post]
 func (s *Server) handleHCLDownload(w http.ResponseWriter, r *http.Request) {
@@ -38,6 +40,25 @@ func (s *Server) handleHCLDownload(w http.ResponseWriter, r *http.Request) {
 	if err := meta.Validate(); err != nil {
 		taskError(w, http.StatusBadRequest, err.Error())
 		return
+	}
+	if meta.LocationID != "" {
+		location, err := s.assets.GetLocation(r.Context(), meta.LocationID)
+		if errors.Is(err, assets.ErrLocationNotFound) {
+			taskError(w, http.StatusNotFound, "Storage location not found")
+			return
+		}
+		if err != nil {
+			taskError(w, http.StatusInternalServerError, "Failed to load storage location")
+			return
+		}
+		if !location.Enabled {
+			taskError(w, http.StatusBadRequest, "Storage location is disabled")
+			return
+		}
+		if location.Type != meta.Kind {
+			taskError(w, http.StatusBadRequest, "storage_path_id names a "+location.Type+" location, not "+meta.Kind)
+			return
+		}
 	}
 	s.queueArtifactTask(w, r, assets.OpHCLDownload, tasks.PriorityMedium, meta,
 		"HCL download task queued successfully")
@@ -60,7 +81,7 @@ type registerArtifactRequest struct {
 // Direct mode).
 //
 //	@Summary		Register an agent-host file
-//	@Description	Minimum role: operator. SHI's add-file picker flow for Direct-mode installs: copies (move: true moves) the named agent-host file into a storage location — by id, or the type's default location — and hashes it. Synchronous.
+//	@Description	Minimum role: operator. SHI's add-file picker flow for Direct-mode installs: copies (move: true moves) the named agent-host file into a storage location — by id, or the type's default location, type interim-fix read as hotfix — and hashes it. Synchronous.
 //	@Tags			Artifacts
 //	@Accept			json
 //	@Produce		json
@@ -86,6 +107,7 @@ func (s *Server) handleRegisterArtifact(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	body.Type = assets.NormalizeKind(body.Type)
 	var location *assets.Location
 	switch {
 	case body.StoragePathID != "":

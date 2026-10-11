@@ -13,15 +13,15 @@ import (
 
 const artifactColumns = `id, location_id, role, kind, filename, path, sha256,
 	expected_sha256, size, version, file_exists, verified_at, source_url,
-	created_at, updated_at`
+	created_at, updated_at, given_checksum, given_algorithm`
 
 func scanArtifact(row interface{ Scan(...any) error }) (*Artifact, error) {
 	var a Artifact
-	var locationID, path, sha, expected, version, sourceURL, verifiedAt sql.NullString
+	var locationID, path, sha, expected, version, sourceURL, verifiedAt, given, givenAlgorithm sql.NullString
 	var createdAt, updatedAt string
 	err := row.Scan(&a.ID, &locationID, &a.Role, &a.Kind, &a.Filename, &path,
 		&sha, &expected, &a.Size, &version, &a.Exists, &verifiedAt, &sourceURL,
-		&createdAt, &updatedAt)
+		&createdAt, &updatedAt, &given, &givenAlgorithm)
 	if err != nil {
 		return nil, err
 	}
@@ -31,6 +31,8 @@ func scanArtifact(row interface{ Scan(...any) error }) (*Artifact, error) {
 	a.ExpectedSHA256 = expected.String
 	a.Version = version.String
 	a.SourceURL = sourceURL.String
+	a.GivenChecksum = given.String
+	a.GivenAlgorithm = givenAlgorithm.String
 	if a.CreatedAt, err = time.Parse(timeLayout, createdAt); err != nil {
 		return nil, fmt.Errorf("artifact %d: parse created_at: %w", a.ID, err)
 	}
@@ -216,6 +218,9 @@ type Ingested struct {
 	Size       int64
 	Version    string
 	SourceURL  string
+	// GivenChecksum and GivenAlgorithm record the checksum the caller handed in with the file, kept beside the agent's own sha256
+	GivenChecksum  string
+	GivenAlgorithm string
 }
 
 // RecordIngested upserts a row for a file just hashed on disk. An existing
@@ -225,16 +230,18 @@ func (s *Store) RecordIngested(ctx context.Context, in *Ingested) (*Artifact, er
 	now := formatTime(time.Now())
 	_, err := s.db.ExecContext(ctx, `INSERT INTO artifacts
 		(location_id, role, kind, filename, path, sha256, size, version,
-		 file_exists, verified_at, source_url, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?)
+		 file_exists, verified_at, source_url, created_at, updated_at, given_checksum, given_algorithm)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT (location_id, role, kind, filename) DO UPDATE SET
 		 path = excluded.path, sha256 = excluded.sha256, size = excluded.size,
 		 version = CASE WHEN excluded.version != '' THEN excluded.version ELSE artifacts.version END,
 		 file_exists = 1, verified_at = excluded.verified_at,
 		 source_url = CASE WHEN excluded.source_url != '' THEN excluded.source_url ELSE artifacts.source_url END,
+		 given_checksum = CASE WHEN excluded.given_checksum != '' THEN excluded.given_checksum ELSE artifacts.given_checksum END,
+		 given_algorithm = CASE WHEN excluded.given_checksum != '' THEN excluded.given_algorithm ELSE artifacts.given_algorithm END,
 		 updated_at = excluded.updated_at`,
 		in.LocationID, in.Role, in.Kind, in.Filename, in.Path, in.SHA256,
-		in.Size, in.Version, now, in.SourceURL, now, now)
+		in.Size, in.Version, now, in.SourceURL, now, now, in.GivenChecksum, in.GivenAlgorithm)
 	if err != nil {
 		return nil, err
 	}

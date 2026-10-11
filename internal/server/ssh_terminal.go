@@ -12,18 +12,20 @@ import (
 
 	"github.com/coder/websocket"
 
+	"github.com/Makr91/hyperweaver-agent/internal/auth"
 	"github.com/Makr91/hyperweaver-agent/internal/machines"
 	"github.com/Makr91/hyperweaver-agent/internal/sshrun"
 )
 
 // SSH terminal sessions — the base's SSHTerminal family on this agent's
 // transport: POST /api/machines/{name}/ssh/start mints a session, the WebSocket
-// at /api/ssh/{sessionId}?ticket=... opens the interactive shell. The shell
-// prefers the provisioning NAT ssh port-forward (the pipeline's transport,
-// immune to guest network reconfiguration) and falls back to the document's
-// control IP — resolveTransport's exact ladder. Sessions are in-memory:
-// shells never survive an agent restart (the base marks them all closed at
-// startup for the same reason).
+// at /api/ssh/{sessionId}?ticket=... opens the interactive shell on its first
+// connect and re-attaches to it afterwards. The shell prefers the provisioning
+// NAT ssh port-forward (the pipeline's transport, immune to guest network
+// reconfiguration) and falls back to the document's control IP —
+// resolveTransport's exact ladder. Sessions are in-memory: shells never
+// survive an agent restart (the base marks them all closed at startup for the
+// same reason).
 
 // sshSession is one terminal session (the base's SSHSession row shape).
 type sshSession struct {
@@ -33,10 +35,15 @@ type sshSession struct {
 	SSHHost      string    `json:"ssh_host"`
 	SSHPort      int       `json:"ssh_port"`
 	SSHUsername  string    `json:"ssh_username"`
+	CreatedBy    string    `json:"created_by"`
 	CreatedAt    time.Time `json:"created_at"`
 	LastActivity time.Time `json:"last_activity"`
 
-	shell *sshrun.Shell
+	person  string
+	shell   *sshrun.Shell
+	link    terminalLink
+	done    chan struct{}
+	startMu sync.Mutex
 }
 
 // sshSessions is the in-memory session store.
@@ -85,22 +92,45 @@ func (s *sshSessions) setStatus(id, status string) {
 	}
 }
 
-// close tears a session's shell down and marks it closed.
-func (s *sshSessions) close(id string) bool {
+func (s *sshSessions) touch(id string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if session, ok := s.sessions[id]; ok {
+		session.LastActivity = time.Now()
+	}
+}
+
+// idleOf lists the live sessions the key createdBy started that no socket is attached to.
+func (s *sshSessions) idleOf(createdBy string) []*sshSession {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	idle := []*sshSession{}
+	for _, session := range s.sessions {
+		if session.CreatedBy == createdBy && session.Status != "closed" && !session.link.attached() {
+			idle = append(idle, session)
+		}
+	}
+	return idle
+}
+
+// close tears a session's shell down and marks it closed; ended is true the first time.
+func (s *sshSessions) close(id string) (session *sshSession, ended bool) {
 	s.mu.Lock()
 	session, ok := s.sessions[id]
 	var shell *sshrun.Shell
-	if ok {
+	if ok && session.Status != "closed" {
 		shell = session.shell
 		session.shell = nil
 		session.Status = "closed"
 		session.LastActivity = time.Now()
+		close(session.done)
+		ended = true
 	}
 	s.mu.Unlock()
 	if shell != nil {
 		shell.Close()
 	}
-	return ok
+	return session, ended
 }
 
 // randomID mints a session id (32 hex chars).
@@ -135,7 +165,7 @@ func (s *Server) sshTransport(ctx context.Context, machine *machines.Machine,
 // /api/machines/{name}/ssh/start — each call is an independent session).
 //
 //	@Summary		Start an SSH terminal session
-//	@Description	Minimum role: operator. Mints an SSH terminal session for a RUNNING machine; connect the terminal at the /api/ssh/{sessionId} WebSocket. Each call is an independent session. Credentials come from the stored configuration (settings.vagrant_user/vagrant_user_pass/vagrant_user_private_key_path; the agent's provisioning key is the last-resort fallback). Transport = the pipeline's ladder: the provisioning NAT ssh port-forward first (immune to guest network reconfiguration), the document's control IP as fallback.
+//	@Description	Minimum role: operator. Mints an SSH terminal session for a RUNNING machine, created_by the calling key; the shell opens when the first terminal connects at the /api/ssh/{sessionId} WebSocket and lives until DELETE /api/ssh/sessions/{sessionId}/stop, the remote shell's exit, the calling key's revocation or deletion while no socket is attached, or the agent's stop; a socket's close leaves it running, its last output kept for the next socket. session-started {kind: ssh, id, machine_name} goes to the person on the sessions topic of GET /api/events. Each call is an independent session. Credentials come from the stored configuration (settings.vagrant_user/vagrant_user_pass/vagrant_user_private_key_path; the agent's provisioning key is the last-resort fallback). Transport = the pipeline's ladder: the provisioning NAT ssh port-forward first (immune to guest network reconfiguration), the document's control IP as fallback.
 //	@Tags			Console
 //	@Produce		json
 //	@Param			machineName	path	string	true	"Machine name"
@@ -171,6 +201,7 @@ func (s *Server) handleStartSSHSession(w http.ResponseWriter, r *http.Request) {
 		taskError(w, http.StatusInternalServerError, "Failed to start SSH session")
 		return
 	}
+	identity := auth.FromContext(r.Context())
 	session := &sshSession{
 		ID:           id,
 		MachineName:  machine.Name,
@@ -178,19 +209,23 @@ func (s *Server) handleStartSSHSession(w http.ResponseWriter, r *http.Request) {
 		SSHHost:      host,
 		SSHPort:      port,
 		SSHUsername:  credentials.Username,
+		CreatedBy:    identity.Name,
 		CreatedAt:    time.Now(),
 		LastActivity: time.Now(),
+		person:       s.personOf(identity),
+		done:         make(chan struct{}),
 	}
 	s.sshSessions.put(session)
 	slog.Info("ssh terminal session created", "session_id", id,
-		"machine", machine.Name, "host", host, "port", port)
+		"machine", machine.Name, "host", host, "port", port, "created_by", identity.Name)
+	s.publishSession(eventSessionStarted, sessionKindSSH, id, machine.Name, session.person)
 	writeJSON(w, session)
 }
 
 // handleListSSHSessions mirrors GET /api/ssh/sessions.
 //
 //	@Summary		List SSH terminal sessions
-//	@Description	Minimum role: viewer. Newest first. Sessions are in-memory — an agent restart closes them all (shells cannot survive it).
+//	@Description	Minimum role: viewer. Every session the agent holds, newest first, each {id, machine_name, status, ssh_host, ssh_port, ssh_username, created_by, created_at, last_activity}, status connecting, active, closed or failed; a person re-attaches to the live ones their own key started. Sessions are in-memory — an agent restart closes them all.
 //	@Tags			Console
 //	@Produce		json
 //	@Success		200	{array}	sshSession	"Sessions"
@@ -221,7 +256,7 @@ func (s *Server) handleSSHSessionInfo(w http.ResponseWriter, r *http.Request) {
 // handleStopSSHSession mirrors DELETE /api/ssh/sessions/{sessionId}/stop.
 //
 //	@Summary		Stop an SSH session
-//	@Description	Minimum role: operator. Closes the shell and marks the session closed.
+//	@Description	Minimum role: operator. Closes the shell, marks the session closed and sends session-ended on the sessions topic to the person who started it, so the tab closes in every open browser.
 //	@Tags			Console
 //	@Produce		json
 //	@Param			sessionId	path	string	true	"SSH session id"
@@ -229,10 +264,12 @@ func (s *Server) handleSSHSessionInfo(w http.ResponseWriter, r *http.Request) {
 //	@Failure		404	"SSH session not found"
 //	@Router			/api/ssh/sessions/{sessionId}/stop [delete]
 func (s *Server) handleStopSSHSession(w http.ResponseWriter, r *http.Request) {
-	if !s.sshSessions.close(r.PathValue("sessionId")) {
+	id := r.PathValue("sessionId")
+	if s.sshSessions.get(id) == nil {
 		taskError(w, http.StatusNotFound, "SSH session not found")
 		return
 	}
+	s.endSSHSession(id)
 	writeJSON(w, successMessageResponse{Success: true, Message: "SSH session stopped."})
 }
 
@@ -249,18 +286,66 @@ type terminalControl struct {
 	Rows int    `json:"rows"`
 }
 
-// handleSSHSocket serves the WebSocket at /api/ssh/{sessionId}: dial, shell,
-// bidirectional piping, resize control frames — the base's
-// handleSSHConnection + setupSSHPiping.
+// sshShell answers the session's shell, opening it on the first socket with the machine's stored credentials; a session already closed answers nil.
+func (s *Server) sshShell(ctx context.Context, session *sshSession, sendText func(string)) (*sshrun.Shell, error) {
+	session.startMu.Lock()
+	defer session.startMu.Unlock()
+	s.sshSessions.mu.Lock()
+	shell, status := session.shell, session.Status
+	s.sshSessions.mu.Unlock()
+	if shell != nil || status == "closed" {
+		return shell, nil
+	}
+	machine, err := s.machines.Get(ctx, session.MachineName)
+	if err != nil {
+		return nil, err
+	}
+	config := machines.ParseConfiguration(machine)
+	credentials := machines.ExtractCredentials(config.Section("settings"))
+	basePath := ""
+	if machine.Home != nil {
+		basePath = *machine.Home
+	}
+	sendText("Connecting to SSH...\r\n")
+	connectCtx, connectCancel := context.WithTimeout(ctx, 20*time.Second)
+	defer connectCancel()
+	shell, err = sshrun.StartShell(connectCtx, session.SSHHost, session.SSHPort,
+		sshrun.Credentials{
+			Username:   credentials.Username,
+			Password:   credentials.Password,
+			SSHKeyPath: credentials.SSHKeyPath,
+		},
+		basePath, s.cfg.ProvisionKeyPath(), 80, 24, session.link.output)
+	if err != nil {
+		return nil, err
+	}
+	s.sshSessions.mu.Lock()
+	session.shell = shell
+	session.Status = "active"
+	session.LastActivity = time.Now()
+	s.sshSessions.mu.Unlock()
+	go s.watchSSHSession(session, shell)
+	return shell, nil
+}
+
+func (s *Server) watchSSHSession(session *sshSession, shell *sshrun.Shell) {
+	_ = shell.Wait()
+	session.link.output("\r\nSSH connection closed.\r\n")
+	s.endSSHSession(session.ID)
+}
+
+// handleSSHSocket serves the WebSocket at /api/ssh/{sessionId}: dial on the
+// first connect, attach on every connect, bidirectional piping, resize
+// control frames.
 //
 //	@Summary		SSH terminal (WebSocket)
-//	@Description	WEBSOCKET upgrade — authenticate with ?ticket= (GET /api/ws-ticket) minted with ?machine= matching the session's machine (the frozen cross-agent shape: machine streams take ONLY a matching scoped ticket; a mismatch answers the same 401 as an invalid ticket). Opens the interactive shell (xterm-256color PTY) for a session minted at POST /api/machines/{name}/ssh/start. Wire: remote output arrives as raw text frames; send raw text as terminal input; send {"type": "resize", "cols": N, "rows": N} JSON frames to resize the PTY. "Connecting to SSH..." opens the stream; "SSH connection closed." marks remote exit.
+//	@Description	WEBSOCKET upgrade — authenticate with ?ticket= (GET /api/ws-ticket) minted with ?machine= matching the session's machine (the frozen cross-agent shape: machine streams take ONLY a matching scoped ticket; a mismatch answers the same 401 as an invalid ticket). The first socket opens the interactive shell (xterm-256color PTY) of a session minted at POST /api/machines/{name}/ssh/start; a later socket attaches to the running shell, the last output it wrote, up to 256 KiB, replayed first, and takes any earlier socket's place. Closing the socket leaves the shell running for the next socket. Wire: remote output arrives as raw text frames; send raw text as terminal input; send {"type": "resize", "cols": N, "rows": N} JSON frames to resize the PTY. "Connecting to SSH..." opens the stream; "SSH connection closed." marks remote exit.
 //	@Tags			Console
 //	@Param			sessionId	path	string	true	"SSH session id"
 //	@Param			ticket	query	string	true	"WebSocket upgrade ticket (GET /api/ws-ticket?machine={name} — must be scoped to the session's machine)"
 //	@Success		101	"Switching Protocols — the terminal begins"
 //	@Failure		401	"Missing, invalid, or wrong-scope ticket"
-//	@Failure		404	"SSH session or machine not found"
+//	@Failure		404	"SSH session or machine not found, or the session already closed"
 //	@Router			/api/ssh/{sessionId} [get]
 func (s *Server) handleSSHSocket(w http.ResponseWriter, r *http.Request) {
 	scope, ok := s.ticketScope(w, r)
@@ -276,16 +361,13 @@ func (s *Server) handleSSHSocket(w http.ResponseWriter, r *http.Request) {
 	if !requireScope(w, scope, session.MachineName) {
 		return
 	}
-	machine, err := s.machines.Get(r.Context(), session.MachineName)
-	if err != nil {
-		taskError(w, http.StatusNotFound, "Machine not found")
+	if session.Status == "closed" {
+		taskError(w, http.StatusNotFound, "SSH session is closed")
 		return
 	}
-	config := machines.ParseConfiguration(machine)
-	credentials := machines.ExtractCredentials(config.Section("settings"))
-	basePath := ""
-	if machine.Home != nil {
-		basePath = *machine.Home
+	if _, err := s.machines.Get(r.Context(), session.MachineName); err != nil {
+		taskError(w, http.StatusNotFound, "Machine not found")
+		return
 	}
 
 	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{OriginPatterns: []string{"*"}})
@@ -304,39 +386,29 @@ func (s *Server) handleSSHSocket(w http.ResponseWriter, r *http.Request) {
 			cancel()
 		}
 	}
+	go func() {
+		select {
+		case <-session.done:
+			cancel()
+		case <-ctx.Done():
+		}
+	}()
 
-	sendText("Connecting to SSH...\r\n")
-	connectCtx, connectCancel := context.WithTimeout(ctx, 20*time.Second)
-	shell, err := sshrun.StartShell(connectCtx, session.SSHHost, session.SSHPort,
-		sshrun.Credentials{
-			Username:   credentials.Username,
-			Password:   credentials.Password,
-			SSHKeyPath: credentials.SSHKeyPath,
-		},
-		basePath, s.cfg.ProvisionKeyPath(), 80, 24, sendText)
-	connectCancel()
+	shell, err := s.sshShell(ctx, session, sendText)
 	if err != nil {
 		slog.Warn("ssh terminal connect failed", "session_id", sessionID, "error", err)
 		s.sshSessions.setStatus(sessionID, "failed")
 		sendText("SSH connection error: " + err.Error() + "\r\n")
 		return
 	}
-	s.sshSessions.mu.Lock()
-	session.shell = shell
-	session.Status = "active"
-	session.LastActivity = time.Now()
-	s.sshSessions.mu.Unlock()
-	defer s.sshSessions.close(sessionID)
+	if shell == nil {
+		sendText("SSH session is closed.\r\n")
+		return
+	}
+	handle := session.link.attach(sendText)
+	defer session.link.detach(handle)
+	s.sshSessions.touch(sessionID)
 
-	// Remote shell exit ends the connection.
-	go func() {
-		_ = shell.Wait()
-		sendText("\r\nSSH connection closed.\r\n")
-		cancel()
-	}()
-
-	// Client input loop: resize control frames (bare or NUL-prefixed JSON — the
-	// zoneweaver footer terminal's framing) or raw terminal bytes.
 	for {
 		_, data, rerr := conn.Read(ctx)
 		if rerr != nil {
@@ -351,5 +423,6 @@ func (s *Server) handleSSHSocket(w http.ResponseWriter, r *http.Request) {
 		if werr := shell.Write(string(data)); werr != nil {
 			return
 		}
+		s.sshSessions.touch(sessionID)
 	}
 }

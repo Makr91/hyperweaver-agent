@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"log/slog"
+	"net/http"
 	"sort"
 	"time"
 
@@ -166,6 +167,7 @@ func setupTasks(cfg *config.Config, secretsStore *secrets.Store) (*agentSystems,
 	agentMigrations = append(agentMigrations, machines.ProfileTombstone...)
 	agentMigrations = append(agentMigrations, machines.HypervisorMigration...)
 	agentMigrations = append(agentMigrations, inbox.Migrations...)
+	agentMigrations = append(agentMigrations, assets.GivenChecksumMigrations...)
 	agentDB, err := openDB(agentPath, agentMigrations)
 	if err != nil {
 		_ = tasksDB.Close()
@@ -267,7 +269,10 @@ func setupTasks(cfg *config.Config, secretsStore *secrets.Store) (*agentSystems,
 	}
 	assetsStore := assets.NewStore(agentDB, artifactsRoot)
 	assets.RegisterExecutors(queue, assetsStore, secretsStore.ResourceAuth, secretsStore,
-		cfg.ArtifactStorage.Scanning.SupportedExtensions)
+		cfg.ArtifactStorage.Scanning.SupportedExtensions,
+		func(ctx context.Context, sourceID, createdBy, path string) (*http.Response, error) {
+			return machines.RegistryFetch(ctx, templateSourceList(cfg), sourceID, createdBy, path)
+		})
 	artifactSvc := assets.NewService(assetsStore, assets.ServiceConfig{
 		Enabled:      cfg.ArtifactStorage.Enabled,
 		Root:         artifactsRoot,

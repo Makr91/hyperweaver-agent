@@ -152,7 +152,7 @@ func (s *Server) handleSession(w http.ResponseWriter, r *http.Request) {
 }
 
 // @Summary		End the browser session
-// @Description	Minimum role: viewer. Forgets the session the __Host-hwa_session cookie names and clears the cookie with Max-Age=0; the key behind it stays. Sent with the cookie, it must arrive same-origin like every write.
+// @Description	Minimum role: viewer. Forgets the session the __Host-hwa_session cookie names and clears the cookie with Max-Age=0; the key behind it stays, and the key's console sessions with no socket attached end, each with a session-ended on the sessions topic. Sent with the cookie, it must arrive same-origin like every write.
 // @Tags			Local Login
 // @Success		204	"Session ended, cookie cleared"
 // @Failure		401	{object}	problem.Body	"No live session or credential"
@@ -164,6 +164,7 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 			slog.Error("session end failed", "error", eerr)
 		}
 	}
+	s.endIdleSessionsOfKey(auth.FromContext(r.Context()).Name)
 	auth.ClearSessionCookie(w)
 	w.WriteHeader(http.StatusNoContent)
 }

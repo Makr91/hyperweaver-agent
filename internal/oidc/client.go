@@ -80,14 +80,10 @@ func (c *client) keyTokenSource(id int64) *tokenSource {
 	return source
 }
 
-func (c *client) keyToken(id int64) string {
+func (c *client) keySource(id int64) *tokenSource {
 	c.mu.Lock()
-	source := c.keyTokens[id]
-	c.mu.Unlock()
-	if source == nil {
-		return ""
-	}
-	return source.bearer()
+	defer c.mu.Unlock()
+	return c.keyTokens[id]
 }
 
 func (c *client) pruneKeyTokens() {

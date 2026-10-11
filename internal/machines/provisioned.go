@@ -212,27 +212,22 @@ type ProvisionEnv struct {
 	Network NetworkEnv
 }
 
-// resolveInstallerFiles verifies every role file reference against the file
-// cache (Mark's ruling 2026-07-06: hash verification is the point — a file
-// that is absent, unhashed, or mismatching NEVER reaches a machine) and
-// returns the verified mounts plus a hash-enriched copy of the roles for the
-// template context. With the assets subsystem disabled, references pass
-// through un-mounted with a loud warning.
-func (e *executors) resolveInstallerFiles(ctx context.Context, spec *Spec, out *tasks.OutputWriter) ([]provisioner.InstallerFile, []provisioner.RoleInput, error) {
-	roles := make([]provisioner.RoleInput, len(spec.Roles))
+// resolveInstallerFiles resolves every role file reference against the file cache and answers the mounts, a hash-enriched copy of the roles for the template context, and the warnings: a file that is absent refuses the prepare; a file that is present but carries no hash, fails its expectation or differs from the spec's hash is mounted as the person's own with a warning. With the assets subsystem disabled, references pass through un-mounted with a warning.
+func (e *executors) resolveInstallerFiles(ctx context.Context, spec *Spec, out *tasks.OutputWriter) (mounts []provisioner.InstallerFile, roles []provisioner.RoleInput, warnings []string, err error) {
+	roles = make([]provisioner.RoleInput, len(spec.Roles))
 	copy(roles, spec.Roles)
 
 	if e.env.Assets == nil {
 		for i := range roles {
 			if roles[i].Files != (provisioner.RoleFiles{}) {
-				out.Write("stderr", "WARNING: assets.enabled is false — installer files are NOT mounted or hash-verified\n")
+				warnings = append(warnings, "artifact storage is disabled: installer files are not mounted or hash-verified")
 				break
 			}
 		}
-		return nil, roles, nil
+		return nil, roles, warnings, nil
 	}
 
-	mounts := []provisioner.InstallerFile{}
+	mounts = []provisioner.InstallerFile{}
 	for i := range roles {
 		role := &roles[i]
 		references := []struct {
@@ -249,25 +244,23 @@ func (e *executors) resolveInstallerFiles(ctx context.Context, spec *Spec, out *
 			if *ref.name == "" {
 				continue
 			}
-			artifact, err := e.env.Assets.Find(ctx, role.Name, ref.kind, *ref.name)
-			if errors.Is(err, assets.ErrNotFound) {
-				return nil, nil, fmt.Errorf("%s %q for role %s is not in the file cache — upload, register, or download it first",
+			artifact, ferr := e.env.Assets.Find(ctx, role.Name, ref.kind, *ref.name)
+			if errors.Is(ferr, assets.ErrNotFound) {
+				return nil, nil, nil, fmt.Errorf("%s %q for role %s is not in the file cache — upload, register, or download it first",
 					ref.kind, *ref.name, role.Name)
 			}
-			if err != nil {
-				return nil, nil, err
+			if ferr != nil {
+				return nil, nil, nil, ferr
 			}
-			if !artifact.Exists {
-				return nil, nil, fmt.Errorf("%s %q for role %s is an expectation only — the file itself is not in the cache",
+			if !artifact.Exists || artifact.Path == "" {
+				return nil, nil, nil, fmt.Errorf("%s %q for role %s is an expectation only — the file itself is not in the cache",
 					ref.kind, *ref.name, role.Name)
 			}
-			if !artifact.Verified() {
-				return nil, nil, fmt.Errorf("%s %q for role %s FAILS hash verification: file %s, expected %s",
-					ref.kind, *ref.name, role.Name, artifact.SHA256, artifact.ExpectedSHA256)
-			}
-			if *ref.hash != "" && !strings.EqualFold(*ref.hash, artifact.SHA256) {
-				return nil, nil, fmt.Errorf("%s %q for role %s: the spec expects hash %s but the cached file is %s",
-					ref.kind, *ref.name, role.Name, *ref.hash, artifact.SHA256)
+			if warning := installerWarning(ref.kind, *ref.name, role.Name, *ref.hash, artifact); warning != "" {
+				warnings = append(warnings, warning)
+				out.Write("stderr", "WARNING: "+warning+"\n")
+			} else {
+				out.Write("stdout", "Verified "+ref.kind+" "+*ref.name+" ("+artifact.SHA256+")\n")
 			}
 			*ref.hash = artifact.SHA256
 			if *ref.version == "" {
@@ -276,14 +269,27 @@ func (e *executors) resolveInstallerFiles(ctx context.Context, spec *Spec, out *
 			mounts = append(mounts, provisioner.InstallerFile{
 				SourcePath: artifact.Path,
 				Role:       role.Name,
-				Subdir:     assets.WorkdirSubdir(ref.kind),
 				Filename:   *ref.name,
 				SHA256:     artifact.SHA256,
 			})
-			out.Write("stdout", "Verified "+ref.kind+" "+*ref.name+" ("+artifact.SHA256+")\n")
 		}
 	}
-	return mounts, roles, nil
+	return mounts, roles, warnings, nil
+}
+
+// installerWarning answers why a present file is mounted as the person's own rather than verified, empty when it verifies.
+func installerWarning(kind, name, role, specHash string, artifact *assets.Artifact) string {
+	switch {
+	case artifact.SHA256 == "":
+		return fmt.Sprintf("%s %q for role %s carries no sha256; mounted as your own file, nothing is guaranteed", kind, name, role)
+	case artifact.ExpectedSHA256 != "" && !strings.EqualFold(artifact.SHA256, artifact.ExpectedSHA256):
+		return fmt.Sprintf("%s %q for role %s hashes %s, not the expected %s; mounted as your own file, nothing is guaranteed",
+			kind, name, role, artifact.SHA256, artifact.ExpectedSHA256)
+	case specHash != "" && !strings.EqualFold(specHash, artifact.SHA256):
+		return fmt.Sprintf("%s %q for role %s hashes %s, not the %s the machine asks for; mounted as your own file, nothing is guaranteed",
+			kind, name, role, artifact.SHA256, specHash)
+	}
+	return ""
 }
 
 // taskProgress records a task's own progress (zoneweaver's
@@ -295,6 +301,20 @@ func (e *executors) taskProgress(task *tasks.Task, percent float64, status strin
 		return
 	}
 	info, err := json.Marshal(map[string]string{"status": status})
+	if err != nil {
+		return
+	}
+	if uerr := e.queue.Store().UpdateProgress(context.Background(), task.ID, percent, info); uerr != nil {
+		mlog().Debug("progress update failed", "task_id", task.ID, "error", uerr)
+	}
+}
+
+// taskProgressWarnings records a task's progress with the warnings the step raised, progress_info carrying {status, warnings}.
+func (e *executors) taskProgressWarnings(task *tasks.Task, percent float64, status string, warnings []string) {
+	if task == nil {
+		return
+	}
+	info, err := json.Marshal(map[string]any{"status": status, "warnings": warnings})
 	if err != nil {
 		return
 	}

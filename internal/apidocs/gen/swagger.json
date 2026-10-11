@@ -22,6 +22,13 @@
                     "filename": {
                         "type": "string"
                     },
+                    "given_algorithm": {
+                        "type": "string"
+                    },
+                    "given_checksum": {
+                        "description": "GivenChecksum is the checksum the caller handed in with the file, under GivenAlgorithm; empty when none was given",
+                        "type": "string"
+                    },
                     "id": {
                         "type": "integer"
                     },
@@ -66,6 +73,10 @@
                         "type": "string"
                     },
                     "role": {
+                        "type": "string"
+                    },
+                    "storage_path_id": {
+                        "description": "LocationID names the location the file lands in; empty selects the kind's default location",
                         "type": "string"
                     }
                 },
@@ -114,6 +125,48 @@
                         "type": "string"
                     },
                     "updated_at": {
+                        "type": "string"
+                    }
+                },
+                "type": "object"
+            },
+            "assets.RegistryDownloadMetadata": {
+                "properties": {
+                    "checksum": {
+                        "type": "string"
+                    },
+                    "checksum_algorithm": {
+                        "type": "string"
+                    },
+                    "download": {
+                        "type": "string"
+                    },
+                    "filename": {
+                        "type": "string"
+                    },
+                    "kind": {
+                        "type": "string"
+                    },
+                    "organization": {
+                        "type": "string"
+                    },
+                    "overwrite_existing": {
+                        "type": "boolean"
+                    },
+                    "patch": {
+                        "type": "string"
+                    },
+                    "release": {
+                        "type": "string"
+                    },
+                    "role": {
+                        "type": "string"
+                    },
+                    "source_name": {
+                        "type": "string"
+                    },
+                    "storage_path_id": {
+                        "description": "LocationID names the location the file lands in; empty selects the kind's default location",
                         "type": "string"
                     }
                 },
@@ -1472,6 +1525,12 @@
                         "type": "string"
                     },
                     "filename": {
+                        "type": "string"
+                    },
+                    "given_algorithm": {
+                        "type": "string"
+                    },
+                    "given_checksum": {
                         "type": "string"
                     },
                     "id": {
@@ -3015,7 +3074,7 @@
             "server.downloadArtifactRequest": {
                 "properties": {
                     "checksum": {
-                        "description": "Checksum is the expected SHA-256 (64 hex chars).",
+                        "description": "Checksum is the expected digest under checksum_algorithm, md5, sha1, sha256 (the default), sha384 or sha512.",
                         "type": "string"
                     },
                     "checksum_algorithm": {
@@ -6213,6 +6272,33 @@
                 },
                 "type": "object"
             },
+            "server.registryDownloadsResponse": {
+                "properties": {
+                    "downloads": {
+                        "items": {},
+                        "type": "array",
+                        "uniqueItems": false
+                    },
+                    "source": {
+                        "$ref": "#/components/schemas/server.registrySourceSummary"
+                    }
+                },
+                "type": "object"
+            },
+            "server.registrySourceSummary": {
+                "properties": {
+                    "id": {
+                        "type": "string"
+                    },
+                    "name": {
+                        "type": "string"
+                    },
+                    "url": {
+                        "type": "string"
+                    }
+                },
+                "type": "object"
+            },
             "server.renameItemRequest": {
                 "properties": {
                     "new_name": {
@@ -6613,6 +6699,9 @@
             "server.sshSession": {
                 "properties": {
                     "created_at": {
+                        "type": "string"
+                    },
+                    "created_by": {
                         "type": "string"
                     },
                     "id": {
@@ -7289,6 +7378,9 @@
                     "created_at": {
                         "type": "string"
                     },
+                    "created_by": {
+                        "type": "string"
+                    },
                     "id": {
                         "type": "string"
                     },
@@ -7299,7 +7391,7 @@
                         "type": "string"
                     },
                     "status": {
-                        "description": "connecting | active | closed | failed",
+                        "description": "active | closed",
                         "type": "string"
                     }
                 },
@@ -8445,7 +8537,7 @@
         },
         "/api/api-keys/{id}": {
             "delete": {
-                "description": "Minimum role: admin. Deleting the last active admin key is refused (lockout guard).",
+                "description": "Minimum role: admin. Deleting the last active admin key is refused (lockout guard). The host shells and SSH sessions the key started end while no socket is attached to them.",
                 "parameters": [
                     {
                         "description": "API key id",
@@ -8497,7 +8589,7 @@
         },
         "/api/api-keys/{id}/revoke": {
             "put": {
-                "description": "Minimum role: admin. Revoking the last active admin key is refused (lockout guard).",
+                "description": "Minimum role: admin. Revoking the last active admin key is refused (lockout guard). The host shells and SSH sessions the key started end while no socket is attached to them.",
                 "parameters": [
                     {
                         "description": "API key id",
@@ -8730,7 +8822,7 @@
         },
         "/api/artifacts/download": {
             "post": {
-                "description": "Minimum role: operator. Queues artifact_download: streamed with live progress ({downloaded_mb, total_mb, speed_mbps, eta_seconds} in progress_info), hashed DURING the stream, verified against checksum when given (mismatch discards the file — never promoted, no auto-retry). role is REQUIRED when the destination is an installer-family location. resource_name names a custom_resource_url secret whose Basic-auth pair authenticates the fetch.",
+                "description": "Minimum role: operator. Queues artifact_download: streamed with live progress ({downloaded_mb, total_mb, speed_mbps, eta_seconds} in progress_info), hashed DURING the stream, verified against checksum under checksum_algorithm when given, md5, sha1, sha256 (the default), sha384 or sha512 (mismatch discards the file — never promoted, no auto-retry); the agent's own sha256 stays the artifact's checksum and the given one is recorded beside it as given_checksum with given_algorithm, a sha256 also becoming the row's expectation. role is REQUIRED when the destination is an installer-family location. resource_name names a custom_resource_url secret whose Basic-auth pair authenticates the fetch.",
                 "requestBody": {
                     "content": {
                         "application/json": {
@@ -8763,7 +8855,7 @@
                         "description": "Download task queued"
                     },
                     "400": {
-                        "description": "Invalid url/filename/checksum, missing role, disabled location, or non-sha256 algorithm"
+                        "description": "Invalid url/filename/checksum, missing role, disabled location, or an unknown algorithm"
                     },
                     "404": {
                         "description": "Storage location not found"
@@ -8827,7 +8919,7 @@
         },
         "/api/artifacts/hcl-download": {
             "post": {
-                "description": "Minimum role: operator. Queues an hcl_download task (SHI's HCLDownloader flow): exchanges the named hcl_download_portal_api_keys secret's refresh token (the ROTATED token is persisted back immediately — SHI's critical rule), looks the file up in the HCL catalog by EXACT name (the catalog's sha256 is authoritative and overwrites the expectation), streams the verified download into the kind's DEFAULT location (the built-in cache). Failures carry contextual guidance (expired key vs un-accepted HCL license); no auto-retry.",
+                "description": "Minimum role: operator. Queues an hcl_download task (SHI's HCLDownloader flow): exchanges the named hcl_download_portal_api_keys secret's refresh token (the ROTATED token is persisted back immediately — SHI's critical rule), looks the file up in the HCL catalog by EXACT name (the catalog's sha256 is authoritative and overwrites the expectation), streams the verified download into the location storage_path_id names, one of the kind's type, or the kind's default location while it is absent. kind interim-fix is read as hotfix. Failures carry contextual guidance (expired key vs un-accepted HCL license); no auto-retry.",
                 "requestBody": {
                     "content": {
                         "application/json": {
@@ -8839,13 +8931,13 @@
                                     {
                                         "$ref": "#/components/schemas/assets.HCLDownloadMetadata",
                                         "summary": "body",
-                                        "description": "HCL portal key, filename, role, and kind"
+                                        "description": "HCL portal key, filename, role, kind and optional storage_path_id"
                                     }
                                 ]
                             }
                         }
                     },
-                    "description": "HCL portal key, filename, role, and kind",
+                    "description": "HCL portal key, filename, role, kind and optional storage_path_id",
                     "required": true
                 },
                 "responses": {
@@ -8860,7 +8952,10 @@
                         "description": "HCL download task queued"
                     },
                     "400": {
-                        "description": "Invalid key_name/role/kind/filename"
+                        "description": "Invalid key_name/role/kind/filename, or a location disabled or of another type"
+                    },
+                    "404": {
+                        "description": "Storage location not found"
                     },
                     "503": {
                         "description": "Artifact storage is disabled"
@@ -8922,7 +9017,7 @@
         },
         "/api/artifacts/register": {
             "post": {
-                "description": "Minimum role: operator. SHI's add-file picker flow for Direct-mode installs: copies (move: true moves) the named agent-host file into a storage location — by id, or the type's default location — and hashes it. Synchronous.",
+                "description": "Minimum role: operator. SHI's add-file picker flow for Direct-mode installs: copies (move: true moves) the named agent-host file into a storage location — by id, or the type's default location, type interim-fix read as hotfix — and hashes it. Synchronous.",
                 "requestBody": {
                     "content": {
                         "application/json": {
@@ -8965,6 +9060,107 @@
                     }
                 },
                 "summary": "Register an agent-host file",
+                "tags": [
+                    "Artifacts"
+                ]
+            }
+        },
+        "/api/artifacts/registry-download": {
+            "post": {
+                "description": "Minimum role: operator. Queues artifact_registry_download: the host fetches the named file of a box registry's download product as the person who queued it, the token of the account the key stands for before the bound account's before the registry's own key, streams it into the location storage_path_id names, one of the kind's type, or the kind's default location while it is absent, under the role, with the download progress_info of every other download, verifies checksum under checksum_algorithm during the stream when given (a mismatch discards the file), and registers the row with the given checksum beside the agent's sha256, a sha256 also the row's expectation. source_name, organization, download, release, patch, filename, kind and role are required; kind interim-fix is read as hotfix.",
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "oneOf": [
+                                    {
+                                        "type": "object"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/assets.RegistryDownloadMetadata",
+                                        "summary": "body",
+                                        "description": "The registry file and its destination"
+                                    }
+                                ]
+                            }
+                        }
+                    },
+                    "description": "The registry file and its destination",
+                    "required": true
+                },
+                "responses": {
+                    "202": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object"
+                                }
+                            }
+                        },
+                        "description": "Registry download task queued"
+                    },
+                    "400": {
+                        "description": "Missing or unusable member, disabled location, or a location of another type"
+                    },
+                    "404": {
+                        "description": "Source or storage location not found"
+                    },
+                    "503": {
+                        "description": "Artifact storage is disabled"
+                    }
+                },
+                "summary": "Download a registry file into a storage location",
+                "tags": [
+                    "Artifacts"
+                ]
+            }
+        },
+        "/api/artifacts/registry/{sourceName}/downloads": {
+            "get": {
+                "description": "Minimum role: viewer. The download products of one configured box registry the caller may reach, read as the person under the registry ladder: the x-registry-token request header first, the token of the account the calling key's SSO login minted it for next, the bound account's token after, the registry's own auth_token last. One read of the registry's /api/downloads/discover, every download, release, patch and file as the registry answers the caller under its own visibility, the members as the registry names them in snake_case, each download carrying its organization; sha256 is the registry's own member and empty while it lists none. A registry that refuses the credential answers 401 with the authentication problem type, as the templates read does.",
+                "parameters": [
+                    {
+                        "description": "The configured template source's id",
+                        "in": "path",
+                        "name": "sourceName",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/server.registryDownloadsResponse"
+                                }
+                            }
+                        },
+                        "description": "The source and its downloads"
+                    },
+                    "401": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/problem.Body"
+                                }
+                            }
+                        },
+                        "description": "The registry refused the credential"
+                    },
+                    "404": {
+                        "description": "Source not found or disabled"
+                    },
+                    "502": {
+                        "description": "Registry unreachable or answered an error"
+                    },
+                    "503": {
+                        "description": "Artifact storage is disabled"
+                    }
+                },
+                "summary": "List a box registry's download files",
                 "tags": [
                     "Artifacts"
                 ]
@@ -9306,7 +9502,7 @@
         },
         "/api/artifacts/upload/prepare": {
             "post": {
-                "description": "Minimum role: operator. Mints an artifact_upload task in PREPARED status (the queue never dispatches it) and returns the upload URL — zoneweaver's two-step upload for large files. The prepared task dies on agent restart; size is capped by artifact_storage.max_upload_gb.",
+                "description": "Minimum role: operator. Mints an artifact_upload task in PREPARED status (the queue never dispatches it) and returns the upload URL — zoneweaver's two-step upload for large files. checksum with checksum_algorithm, md5, sha1, sha256 (the default), sha384 or sha512, is verified once the file lands, the agent's own sha256 staying the artifact's checksum and the given one recorded beside it. The prepared task dies on agent restart; size is capped by artifact_storage.max_upload_gb.",
                 "requestBody": {
                     "content": {
                         "application/json": {
@@ -9339,7 +9535,7 @@
                         "description": "Upload prepared"
                     },
                     "400": {
-                        "description": "Missing fields, unusable filename, over the size cap, disabled location, or missing role"
+                        "description": "Missing fields, unusable filename or checksum, over the size cap, disabled location, or missing role"
                     },
                     "404": {
                         "description": "Storage location not found"
@@ -9612,7 +9808,7 @@
         },
         "/api/auth/logout": {
             "post": {
-                "description": "Minimum role: viewer. Forgets the session the __Host-hwa_session cookie names and clears the cookie with Max-Age=0; the key behind it stays. Sent with the cookie, it must arrive same-origin like every write.",
+                "description": "Minimum role: viewer. Forgets the session the __Host-hwa_session cookie names and clears the cookie with Max-Age=0; the key behind it stays, and the key's console sessions with no socket attached end, each with a session-ended on the sessions topic. Sent with the cookie, it must arrive same-origin like every write.",
                 "responses": {
                     "204": {
                         "description": "Session ended, cookie cleared"
@@ -10872,10 +11068,10 @@
         },
         "/api/events": {
             "get": {
-                "description": "Minimum role: viewer. The one event stream of the Universal Events Contract, plain WHATWG server-sent events. topics is a comma-separated list of health, tasks, hosts, admin, monitoring, profile and notifications; unknown names are ignored, an empty list asks for every topic, and the stream answers the topics the key's role may read, admin left out for a non-admin key, so the ready event's topics list is the subscription that stands; 403 only when nothing is left. The first frame is retry: 3000 followed by the ready event carrying the newest id and the subscribed topics. Every event carries id \u003cepoch-ms\u003e-\u003cseq\u003e, a kebab-case event name and one line of JSON data; a :hb comment line is sent after 25 seconds without a frame. Topic tasks sends task-updated, one task row as GET /api/tasks answers it, when a task is created and on every change of its status, progress_percent, progress_info or error_message. Topic hosts sends stats-updated, the GET /api/stats document, when a machine is created or removed and when one changes status. Topic health sends health, the GET /api/health report, whenever a task ends and the report differs from the last one sent. Topic admin sends restart-required, {required, last_modified_by, last_modified_time}, after every configuration save and backup restore, and {required: false} as the agent restarts; it is subscribed for an admin key alone. Topic admin also sends update-available {current_version, latest_version, release_date} when a check finds a newer release. Topic monitoring sends cpu-sample {cpu: [sample]} with per_core_parsed, memory-sample {memory: [sample]} and network-sample {usage: [samples]}, the members GET /api/monitoring/system/cpu, /api/system/memory and /api/network/usage answer, whenever the agent takes them: every monitoring.live_interval seconds while at least one client is subscribed to the topic, whether or not storage is on, and nothing while none is; on every collector tick while monitoring.storage_enabled; and on POST /api/monitoring/collect. A live sample is one event in the ring like any other. Topic profile is the person's profile topic of the contract; this agent keeps no preferences, so it sends nothing on it. Topic notifications sends, to the one person whose inbox changed, notification-created (the row as GET /api/notifications answers it), notification-read {id, read_at}, notification-unread {id}, notification-dismissed {id}, inbox-read-all {read_at} and inbox-cleared {}, each followed by unread-count {count}, the person's unread rows, the local inbox's and, for the account the agent is bound to, the hub's. For the bound account, while at least one client here is subscribed to the topic, the agent also holds the identity provider's stream open on its session and notifications topics under the account's token and relays the notifications topic to that person: the hub's notification-created row arrives marked origin hub, its unread-count, ready and reset each send this agent's combined unread-count, and every other event of the topic passes as it came; the hub's session-terminated ends the bound account's grant on the agent, and the account signs in again. No topic has a snapshot event. The ring keeps the last 500 events or 5 minutes, whichever is larger: a Last-Event-ID inside it replays every later event of the subscribed topics, one outside it answers a reset event naming the subscribed topics. A task's output and every terminal stay on their WebSockets.",
+                "description": "Minimum role: viewer. The one event stream of the Universal Events Contract, plain WHATWG server-sent events. topics is a comma-separated list of health, tasks, hosts, admin, monitoring, profile, notifications and sessions; unknown names are ignored, an empty list asks for every topic, and the stream answers the topics the key's role may read, admin left out for a non-admin key, so the ready event's topics list is the subscription that stands; 403 only when nothing is left. The first frame is retry: 3000 followed by the ready event carrying the newest id and the subscribed topics. Every event carries id \u003cepoch-ms\u003e-\u003cseq\u003e, a kebab-case event name and one line of JSON data; a :hb comment line is sent after 25 seconds without a frame. Topic tasks sends task-updated, one task row as GET /api/tasks answers it, when a task is created and on every change of its status, progress_percent, progress_info or error_message. Topic hosts sends stats-updated, the GET /api/stats document, when a machine is created or removed and when one changes status. Topic health sends health, the GET /api/health report, whenever a task ends and the report differs from the last one sent. Topic admin sends restart-required, {required, last_modified_by, last_modified_time}, after every configuration save and backup restore, and {required: false} as the agent restarts; it is subscribed for an admin key alone. Topic admin also sends update-available {current_version, latest_version, release_date} when a check finds a newer release. Topic monitoring sends cpu-sample {cpu: [sample]} with per_core_parsed, memory-sample {memory: [sample]} and network-sample {usage: [samples]}, the members GET /api/monitoring/system/cpu, /api/system/memory and /api/network/usage answer, whenever the agent takes them: every monitoring.live_interval seconds while at least one client is subscribed to the topic, whether or not storage is on, and nothing while none is; on every collector tick while monitoring.storage_enabled; and on POST /api/monitoring/collect. A live sample is one event in the ring like any other. Topic profile is the person's profile topic of the contract; this agent keeps no preferences, so it sends nothing on it. Topic notifications sends, to the one person whose inbox changed, notification-created (the row as GET /api/notifications answers it), notification-read {id, read_at}, notification-unread {id}, notification-dismissed {id}, inbox-read-all {read_at} and inbox-cleared {}, each followed by unread-count {count}, the person's unread rows, the local inbox's and, for the account the agent is bound to, the hub's. For the bound account, while at least one client here is subscribed to the topic, the agent also holds the identity provider's stream open on its session and notifications topics under the account's token and relays the notifications topic to that person: the hub's notification-created row arrives marked origin hub, its unread-count, ready and reset each send this agent's combined unread-count, and every other event of the topic passes as it came; the hub's session-terminated ends the bound account's grant on the agent, and the account signs in again. Topic sessions sends, to the person whose key started the terminal, session-started and session-ended, each {kind, id, machine_name}, kind host_shell or ssh and machine_name empty for the host shell, when a host shell or an SSH session starts and when it ends, whoever ended it. No topic has a snapshot event. The ring keeps the last 500 events or 5 minutes, whichever is larger: a Last-Event-ID inside it replays every later event of the subscribed topics, one outside it answers a reset event naming the subscribed topics. A task's output and every terminal stay on their WebSockets.",
                 "parameters": [
                     {
-                        "description": "Comma-separated topics: health, tasks, hosts, admin, monitoring, profile, notifications",
+                        "description": "Comma-separated topics: health, tasks, hosts, admin, monitoring, profile, notifications, sessions",
                         "in": "query",
                         "name": "topics",
                         "schema": {
@@ -14576,7 +14772,7 @@
         },
         "/api/machines/{machineName}/ssh/start": {
             "post": {
-                "description": "Minimum role: operator. Mints an SSH terminal session for a RUNNING machine; connect the terminal at the /api/ssh/{sessionId} WebSocket. Each call is an independent session. Credentials come from the stored configuration (settings.vagrant_user/vagrant_user_pass/vagrant_user_private_key_path; the agent's provisioning key is the last-resort fallback). Transport = the pipeline's ladder: the provisioning NAT ssh port-forward first (immune to guest network reconfiguration), the document's control IP as fallback.",
+                "description": "Minimum role: operator. Mints an SSH terminal session for a RUNNING machine, created_by the calling key; the shell opens when the first terminal connects at the /api/ssh/{sessionId} WebSocket and lives until DELETE /api/ssh/sessions/{sessionId}/stop, the remote shell's exit, the calling key's revocation or deletion while no socket is attached, or the agent's stop; a socket's close leaves it running, its last output kept for the next socket. session-started {kind: ssh, id, machine_name} goes to the person on the sessions topic of GET /api/events. Each call is an independent session. Credentials come from the stored configuration (settings.vagrant_user/vagrant_user_pass/vagrant_user_private_key_path; the agent's provisioning key is the last-resort fallback). Transport = the pipeline's ladder: the provisioning NAT ssh port-forward first (immune to guest network reconfiguration), the document's control IP as fallback.",
                 "parameters": [
                     {
                         "description": "Machine name",
@@ -17455,7 +17651,7 @@
         },
         "/api/provisioning/catalog": {
             "get": {
-                "description": "Minimum role: viewer. Fetches the source's catalog.json LIVE (?source= names a configured catalog; empty = the default), validates format_version 1, and relays the document verbatim with every member the catalog publishes: {name, format_version, updated, provisioners: [{name, repo, description, versions: [{version, released_at, artifacts: [{url, checksum_type, checksum}]}]}]} — versions semver-DESC, artifact URLs OPAQUE (release tags carry slashes; never parse or construct them). Versions may disappear between fetches when an author deletes a release. An oidc source is read as the person: under the access token of the account the calling key's SSO login minted it for, else the bound account's; with none held, or the catalog refusing it, the answer is 401 with the authentication problem type.",
+                "description": "Minimum role: viewer. Fetches the source's catalog.json LIVE (?source= names a configured catalog; empty = the default), validates format_version 1, and relays the document verbatim with every member the catalog publishes: {name, format_version, updated, provisioners: [{name, repo, description, versions: [{version, released_at, artifacts: [{url, checksum_type, checksum}]}]}]} — versions semver-DESC, artifact URLs OPAQUE (release tags carry slashes; never parse or construct them). Versions may disappear between fetches when an author deletes a release. An oidc source is read as the person: the agent reads the catalog's protected resource metadata at its origin's /.well-known/oauth-protected-resource, accepts it while its resource equals the origin and its authorization_servers name this agent's issuer, exchanges the account's access token at the identity provider for one minted for that resource, the calling key's own account before the bound account's, and sends it as Bearer; with no account token held, the identity provider refusing the exchange, or the catalog refusing the token, the answer is 401 with the authentication problem type and the refusal in detail.",
                 "parameters": [
                     {
                         "description": "A configured catalog source's id; empty = the default",
@@ -17516,7 +17712,7 @@
         },
         "/api/provisioning/catalog/health": {
             "get": {
-                "description": "Minimum role: viewer. Fetches the source's health.json LIVE, the URL beside the catalog's (catalog.json becoming health.json, /catalog becoming /health), and relays it verbatim: {name, format_version, updated, provisioners: {\u003cfamily\u003e: {repo, tier, presentation, rules, failed_rules, health}}}. 404 while the source publishes none. An oidc source is read as the person, the calling key's own account's token before the bound account's; with none held, or the catalog refusing it, the answer is 401 with the authentication problem type.",
+                "description": "Minimum role: viewer. Fetches the source's health.json LIVE, the URL beside the catalog's (catalog.json becoming health.json, /catalog becoming /health), and relays it verbatim: {name, format_version, updated, provisioners: {\u003cfamily\u003e: {repo, tier, presentation, rules, failed_rules, health}}}. 404 while the source publishes none. An oidc source is read as the person under a token exchanged for the catalog's resource identifier, the calling key's own account before the bound account's; with none held, the exchange refused, or the catalog refusing it, the answer is 401 with the authentication problem type.",
                 "parameters": [
                     {
                         "description": "A configured catalog source's id; empty = the default",
@@ -17578,7 +17774,7 @@
         },
         "/api/provisioning/catalog/install": {
             "post": {
-                "description": "Minimum role: operator. Queues provisioner_catalog_install, a task and never an inbox row: the executor fetches the catalog FRESH as the person who queued it (an oidc source under that key's own account's token, else the bound account's; a stale pin would 404 anyway; published checksums never change), downloads the named version's immutable VERSIONED asset, verifies its sha256 DURING the stream (mismatch = loud failure, nothing imported), then runs the ordinary import path — DSL lint gate, non-clobber, role-specs + schema.json derivation all included. While the archive downloads, the TASK carries real byte progress (the converged wire, sync 2026-07-17): progress_info is exactly {status: \"downloading\", received_bytes, total_bytes|null} and progress_percent maps the bytes into 0→90 (this op had no intermediate percents; the sha256 verify + import ride after the window and completion lands 100) — throttled to one update per 1s or 1% of total (whichever first), final update always emitted; an unknown Content-Length parks the percent at 0 while received_bytes streams. Serialized with imports (one registry write at a time).",
+                "description": "Minimum role: operator. Queues provisioner_catalog_install, a task and never an inbox row: the executor fetches the catalog FRESH as the person who queued it (an oidc source under a token exchanged for the catalog's resource identifier from that key's own account, else the bound account's; a stale pin would 404 anyway; published checksums never change), downloads the named version's immutable VERSIONED asset, verifies its sha256 DURING the stream (mismatch = loud failure, nothing imported), then runs the ordinary import path — DSL lint gate, non-clobber, role-specs + schema.json derivation all included. While the archive downloads, the TASK carries real byte progress (the converged wire, sync 2026-07-17): progress_info is exactly {status: \"downloading\", received_bytes, total_bytes|null} and progress_percent maps the bytes into 0→90 (this op had no intermediate percents; the sha256 verify + import ride after the window and completion lands 100) — throttled to one update per 1s or 1% of total (whichever first), final update always emitted; an unknown Content-Length parks the percent at 0 while received_bytes streams. Serialized with imports (one registry write at a time).",
                 "requestBody": {
                     "content": {
                         "application/json": {
@@ -17644,7 +17840,7 @@
                 ]
             },
             "post": {
-                "description": "Minimum role: operator. Adds a catalog to catalog_sources.sources in the storage configuration file, keyed by an id derived from display_name, enabled and not the default; auth is none or oidc, oidc sending the bound account's access token as Bearer on the catalog read and its downloads. It takes effect at once, no restart: the sources list, the catalog read and the next catalog install read it.",
+                "description": "Minimum role: operator. Adds a catalog to catalog_sources.sources in the storage configuration file, keyed by an id derived from display_name, enabled and not the default; auth is none or oidc, oidc sending as Bearer on the catalog read and its downloads a token exchanged for the catalog's resource identifier from the reading person's account. It takes effect at once, no restart: the sources list, the catalog read and the next catalog install read it.",
                 "requestBody": {
                     "content": {
                         "application/json": {
@@ -18633,7 +18829,7 @@
         },
         "/api/ssh/sessions": {
             "get": {
-                "description": "Minimum role: viewer. Newest first. Sessions are in-memory — an agent restart closes them all (shells cannot survive it).",
+                "description": "Minimum role: viewer. Every session the agent holds, newest first, each {id, machine_name, status, ssh_host, ssh_port, ssh_username, created_by, created_at, last_activity}, status connecting, active, closed or failed; a person re-attaches to the live ones their own key started. Sessions are in-memory — an agent restart closes them all.",
                 "responses": {
                     "200": {
                         "content": {
@@ -18692,7 +18888,7 @@
         },
         "/api/ssh/sessions/{sessionId}/stop": {
             "delete": {
-                "description": "Minimum role: operator. Closes the shell and marks the session closed.",
+                "description": "Minimum role: operator. Closes the shell, marks the session closed and sends session-ended on the sessions topic to the person who started it, so the tab closes in every open browser.",
                 "parameters": [
                     {
                         "description": "SSH session id",
@@ -18727,7 +18923,7 @@
         },
         "/api/ssh/{sessionId}": {
             "get": {
-                "description": "WEBSOCKET upgrade — authenticate with ?ticket= (GET /api/ws-ticket) minted with ?machine= matching the session's machine (the frozen cross-agent shape: machine streams take ONLY a matching scoped ticket; a mismatch answers the same 401 as an invalid ticket). Opens the interactive shell (xterm-256color PTY) for a session minted at POST /api/machines/{name}/ssh/start. Wire: remote output arrives as raw text frames; send raw text as terminal input; send {\"type\": \"resize\", \"cols\": N, \"rows\": N} JSON frames to resize the PTY. \"Connecting to SSH...\" opens the stream; \"SSH connection closed.\" marks remote exit.",
+                "description": "WEBSOCKET upgrade — authenticate with ?ticket= (GET /api/ws-ticket) minted with ?machine= matching the session's machine (the frozen cross-agent shape: machine streams take ONLY a matching scoped ticket; a mismatch answers the same 401 as an invalid ticket). The first socket opens the interactive shell (xterm-256color PTY) of a session minted at POST /api/machines/{name}/ssh/start; a later socket attaches to the running shell, the last output it wrote, up to 256 KiB, replayed first, and takes any earlier socket's place. Closing the socket leaves the shell running for the next socket. Wire: remote output arrives as raw text frames; send raw text as terminal input; send {\"type\": \"resize\", \"cols\": N, \"rows\": N} JSON frames to resize the PTY. \"Connecting to SSH...\" opens the stream; \"SSH connection closed.\" marks remote exit.",
                 "parameters": [
                     {
                         "description": "SSH session id",
@@ -18756,7 +18952,7 @@
                         "description": "Missing, invalid, or wrong-scope ticket"
                     },
                     "404": {
-                        "description": "SSH session or machine not found"
+                        "description": "SSH session or machine not found, or the session already closed"
                     }
                 },
                 "summary": "SSH terminal (WebSocket)",
@@ -20909,7 +21105,7 @@
         },
         "/api/term/sessions": {
             "get": {
-                "description": "Minimum role: admin. Newest first.",
+                "description": "Minimum role: admin. Every session the agent holds, newest first, each {id, status, shell, created_by, created_at, last_activity}, status active or closed; a person re-attaches to the active ones their own key started.",
                 "responses": {
                     "200": {
                         "content": {
@@ -20968,7 +21164,7 @@
         },
         "/api/term/sessions/{sessionId}/stop": {
             "delete": {
-                "description": "Minimum role: admin. Closes the shell and marks the session closed.",
+                "description": "Minimum role: admin. Closes the shell, marks the session closed and sends session-ended on the sessions topic to the person who started it, so the tab closes in every open browser.",
                 "parameters": [
                     {
                         "description": "Terminal session ID",
@@ -21003,7 +21199,7 @@
         },
         "/api/term/start": {
             "post": {
-                "description": "Minimum role: ADMIN (the host-terminal capability token — every /api/term REST verb is admin-only: a shell on the agent host as the agent's own user is full host access). Mints a session; connect the terminal at the /api/term/{sessionId} WebSocket, where the shell actually opens (PowerShell/cmd via ConPTY on Windows, $SHELL login shell via a real PTY elsewhere). Sessions are in-memory — an agent restart closes them all.",
+                "description": "Minimum role: ADMIN (the host-terminal capability token — every /api/term REST verb is admin-only: a shell on the agent host as the agent's own user is full host access). Opens the shell at once (PowerShell/cmd via ConPTY on Windows, $SHELL login shell via a real PTY elsewhere) and answers the session, status active, created_by the calling key; connect a terminal at the /api/term/{sessionId} WebSocket. The shell lives until DELETE /api/term/sessions/{sessionId}/stop, the shell's own exit, the calling key's revocation or deletion while no socket is attached, or the agent's stop; a socket's close leaves it running, its last output kept for the next socket. session-started {kind: host_shell, id, machine_name: \"\"} goes to the person on the sessions topic of GET /api/events. Sessions are in-memory — an agent restart closes them all.",
                 "responses": {
                     "200": {
                         "content": {
@@ -21013,7 +21209,10 @@
                                 }
                             }
                         },
-                        "description": "Session created"
+                        "description": "Session created, the shell open"
+                    },
+                    "500": {
+                        "description": "The shell could not be opened"
                     }
                 },
                 "summary": "Start a host terminal session",
@@ -21024,7 +21223,7 @@
         },
         "/api/term/{sessionId}": {
             "get": {
-                "description": "WEBSOCKET upgrade — authenticate with an UNSCOPED ?ticket= (GET /api/ws-ticket without ?machine= — the frozen cross-agent shape: host-level streams take ONLY an unscoped ticket; a machine-scoped ticket answers the same 401 as an invalid one); the session id itself is mintable only by an admin at POST /api/term/start. Opens the host shell for the session. Wire = the SSH terminal's exactly: raw text frames both ways, {\"type\": \"resize\", \"cols\": N, \"rows\": N} JSON frames resize the PTY, \"Terminal session closed.\" marks shell exit — one xterm.js component serves both terminals.",
+                "description": "WEBSOCKET upgrade — authenticate with an UNSCOPED ?ticket= (GET /api/ws-ticket without ?machine= — the frozen cross-agent shape: host-level streams take ONLY an unscoped ticket; a machine-scoped ticket answers the same 401 as an invalid one); the session id itself is mintable only by an admin at POST /api/term/start. Attaches to the session's running shell: the last output the shell wrote, up to 256 KiB, is replayed first, then the live stream; a second socket on the same session takes the first one's place. Closing the socket leaves the shell running for the next socket. Wire = the SSH terminal's exactly: raw text frames both ways, {\"type\": \"resize\", \"cols\": N, \"rows\": N} JSON frames resize the PTY, \"Terminal session closed.\" marks shell exit — one xterm.js component serves both terminals.",
                 "parameters": [
                     {
                         "description": "Terminal session ID",
@@ -21053,7 +21252,7 @@
                         "description": "Missing, invalid, or machine-scoped ticket"
                     },
                     "404": {
-                        "description": "Terminal session not found"
+                        "description": "Terminal session not found or already closed"
                     }
                 },
                 "summary": "Host terminal (WebSocket)",

@@ -77,3 +77,9 @@ var MergeMigrations = []string{
 	CREATE INDEX idx_artifacts_role_kind ON artifacts (role, kind);
 	CREATE INDEX idx_artifacts_location ON artifacts (location_id);`,
 }
+
+// GivenChecksumMigrations adds the checksum a caller handed in beside the agent's own sha256, with the algorithm it was given under.
+var GivenChecksumMigrations = []string{
+	`ALTER TABLE artifacts ADD COLUMN given_checksum TEXT;
+	ALTER TABLE artifacts ADD COLUMN given_algorithm TEXT;`,
+}

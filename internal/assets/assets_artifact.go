@@ -22,8 +22,11 @@ type Artifact struct {
 	// File location (empty on expectation-only rows)
 	Path string `json:"path"`
 	// The file's actual SHA-256
-	SHA256         string     `json:"checksum"`
-	ExpectedSHA256 string     `json:"expected_sha256,omitempty"`
+	SHA256         string `json:"checksum"`
+	ExpectedSHA256 string `json:"expected_sha256,omitempty"`
+	// GivenChecksum is the checksum the caller handed in with the file, under GivenAlgorithm; empty when none was given
+	GivenChecksum  string     `json:"given_checksum,omitempty"`
+	GivenAlgorithm string     `json:"given_algorithm,omitempty"`
 	Size           int64      `json:"size"`
 	Version        string     `json:"version,omitempty"`
 	Exists         bool       `json:"file_exists"`

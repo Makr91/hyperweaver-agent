@@ -78,20 +78,23 @@ func PathFor(location *Location, role, filename string) (string, error) {
 	return safepath.Under(location.Path, filename)
 }
 
-// HashFile computes a file's SHA-256 (the system's one hash algorithm —
-// SHI rule).
+// HashFile computes a file's SHA-256, the one key every artifact is known by.
 func HashFile(path string) (sha string, size int64, err error) {
-	f, err := os.Open(filepath.Clean(path))
-	if err != nil {
-		return "", 0, err
-	}
-	defer func() {
-		_ = f.Close()
-	}()
 	hasher := sha256.New()
-	n, err := io.Copy(hasher, f)
+	n, err := copyFileTo(path, hasher)
 	if err != nil {
 		return "", 0, err
 	}
 	return hex.EncodeToString(hasher.Sum(nil)), n, nil
+}
+
+func copyFileTo(path string, w io.Writer) (int64, error) {
+	f, err := os.Open(filepath.Clean(path))
+	if err != nil {
+		return 0, err
+	}
+	defer func() {
+		_ = f.Close()
+	}()
+	return io.Copy(w, f)
 }

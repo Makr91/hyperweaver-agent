@@ -49,6 +49,8 @@ type HCLDownloadMetadata struct {
 	Filename string `json:"filename"`
 	Role     string `json:"role"`
 	Kind     string `json:"kind"`
+	// LocationID names the location the file lands in; empty selects the kind's default location
+	LocationID string `json:"storage_path_id,omitempty"`
 }
 
 // Validate checks an HCL download request before it becomes a task.
@@ -59,6 +61,7 @@ func (m *HCLDownloadMetadata) Validate() error {
 	if !ValidRole(m.Role) {
 		return errors.New("role is not usable")
 	}
+	m.Kind = NormalizeKind(m.Kind)
 	if !RoleKeyed(m.Kind) {
 		return errors.New("kind must be installer, fixpack, or hotfix")
 	}
@@ -109,10 +112,9 @@ func (e *executors) hclDownload(ctx context.Context, task *tasks.Task, out *task
 	}
 	out.Write("stdout", "Catalog entry "+fileID+" (sha256 "+catalogSHA+")\n")
 
-	// Downloads land in the kind's default location (built-in cache first).
-	location, err := e.store.DefaultLocation(ctx, meta.Kind)
+	location, err := e.kindLocation(ctx, meta.Kind, meta.LocationID)
 	if err != nil {
-		return fmt.Errorf("no enabled %s storage location: %w", meta.Kind, err)
+		return err
 	}
 
 	// The catalog's hash is authoritative — it overwrites the expectation
@@ -149,11 +151,12 @@ func (e *executors) hclDownload(ctx context.Context, task *tasks.Task, out *task
 	}
 
 	temp := target + ".download"
-	sha, size, err := e.streamToFile(task.ID, response.Body, temp, response.ContentLength)
+	hashes, size, err := e.streamToFile(task.ID, response.Body, temp, response.ContentLength, AlgorithmSHA256)
 	if err != nil {
 		_ = os.Remove(temp)
 		return err
 	}
+	sha := hashes.SHA256()
 	if !strings.EqualFold(sha, catalogSHA) {
 		_ = os.Remove(temp)
 		return fmt.Errorf("hash mismatch: downloaded %s, catalog says %s — file discarded", sha, catalogSHA)
@@ -177,6 +180,28 @@ func (e *executors) hclDownload(ctx context.Context, task *tasks.Task, out *task
 	out.Write("stdout", "Downloaded and verified "+artifact.Filename+" ("+sha+", "+
 		strconv.FormatInt(size, 10)+" bytes)\n")
 	return nil
+}
+
+// kindLocation answers the location a kind-addressed download lands in: the one id names while it is enabled and of the kind's type, else the kind's default location.
+func (e *executors) kindLocation(ctx context.Context, kind, id string) (*Location, error) {
+	if id == "" {
+		location, err := e.store.DefaultLocation(ctx, kind)
+		if err != nil {
+			return nil, fmt.Errorf("no enabled %s storage location: %w", kind, err)
+		}
+		return location, nil
+	}
+	location, err := e.store.GetLocation(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if !location.Enabled {
+		return nil, errors.New("storage location is disabled")
+	}
+	if location.Type != kind {
+		return nil, fmt.Errorf("storage location %s holds %s files, not %s", location.Name, location.Type, kind)
+	}
+	return location, nil
 }
 
 // hclExchange trades the refresh token for an access token, returning the
