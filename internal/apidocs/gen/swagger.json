@@ -7496,6 +7496,14 @@
                     "release_date": {},
                     "release_notes": {},
                     "release_url": {},
+                    "releases": {
+                        "description": "The releases of the repository release_url belongs to, newest first, null while the list cannot be read",
+                        "items": {
+                            "$ref": "#/components/schemas/updater.Release"
+                        },
+                        "type": "array",
+                        "uniqueItems": false
+                    },
                     "success": {
                         "type": "boolean"
                     },
@@ -8007,6 +8015,56 @@
                     },
                     "url": {
                         "type": "string"
+                    }
+                },
+                "type": "object"
+            },
+            "updater.Release": {
+                "properties": {
+                    "assets": {
+                        "items": {
+                            "$ref": "#/components/schemas/updater.ReleaseAsset"
+                        },
+                        "type": "array",
+                        "uniqueItems": false
+                    },
+                    "author": {
+                        "type": "string"
+                    },
+                    "body": {
+                        "type": "string"
+                    },
+                    "html_url": {
+                        "type": "string"
+                    },
+                    "name": {
+                        "type": "string"
+                    },
+                    "prerelease": {
+                        "type": "boolean"
+                    },
+                    "published_at": {
+                        "type": "string"
+                    },
+                    "tag": {
+                        "type": "string"
+                    }
+                },
+                "type": "object"
+            },
+            "updater.ReleaseAsset": {
+                "properties": {
+                    "browser_download_url": {
+                        "type": "string"
+                    },
+                    "name": {
+                        "type": "string"
+                    },
+                    "sha256": {
+                        "type": "string"
+                    },
+                    "size": {
+                        "type": "integer"
                     }
                 },
                 "type": "object"
@@ -8532,7 +8590,7 @@
         },
         "/api/app/updates/check": {
             "get": {
-                "description": "Minimum role: viewer. Fetches the configured versioninfo document (updates.versioninfo_url) and compares against the running build; release_url, release_date, changelog and release_notes, the release's own text, come from the document, null when it carries none; assets lists the release's files, one {name, url, size, checksum} per platform URL and the checksums URL the document carries, size from the file's own Content-Length and checksum from the release's SHA256SUMS.txt, each null where unknown, assets itself null while the document carries no URL. When no URL is configured or the document cannot be fetched or read, the answer is still 200 with update_available false, latest_version null and the reason in message, so a page never draws a failure for a check it could not make. A check that finds a newer release, this one or the scheduled one every updates.check_interval_hours, writes one row to the bound person's inbox, once per version, and sends update-available on the admin topic of the event stream.",
+                "description": "Minimum role: viewer. Fetches the configured versioninfo document (updates.versioninfo_url) and compares against the running build; release_url, release_date, changelog and release_notes, the release's own text, come from the document, null when it carries none; assets lists the release's files, one {name, url, size, checksum} per platform URL and the checksums URL the document carries, size from the file's own Content-Length and checksum from the release's SHA256SUMS.txt, each null where unknown, assets itself null while the document carries no URL; releases lists the releases of the repository release_url belongs to, newest first as its releases page lists them, each {tag, name, prerelease, published_at, author, html_url, body, assets: [{name, size, sha256, browser_download_url}]}, author the releaser's login, body the release's markdown, sha256 from that release's SHA256SUMS.txt and null where it lists none, releases null while the list cannot be read, the check still answering its one release. When no URL is configured or the document cannot be fetched or read, the answer is still 200 with update_available false, latest_version null and the reason in message, so a page never draws a failure for a check it could not make. A check that finds a newer release, this one or the scheduled one every updates.check_interval_hours, writes one row to the bound person's inbox, once per version, and sends update-available on the admin topic of the event stream.",
                 "responses": {
                     "200": {
                         "content": {
@@ -16943,7 +17001,7 @@
                 ]
             },
             "get": {
-                "description": "Minimum role: viewer. One page of the inbox of the person the calling key stands for, newest first: page counts from 0, size is 20 unless given and at most 100, and unread_only keeps the unread rows alone. The rows are the agent's local inbox, origin local, and, for the account the agent is bound to while it holds that account's token, the identity provider's hub rows, origin hub, each keeping the hub's own numeric id; total counts both.",
+                "description": "Minimum role: viewer. One page of the inbox of the person the calling key stands for, newest first: page counts from 0, size is 20 unless given and at most 100, and unread_only keeps the unread rows alone. The rows are the agent's local inbox, origin local, each carrying a body that says what happened in one sentence, system as this agent's brand name and navigate as the path on this host that shows the thing (the machine's page, the Templates page for a template task, the Update page for a release), and, for the account the agent is bound to while it holds that account's token, the identity provider's hub rows, origin hub, each keeping the hub's own members and numeric id; total counts both.",
                 "parameters": [
                     {
                         "description": "Page number, counted from 0",
@@ -16979,7 +17037,7 @@
                                 }
                             }
                         },
-                        "description": "The page: {items: [{id, title, body, type, severity, navigate, read_at, created_at, origin}], page, size, total, total_pages}; a hub row carries every member the hub answers"
+                        "description": "The page: {items: [{id, title, body, type, severity, navigate, system, read_at, created_at, origin}], page, size, total, total_pages}; a hub row carries every member the hub answers"
                     },
                     "401": {
                         "content": {
@@ -17397,7 +17455,7 @@
         },
         "/api/provisioning/catalog": {
             "get": {
-                "description": "Minimum role: viewer. Fetches the source's catalog.json LIVE (?source= names a configured catalog; empty = the default), validates format_version 1, and relays the document verbatim with every member the catalog publishes: {name, format_version, updated, provisioners: [{name, repo, description, versions: [{version, released_at, artifacts: [{url, checksum_type, checksum}]}]}]} — versions semver-DESC, artifact URLs OPAQUE (release tags carry slashes; never parse or construct them). Versions may disappear between fetches when an author deletes a release. An oidc source is read under the bound account's access token; with none held, or the catalog refusing it, the answer is 401 with the authentication problem type.",
+                "description": "Minimum role: viewer. Fetches the source's catalog.json LIVE (?source= names a configured catalog; empty = the default), validates format_version 1, and relays the document verbatim with every member the catalog publishes: {name, format_version, updated, provisioners: [{name, repo, description, versions: [{version, released_at, artifacts: [{url, checksum_type, checksum}]}]}]} — versions semver-DESC, artifact URLs OPAQUE (release tags carry slashes; never parse or construct them). Versions may disappear between fetches when an author deletes a release. An oidc source is read as the person: under the access token of the account the calling key's SSO login minted it for, else the bound account's; with none held, or the catalog refusing it, the answer is 401 with the authentication problem type.",
                 "parameters": [
                     {
                         "description": "A configured catalog source's id; empty = the default",
@@ -17458,7 +17516,7 @@
         },
         "/api/provisioning/catalog/health": {
             "get": {
-                "description": "Minimum role: viewer. Fetches the source's health.json LIVE, the URL beside the catalog's (catalog.json becoming health.json, /catalog becoming /health), and relays it verbatim: {name, format_version, updated, provisioners: {\u003cfamily\u003e: {repo, tier, presentation, rules, failed_rules, health}}}. 404 while the source publishes none. An oidc source is read under the bound account's access token; with none held, or the catalog refusing it, the answer is 401 with the authentication problem type.",
+                "description": "Minimum role: viewer. Fetches the source's health.json LIVE, the URL beside the catalog's (catalog.json becoming health.json, /catalog becoming /health), and relays it verbatim: {name, format_version, updated, provisioners: {\u003cfamily\u003e: {repo, tier, presentation, rules, failed_rules, health}}}. 404 while the source publishes none. An oidc source is read as the person, the calling key's own account's token before the bound account's; with none held, or the catalog refusing it, the answer is 401 with the authentication problem type.",
                 "parameters": [
                     {
                         "description": "A configured catalog source's id; empty = the default",
@@ -17520,7 +17578,7 @@
         },
         "/api/provisioning/catalog/install": {
             "post": {
-                "description": "Minimum role: operator. Queues provisioner_catalog_install: the executor fetches the catalog FRESH (a stale pin would 404 anyway; published checksums never change), downloads the named version's immutable VERSIONED asset, verifies its sha256 DURING the stream (mismatch = loud failure, nothing imported), then runs the ordinary import path — DSL lint gate, non-clobber, role-specs + schema.json derivation all included. While the archive downloads, the TASK carries real byte progress (the converged wire, sync 2026-07-17): progress_info is exactly {status: \"downloading\", received_bytes, total_bytes|null} and progress_percent maps the bytes into 0→90 (this op had no intermediate percents; the sha256 verify + import ride after the window and completion lands 100) — throttled to one update per 1s or 1% of total (whichever first), final update always emitted; an unknown Content-Length parks the percent at 0 while received_bytes streams. Serialized with imports (one registry write at a time).",
+                "description": "Minimum role: operator. Queues provisioner_catalog_install, a task and never an inbox row: the executor fetches the catalog FRESH as the person who queued it (an oidc source under that key's own account's token, else the bound account's; a stale pin would 404 anyway; published checksums never change), downloads the named version's immutable VERSIONED asset, verifies its sha256 DURING the stream (mismatch = loud failure, nothing imported), then runs the ordinary import path — DSL lint gate, non-clobber, role-specs + schema.json derivation all included. While the archive downloads, the TASK carries real byte progress (the converged wire, sync 2026-07-17): progress_info is exactly {status: \"downloading\", received_bytes, total_bytes|null} and progress_percent maps the bytes into 0→90 (this op had no intermediate percents; the sha256 verify + import ride after the window and completion lands 100) — throttled to one update per 1s or 1% of total (whichever first), final update always emitted; an unknown Content-Length parks the percent at 0 while received_bytes streams. Serialized with imports (one registry write at a time).",
                 "requestBody": {
                     "content": {
                         "application/json": {
@@ -20487,7 +20545,7 @@
         },
         "/api/templates/publish": {
             "post": {
-                "description": "Minimum role: operator. Queues template_upload (the base's publish): exports the machine (or takes an existing .box by path), ensures the registry structure (box → version → provider virtualbox → architecture; duplicates tolerated), chunk-uploads the artifact (100MB chunks, three retries with backoff), and releases the box. While the upload runs, the TASK carries real byte progress (the converged wire, sync 2026-07-17): progress_info is exactly {status: \"uploading\", received_bytes, total_bytes} — received_bytes is bytes SENT so far (the uniform field name for both directions), total_bytes the .box file size — and progress_percent maps the bytes into the step's existing 85→95 window, throttled to one update per 1s or 1% of total (whichever first), final update always emitted; a retried chunk re-reports its own range instead of inflating the count. The registry credential is the bound account's access token while one is held, else the configured source's auth_token (the registry API key, a BoxVault service-account token sent as Bearer; ca_file trusts self-signed registries) — tokens never ride task metadata, so the base's per-request auth_token has no analog.",
+                "description": "Minimum role: operator. Queues template_upload (the base's publish): exports the machine (or takes an existing .box by path), ensures the registry structure (box → version → provider virtualbox → architecture; duplicates tolerated), chunk-uploads the artifact (100MB chunks, three retries with backoff), and releases the box. While the upload runs, the TASK carries real byte progress (the converged wire, sync 2026-07-17): progress_info is exactly {status: \"uploading\", received_bytes, total_bytes} — received_bytes is bytes SENT so far (the uniform field name for both directions), total_bytes the .box file size — and progress_percent maps the bytes into the step's existing 85→95 window, throttled to one update per 1s or 1% of total (whichever first), final update always emitted; a retried chunk re-reports its own range instead of inflating the count. The registry credential is the access token of the account the calling key's SSO login minted it for, else the bound account's, while one is held, else the configured source's auth_token (the registry API key, a BoxVault service-account token sent as Bearer; ca_file trusts self-signed registries) — tokens never ride task metadata, so the base's per-request auth_token has no analog.",
                 "requestBody": {
                     "content": {
                         "application/json": {
@@ -20534,7 +20592,7 @@
         },
         "/api/templates/pull": {
             "post": {
-                "description": "Minimum role: operator. Queues a template_download task: the .box streams from the named source (or the default registry), its disk image lands in the template storage, and the registry row is created. The download is read as the person: the bound account's access token while one is held, else the source's own auth_token last, so org-private boxes download per the person's own claims and the server-wide key serves only a host nobody is signed into. While the download runs, the TASK carries real byte progress (the converged wire, sync 2026-07-17): progress_info is exactly {status: \"downloading\", received_bytes, total_bytes|null} and progress_percent maps the bytes into the step's existing 10→60 window — throttled to one update per 1s or 1% of total (whichever first), final update always emitted; an unknown Content-Length parks the percent at 10 while received_bytes streams. An already-local tuple answers an honest 409 with the existing row's id instead of queueing a no-op download (the shared already-exists pre-check; a row whose disk image vanished self-heals, so re-pull after manual cleanup works). Private-box credentials live on the configured source (template_sources.sources[].auth_token) — never in task metadata.",
+                "description": "Minimum role: operator. Queues a template_download task: the .box streams from the named source (or the default registry), its disk image lands in the template storage, and the registry row is created. The download is read as the person who queued it: the access token of the account the calling key's SSO login minted it for, else the bound account's, while one is held, else the source's own auth_token last, so org-private boxes download per the person's own claims and the server-wide key serves only a host nobody is signed into. While the download runs, the TASK carries real byte progress (the converged wire, sync 2026-07-17): progress_info is exactly {status: \"downloading\", received_bytes, total_bytes|null} and progress_percent maps the bytes into the step's existing 10→60 window — throttled to one update per 1s or 1% of total (whichever first), final update always emitted; an unknown Content-Length parks the percent at 10 while received_bytes streams. An already-local tuple answers an honest 409 with the existing row's id instead of queueing a no-op download (the shared already-exists pre-check; a row whose disk image vanished self-heals, so re-pull after manual cleanup works). Private-box credentials live on the configured source (template_sources.sources[].auth_token) — never in task metadata.",
                 "requestBody": {
                     "content": {
                         "application/json": {
@@ -20605,7 +20663,7 @@
         },
         "/api/templates/remote/{sourceName}": {
             "get": {
-                "description": "Minimum role: viewer. The registry's discovery catalog — the machine wizard's box-picker feed. ONE /api/discover call, read as the person: the Bearer sent is, in order, the x-registry-token request header, the signed-in person's identity-provider token a Hyperweaver server forwards on a proxied read; else the agent's bound account's access token while one is held; else the source's own auth_token, the server-wide BoxVault service-account key, the last resort; else none, public boxes alone. So a private box of the person's organizations lists beside the public ones and the server-wide key serves only a host nobody is signed into; the configured key is never returned. FILTERED to what this agent can consume: only versions carrying a provider in the host's set (virtualbox always; utm too on a UTM-capable macOS agent) in the host's architecture survive (foreign providers/architectures are pruned; boxes left with no versions are dropped) — a zone/docker/aws-only or foreign-arch box never reaches the picker. The base's GET /api/templates/remote/{sourceName}.",
+                "description": "Minimum role: viewer. The registry's discovery catalog — the machine wizard's box-picker feed. ONE /api/discover call, read as the person: the Bearer sent is, in order, the x-registry-token request header, the signed-in person's identity-provider token a Hyperweaver server forwards on a proxied read; else the access token of the account the calling key's SSO login minted it for, kept and refreshed per key, so a person signed in through oidc.allowed_users reads as themselves; else the agent's bound account's access token while one is held, a plain key reading as the bound account; else the source's own auth_token, the server-wide BoxVault service-account key, the last resort; else none, public boxes alone. So a private box of the person's organizations lists beside the public ones and the server-wide key serves only a host nobody is signed into; the configured key is never returned. FILTERED to what this agent can consume: only versions carrying a provider in the host's set (virtualbox always; utm too on a UTM-capable macOS agent) in the host's architecture survive (foreign providers/architectures are pruned; boxes left with no versions are dropped) — a zone/docker/aws-only or foreign-arch box never reaches the picker. The base's GET /api/templates/remote/{sourceName}.",
                 "parameters": [
                     {
                         "description": "The configured template source's id",
@@ -20647,7 +20705,7 @@
         },
         "/api/templates/remote/{sourceName}/{org}/{boxName}": {
             "get": {
-                "description": "Minimum role: viewer. The registry's Vagrant-compatible /{org}/{box} metadata document: versions with providers and download URLs, FILTERED to what this agent can consume (the host's provider set — virtualbox always, utm on a UTM-capable macOS agent — in the host architecture), read as the person under the same credential ladder as the catalog: the x-registry-token request header first, the signed-in person's identity-provider token a Hyperweaver server forwards, else the bound account's access token, else the source's own auth_token last. A box that exists upstream but carries nothing downloadable here answers 404, same as absent. The base's GET /api/templates/remote/{sourceName}/{org}/{boxName}.",
+                "description": "Minimum role: viewer. The registry's Vagrant-compatible /{org}/{box} metadata document: versions with providers and download URLs, FILTERED to what this agent can consume (the host's provider set — virtualbox always, utm on a UTM-capable macOS agent — in the host architecture), read as the person under the same credential ladder as the catalog: the x-registry-token request header first, the signed-in person's identity-provider token a Hyperweaver server forwards, else the token of the account the calling key's SSO login minted it for, else the bound account's access token, else the source's own auth_token last. A box that exists upstream but carries nothing downloadable here answers 404, same as absent. The base's GET /api/templates/remote/{sourceName}/{org}/{boxName}.",
                 "parameters": [
                     {
                         "description": "The configured template source's id",
