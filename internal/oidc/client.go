@@ -58,9 +58,48 @@ type client struct {
 	flows       map[string]*flow
 	silent      map[string]*silentFlow
 	codeFlows   map[string]*codeFlow
+	keyTokens   map[int64]*tokenSource
 }
 
 var errNotAllowed = errors.New("account is not the bound account and not in oidc.allowed_users")
+
+func (c *client) keyTokenSource(id int64) *tokenSource {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if source := c.keyTokens[id]; source != nil {
+		return source
+	}
+	source := &tokenSource{
+		provider: c.provider,
+		clientID: c.clientID,
+		ctx:      c.ctx,
+		wg:       c.wg,
+		persist:  func(refreshToken string) { c.binding.setKeyRefreshToken(id, refreshToken) },
+	}
+	c.keyTokens[id] = source
+	return source
+}
+
+func (c *client) keyToken(id int64) string {
+	c.mu.Lock()
+	source := c.keyTokens[id]
+	c.mu.Unlock()
+	if source == nil {
+		return ""
+	}
+	return source.bearer()
+}
+
+func (c *client) pruneKeyTokens() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for id, source := range c.keyTokens {
+		if _, err := c.keys.Get(id); err != nil {
+			source.clear()
+			delete(c.keyTokens, id)
+		}
+	}
+}
 
 func randomHex() (string, error) {
 	raw := make([]byte, 32)
@@ -284,7 +323,12 @@ func (c *client) completeLogin(claims *identityClaims, answer *tokenAnswer) (*Cr
 		_, kerr := c.keys.Get(id)
 		return kerr == nil
 	})
-	c.tokens.set(answer)
+	c.pruneKeyTokens()
+	if claims.stableID() == c.binding.boundSubject() {
+		c.tokens.set(answer)
+	} else {
+		c.keyTokenSource(entity.ID).set(answer)
+	}
 	return &Credential{
 		EntityID: entity.ID,
 		Name:     entity.Name,

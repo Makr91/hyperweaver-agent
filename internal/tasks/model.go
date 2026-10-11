@@ -74,7 +74,7 @@ type Task struct {
 	Notify bool `json:"notify"`
 }
 
-// NotableOperations are the operation kinds whose end is written to the person's inbox unless the request says otherwise.
+// NotableOperations are the operation kinds whose end is written to the person's inbox unless the request says otherwise; a provisioner import, refresh or catalog install is a task alone.
 var NotableOperations = map[string]bool{
 	"machine_create_orchestration":    true,
 	"machine_provision_orchestration": true,
@@ -89,8 +89,6 @@ var NotableOperations = map[string]bool{
 	"template_download":               true,
 	"template_upload":                 true,
 	"template_export":                 true,
-	"provisioner_import":              true,
-	"provisioner_catalog_install":     true,
 	"agent_update":                    true,
 }
 

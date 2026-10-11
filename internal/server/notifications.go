@@ -116,13 +116,13 @@ func hubCreatedAt(item map[string]any) time.Time {
 }
 
 // @Summary		The signed-in person's inbox
-// @Description	Minimum role: viewer. One page of the inbox of the person the calling key stands for, newest first: page counts from 0, size is 20 unless given and at most 100, and unread_only keeps the unread rows alone. The rows are the agent's local inbox, origin local, and, for the account the agent is bound to while it holds that account's token, the identity provider's hub rows, origin hub, each keeping the hub's own numeric id; total counts both.
+// @Description	Minimum role: viewer. One page of the inbox of the person the calling key stands for, newest first: page counts from 0, size is 20 unless given and at most 100, and unread_only keeps the unread rows alone. The rows are the agent's local inbox, origin local, each carrying a body that says what happened in one sentence, system as this agent's brand name and navigate as the path on this host that shows the thing (the machine's page, the Templates page for a template task, the Update page for a release), and, for the account the agent is bound to while it holds that account's token, the identity provider's hub rows, origin hub, each keeping the hub's own members and numeric id; total counts both.
 // @Tags			Local Login
 // @Produce		json
 // @Param			page		query	int		false	"Page number, counted from 0"
 // @Param			size		query	int		false	"Page size, 20 unless given, at most 100"
 // @Param			unread_only	query	bool	false	"Unread rows alone"
-// @Success		200	{object}	notificationsPage	"The page: {items: [{id, title, body, type, severity, navigate, read_at, created_at, origin}], page, size, total, total_pages}; a hub row carries every member the hub answers"
+// @Success		200	{object}	notificationsPage	"The page: {items: [{id, title, body, type, severity, navigate, system, read_at, created_at, origin}], page, size, total, total_pages}; a hub row carries every member the hub answers"
 // @Failure		401	{object}	problem.Body	"Missing credential"
 // @Failure		403	{object}	problem.Body	"Invalid credential"
 // @Router			/api/notifications [get]

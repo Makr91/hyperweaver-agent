@@ -78,10 +78,11 @@ func (e *executors) templateDownload(ctx context.Context, task *tasks.Task, out 
 	if err != nil {
 		return err
 	}
-	// Registry auth: the bound account's token, else the source's API key, as
-	// Bearer (ca_file honored by the client).
+	// Registry auth: the account of the key that queued the task, else the
+	// bound account's token, else the source's API key, as Bearer (ca_file
+	// honored by the client).
 	client := registryHTTPClient(source)
-	setRegistryAuth(request, registryToken(source))
+	setRegistryAuth(request, registryToken(source, task.CreatedBy))
 
 	out.Write("stdout", "Downloading "+downloadURL+"\n")
 	e.taskProgress(task, 10, "downloading")

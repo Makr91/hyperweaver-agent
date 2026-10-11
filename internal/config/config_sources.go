@@ -42,7 +42,7 @@ type CatalogSourceConfig struct {
 	URL         string `yaml:"url"          json:"url"`
 	Enabled     bool   `yaml:"enabled"      json:"enabled"`
 	Default     bool   `yaml:"default"      json:"default"`
-	// Auth is none or oidc; oidc sends the bound account's access token as Bearer on the catalog read and its downloads.
+	// Auth is none or oidc; oidc sends the reading person's access token as Bearer on the catalog read and its downloads, the calling key's own account before the bound account.
 	Auth string `yaml:"auth" json:"auth"`
 	// CAFile adds a PEM CA bundle to the trust store for this catalog —
 	// self-hosted forks behind private CAs. Verification always stays on.

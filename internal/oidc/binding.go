@@ -26,26 +26,33 @@ type stateFile struct {
 	MintedKeys      map[int64]KeyIdentity `json:"minted_keys"`
 }
 
-const refreshTokenFile = "oidc.refresh"
+const (
+	refreshTokenFile = "oidc.refresh"
+	keyRefreshFile   = "oidc.keys.refresh"
+)
 
 type binding struct {
-	mu           sync.Mutex
-	storePath    string
-	refreshPath  string
-	allowedUsers []string
-	subject      string
-	email        string
-	customerID   string
-	refreshToken string
-	mintedKeys   map[int64]KeyIdentity
+	mu              sync.Mutex
+	storePath       string
+	refreshPath     string
+	keyRefreshPath  string
+	allowedUsers    []string
+	subject         string
+	email           string
+	customerID      string
+	refreshToken    string
+	mintedKeys      map[int64]KeyIdentity
+	keyRefreshToken map[int64]string
 }
 
 func newBinding(storePath string, allowedUsers []string, load bool) *binding {
 	b := &binding{
-		storePath:    storePath,
-		refreshPath:  filepath.Join(filepath.Dir(storePath), refreshTokenFile),
-		allowedUsers: allowedUsers,
-		mintedKeys:   map[int64]KeyIdentity{},
+		storePath:       storePath,
+		refreshPath:     filepath.Join(filepath.Dir(storePath), refreshTokenFile),
+		keyRefreshPath:  filepath.Join(filepath.Dir(storePath), keyRefreshFile),
+		allowedUsers:    allowedUsers,
+		mintedKeys:      map[int64]KeyIdentity{},
+		keyRefreshToken: map[int64]string{},
 	}
 	if !load {
 		return b
@@ -60,6 +67,7 @@ func newBinding(storePath string, allowedUsers []string, load bool) *binding {
 	b.customerID = state.BoundCustomerID
 	b.mintedKeys = state.MintedKeys
 	b.refreshToken = loadRefreshToken(b.refreshPath)
+	b.keyRefreshToken = loadKeyRefreshTokens(b.keyRefreshPath)
 	return b
 }
 
@@ -67,6 +75,67 @@ func (b *binding) storedRefreshToken() string {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	return b.refreshToken
+}
+
+func (b *binding) storedKeyRefreshTokens() map[int64]string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	tokens := make(map[int64]string, len(b.keyRefreshToken))
+	for id, token := range b.keyRefreshToken {
+		tokens[id] = token
+	}
+	return tokens
+}
+
+func (b *binding) setKeyRefreshToken(id int64, token string) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.keyRefreshToken[id] == token {
+		return
+	}
+	if token == "" {
+		delete(b.keyRefreshToken, id)
+	} else {
+		b.keyRefreshToken[id] = token
+	}
+	b.saveKeyRefreshTokensLocked()
+}
+
+func loadKeyRefreshTokens(path string) map[int64]string {
+	tokens := map[int64]string{}
+	raw, err := safepath.ReadFile(path)
+	if err != nil {
+		if !errors.Is(err, os.ErrNotExist) {
+			slog.Warn("oidc key refresh tokens unreadable", "path", path, "error", err)
+		}
+		return tokens
+	}
+	if uerr := json.Unmarshal(raw, &tokens); uerr != nil {
+		slog.Warn("oidc key refresh tokens unreadable", "path", path, "error", uerr)
+		return map[int64]string{}
+	}
+	return tokens
+}
+
+func (b *binding) saveKeyRefreshTokensLocked() {
+	if len(b.keyRefreshToken) == 0 {
+		if err := os.Remove(b.keyRefreshPath); err != nil && !errors.Is(err, os.ErrNotExist) {
+			slog.Error("oidc key refresh tokens removal failed", "error", err)
+		}
+		return
+	}
+	raw, err := json.Marshal(b.keyRefreshToken)
+	if err != nil {
+		slog.Error("oidc key refresh tokens save failed", "error", err)
+		return
+	}
+	if err := os.MkdirAll(filepath.Dir(b.keyRefreshPath), 0o700); err != nil {
+		slog.Error("oidc key refresh tokens save failed", "error", err)
+		return
+	}
+	if err := safepath.WriteFile(b.keyRefreshPath, raw, 0o600); err != nil {
+		slog.Error("oidc key refresh tokens save failed", "error", err)
+	}
 }
 
 func (b *binding) setRefreshToken(token string) {
@@ -175,12 +244,26 @@ func (b *binding) record(entityID int64, claims *identityClaims, keyExists func(
 		b.customerID = claims.CustomerID
 	}
 	b.mintedKeys[entityID] = KeyIdentity{Subject: claims.stableID(), Email: claims.Email, CustomerID: claims.CustomerID}
+	pruned := false
 	for id := range b.mintedKeys {
 		if id != entityID && !keyExists(id) {
 			delete(b.mintedKeys, id)
+			if _, held := b.keyRefreshToken[id]; held {
+				delete(b.keyRefreshToken, id)
+				pruned = true
+			}
 		}
 	}
 	b.saveLocked()
+	if pruned {
+		b.saveKeyRefreshTokensLocked()
+	}
+}
+
+func (b *binding) boundSubject() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.subject
 }
 
 func (b *binding) identityForKey(id int64) (KeyIdentity, bool) {

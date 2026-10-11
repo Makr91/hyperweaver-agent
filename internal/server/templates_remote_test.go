@@ -26,24 +26,36 @@ func TestRegistryJSONCredentialLadder(t *testing.T) {
 	t.Cleanup(func() { machines.SetOIDCTokenSource(nil) })
 	registry, seen := registryStub(t)
 	source := &machines.TemplateSource{ID: "boxvault", URL: registry.URL, Enabled: true, AuthToken: "server-wide-key"}
-	machines.SetOIDCTokenSource(func() string { return "bound-token" })
+	machines.SetOIDCTokenSource(func(createdBy string) string {
+		if createdBy == "alice@example.com" {
+			return "alice-token"
+		}
+		return "bound-token"
+	})
 
-	if _, status, err := registryJSON(context.Background(), source, "forwarded-person-token", "/api/discover", false); err != nil || status != http.StatusOK {
+	if _, status, err := registryJSON(context.Background(), source, "forwarded-person-token", "alice@example.com", "/api/discover", false); err != nil || status != http.StatusOK {
 		t.Fatalf("header read: status %d, err %v", status, err)
 	}
 	if *seen != "Bearer forwarded-person-token" {
 		t.Fatalf("x-registry-token must win: got %q", *seen)
 	}
 
-	if _, _, err := registryJSON(context.Background(), source, "", "/api/discover", false); err != nil {
+	if _, _, err := registryJSON(context.Background(), source, "", "alice@example.com", "/api/discover", false); err != nil {
+		t.Fatal(err)
+	}
+	if *seen != "Bearer alice-token" {
+		t.Fatalf("the calling key's own account must beat the bound account: got %q", *seen)
+	}
+
+	if _, _, err := registryJSON(context.Background(), source, "", "Tray-Login", "/api/discover", false); err != nil {
 		t.Fatal(err)
 	}
 	if *seen != "Bearer bound-token" {
-		t.Fatalf("bound token must beat the source's key: got %q", *seen)
+		t.Fatalf("a plain key reads as the bound account: got %q", *seen)
 	}
 
-	machines.SetOIDCTokenSource(func() string { return "" })
-	if _, _, err := registryJSON(context.Background(), source, "", "/api/discover", false); err != nil {
+	machines.SetOIDCTokenSource(func(string) string { return "" })
+	if _, _, err := registryJSON(context.Background(), source, "", "Tray-Login", "/api/discover", false); err != nil {
 		t.Fatal(err)
 	}
 	if *seen != "Bearer server-wide-key" {

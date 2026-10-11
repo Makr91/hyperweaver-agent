@@ -86,6 +86,8 @@ type ClearedChange struct{}
 type Store struct {
 	db     *sql.DB
 	Notify func(person string, change Change)
+	// System is the origin host's name every local row answers, the brand name of GET /api/status.
+	System string
 }
 
 // NewStore wraps the opened agent database.
@@ -101,12 +103,15 @@ func (s *Store) notify(person string, change Change) {
 
 // Row is one notification as the inbox routes answer it.
 type Row struct {
-	ID        string     `json:"id"`
-	Title     string     `json:"title"`
-	Body      string     `json:"body"`
-	Type      string     `json:"type"`
-	Severity  string     `json:"severity"`
-	Navigate  string     `json:"navigate"`
+	ID       string `json:"id"`
+	Title    string `json:"title"`
+	Body     string `json:"body"`
+	Type     string `json:"type"`
+	Severity string `json:"severity"`
+	// The route on the origin host that shows the thing, a path on this host for a local row
+	Navigate string `json:"navigate"`
+	// The origin host's name
+	System    string     `json:"system"`
 	ReadAt    *time.Time `json:"read_at"`
 	CreatedAt time.Time  `json:"created_at"`
 	Origin    string     `json:"origin"`
@@ -125,8 +130,8 @@ type Write struct {
 
 const rowColumns = `id, title, body, type, severity, navigate, read_at, created_at`
 
-func scanRow(row interface{ Scan(...any) error }) (*Row, error) {
-	r := Row{Origin: OriginLocal}
+func (s *Store) scanRow(row interface{ Scan(...any) error }) (*Row, error) {
+	r := Row{Origin: OriginLocal, System: s.System}
 	var createdAt string
 	var readAt sql.NullString
 	err := row.Scan(&r.ID, &r.Title, &r.Body, &r.Type, &r.Severity, &r.Navigate, &readAt, &createdAt)
@@ -199,7 +204,7 @@ func (s *Store) Create(ctx context.Context, person string, write *Write) (row *R
 }
 
 func (s *Store) get(ctx context.Context, person, id string) (*Row, error) {
-	row, err := scanRow(s.db.QueryRowContext(ctx,
+	row, err := s.scanRow(s.db.QueryRowContext(ctx,
 		`SELECT `+rowColumns+` FROM notifications WHERE person = ? AND id = ?`, person, id))
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
@@ -236,7 +241,7 @@ func (s *Store) List(ctx context.Context, person string, page, size int, unreadO
 
 	rows = []*Row{}
 	for result.Next() {
-		row, serr := scanRow(result)
+		row, serr := s.scanRow(result)
 		if serr != nil {
 			return nil, 0, serr
 		}

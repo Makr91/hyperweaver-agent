@@ -18,9 +18,11 @@ import (
 )
 
 const (
-	inboxNotifyPath = "/api/notify"
-	inboxTimeout    = 15 * time.Second
-	updatePagePath  = "hosts/self/agent/update"
+	inboxNotifyPath   = "/api/notify"
+	inboxTimeout      = 15 * time.Second
+	hostPagePath      = "/hosts/self"
+	updatePagePath    = "/hosts/self/agent/update"
+	templatesPagePath = "/hosts/self/provisioning/templates"
 )
 
 type inboxNotification struct {
@@ -42,24 +44,37 @@ type inboxWrite struct {
 	Recipient      inboxRecipient    `json:"recipient"`
 }
 
-func taskTitle(task *tasks.Task) string {
-	operation := strings.ReplaceAll(task.Operation, "_", " ")
+func taskOutcome(task *tasks.Task) string {
 	switch task.Status {
 	case tasks.StatusCompleted:
-		return strings.ToUpper(operation[:1]) + operation[1:] + " finished"
+		return "finished"
 	case tasks.StatusCompletedWithErrors:
-		return strings.ToUpper(operation[:1]) + operation[1:] + " finished with errors"
+		return "finished with errors"
 	case tasks.StatusCancelled:
-		return strings.ToUpper(operation[:1]) + operation[1:] + " cancelled"
+		return "was cancelled"
 	default:
-		return strings.ToUpper(operation[:1]) + operation[1:] + " failed"
+		return "failed"
 	}
 }
 
+func taskTitle(task *tasks.Task) string {
+	operation := strings.ReplaceAll(task.Operation, "_", " ")
+	return strings.ToUpper(operation[:1]) + operation[1:] + " " + taskOutcome(task)
+}
+
+func isSystemTarget(name string) bool {
+	return name == "" || name == "system" || name == "filesystem"
+}
+
 func taskBody(task *tasks.Task) string {
-	body := task.MachineName
+	body := "The " + strings.ReplaceAll(task.Operation, "_", " ")
+	if isSystemTarget(task.MachineName) {
+		body += " task " + taskOutcome(task) + "."
+	} else {
+		body += " task on " + task.MachineName + " " + taskOutcome(task) + "."
+	}
 	if task.ErrorMessage != nil && *task.ErrorMessage != "" {
-		body += ": " + *task.ErrorMessage
+		body += " " + *task.ErrorMessage
 	}
 	if len(body) > 1000 {
 		body = body[:1000]
@@ -78,41 +93,47 @@ func taskSeverity(task *tasks.Task) string {
 	}
 }
 
-func (s *Server) taskNavigate(task *tasks.Task) string {
-	base := s.cfg.LocalURL()
-	if task.MachineName == "" || task.MachineName == "system" || task.MachineName == "filesystem" {
-		return base
+func taskNavigate(task *tasks.Task) string {
+	if strings.HasPrefix(task.Operation, "template_") {
+		return templatesPagePath
 	}
-	return base + "hosts/self/machines/" + url.PathEscape(task.MachineName)
+	if isSystemTarget(task.MachineName) {
+		return hostPagePath
+	}
+	return hostPagePath + "/machines/" + url.PathEscape(task.MachineName)
 }
 
-func (s *Server) taskWrite(task *tasks.Task) *inbox.Write {
+func taskWrite(task *tasks.Task) *inbox.Write {
 	return &inbox.Write{
 		IdempotencyKey: "hyperweaver-agent:task:" + task.ID,
 		Type:           "SYSTEM",
 		Severity:       taskSeverity(task),
 		Title:          taskTitle(task),
 		Body:           taskBody(task),
-		Navigate:       s.taskNavigate(task),
+		Navigate:       taskNavigate(task),
 		Tag:            "hyperweaver-agent-task",
 	}
 }
 
-func (s *Server) updateWrite(latestVersion string) *inbox.Write {
+func updateWrite(latestVersion string) *inbox.Write {
 	hostname, _ := os.Hostname()
 	return &inbox.Write{
 		IdempotencyKey: "hyperweaver-agent:update:" + latestVersion,
 		Type:           "SYSTEM",
 		Severity:       "INFO",
 		Title:          "Hyperweaver Agent " + latestVersion + " is available",
-		Body:           hostname,
-		Navigate:       s.cfg.LocalURL() + updatePagePath,
+		Body:           "Hyperweaver Agent " + latestVersion + " is published; " + hostname + " runs " + version.Version + ".",
+		Navigate:       updatePagePath,
 		Tag:            "hyperweaver-agent-update",
 	}
 }
 
+func (s *Server) absoluteLink(path string) string {
+	return strings.TrimSuffix(s.cfg.LocalURL(), "/") + path
+}
+
 func (s *Server) notifyInbox(task *tasks.Task) {
-	write := s.taskWrite(task)
+	write := taskWrite(task)
 	for _, person := range s.personsOfKeyName(task.CreatedBy) {
 		s.writeLocalInbox(person, write, "task_id", task.ID)
 	}
@@ -122,7 +143,7 @@ func (s *Server) notifyInbox(task *tasks.Task) {
 }
 
 func (s *Server) notifyUpdateInbox(latestVersion string) {
-	write := s.updateWrite(latestVersion)
+	write := updateWrite(latestVersion)
 	for _, person := range s.personsOfActiveKeys() {
 		s.writeLocalInbox(person, write, "latest_version", latestVersion)
 	}
@@ -151,7 +172,7 @@ func (s *Server) writeProviderInbox(write *inbox.Write, attrs ...any) bool {
 		Notification: inboxNotification{
 			Title:    write.Title,
 			Body:     write.Body,
-			Navigate: write.Navigate,
+			Navigate: s.absoluteLink(write.Navigate),
 			Tag:      write.Tag,
 		},
 		Recipient: inboxRecipient{UserUUID: subject},

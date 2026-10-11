@@ -56,7 +56,7 @@ type CatalogSource struct {
 	CAFile  string `json:"-"`
 }
 
-// The auth a catalog source carries: none sends nothing, oidc sends the bound account's access token as Bearer.
+// The auth a catalog source carries: none sends nothing, oidc sends the reading account's access token as Bearer, the account of the key that asked, else the bound account's.
 const (
 	CatalogAuthNone = "none"
 	CatalogAuthOIDC = "oidc"
@@ -65,10 +65,10 @@ const (
 // catalogDocumentLimit bounds one catalog or health document read.
 const catalogDocumentLimit = 16 << 20
 
-var oidcTokenSource func() string
+var oidcTokenSource func(createdBy string) string
 
-// SetOIDCTokenSource wires the bound account's access token for catalog sources whose auth is oidc.
-func SetOIDCTokenSource(source func() string) {
+// SetOIDCTokenSource wires the federated access token an oidc catalog source is read with: the account of the key named createdBy, else the bound account's.
+func SetOIDCTokenSource(source func(createdBy string) string) {
 	oidcTokenSource = source
 }
 
@@ -166,8 +166,8 @@ func catalogClient(source *CatalogSource, timeout time.Duration) (*http.Client, 
 	return client, nil
 }
 
-// catalogRequest builds one GET against the source, Bearer with the bound account's token for an oidc source.
-func catalogRequest(ctx context.Context, source *CatalogSource, target string) (*http.Request, error) {
+// catalogRequest builds one GET against the source, Bearer with the token of the key createdBy's account, else the bound account's, for an oidc source.
+func catalogRequest(ctx context.Context, source *CatalogSource, target, createdBy string) (*http.Request, error) {
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, target, http.NoBody)
 	if err != nil {
 		return nil, err
@@ -175,7 +175,7 @@ func catalogRequest(ctx context.Context, source *CatalogSource, target string) (
 	if source.Auth == CatalogAuthOIDC {
 		token := ""
 		if oidcTokenSource != nil {
-			token = oidcTokenSource()
+			token = oidcTokenSource(createdBy)
 		}
 		if token == "" {
 			return nil, ErrCatalogAuth
@@ -185,13 +185,13 @@ func catalogRequest(ctx context.Context, source *CatalogSource, target string) (
 	return request, nil
 }
 
-// fetchCatalogDocument reads one document of the source verbatim.
-func fetchCatalogDocument(ctx context.Context, source *CatalogSource, target string) ([]byte, error) {
+// fetchCatalogDocument reads one document of the source verbatim as the key createdBy's account.
+func fetchCatalogDocument(ctx context.Context, source *CatalogSource, target, createdBy string) ([]byte, error) {
 	client, err := catalogClient(source, catalogFetchTimeout)
 	if err != nil {
 		return nil, err
 	}
-	request, err := catalogRequest(ctx, source, target)
+	request, err := catalogRequest(ctx, source, target, createdBy)
 	if err != nil {
 		return nil, err
 	}
@@ -227,9 +227,9 @@ func decodeDocument(raw []byte) (map[string]any, error) {
 	return document, nil
 }
 
-// FetchCatalogVerbatim downloads one source's catalog.json and validates it, parseable JSON with format_version exactly 1, answering the document with every member the catalog publishes beside the parsed one.
-func FetchCatalogVerbatim(ctx context.Context, source *CatalogSource) (verbatim map[string]any, document *CatalogDocument, err error) {
-	raw, err := fetchCatalogDocument(ctx, source, source.URL)
+// FetchCatalogVerbatim downloads one source's catalog.json as the key createdBy's account and validates it, parseable JSON with format_version exactly 1, answering the document with every member the catalog publishes beside the parsed one.
+func FetchCatalogVerbatim(ctx context.Context, source *CatalogSource, createdBy string) (verbatim map[string]any, document *CatalogDocument, err error) {
+	raw, err := fetchCatalogDocument(ctx, source, source.URL, createdBy)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -248,10 +248,11 @@ func FetchCatalogVerbatim(ctx context.Context, source *CatalogSource) (verbatim 
 	return verbatim, document, nil
 }
 
-// FetchCatalog downloads and validates one source's catalog.json: HTTP 200,
-// parseable JSON, format_version exactly 1 (the consumption contract's gate).
-func FetchCatalog(ctx context.Context, source *CatalogSource) (*CatalogDocument, error) {
-	_, document, err := FetchCatalogVerbatim(ctx, source)
+// FetchCatalog downloads and validates one source's catalog.json as the key
+// createdBy's account: HTTP 200, parseable JSON, format_version exactly 1
+// (the consumption contract's gate).
+func FetchCatalog(ctx context.Context, source *CatalogSource, createdBy string) (*CatalogDocument, error) {
+	_, document, err := FetchCatalogVerbatim(ctx, source, createdBy)
 	return document, err
 }
 
@@ -266,13 +267,13 @@ func catalogHealthURL(catalogURL string) (string, bool) {
 	return "", false
 }
 
-// FetchCatalogHealth downloads one source's health.json with every member as published; ErrCatalogHealthMissing while the source publishes none.
-func FetchCatalogHealth(ctx context.Context, source *CatalogSource) (map[string]any, error) {
+// FetchCatalogHealth downloads one source's health.json as the key createdBy's account with every member as published; ErrCatalogHealthMissing while the source publishes none.
+func FetchCatalogHealth(ctx context.Context, source *CatalogSource, createdBy string) (map[string]any, error) {
 	target, ok := catalogHealthURL(source.URL)
 	if !ok {
 		return nil, ErrCatalogHealthMissing
 	}
-	raw, err := fetchCatalogDocument(ctx, source, target)
+	raw, err := fetchCatalogDocument(ctx, source, target, createdBy)
 	var status *catalogStatusError
 	if errors.As(err, &status) && status.status == http.StatusNotFound {
 		return nil, ErrCatalogHealthMissing
@@ -314,7 +315,7 @@ func (e *executors) catalogInstall(ctx context.Context, task *tasks.Task, out *t
 	}
 
 	out.Write("stdout", "Fetching catalog "+source.Name+"\n")
-	document, err := FetchCatalog(ctx, source)
+	document, err := FetchCatalog(ctx, source, task.CreatedBy)
 	if err != nil {
 		return err
 	}
@@ -349,7 +350,7 @@ func (e *executors) catalogInstall(ctx context.Context, task *tasks.Task, out *t
 	// still lands 100. progress_info carries {status: "downloading",
 	// received_bytes, total_bytes|null}.
 	sum, size, err := downloadVerified(ctx, source, artifact.URL, archivePath,
-		e.queue.Store(), task.ID)
+		e.queue.Store(), task.ID, task.CreatedBy)
 	if err != nil {
 		return err
 	}
@@ -392,13 +393,13 @@ func resolveCatalogArtifact(document *CatalogDocument, name, version string) (*C
 // 2026-07-17): total from Content-Length (-1 = unknown parks the percent at
 // the window floor while received_bytes still streams).
 func downloadVerified(ctx context.Context, source *CatalogSource, assetURL, dest string,
-	store *tasks.Store, taskID string,
+	store *tasks.Store, taskID, createdBy string,
 ) (sum string, size int64, err error) {
 	client, err := catalogClient(source, catalogDownloadTimeout)
 	if err != nil {
 		return "", 0, err
 	}
-	request, err := catalogRequest(ctx, source, assetURL)
+	request, err := catalogRequest(ctx, source, assetURL, createdBy)
 	if err != nil {
 		return "", 0, err
 	}

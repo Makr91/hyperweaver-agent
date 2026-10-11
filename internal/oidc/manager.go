@@ -70,11 +70,43 @@ func New(cfg *config.Config, keyStore *keys.Store) *Manager {
 		flows:       map[string]*flow{},
 		silent:      map[string]*silentFlow{},
 		codeFlows:   map[string]*codeFlow{},
+		keyTokens:   map[int64]*tokenSource{},
 	}
 	if m.enabled {
 		m.tokens.resume(m.binding.storedRefreshToken())
+		for id, refreshToken := range m.binding.storedKeyRefreshTokens() {
+			if _, err := keyStore.Get(id); err != nil {
+				m.binding.setKeyRefreshToken(id, "")
+				continue
+			}
+			m.client.keyTokenSource(id).resume(refreshToken)
+		}
 	}
 	return m
+}
+
+// BearerTokenFor answers the access token a registry or catalog read runs under for the key named createdBy: the account that key's SSO login minted it for while its token is held, else the bound account's token; empty createdBy or a plain key answers the bound account's.
+func (m *Manager) BearerTokenFor(createdBy string) string {
+	if createdBy == "" {
+		return m.tokens.bearer()
+	}
+	bound := m.binding.boundSubject()
+	for _, key := range m.client.keys.List() {
+		if key.Name != createdBy || !key.IsActive {
+			continue
+		}
+		identity, ok := m.binding.identityForKey(key.ID)
+		if !ok {
+			continue
+		}
+		if identity.Subject == bound {
+			return m.tokens.bearer()
+		}
+		if token := m.client.keyToken(key.ID); token != "" {
+			return token
+		}
+	}
+	return m.tokens.bearer()
 }
 
 func deviceScopeOf(scopes []string) string {

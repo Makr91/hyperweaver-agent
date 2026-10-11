@@ -63,20 +63,22 @@ func setRegistryAuth(request *http.Request, token string) {
 	}
 }
 
-var oidcTokenSource func() string
+var oidcTokenSource func(createdBy string) string
 
-// SetOIDCTokenSource wires the bound account's access token as the first
+// SetOIDCTokenSource wires the federated access token a read runs under, the
+// one of the key named createdBy, else the bound account's, as the first
 // registry credential; the source's auth_token is the fallback.
-func SetOIDCTokenSource(source func() string) {
+func SetOIDCTokenSource(source func(createdBy string) string) {
 	oidcTokenSource = source
 }
 
-// registryToken resolves the source's credential: the bound account's access
-// token while one is held, else the source's configured API key (BoxVault
-// service-account token), else none.
-func registryToken(source *TemplateSource) string {
+// registryToken resolves the source's credential for the key named
+// createdBy: that key's own account's access token, else the bound
+// account's, while one is held, else the source's configured API key
+// (BoxVault service-account token), else none.
+func registryToken(source *TemplateSource, createdBy string) string {
 	if oidcTokenSource != nil {
-		if token := oidcTokenSource(); token != "" {
+		if token := oidcTokenSource(createdBy); token != "" {
 			return token
 		}
 	}
@@ -130,7 +132,7 @@ func RegistryHTTPClient(source *TemplateSource) *http.Client {
 	return registryHTTPClient(source)
 }
 
-// RegistryToken exposes the source's credential, the bound account's token before the source's API key, for the server's catalog proxy.
-func RegistryToken(source *TemplateSource) string {
-	return registryToken(source)
+// RegistryToken exposes the source's credential for the key named createdBy, that key's account's token, else the bound account's, before the source's API key, for the server's catalog proxy.
+func RegistryToken(source *TemplateSource, createdBy string) string {
+	return registryToken(source, createdBy)
 }

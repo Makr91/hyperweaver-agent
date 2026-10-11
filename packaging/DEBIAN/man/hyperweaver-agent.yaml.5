@@ -409,8 +409,9 @@ template to run your own and add it as another source.
 Map of catalogs keyed by an id matching ^[a-z0-9_]+$, each entry carrying
 display_name, url, enabled, default, auth, ca_file. The entry flagged default
 serves requests that name no source. auth is none or oidc; oidc sends the
-bound account's access token as Bearer on the catalog read and its downloads,
-the way an organization's private catalog is read. ca_file adds a PEM CA
+reading person's access token as Bearer on the catalog read and its downloads,
+the account the calling key's SSO login minted it for before the bound
+account's, the way an organization's private catalog is read. ca_file adds a PEM CA
 bundle to the trust store for self-hosted forks; certificate verification
 always stays on. A source added through POST /api/provisioning/catalog/sources
 lands here and is read at once (default: the STARTcloud Provisioner Catalog).
@@ -658,6 +659,11 @@ Beside the configuration files the agent also keeps
 (hashed API keys, 0600),
 .Pa sessions.json
 (browser sessions, each a digest of its cookie handle mapped to its key, 0600),
+.Pa oidc.refresh
+and
+.Pa oidc.keys.refresh
+(the bound account's refresh token and the refresh tokens of the other
+federated accounts whose SSO logins minted keys, 0600),
 .Pa protocol.secret
 (per-boot hwa:// handoff secret, 0600),
 .Pa secrets.yaml

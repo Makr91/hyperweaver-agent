@@ -70,13 +70,17 @@ type listCatalogSourcesResponse struct {
 }
 
 func catalogRow(source *provisioner.CatalogSource) catalogSourceRow {
+	authMode := source.Auth
+	if authMode == "" {
+		authMode = provisioner.CatalogAuthNone
+	}
 	return catalogSourceRow{
 		ID:      source.ID,
 		Name:    source.Name,
 		URL:     source.URL,
 		Enabled: source.Enabled,
 		Default: source.Default,
-		Auth:    source.Auth,
+		Auth:    authMode,
 	}
 }
 
@@ -106,7 +110,7 @@ func (s *Server) handleListCatalogSources(w http.ResponseWriter, _ *http.Request
 // verbatim.
 //
 //	@Summary		Browse a provisioner catalog
-//	@Description	Minimum role: viewer. Fetches the source's catalog.json LIVE (?source= names a configured catalog; empty = the default), validates format_version 1, and relays the document verbatim with every member the catalog publishes: {name, format_version, updated, provisioners: [{name, repo, description, versions: [{version, released_at, artifacts: [{url, checksum_type, checksum}]}]}]} — versions semver-DESC, artifact URLs OPAQUE (release tags carry slashes; never parse or construct them). Versions may disappear between fetches when an author deletes a release. An oidc source is read under the bound account's access token; with none held, or the catalog refusing it, the answer is 401 with the authentication problem type.
+//	@Description	Minimum role: viewer. Fetches the source's catalog.json LIVE (?source= names a configured catalog; empty = the default), validates format_version 1, and relays the document verbatim with every member the catalog publishes: {name, format_version, updated, provisioners: [{name, repo, description, versions: [{version, released_at, artifacts: [{url, checksum_type, checksum}]}]}]} — versions semver-DESC, artifact URLs OPAQUE (release tags carry slashes; never parse or construct them). Versions may disappear between fetches when an author deletes a release. An oidc source is read as the person: under the access token of the account the calling key's SSO login minted it for, else the bound account's; with none held, or the catalog refusing it, the answer is 401 with the authentication problem type.
 //	@Tags			Provisioning
 //	@Produce		json
 //	@Param			source	query	string	false	"A configured catalog source's id; empty = the default"
@@ -121,7 +125,7 @@ func (s *Server) handleGetCatalog(w http.ResponseWriter, r *http.Request) {
 		taskError(w, http.StatusNotFound, err.Error())
 		return
 	}
-	document, _, err := provisioner.FetchCatalogVerbatim(r.Context(), source)
+	document, _, err := provisioner.FetchCatalogVerbatim(r.Context(), source, auth.FromContext(r.Context()).Name)
 	if err != nil {
 		catalogFailure(w, source, err)
 		return
@@ -130,7 +134,7 @@ func (s *Server) handleGetCatalog(w http.ResponseWriter, r *http.Request) {
 }
 
 // @Summary		A provisioner catalog's health document
-// @Description	Minimum role: viewer. Fetches the source's health.json LIVE, the URL beside the catalog's (catalog.json becoming health.json, /catalog becoming /health), and relays it verbatim: {name, format_version, updated, provisioners: {<family>: {repo, tier, presentation, rules, failed_rules, health}}}. 404 while the source publishes none. An oidc source is read under the bound account's access token; with none held, or the catalog refusing it, the answer is 401 with the authentication problem type.
+// @Description	Minimum role: viewer. Fetches the source's health.json LIVE, the URL beside the catalog's (catalog.json becoming health.json, /catalog becoming /health), and relays it verbatim: {name, format_version, updated, provisioners: {<family>: {repo, tier, presentation, rules, failed_rules, health}}}. 404 while the source publishes none. An oidc source is read as the person, the calling key's own account's token before the bound account's; with none held, or the catalog refusing it, the answer is 401 with the authentication problem type.
 // @Tags			Provisioning
 // @Produce		json
 // @Param			source	query	string	false	"A configured catalog source's id; empty = the default"
@@ -145,7 +149,7 @@ func (s *Server) handleCatalogHealth(w http.ResponseWriter, r *http.Request) {
 		taskError(w, http.StatusNotFound, err.Error())
 		return
 	}
-	document, err := provisioner.FetchCatalogHealth(r.Context(), source)
+	document, err := provisioner.FetchCatalogHealth(r.Context(), source, auth.FromContext(r.Context()).Name)
 	if errors.Is(err, provisioner.ErrCatalogHealthMissing) {
 		taskError(w, http.StatusNotFound, err.Error())
 		return
@@ -263,7 +267,7 @@ func (s *Server) handleCreateCatalogSource(w http.ResponseWriter, r *http.Reques
 // named family/version's VERSIONED asset, verify its sha256, import.
 //
 //	@Summary		Install a provisioner from a catalog
-//	@Description	Minimum role: operator. Queues provisioner_catalog_install: the executor fetches the catalog FRESH (a stale pin would 404 anyway; published checksums never change), downloads the named version's immutable VERSIONED asset, verifies its sha256 DURING the stream (mismatch = loud failure, nothing imported), then runs the ordinary import path — DSL lint gate, non-clobber, role-specs + schema.json derivation all included. While the archive downloads, the TASK carries real byte progress (the converged wire, sync 2026-07-17): progress_info is exactly {status: "downloading", received_bytes, total_bytes|null} and progress_percent maps the bytes into 0→90 (this op had no intermediate percents; the sha256 verify + import ride after the window and completion lands 100) — throttled to one update per 1s or 1% of total (whichever first), final update always emitted; an unknown Content-Length parks the percent at 0 while received_bytes streams. Serialized with imports (one registry write at a time).
+//	@Description	Minimum role: operator. Queues provisioner_catalog_install, a task and never an inbox row: the executor fetches the catalog FRESH as the person who queued it (an oidc source under that key's own account's token, else the bound account's; a stale pin would 404 anyway; published checksums never change), downloads the named version's immutable VERSIONED asset, verifies its sha256 DURING the stream (mismatch = loud failure, nothing imported), then runs the ordinary import path — DSL lint gate, non-clobber, role-specs + schema.json derivation all included. While the archive downloads, the TASK carries real byte progress (the converged wire, sync 2026-07-17): progress_info is exactly {status: "downloading", received_bytes, total_bytes|null} and progress_percent maps the bytes into 0→90 (this op had no intermediate percents; the sha256 verify + import ride after the window and completion lands 100) — throttled to one update per 1s or 1% of total (whichever first), final update always emitted; an unknown Content-Length parks the percent at 0 while received_bytes streams. Serialized with imports (one registry write at a time).
 //	@Tags			Provisioning
 //	@Accept			json
 //	@Produce		json

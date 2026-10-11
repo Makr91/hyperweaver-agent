@@ -100,6 +100,8 @@ type updateCheckResponse struct {
 	ReleaseNotes    any    `json:"release_notes"`
 	// The release's files from the document's platform URLs and checksumsUrl, null while it carries no URL
 	Assets []updater.Asset `json:"assets"`
+	// The releases of the repository release_url belongs to, newest first, null while the list cannot be read
+	Releases []updater.Release `json:"releases"`
 }
 
 func updateUnknown(reason string) updateCheckResponse {
@@ -115,7 +117,7 @@ func updateUnknown(reason string) updateCheckResponse {
 // the configured versioninfo document and compare against the running build.
 //
 //	@Summary		Check for application updates
-//	@Description	Minimum role: viewer. Fetches the configured versioninfo document (updates.versioninfo_url) and compares against the running build; release_url, release_date, changelog and release_notes, the release's own text, come from the document, null when it carries none; assets lists the release's files, one {name, url, size, checksum} per platform URL and the checksums URL the document carries, size from the file's own Content-Length and checksum from the release's SHA256SUMS.txt, each null where unknown, assets itself null while the document carries no URL. When no URL is configured or the document cannot be fetched or read, the answer is still 200 with update_available false, latest_version null and the reason in message, so a page never draws a failure for a check it could not make. A check that finds a newer release, this one or the scheduled one every updates.check_interval_hours, writes one row to the bound person's inbox, once per version, and sends update-available on the admin topic of the event stream.
+//	@Description	Minimum role: viewer. Fetches the configured versioninfo document (updates.versioninfo_url) and compares against the running build; release_url, release_date, changelog and release_notes, the release's own text, come from the document, null when it carries none; assets lists the release's files, one {name, url, size, checksum} per platform URL and the checksums URL the document carries, size from the file's own Content-Length and checksum from the release's SHA256SUMS.txt, each null where unknown, assets itself null while the document carries no URL; releases lists the releases of the repository release_url belongs to, newest first as its releases page lists them, each {tag, name, prerelease, published_at, author, html_url, body, assets: [{name, size, sha256, browser_download_url}]}, author the releaser's login, body the release's markdown, sha256 from that release's SHA256SUMS.txt and null where it lists none, releases null while the list cannot be read, the check still answering its one release. When no URL is configured or the document cannot be fetched or read, the answer is still 200 with update_available false, latest_version null and the reason in message, so a page never draws a failure for a check it could not make. A check that finds a newer release, this one or the scheduled one every updates.check_interval_hours, writes one row to the bound person's inbox, once per version, and sends update-available on the admin topic of the event stream.
 //	@Tags			System
 //	@Produce		json
 //	@Success		200	{object}	updateCheckResponse	"Update check result"
@@ -149,6 +151,7 @@ func (s *Server) handleUpdateCheck(w http.ResponseWriter, r *http.Request) {
 		Changelog:       nullable(info.Changelog),
 		ReleaseNotes:    nullable(info.ReleaseNotes),
 		Assets:          info.Assets(r.Context()),
+		Releases:        updater.Releases(r.Context(), info.ReleaseURL),
 	})
 }
 
