@@ -65,23 +65,22 @@ func setRegistryAuth(request *http.Request, token string) {
 
 var oidcTokenSource func() string
 
-// SetOIDCTokenSource wires the Direct-mode OIDC access token as the Bearer
-// fallback for registry sources without their own auth_token.
+// SetOIDCTokenSource wires the bound account's access token as the first
+// registry credential; the source's auth_token is the fallback.
 func SetOIDCTokenSource(source func() string) {
 	oidcTokenSource = source
 }
 
-// registryToken resolves the source's credential: the configured API key
-// (BoxVault service-account token) first, else the logged-in user's OIDC
-// access token when one is held.
+// registryToken resolves the source's credential: the bound account's access
+// token while one is held, else the source's configured API key (BoxVault
+// service-account token), else none.
 func registryToken(source *TemplateSource) string {
-	if source.AuthToken != "" {
-		return source.AuthToken
-	}
 	if oidcTokenSource != nil {
-		return oidcTokenSource()
+		if token := oidcTokenSource(); token != "" {
+			return token
+		}
 	}
-	return ""
+	return source.AuthToken
 }
 
 // registryPost sends one JSON document and reports the status code.
@@ -131,7 +130,7 @@ func RegistryHTTPClient(source *TemplateSource) *http.Client {
 	return registryHTTPClient(source)
 }
 
-// RegistryToken exposes the source's API key for the server's catalog proxy.
+// RegistryToken exposes the source's credential, the bound account's token before the source's API key, for the server's catalog proxy.
 func RegistryToken(source *TemplateSource) string {
 	return registryToken(source)
 }

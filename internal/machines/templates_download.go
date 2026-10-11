@@ -78,8 +78,8 @@ func (e *executors) templateDownload(ctx context.Context, task *tasks.Task, out 
 	if err != nil {
 		return err
 	}
-	// Registry auth: the source's API key as Bearer (ca_file honored by the
-	// client).
+	// Registry auth: the bound account's token, else the source's API key, as
+	// Bearer (ca_file honored by the client).
 	client := registryHTTPClient(source)
 	setRegistryAuth(request, registryToken(source))
 

@@ -24,10 +24,10 @@ import (
 // THIS host's provider set (virtualbox; utm when the capability probe
 // passes) AND the host's architecture
 // (Mark's directive 2026-07-09: a zones-only or foreign-arch box in the
-// picker is a guaranteed 404 at download time). An
-// x-registry-token request header overrides the source's configured token
-// (the base's user-token rule); the configured auth_token never leaves the
-// agent.
+// picker is a guaranteed 404 at download time). The credential ladder: an
+// x-registry-token request header first (the signed-in person's token a
+// Hyperweaver server forwards), else the bound account's token, else the
+// source's configured auth_token, which never leaves the agent.
 
 // templateSourceSummary is one enabled registry in the sources list —
 // credentials (auth_token) withheld.
@@ -82,7 +82,8 @@ func (s *Server) findRegistrySource(id string) *machines.TemplateSource {
 }
 
 // registryJSON fetches one registry path (Bearer = headerToken when the
-// request carried x-registry-token, else the source's API key) and decodes
+// request carried x-registry-token, else the bound account's token, else the
+// source's API key) and decodes
 // the JSON answer. vagrantUA selects Vagrant's user agent — ONLY the
 // /{org}/{box} metadata path wants it, where BoxVault's vagrantHandler
 // middleware rewrites Vagrant-UA URLs onto its metadata API. A Vagrant UA
@@ -94,7 +95,7 @@ func registryJSON(ctx context.Context, source *machines.TemplateSource,
 	headerToken, path string, vagrantUA bool,
 ) (decoded any, status int, err error) {
 	// ONE registry transport: the shared client (ca_file honored) and the
-	// source's API key; an x-registry-token header still overrides.
+	// ladder's credential; an x-registry-token header wins over both.
 	client := machines.RegistryHTTPClient(source)
 	token := headerToken
 	if token == "" {
@@ -231,7 +232,7 @@ func compatibleMetadataVersions(versions []any, providerSet map[string]bool) []a
 // Plain UA — see registryJSON.
 //
 //	@Summary		List a source's remote box catalog
-//	@Description	Minimum role: viewer. The registry's discovery catalog — the machine wizard's box-picker feed. ONE /api/discover call: public boxes for everyone, and when the source carries an API key (a BoxVault service-account token, sent as Bearer) the registry additionally answers the key's own organization's boxes. Sources WITHOUT their own auth_token fall back to the logged-in user's OIDC access token when one is held (the Direct-mode device login) — org-private BoxVault boxes then appear per the user's own claims. FILTERED to what this agent can consume: only versions carrying a provider in the host's set (virtualbox always; utm too on a UTM-capable macOS agent) in the host's architecture survive (foreign providers/architectures are pruned; boxes left with no versions are dropped) — a zone/docker/aws-only or foreign-arch box never reaches the picker. An x-registry-token request header overrides the source's configured key (never returned). The base's GET /api/templates/remote/{sourceName}.
+//	@Description	Minimum role: viewer. The registry's discovery catalog — the machine wizard's box-picker feed. ONE /api/discover call, read as the person: the Bearer sent is, in order, the x-registry-token request header, the signed-in person's identity-provider token a Hyperweaver server forwards on a proxied read; else the agent's bound account's access token while one is held; else the source's own auth_token, the server-wide BoxVault service-account key, the last resort; else none, public boxes alone. So a private box of the person's organizations lists beside the public ones and the server-wide key serves only a host nobody is signed into; the configured key is never returned. FILTERED to what this agent can consume: only versions carrying a provider in the host's set (virtualbox always; utm too on a UTM-capable macOS agent) in the host's architecture survive (foreign providers/architectures are pruned; boxes left with no versions are dropped) — a zone/docker/aws-only or foreign-arch box never reaches the picker. The base's GET /api/templates/remote/{sourceName}.
 //	@Tags			Machine Management
 //	@Produce		json
 //	@Param			sourceName	path	string	true	"The configured template source's id"
@@ -284,7 +285,7 @@ func (s *Server) handleRemoteTemplates(w http.ResponseWriter, r *http.Request) {
 // carries nothing downloadable here answers 404, same as absent.
 //
 //	@Summary		Get one remote box's metadata
-//	@Description	Minimum role: viewer. The registry's Vagrant-compatible /{org}/{box} metadata document: versions with providers and download URLs, FILTERED to what this agent can consume (the host's provider set — virtualbox always, utm on a UTM-capable macOS agent — in the host architecture). A box that exists upstream but carries nothing downloadable here answers 404, same as absent. The base's GET /api/templates/remote/{sourceName}/{org}/{boxName}.
+//	@Description	Minimum role: viewer. The registry's Vagrant-compatible /{org}/{box} metadata document: versions with providers and download URLs, FILTERED to what this agent can consume (the host's provider set — virtualbox always, utm on a UTM-capable macOS agent — in the host architecture), read as the person under the same credential ladder as the catalog: the x-registry-token request header first, the signed-in person's identity-provider token a Hyperweaver server forwards, else the bound account's access token, else the source's own auth_token last. A box that exists upstream but carries nothing downloadable here answers 404, same as absent. The base's GET /api/templates/remote/{sourceName}/{org}/{boxName}.
 //	@Tags			Machine Management
 //	@Produce		json
 //	@Param			sourceName	path	string	true	"The configured template source's id"

@@ -22,9 +22,10 @@ import (
 // Template publish — the base's template_upload ported: export the machine
 // (or take an existing .box), ensure the registry structure (box → version →
 // provider → architecture), chunk-upload the artifact with retries, release
-// the box. Provider here is "virtualbox". Registry credentials live on the
-// configured source ONLY (the house secrets rule — the base's per-request
-// auth_token deliberately has no analog: tokens never ride task metadata).
+// the box. Provider here is "virtualbox". The registry credential is the
+// bound account's token, else the configured source's key (the house secrets
+// rule — the base's per-request auth_token deliberately has no analog: tokens
+// never ride task metadata).
 
 // OpTemplatePublish is the publish task operation (the base's op name).
 const OpTemplatePublish = "template_upload"
