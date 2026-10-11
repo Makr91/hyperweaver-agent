@@ -150,3 +150,11 @@ func catalogRequest(ctx context.Context, source *CatalogSource, target, createdB
 func catalogRefused(status int) bool {
 	return status == http.StatusUnauthorized || status == http.StatusForbidden
 }
+
+// catalogRefusal answers the error for a catalog that refused the token: 403 names a missing membership, 401 a token the catalog does not take.
+func catalogRefusal(source *CatalogSource, status int) error {
+	if status == http.StatusForbidden {
+		return fmt.Errorf("%w: the signed-in account is not a member of the organization catalog %s serves", ErrCatalogAuth, source.Name)
+	}
+	return fmt.Errorf("%w: catalog %s refused the token (HTTP %d)", ErrCatalogAuth, source.Name, status)
+}

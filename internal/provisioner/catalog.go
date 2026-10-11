@@ -176,7 +176,7 @@ func fetchCatalogDocument(ctx context.Context, source *CatalogSource, target, cr
 	if response.StatusCode != http.StatusOK {
 		if catalogRefused(response.StatusCode) && source.Auth == CatalogAuthOIDC {
 			forgetCatalogCredentials(source, createdBy)
-			return nil, fmt.Errorf("%w: catalog %s answered HTTP %d", ErrCatalogAuth, source.Name, response.StatusCode)
+			return nil, catalogRefusal(source, response.StatusCode)
 		}
 		return nil, &catalogStatusError{source: source.Name, status: response.StatusCode}
 	}
@@ -384,7 +384,7 @@ func downloadVerified(ctx context.Context, source *CatalogSource, assetURL, dest
 	if response.StatusCode != http.StatusOK {
 		if catalogRefused(response.StatusCode) && source.Auth == CatalogAuthOIDC {
 			forgetCatalogCredentials(source, createdBy)
-			return "", 0, fmt.Errorf("%w: asset download answered HTTP %d", ErrCatalogAuth, response.StatusCode)
+			return "", 0, catalogRefusal(source, response.StatusCode)
 		}
 		return "", 0, fmt.Errorf("asset download answered HTTP %d", response.StatusCode)
 	}
