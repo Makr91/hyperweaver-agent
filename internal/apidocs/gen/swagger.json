@@ -1877,7 +1877,14 @@
             },
             "server.catalogSourceRow": {
                 "properties": {
+                    "auth": {
+                        "description": "none or oidc",
+                        "type": "string"
+                    },
                     "default": {
+                        "type": "boolean"
+                    },
+                    "enabled": {
                         "type": "boolean"
                     },
                     "id": {
@@ -17560,7 +17567,7 @@
         },
         "/api/provisioning/catalog/sources": {
             "get": {
-                "description": "Minimum role: viewer. The enabled catalog_sources definitions (id, name, url, default) — the HACS model's registries; fork the catalog repo and add your own as another source. The id is what source_name and ?source= name. CA bundles are never returned.",
+                "description": "Minimum role: viewer. Every catalog_sources definition, the disabled ones included, each with id, name, url, enabled, default and auth (none or oidc) — the HACS model's registries, the rows the Sources modal draws and writes back through PUT /api/config/storage; fork the catalog repo and add your own as another source. The id is what source_name and ?source= name; a catalog read or install names an enabled source alone. CA bundles are never returned.",
                 "responses": {
                     "200": {
                         "content": {
@@ -17570,7 +17577,7 @@
                                 }
                             }
                         },
-                        "description": "Enabled catalogs"
+                        "description": "Every configured catalog"
                     }
                 },
                 "summary": "List configured provisioner catalogs",
@@ -17609,7 +17616,7 @@
                                 }
                             }
                         },
-                        "description": "Source added: {success, source: {id, name, url, default}}"
+                        "description": "Source added: {success, source: {id, name, url, enabled, default, auth}}"
                     },
                     "400": {
                         "content": {
@@ -20697,7 +20704,7 @@
         },
         "/api/templates/sources": {
             "get": {
-                "description": "Minimum role: viewer. The enabled Vagrant/BoxVault-compatible registries (id, name, url, default) — credentials are never returned. The id is what every source_name member and the {sourceName} path segment name. The base's GET /api/templates/sources.",
+                "description": "Minimum role: viewer. Every configured Vagrant/BoxVault-compatible registry, the disabled ones included, each with id, name, url, enabled and default — the rows the Registries modal draws and writes back through PUT /api/config/storage; credentials are never returned. The id is what every source_name member and the {sourceName} path segment name; a catalog read or a pull names an enabled registry alone. The base's GET /api/templates/sources.",
                 "responses": {
                     "200": {
                         "content": {
@@ -20707,7 +20714,7 @@
                                 }
                             }
                         },
-                        "description": "Enabled sources"
+                        "description": "Every configured registry"
                     }
                 },
                 "summary": "List configured template sources",

@@ -57,7 +57,10 @@ type catalogSourceRow struct {
 	ID      string `json:"id"`
 	Name    string `json:"name"`
 	URL     string `json:"url"`
+	Enabled bool   `json:"enabled"`
 	Default bool   `json:"default"`
+	// none or oidc
+	Auth string `json:"auth"`
 }
 
 // listCatalogSourcesResponse is GET /api/provisioning/catalog/sources's answer.
@@ -66,27 +69,31 @@ type listCatalogSourcesResponse struct {
 	Sources []catalogSourceRow `json:"sources"`
 }
 
-// handleListCatalogSources lists the enabled catalog definitions (the
-// templates/sources shape — never the CA file path).
+func catalogRow(source *provisioner.CatalogSource) catalogSourceRow {
+	return catalogSourceRow{
+		ID:      source.ID,
+		Name:    source.Name,
+		URL:     source.URL,
+		Enabled: source.Enabled,
+		Default: source.Default,
+		Auth:    source.Auth,
+	}
+}
+
+// handleListCatalogSources lists every catalog definition, enabled or not
+// (the templates/sources shape — never the CA file path).
 //
 //	@Summary		List configured provisioner catalogs
-//	@Description	Minimum role: viewer. The enabled catalog_sources definitions (id, name, url, default) — the HACS model's registries; fork the catalog repo and add your own as another source. The id is what source_name and ?source= name. CA bundles are never returned.
+//	@Description	Minimum role: viewer. Every catalog_sources definition, the disabled ones included, each with id, name, url, enabled, default and auth (none or oidc) — the HACS model's registries, the rows the Sources modal draws and writes back through PUT /api/config/storage; fork the catalog repo and add your own as another source. The id is what source_name and ?source= name; a catalog read or install names an enabled source alone. CA bundles are never returned.
 //	@Tags			Provisioning
 //	@Produce		json
-//	@Success		200	{object}	listCatalogSourcesResponse	"Enabled catalogs"
+//	@Success		200	{object}	listCatalogSourcesResponse	"Every configured catalog"
 //	@Router			/api/provisioning/catalog/sources [get]
 func (s *Server) handleListCatalogSources(w http.ResponseWriter, _ *http.Request) {
-	sources := []catalogSourceRow{}
-	for _, source := range s.catalogSourceList() {
-		if !source.Enabled {
-			continue
-		}
-		sources = append(sources, catalogSourceRow{
-			ID:      source.ID,
-			Name:    source.Name,
-			URL:     source.URL,
-			Default: source.Default,
-		})
+	configured := s.catalogSourceList()
+	sources := make([]catalogSourceRow, 0, len(configured))
+	for i := range configured {
+		sources = append(sources, catalogRow(&configured[i]))
 	}
 	// enabled = zoneweaver's converged field (its provisioning.catalog_sources
 	// carries a subsystem gate); this agent has no catalog kill-switch, so the
@@ -184,7 +191,7 @@ func (s *Server) catalogSourceID(displayName string) string {
 // @Accept			json
 // @Produce		json
 // @Param			body	body		createCatalogSourceRequest	true	"The new source"
-// @Success		201		{object}	createCatalogSourceResponse	"Source added: {success, source: {id, name, url, default}}"
+// @Success		201		{object}	createCatalogSourceResponse	"Source added: {success, source: {id, name, url, enabled, default, auth}}"
 // @Failure		400		{object}	problem.Body	"Unreadable body"
 // @Failure		409		{object}	problem.Body	"A source of that url is already present (unique at /url); source carries it"
 // @Failure		422		{object}	problem.Body	"display_name or url missing (required); url not an http(s) URL (format uri at /url); auth outside none, oidc (enum at /auth)"
@@ -215,13 +222,12 @@ func (s *Server) handleCreateCatalogSource(w http.ResponseWriter, r *http.Reques
 		problem.Invalid(w, failures...)
 		return
 	}
-	for _, existing := range s.catalogSourceList() {
-		if existing.URL == body.URL {
+	configured := s.catalogSourceList()
+	for i := range configured {
+		if configured[i].URL == body.URL {
 			problem.Send(w, http.StatusConflict, "conflict", "", "A catalog source with this url is already present",
 				[]problem.Error{problem.Unique("/url", "catalog_sources")},
-				map[string]any{"source": catalogSourceRow{
-					ID: existing.ID, Name: existing.Name, URL: existing.URL, Default: existing.Default,
-				}})
+				map[string]any{"source": catalogRow(&configured[i])})
 			return
 		}
 	}
@@ -249,7 +255,7 @@ func (s *Server) handleCreateCatalogSource(w http.ResponseWriter, r *http.Reques
 		"by", auth.FromContext(r.Context()).Name)
 	writeJSONStatus(w, http.StatusCreated, createCatalogSourceResponse{
 		Success: true,
-		Source:  catalogSourceRow{ID: id, Name: body.DisplayName, URL: body.URL, Default: false},
+		Source:  catalogSourceRow{ID: id, Name: body.DisplayName, URL: body.URL, Enabled: true, Default: false, Auth: body.Auth},
 	})
 }
 

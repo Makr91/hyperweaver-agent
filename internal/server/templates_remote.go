@@ -44,21 +44,18 @@ type templateSourcesResponse struct {
 	Sources []templateSourceSummary `json:"sources"`
 }
 
-// handleListTemplateSources mirrors GET /api/templates/sources: the enabled
-// registries, credentials withheld.
+// handleListTemplateSources mirrors GET /api/templates/sources: every
+// registry, enabled or not, credentials withheld.
 //
 //	@Summary		List configured template sources
-//	@Description	Minimum role: viewer. The enabled Vagrant/BoxVault-compatible registries (id, name, url, default) — credentials are never returned. The id is what every source_name member and the {sourceName} path segment name. The base's GET /api/templates/sources.
+//	@Description	Minimum role: viewer. Every configured Vagrant/BoxVault-compatible registry, the disabled ones included, each with id, name, url, enabled and default — the rows the Registries modal draws and writes back through PUT /api/config/storage; credentials are never returned. The id is what every source_name member and the {sourceName} path segment name; a catalog read or a pull names an enabled registry alone. The base's GET /api/templates/sources.
 //	@Tags			Machine Management
 //	@Produce		json
-//	@Success		200	{object}	templateSourcesResponse	"Enabled sources"
+//	@Success		200	{object}	templateSourcesResponse	"Every configured registry"
 //	@Router			/api/templates/sources [get]
 func (s *Server) handleListTemplateSources(w http.ResponseWriter, _ *http.Request) {
 	sources := []templateSourceSummary{}
 	for _, source := range s.templateSources() {
-		if !source.Enabled {
-			continue
-		}
 		sources = append(sources, templateSourceSummary{
 			ID:      source.ID,
 			Name:    source.Name,
