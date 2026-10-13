@@ -45,6 +45,7 @@ func (t *tokenSource) tokenFor(ctx context.Context, resource string) (string, er
 	t.mu.Lock()
 	cached, held := t.resources[resource]
 	subject := t.accessToken
+	scope := t.scope
 	if time.Now().After(t.expiry) {
 		subject = ""
 	}
@@ -59,7 +60,7 @@ func (t *tokenSource) tokenFor(ctx context.Context, resource string) (string, er
 	if err != nil {
 		return "", err
 	}
-	answer, err := exchangeToken(ctx, endpoints, t.clientID, subject, resource, t.scope)
+	answer, err := exchangeToken(ctx, endpoints, t.clientID, subject, resource, scope)
 	if err != nil {
 		return "", err
 	}
@@ -89,6 +90,9 @@ func (t *tokenSource) set(answer *tokenAnswer) {
 	t.accessToken = answer.AccessToken
 	if answer.RefreshToken != "" {
 		t.refreshToken = answer.RefreshToken
+	}
+	if answer.Scope != "" {
+		t.scope = answer.Scope
 	}
 	t.expiry = time.Now().Add(time.Duration(answer.ExpiresIn) * time.Second)
 	refreshToken := t.refreshToken
@@ -179,6 +183,9 @@ func (t *tokenSource) refreshOnce(refreshToken string) bool {
 	t.accessToken = answer.AccessToken
 	if answer.RefreshToken != "" {
 		t.refreshToken = answer.RefreshToken
+	}
+	if answer.Scope != "" {
+		t.scope = answer.Scope
 	}
 	t.expiry = time.Now().Add(time.Duration(answer.ExpiresIn) * time.Second)
 	rotated := t.refreshToken

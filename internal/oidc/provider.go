@@ -177,6 +177,7 @@ type tokenAnswer struct {
 	AccessToken      string `json:"access_token"`
 	RefreshToken     string `json:"refresh_token"`
 	IDToken          string `json:"id_token"`
+	Scope            string `json:"scope"`
 	ExpiresIn        int    `json:"expires_in"`
 	Error            string `json:"error"`
 	ErrorDescription string `json:"error_description"`
