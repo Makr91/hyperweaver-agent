@@ -70,7 +70,7 @@ type artifactStatsResponse struct {
 // ?search, ?limit, ?offset, ?sort_by, ?sort_order).
 //
 //	@Summary		List artifacts
-//	@Description	Minimum role: viewer. Every registry row — present files and expectation-only entries — with zoneweaver's filtering and paging.
+//	@Description	Minimum role: viewer. Every registry row — present files and expectation-only entries — with zoneweaver's filtering and paging. version is the row's structured version {major, minor, patch, fix_pack, ea_access_release, full_version}, the bundled registry's where it recorded one, else the version string split on dots. A row whose file is missing carries source, the registry the agent can fetch it from: boxvault when its source_url is under a configured box registry, hcl for the HCL portal and every bundled expectation, custom for any other URL; POST /api/artifacts/{id}/fetch queues that download. type id_file lists the ID files, role the id type (safe_id, server_id, user_id).
 //	@Tags			Artifacts
 //	@Produce		json
 //	@Param			type			query	string	false	"Filter by artifact type"
@@ -123,7 +123,7 @@ func (s *Server) handleListArtifacts(w http.ResponseWriter, r *http.Request) {
 	index := s.locationIndex(r)
 	documents := make([]artifactDocument, 0, len(list))
 	for _, artifact := range list {
-		documents = append(documents, artifactJSON(artifact, index[artifact.LocationID]))
+		documents = append(documents, s.artifactDocument(artifact, index[artifact.LocationID]))
 	}
 	writeJSON(w, artifactListResponse{
 		Artifacts: documents,
@@ -198,7 +198,7 @@ func (s *Server) handleArtifactDetails(w http.ResponseWriter, r *http.Request) {
 	if artifact.LocationID != "" {
 		location, _ = s.assets.GetLocation(r.Context(), artifact.LocationID)
 	}
-	writeJSON(w, artifactJSON(artifact, location))
+	writeJSON(w, s.artifactDocument(artifact, location))
 }
 
 // handleArtifactStats: GET /api/artifacts/stats.

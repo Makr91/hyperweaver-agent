@@ -237,7 +237,7 @@ properties:
               order: 2
             type:
               type: string
-              enum: [iso, image, installer, fixpack, hotfix]
+              enum: [iso, image, installer, fixpack, hotfix, id_file]
               title: Type
               order: 3
             enabled:

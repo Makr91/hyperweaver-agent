@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/Makr91/hyperweaver-agent/internal/tasks"
 )
@@ -76,6 +77,26 @@ func (m *RegistryDownloadMetadata) FilePath() string {
 		"/release/" + url.PathEscape(m.Release) +
 		"/patch/" + url.PathEscape(m.Patch) +
 		"/file/" + url.PathEscape(m.Filename) + "/download"
+}
+
+// ParseRegistryFileURL reads the organization, download, release, patch and file a registry file download URL names; false for any other URL.
+func ParseRegistryFileURL(rawURL string) (meta RegistryDownloadMetadata, ok bool) {
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		return meta, false
+	}
+	segments := strings.Split(strings.Trim(parsed.Path, "/"), "/")
+	if len(segments) != 12 || segments[0] != "api" || segments[1] != "organization" ||
+		segments[3] != "download" || segments[5] != "release" || segments[7] != "patch" ||
+		segments[9] != "file" || segments[11] != "download" {
+		return meta, false
+	}
+	meta.Organization = segments[2]
+	meta.Download = segments[4]
+	meta.Release = segments[6]
+	meta.Patch = segments[8]
+	meta.Filename = segments[10]
+	return meta, true
 }
 
 // registryDownload executes one artifact_registry_download task: fetch the file from the registry as the person who queued it, stream it into the location under the role, verify the given checksum, register the row.

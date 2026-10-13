@@ -46,15 +46,33 @@ var sslSubdirs = []string{"ca", "crt", "key", "csr", "jks", "kyr", "pfx", "combi
 // installerArchives is the one subtree every kind of a role's file mounts under, installers/<role>/archives/<file>, where the provisioner's playbooks read them.
 const installerArchives = "archives"
 
-// InstallerFile is one cached file to mount into the working copy's installers/<role>/archives/ tree.
+// InstallerFile is one cached file to mount into the working copy's installers/<installer_dir>/archives/ tree.
 type InstallerFile struct {
 	// SourcePath is the cache location.
 	SourcePath string
-	// Role and Filename place the mount (installers/<role>/archives/<file>).
+	// Role is the manifest role's installer_dir and Filename the file; together they place the mount (installers/<installer_dir>/archives/<file>).
 	Role     string
 	Filename string
 	// SHA256 is the hash the cache recorded, which a copied mount must reproduce.
 	SHA256 string
+}
+
+// The id-files folders and the id file types that name them.
+const (
+	IDTypeSafeID   = "safe_id"
+	IDTypeServerID = "server_id"
+	IDTypeUserID   = "user_id"
+
+	idDirServerIDs   = "server-ids"
+	idDirUserIDs     = "user-ids"
+	idDirUserSafeIDs = "user-safe-ids"
+)
+
+// IDFile is one cached ID file to place under id-files: Type is the id file's type (safe_id, server_id, user_id, or another folder name), Name the file name it lands under, empty for the type's default.
+type IDFile struct {
+	SourcePath string
+	Type       string
+	Name       string
 }
 
 // MaterializeInput is everything one working-directory materialization
@@ -67,14 +85,16 @@ type MaterializeInput struct {
 	Version *Version
 	// HostsYML is the rendered Hosts.yml (RenderHostsFile output).
 	HostsYML []byte
-	// Roles receive installers/<role>/ mount skeletons.
-	Roles []RoleInput
+	// InstallerDirs receive installers/<installer_dir>/ mount skeletons, the folders the manifest's roles read.
+	InstallerDirs []string
 	// Installers are the cache-verified files to mount (resolved and
 	// hash-checked by the caller against the file cache).
 	Installers []InstallerFile
 	// SafeIDPath optionally names an agent-host Domino safe-ID file to place
 	// under id-files per the package's conventions.
 	SafeIDPath string
+	// IDFiles are the cached ID files to place under id-files, each by the folder its type names.
+	IDFiles []IDFile
 	// CACertPath/CAKeyPath locate the agent's CA pair (the installer-seeded
 	// STARTcloud CA, or the generated one) seeding ssls/ca and signing the
 	// default-signed pair.
@@ -128,7 +148,7 @@ func Materialize(in *MaterializeInput) error {
 	if ierr := materializeIDFiles(dir, in); ierr != nil {
 		return ierr
 	}
-	if ierr := materializeInstallers(dir, in.Roles); ierr != nil {
+	if ierr := materializeInstallers(dir, in.InstallerDirs); ierr != nil {
 		return ierr
 	}
 	if ierr := mountInstallerFiles(dir, in.Installers); ierr != nil {
@@ -243,25 +263,10 @@ func syncPackage(src, dst string) error {
 	})
 }
 
-// materializeIDFiles creates the id-files tree and places the safe ID per
-// the package's conventions — metadata-driven, never code-typed (design
-// D-G/§5): provisioner.yml may carry id_files.safe_id_dir (default
-// user-safe-ids; the additional-server packages declare server-ids) and
-// id_files.keep_original_name (default false — the file lands as safe.ids).
-func materializeIDFiles(dir string, in *MaterializeInput) error {
-	idRoot := filepath.Join(dir, "id-files")
-	for _, sub := range []string{"server-ids", "user-ids", "user-safe-ids"} {
-		if err := os.MkdirAll(filepath.Join(idRoot, sub), 0o750); err != nil {
-			return err
-		}
-	}
-	if in.SafeIDPath == "" {
-		return nil
-	}
-
-	safeIDDir := "user-safe-ids"
-	keepName := false
-	if idFiles, ok := in.Version.Metadata["id_files"].(map[string]any); ok {
+// idFileRules reads the manifest's top-level id_files: the safe ID folder (default user-safe-ids) and whether a safe ID keeps its own file name (default false, landing as safe.ids).
+func idFileRules(version *Version) (safeIDDir string, keepName bool, err error) {
+	safeIDDir = idDirUserSafeIDs
+	if idFiles, ok := version.Metadata["id_files"].(map[string]any); ok {
 		if v, sok := idFiles["safe_id_dir"].(string); sok && v != "" {
 			safeIDDir = v
 		}
@@ -270,18 +275,66 @@ func materializeIDFiles(dir string, in *MaterializeInput) error {
 		}
 	}
 	if !ValidName(safeIDDir) {
-		return fmt.Errorf("package declares an unusable id_files.safe_id_dir %q", safeIDDir)
+		return "", false, fmt.Errorf("package declares an unusable id_files.safe_id_dir %q", safeIDDir)
 	}
+	return safeIDDir, keepName, nil
+}
 
-	source, err := safepath.CleanAbs(in.SafeIDPath)
+// materializeIDFiles creates the id-files tree and places every ID file: the agent-host safe ID of safe_id_path and each cached id file, by the folder its type names, safe_id under the manifest's id_files.safe_id_dir, server_id under server-ids, user_id under user-ids, any other type under a folder of its own name.
+func materializeIDFiles(dir string, in *MaterializeInput) error {
+	idRoot := filepath.Join(dir, "id-files")
+	for _, sub := range []string{idDirServerIDs, idDirUserIDs, idDirUserSafeIDs} {
+		if err := os.MkdirAll(filepath.Join(idRoot, sub), 0o750); err != nil {
+			return err
+		}
+	}
+	safeIDDir, keepName, err := idFileRules(in.Version)
 	if err != nil {
 		return err
 	}
-	name := "safe.ids"
-	if keepName {
+	files := make([]IDFile, 0, len(in.IDFiles)+1)
+	if in.SafeIDPath != "" {
+		files = append(files, IDFile{SourcePath: in.SafeIDPath, Type: IDTypeSafeID})
+	}
+	files = append(files, in.IDFiles...)
+	for i := range files {
+		if perr := placeIDFile(idRoot, &files[i], safeIDDir, keepName); perr != nil {
+			return perr
+		}
+	}
+	return nil
+}
+
+// placeIDFile copies one ID file under id-files/<folder>/<name>.
+func placeIDFile(idRoot string, file *IDFile, safeIDDir string, keepName bool) error {
+	source, err := safepath.CleanAbs(file.SourcePath)
+	if err != nil {
+		return err
+	}
+	folder := file.Type
+	switch file.Type {
+	case IDTypeSafeID:
+		folder = safeIDDir
+	case IDTypeServerID:
+		folder = idDirServerIDs
+	case IDTypeUserID:
+		folder = idDirUserIDs
+	}
+	if !ValidName(folder) {
+		return fmt.Errorf("id file type %q is unusable as a folder", file.Type)
+	}
+	name := file.Name
+	switch {
+	case name != "":
+	case file.Type == IDTypeSafeID && !keepName:
+		name = "safe.ids"
+	default:
 		name = filepath.Base(source)
 	}
-	target, err := safepath.Under(idRoot, filepath.Join(safeIDDir, name))
+	if !ValidName(name) {
+		return fmt.Errorf("id file name %q is unusable", name)
+	}
+	target, err := safepath.Under(idRoot, filepath.Join(folder, name))
 	if err != nil {
 		return err
 	}
@@ -290,24 +343,20 @@ func materializeIDFiles(dir string, in *MaterializeInput) error {
 	}
 	data, err := os.ReadFile(filepath.Clean(source))
 	if err != nil {
-		return fmt.Errorf("read safe ID %s: %w", source, err)
+		return fmt.Errorf("read id file %s: %w", source, err)
 	}
 	return safepath.WriteFile(target, data, 0o600)
 }
 
-// materializeInstallers creates the installers/<role>/ mount skeletons for
-// every role in the request. The file cache populates them when the assets
-// subsystem lands (arch item 3); until then the folders: mounts resolve to
-// empty trees.
-func materializeInstallers(dir string, roles []RoleInput) error {
+// materializeInstallers creates the installers/<installer_dir>/ mount skeletons for every folder the manifest's roles read.
+func materializeInstallers(dir string, installerDirs []string) error {
 	root := filepath.Join(dir, "installers")
 	if err := os.MkdirAll(root, 0o750); err != nil {
 		return err
 	}
-	for i := range roles {
-		name := roles[i].Name
+	for _, name := range installerDirs {
 		if !ValidName(name) {
-			return fmt.Errorf("role name %q is unusable as a directory", name)
+			return fmt.Errorf("installer_dir %q is unusable as a directory", name)
 		}
 		for _, sub := range installerSubdirs {
 			target, err := safepath.Under(root, filepath.Join(name, sub))

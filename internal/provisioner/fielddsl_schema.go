@@ -49,15 +49,24 @@ func ValidateVersionAnswers(version *Version, roles []RoleInput, answers map[str
 	return dsl.ValidateAnswers(answers, roles, prior, provisionedBefore), nil
 }
 
-// LintVersionManifest lints one version directory's manifest DSL — the
+// LintVersionManifest lints one version directory's manifest, the form DSL and the roles — the
 // import-time fail-closed gate. Errors echo the author's own values inline.
 func LintVersionManifest(versionRoot string) []string {
 	manifest, err := readManifest(filepath.Join(versionRoot, versionManifest))
 	if err != nil {
 		return []string{versionManifest + ": " + err.Error()}
 	}
-	_, problems := ParseFieldDSL(manifest, manifestRoleNames(manifest))
-	return problems
+	dsl, problems := ParseFieldDSL(manifest, manifestRoleNames(manifest))
+	var declared map[string]bool
+	if len(problems) == 0 {
+		declared = map[string]bool{}
+		if dsl != nil {
+			for name := range dsl.byName {
+				declared[name] = true
+			}
+		}
+	}
+	return append(problems, lintRoles(manifest, declared)...)
 }
 
 // BuildFieldSchema derives a version's schema.json (JSON Schema 2020-12)

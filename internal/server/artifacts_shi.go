@@ -152,7 +152,7 @@ func (s *Server) handleRegisterArtifact(w http.ResponseWriter, r *http.Request) 
 	w.WriteHeader(http.StatusCreated)
 	if werr := json.NewEncoder(w).Encode(map[string]any{
 		"success":  true,
-		"artifact": artifactJSON(artifact, location),
+		"artifact": s.artifactDocument(artifact, location),
 		"message":  "File registered and hashed successfully",
 	}); werr != nil {
 		slog.Error("write register response", "error", werr)

@@ -7,23 +7,6 @@ import (
 	"strings"
 )
 
-// manifestRoleNames reads metadata.roles[].name — the source of the
-// role-enable flags show_if may reference: <name>_enabled, the manifest role
-// name VERBATIM (the ruled spelling; the Jinja render context's sanitized
-// flags are generate.go's separate layer).
-func manifestRoleNames(metadata map[string]any) []string {
-	meta, _ := metadata["metadata"].(map[string]any)
-	roles, _ := meta["roles"].([]any)
-	names := []string{}
-	for _, entry := range roles {
-		role, _ := entry.(map[string]any)
-		if name, _ := role["name"].(string); name != "" {
-			names = append(names, name)
-		}
-	}
-	return names
-}
-
 // ParseFieldDSL parses and LINTS metadata.configuration. A nil DSL with no
 // problems means the package ships no form (legal — the simplest valid
 // package is manifest + template). ANY returned problem is fail-closed at

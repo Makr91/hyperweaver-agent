@@ -27,8 +27,24 @@ type shiRegistryEntry struct {
 	FileName string `json:"fileName"`
 	SHA256   string `json:"sha256"`
 	Version  struct {
-		FullVersion string `json:"fullVersion"`
+		MajorVersion    string `json:"majorVersion"`
+		MinorVersion    string `json:"minorVersion"`
+		PatchVersion    string `json:"patchVersion"`
+		FixPackVersion  string `json:"fixPackVersion"`
+		EaAccessRelease string `json:"ea_access_release"`
+		FullVersion     string `json:"fullVersion"`
 	} `json:"version"`
+}
+
+func (e *shiRegistryEntry) versionInfo() *VersionInfo {
+	return &VersionInfo{
+		Major:           e.Version.MajorVersion,
+		Minor:           e.Version.MinorVersion,
+		Patch:           e.Version.PatchVersion,
+		FixPack:         e.Version.FixPackVersion,
+		EaAccessRelease: e.Version.EaAccessRelease,
+		FullVersion:     e.Version.FullVersion,
+	}
 }
 
 // kindByGroup maps SHI's plural group names to the cache kinds.
@@ -75,14 +91,15 @@ func SeedExpectations(ctx context.Context, store *Store) error {
 				alog().Warn("no storage location for initial-registry kind", "kind", kind)
 				continue
 			}
-			for _, entry := range entries {
+			for i := range entries {
+				entry := &entries[i]
 				if !ValidFilename(entry.FileName) || entry.SHA256 == "" {
 					alog().Warn("skipping unusable initial-registry entry",
 						"role", role, "group", group, "filename", entry.FileName)
 					continue
 				}
 				if err := store.SeedExpectation(ctx, location.ID, role, kind,
-					entry.FileName, entry.SHA256, entry.Version.FullVersion); err != nil {
+					entry.FileName, entry.SHA256, entry.versionInfo()); err != nil {
 					return fmt.Errorf("seed expectation %s/%s/%s: %w",
 						role, kind, entry.FileName, err)
 				}

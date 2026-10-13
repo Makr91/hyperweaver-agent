@@ -7,11 +7,14 @@ import (
 	"net/http"
 	"os"
 	"runtime"
+	"strconv"
 	"strings"
 
+	"github.com/Makr91/hyperweaver-agent/internal/assets"
 	"github.com/Makr91/hyperweaver-agent/internal/machines"
 	"github.com/Makr91/hyperweaver-agent/internal/provisioner"
 	"github.com/Makr91/hyperweaver-agent/internal/safepath"
+	"github.com/Makr91/hyperweaver-agent/internal/tasks"
 )
 
 // validateSpec checks the creation spec: the provisioner reference is
@@ -142,7 +145,55 @@ func (s *Server) validateSpec(w http.ResponseWriter, spec *machines.Spec) (ok bo
 		taskError(w, http.StatusBadRequest, "sync_method must be rsync or scp")
 		return false, nil
 	}
+	for _, ref := range spec.IDFiles {
+		artifact, err := s.assets.Get(context.Background(), ref.ArtifactID)
+		if errors.Is(err, assets.ErrNotFound) {
+			taskError(w, http.StatusBadRequest, "id_files: artifact "+strconv.FormatInt(ref.ArtifactID, 10)+" is not in the registry")
+			return false, nil
+		}
+		if err != nil {
+			taskError(w, http.StatusInternalServerError, "Failed to read the id_files artifacts")
+			return false, nil
+		}
+		if artifact.Kind != assets.KindIDFile {
+			taskError(w, http.StatusBadRequest, "id_files: artifact "+strconv.FormatInt(ref.ArtifactID, 10)+" is a "+artifact.Kind+", not an id_file")
+			return false, nil
+		}
+		if ref.Name != "" && !assets.ValidFilename(ref.Name) {
+			taskError(w, http.StatusBadRequest, "id_files: name "+ref.Name+" is not usable")
+			return false, nil
+		}
+	}
 	return true, diskWarnings
+}
+
+// chainWaitFor checks the wait_for task ids, chains each behind the one before it and answers the last, the task the create's first child waits on; nil with no ids.
+func (s *Server) chainWaitFor(ctx context.Context, ids []string) (last *string, problem string) {
+	previous := ""
+	for i, id := range ids {
+		task, err := s.tasks.Store().Get(ctx, id)
+		if errors.Is(err, tasks.ErrNotFound) {
+			return nil, "wait_for task " + id + " not found"
+		}
+		if err != nil {
+			return nil, "Failed to read wait_for task " + id
+		}
+		switch task.Status {
+		case tasks.StatusPending, tasks.StatusPrepared, tasks.StatusRunning:
+		default:
+			return nil, "wait_for task " + id + " is " + task.Status
+		}
+		if i > 0 {
+			if derr := s.tasks.Store().SetDependsOn(ctx, id, previous); derr != nil {
+				return nil, "Failed to chain wait_for task " + id
+			}
+		}
+		previous = id
+	}
+	if previous == "" {
+		return nil, ""
+	}
+	return &previous, ""
 }
 
 // diskWarningRows wraps the typed-disk warning strings into the create

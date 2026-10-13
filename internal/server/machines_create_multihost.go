@@ -24,6 +24,7 @@ type multiHostCreateResponse struct {
 	Count            int                        `json:"count"`
 	Message          string                     `json:"message"`
 	Machines         []multiHostMachine         `json:"machines"`
+	WaitedOn         []string                   `json:"waited_on,omitempty"`
 	ResourceWarnings map[string][]resourceIssue `json:"resource_warnings,omitempty"`
 }
 
@@ -46,7 +47,7 @@ type multiHostCreateResponse struct {
 // separate create-orchestration parents, NO meta-parent. Auto-download is
 // single-host only: any entry naming a non-local box refuses the request.
 func (s *Server) createMultiHostMachines(w http.ResponseWriter, r *http.Request,
-	body *createMachineRequest, hosts []map[string]any,
+	body *createMachineRequest, hosts []map[string]any, waitFor *string,
 ) {
 	if body.Name != "" {
 		taskError(w, http.StatusBadRequest,
@@ -290,7 +291,7 @@ func (s *Server) createMultiHostMachines(w http.ResponseWriter, r *http.Request,
 		}
 	}
 	machinesOut := make([]multiHostMachine, 0, len(plans))
-	var dependsOn *string
+	dependsOn := waitFor
 	for k := range plans {
 		plan := &plans[k]
 		parentID, subTasks, _, lastTaskID, qerr := s.queueCreateOrchestration(r.Context(),
@@ -319,6 +320,7 @@ func (s *Server) createMultiHostMachines(w http.ResponseWriter, r *http.Request,
 		Message: "Machine creation queued for " + strconv.Itoa(len(plans)) +
 			" machines (multi-host document)",
 		Machines: machinesOut,
+		WaitedOn: body.WaitFor,
 	}
 	if len(warningsByMachine) > 0 {
 		response.ResourceWarnings = warningsByMachine

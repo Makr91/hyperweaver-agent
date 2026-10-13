@@ -47,8 +47,10 @@ func (s *Server) handleArtifactAction(w http.ResponseWriter, r *http.Request) {
 		s.queueTransfer(w, r, assets.OpMove, "Artifact move task created successfully.")
 	case "copy":
 		s.queueTransfer(w, r, assets.OpCopy, "Artifact copy task created successfully.")
+	case "fetch":
+		s.fetchArtifact(w, r)
 	default:
-		taskError(w, http.StatusNotFound, "Unknown artifact action (move or copy)")
+		taskError(w, http.StatusNotFound, "Unknown artifact action (move, copy or fetch)")
 	}
 }
 

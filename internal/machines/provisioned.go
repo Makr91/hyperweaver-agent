@@ -122,11 +122,12 @@ type Spec struct {
 	HostIndex int `json:"host_index,omitempty"`
 	// Notes/Tags persist onto the machine row at finalize (the base's
 	// SubTaskExecutors finalize does exactly this).
-	Notes            string   `json:"notes"`
-	Tags             []string `json:"tags"`
-	SyncMethod       string   `json:"sync_method"`
-	SafeIDPath       string   `json:"safe_id_path"`
-	StartAfterCreate bool     `json:"start_after_create"`
+	Notes            string      `json:"notes"`
+	Tags             []string    `json:"tags"`
+	SyncMethod       string      `json:"sync_method"`
+	SafeIDPath       string      `json:"safe_id_path"`
+	IDFiles          []IDFileRef `json:"id_files,omitempty"`
+	StartAfterCreate bool        `json:"start_after_create"`
 	// RemoveTransportOnCompletion is the wizard's per-create transport signal
 	// (the converged cross-agent key, sync 2026-07-18 — UI's Q1(b) answer with
 	// Go's NAT input consumed): true asks the provision pipeline to remove the
@@ -138,6 +139,12 @@ type Spec struct {
 	// remove_transport_on_completion — the ONE effective-flag home the
 	// provision chain, knob_current, and the PUT flip all read.
 	RemoveTransportOnCompletion *bool `json:"remove_transport_on_completion,omitempty"`
+}
+
+// IDFileRef names one id_file artifact of the registry and the file name it lands under, the type's default when empty.
+type IDFileRef struct {
+	ArtifactID int64  `json:"artifact_id"`
+	Name       string `json:"name,omitempty"`
 }
 
 // HasProvisioner reports whether the spec references a provisioner package.
@@ -212,8 +219,8 @@ type ProvisionEnv struct {
 	Network NetworkEnv
 }
 
-// resolveInstallerFiles resolves every role file reference against the file cache and answers the mounts, a hash-enriched copy of the roles for the template context, and the warnings: a file that is absent refuses the prepare; a file that is present but carries no hash, fails its expectation or differs from the spec's hash is mounted as the person's own with a warning. With the assets subsystem disabled, references pass through un-mounted with a warning.
-func (e *executors) resolveInstallerFiles(ctx context.Context, spec *Spec, out *tasks.OutputWriter) (mounts []provisioner.InstallerFile, roles []provisioner.RoleInput, warnings []string, err error) {
+// resolveInstallerFiles resolves every role file reference against the file cache by the manifest role's installer_dir and answers the mounts, a hash-enriched copy of the roles for the template context, and the warnings: a file that is absent refuses the prepare; a file that is present but carries no hash, fails its expectation or differs from the spec's hash is mounted as the person's own with a warning. With the assets subsystem disabled, references pass through un-mounted with a warning.
+func (e *executors) resolveInstallerFiles(ctx context.Context, version *provisioner.Version, spec *Spec, out *tasks.OutputWriter) (mounts []provisioner.InstallerFile, roles []provisioner.RoleInput, warnings []string, err error) {
 	roles = make([]provisioner.RoleInput, len(spec.Roles))
 	copy(roles, spec.Roles)
 
@@ -230,6 +237,14 @@ func (e *executors) resolveInstallerFiles(ctx context.Context, spec *Spec, out *
 	mounts = []provisioner.InstallerFile{}
 	for i := range roles {
 		role := &roles[i]
+		if role.Files == (provisioner.RoleFiles{}) {
+			continue
+		}
+		declared, known := version.ManifestRole(role.Name)
+		if !known || declared.InstallerDir == "" {
+			return nil, nil, nil, fmt.Errorf("role %s names installer files but the manifest declares no installer_dir for it", role.Name)
+		}
+		installerDir := declared.InstallerDir
 		references := []struct {
 			kind    string
 			name    *string
@@ -244,10 +259,10 @@ func (e *executors) resolveInstallerFiles(ctx context.Context, spec *Spec, out *
 			if *ref.name == "" {
 				continue
 			}
-			artifact, ferr := e.env.Assets.Find(ctx, role.Name, ref.kind, *ref.name)
+			artifact, ferr := e.env.Assets.Find(ctx, installerDir, ref.kind, *ref.name)
 			if errors.Is(ferr, assets.ErrNotFound) {
-				return nil, nil, nil, fmt.Errorf("%s %q for role %s is not in the file cache — upload, register, or download it first",
-					ref.kind, *ref.name, role.Name)
+				return nil, nil, nil, fmt.Errorf("%s %q for role %s is not in the file cache under %s — upload, register, or download it first",
+					ref.kind, *ref.name, role.Name, installerDir)
 			}
 			if ferr != nil {
 				return nil, nil, nil, ferr
@@ -268,13 +283,59 @@ func (e *executors) resolveInstallerFiles(ctx context.Context, spec *Spec, out *
 			}
 			mounts = append(mounts, provisioner.InstallerFile{
 				SourcePath: artifact.Path,
-				Role:       role.Name,
+				Role:       installerDir,
 				Filename:   *ref.name,
 				SHA256:     artifact.SHA256,
 			})
 		}
 	}
 	return mounts, roles, warnings, nil
+}
+
+// installerDirs answers every installer_dir the manifest's roles declare, the folders that receive mount skeletons.
+func installerDirs(version *provisioner.Version) []string {
+	seen := map[string]bool{}
+	dirs := []string{}
+	for _, role := range provisioner.ManifestRoles(version.Metadata) {
+		if role.InstallerDir == "" || seen[role.InstallerDir] {
+			continue
+		}
+		seen[role.InstallerDir] = true
+		dirs = append(dirs, role.InstallerDir)
+	}
+	return dirs
+}
+
+// resolveIDFiles resolves the spec's id_files against the registry: each must be a present id_file row, its role the id type; a safe_id with no name takes the USER_SAFE_ID answer when the form carries one.
+func (e *executors) resolveIDFiles(ctx context.Context, spec *Spec) ([]provisioner.IDFile, error) {
+	if len(spec.IDFiles) == 0 {
+		return nil, nil
+	}
+	if e.env.Assets == nil {
+		return nil, errors.New("id_files need artifact storage, which is disabled")
+	}
+	files := make([]provisioner.IDFile, 0, len(spec.IDFiles))
+	for _, ref := range spec.IDFiles {
+		artifact, err := e.env.Assets.Get(ctx, ref.ArtifactID)
+		if errors.Is(err, assets.ErrNotFound) {
+			return nil, fmt.Errorf("id_files: artifact %d is not in the registry", ref.ArtifactID)
+		}
+		if err != nil {
+			return nil, err
+		}
+		if artifact.Kind != assets.KindIDFile {
+			return nil, fmt.Errorf("id_files: artifact %d is a %s, not an id_file", ref.ArtifactID, artifact.Kind)
+		}
+		if !artifact.Exists || artifact.Path == "" {
+			return nil, fmt.Errorf("id_files: artifact %d (%s) has no file on this host", ref.ArtifactID, artifact.Filename)
+		}
+		name := ref.Name
+		if name == "" && artifact.Role == provisioner.IDTypeSafeID {
+			name, _ = spec.Properties["USER_SAFE_ID"].(string)
+		}
+		files = append(files, provisioner.IDFile{SourcePath: artifact.Path, Type: artifact.Role, Name: name})
+	}
+	return files, nil
 }
 
 // installerWarning answers why a present file is mounted as the person's own rather than verified, empty when it verifies.

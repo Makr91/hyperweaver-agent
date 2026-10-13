@@ -58,12 +58,16 @@ func (e *executors) prepareDocument(ctx context.Context, task *tasks.Task, out *
 	}
 
 	settings := effectiveSettings(ctx, e.env, spec)
-	mounts, roles, warnings, err := e.resolveInstallerFiles(ctx, spec, out)
+	mounts, roles, warnings, err := e.resolveInstallerFiles(ctx, version, spec, out)
 	if err != nil {
 		return err
 	}
 	if len(warnings) > 0 {
 		e.taskProgressWarnings(task, 20, "resolving_installer_files", warnings)
+	}
+	idFiles, err := e.resolveIDFiles(ctx, spec)
+	if err != nil {
+		return err
 	}
 	rendered, err := provisioner.RenderHostsFile(&provisioner.GenerateInput{
 		Version:  version,
@@ -95,14 +99,15 @@ func (e *executors) prepareDocument(ctx context.Context, task *tasks.Task, out *
 	e.taskProgress(task, 50, "materializing_workdir")
 	out.Write("stdout", "Materializing working directory "+workdir+"\n")
 	if merr := provisioner.Materialize(&provisioner.MaterializeInput{
-		MachineDir: workdir,
-		Version:    version,
-		HostsYML:   rendered,
-		Roles:      roles,
-		Installers: mounts,
-		SafeIDPath: spec.SafeIDPath,
-		CACertPath: e.env.CACertPath,
-		CAKeyPath:  e.env.CAKeyPath,
+		MachineDir:    workdir,
+		Version:       version,
+		HostsYML:      rendered,
+		InstallerDirs: installerDirs(version),
+		Installers:    mounts,
+		SafeIDPath:    spec.SafeIDPath,
+		IDFiles:       idFiles,
+		CACertPath:    e.env.CACertPath,
+		CAKeyPath:     e.env.CAKeyPath,
 	}); merr != nil {
 		return merr
 	}

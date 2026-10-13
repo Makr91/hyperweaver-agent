@@ -44,7 +44,7 @@ func (s *Server) handleScanArtifacts(w http.ResponseWriter, r *http.Request) {
 		message = "Scan task created for storage location '" + location.Name + "'"
 	} else if meta.Type != "" {
 		if !assets.ValidKind(meta.Type) {
-			taskError(w, http.StatusBadRequest, "type must be one of iso, image, installer, fixpack, hotfix")
+			taskError(w, http.StatusBadRequest, "type must be one of "+assets.KindNames)
 			return
 		}
 		message = "Scan task created for " + meta.Type + " locations"

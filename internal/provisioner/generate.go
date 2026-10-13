@@ -54,6 +54,11 @@ type RoleInput struct {
 	Name    string    `json:"name"`
 	Enabled bool      `json:"enabled"`
 	Files   RoleFiles `json:"files"`
+	// Collection and Tags are the role's Ansible collection and tags, the manifest's when the request carries none
+	Collection string   `json:"collection,omitempty"`
+	Tags       []string `json:"tags,omitempty"`
+	// Vars are the role's own variables, handed to the template verbatim under the role's vars
+	Vars map[string]any `json:"vars,omitempty"`
 }
 
 // GenerateInput is everything one Hosts.yml render consumes.
@@ -143,6 +148,7 @@ func RenderHostsFile(in *GenerateInput) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+	in.Roles = CompleteRoles(in.Version, in.Roles)
 	templatesDir := filepath.Join(in.Version.Root, "templates")
 	templatePath := filepath.Join(templatesDir, hostsTemplateName)
 	if _, serr := os.Stat(templatePath); serr != nil {
@@ -204,15 +210,49 @@ func (l *packageLoader) Inherit(_ string) (loaders.Loader, error) {
 	return l, nil
 }
 
-// rolesContext exposes the role selections structured (name/enabled/files)
-// for templates that iterate instead of testing flattened flags.
+// CompleteRoles answers the request's roles in their order, each row's collection and tags filled from the manifest where the request left them empty.
+func CompleteRoles(version *Version, roles []RoleInput) []RoleInput {
+	out := make([]RoleInput, len(roles))
+	copy(out, roles)
+	manifest := map[string]ManifestRole{}
+	for _, role := range ManifestRoles(version.Metadata) {
+		manifest[role.Name] = role
+	}
+	for i := range out {
+		declared, known := manifest[out[i].Name]
+		if !known {
+			continue
+		}
+		if out[i].Collection == "" {
+			out[i].Collection = declared.Collection
+		}
+		if len(out[i].Tags) == 0 {
+			out[i].Tags = declared.Tags
+		}
+	}
+	return out
+}
+
+// rolesContext exposes the role selections structured, in request order, for the template's roles loop: name, enabled, run_tasks, collection, tags, files and vars.
 func rolesContext(roles []RoleInput) []map[string]any {
 	out := make([]map[string]any, 0, len(roles))
 	for i := range roles {
+		tags := roles[i].Tags
+		if tags == nil {
+			tags = []string{}
+		}
+		vars := roles[i].Vars
+		if vars == nil {
+			vars = map[string]any{}
+		}
 		out = append(out, map[string]any{
-			"name":    roles[i].Name,
-			"enabled": roles[i].Enabled,
-			"files":   roles[i].Files,
+			"name":       roles[i].Name,
+			"enabled":    roles[i].Enabled,
+			"run_tasks":  roles[i].Enabled,
+			"collection": roles[i].Collection,
+			"tags":       tags,
+			"files":      roles[i].Files,
+			"vars":       vars,
 		})
 	}
 	return out

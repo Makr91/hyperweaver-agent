@@ -3,6 +3,7 @@ package assets
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -13,15 +14,15 @@ import (
 
 const artifactColumns = `id, location_id, role, kind, filename, path, sha256,
 	expected_sha256, size, version, file_exists, verified_at, source_url,
-	created_at, updated_at, given_checksum, given_algorithm`
+	created_at, updated_at, given_checksum, given_algorithm, version_info`
 
 func scanArtifact(row interface{ Scan(...any) error }) (*Artifact, error) {
 	var a Artifact
-	var locationID, path, sha, expected, version, sourceURL, verifiedAt, given, givenAlgorithm sql.NullString
+	var locationID, path, sha, expected, version, sourceURL, verifiedAt, given, givenAlgorithm, versionInfo sql.NullString
 	var createdAt, updatedAt string
 	err := row.Scan(&a.ID, &locationID, &a.Role, &a.Kind, &a.Filename, &path,
 		&sha, &expected, &a.Size, &version, &a.Exists, &verifiedAt, &sourceURL,
-		&createdAt, &updatedAt, &given, &givenAlgorithm)
+		&createdAt, &updatedAt, &given, &givenAlgorithm, &versionInfo)
 	if err != nil {
 		return nil, err
 	}
@@ -33,6 +34,12 @@ func scanArtifact(row interface{ Scan(...any) error }) (*Artifact, error) {
 	a.SourceURL = sourceURL.String
 	a.GivenChecksum = given.String
 	a.GivenAlgorithm = givenAlgorithm.String
+	if versionInfo.Valid && versionInfo.String != "" {
+		info := &VersionInfo{}
+		if uerr := json.Unmarshal([]byte(versionInfo.String), info); uerr == nil {
+			a.VersionInfo = info
+		}
+	}
 	if a.CreatedAt, err = time.Parse(timeLayout, createdAt); err != nil {
 		return nil, fmt.Errorf("artifact %d: parse created_at: %w", a.ID, err)
 	}
@@ -256,14 +263,24 @@ func (s *Store) RecordIngested(ctx context.Context, in *Ingested) (*Artifact, er
 }
 
 // SeedExpectation inserts a hash expectation (no binary) unless the entry
-// already exists — SHI's initial-registry semantics.
-func (s *Store) SeedExpectation(ctx context.Context, locationID, role, kind, filename, sha, version string) error {
+// already exists — SHI's initial-registry semantics; an existing row takes the structured version when it has none.
+func (s *Store) SeedExpectation(ctx context.Context, locationID, role, kind, filename, sha string, version *VersionInfo) error {
 	now := formatTime(time.Now())
+	var fullVersion, info any
+	if version != nil {
+		fullVersion = version.FullVersion
+		raw, err := json.Marshal(version)
+		if err != nil {
+			return err
+		}
+		info = string(raw)
+	}
 	_, err := s.db.ExecContext(ctx, `INSERT INTO artifacts
-		(location_id, role, kind, filename, expected_sha256, version, file_exists, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?)
-		ON CONFLICT (location_id, role, kind, filename) DO NOTHING`,
-		locationID, role, kind, filename, sha, version, now, now)
+		(location_id, role, kind, filename, expected_sha256, version, version_info, file_exists, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
+		ON CONFLICT (location_id, role, kind, filename) DO UPDATE SET
+		 version_info = COALESCE(artifacts.version_info, excluded.version_info)`,
+		locationID, role, kind, filename, sha, fullVersion, info, now, now)
 	return err
 }
 

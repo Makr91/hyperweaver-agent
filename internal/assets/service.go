@@ -51,6 +51,7 @@ var builtinLocations = []struct {
 	{"installers", "Installer Cache", KindInstaller},
 	{"fixpacks", "Fixpack Cache", KindFixpack},
 	{"hotfixes", "Hotfix Cache", KindHotfix},
+	{"id-files", "ID Files", KindIDFile},
 }
 
 // DefaultExtensions is the scanning filter fallback (zoneweaver's

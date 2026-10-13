@@ -57,6 +57,9 @@
                     },
                     "version": {
                         "type": "string"
+                    },
+                    "version_info": {
+                        "$ref": "#/components/schemas/assets.VersionInfo"
                     }
                 },
                 "type": "object"
@@ -254,6 +257,29 @@
                 },
                 "type": "object"
             },
+            "assets.VersionInfo": {
+                "properties": {
+                    "ea_access_release": {
+                        "type": "string"
+                    },
+                    "fix_pack": {
+                        "type": "string"
+                    },
+                    "full_version": {
+                        "type": "string"
+                    },
+                    "major": {
+                        "type": "string"
+                    },
+                    "minor": {
+                        "type": "string"
+                    },
+                    "patch": {
+                        "type": "string"
+                    }
+                },
+                "type": "object"
+            },
             "config.Backup": {
                 "properties": {
                     "created_at": {
@@ -414,6 +440,7 @@
                 "type": "object"
             },
             "hostinfo.Info": {
+                "description": "The host as GET /api/version answers it",
                 "properties": {
                     "arch": {
                         "type": "string"
@@ -442,6 +469,17 @@
                     "Provisioners",
                     "Templates"
                 ]
+            },
+            "machines.IDFileRef": {
+                "properties": {
+                    "artifact_id": {
+                        "type": "integer"
+                    },
+                    "name": {
+                        "type": "string"
+                    }
+                },
+                "type": "object"
             },
             "machines.ImportMetadata": {
                 "properties": {
@@ -1142,6 +1180,10 @@
             },
             "provisioner.RoleInput": {
                 "properties": {
+                    "collection": {
+                        "description": "Collection and Tags are the role's Ansible collection and tags, the manifest's when the request carries none",
+                        "type": "string"
+                    },
                     "enabled": {
                         "type": "boolean"
                     },
@@ -1150,6 +1192,18 @@
                     },
                     "name": {
                         "type": "string"
+                    },
+                    "tags": {
+                        "items": {
+                            "type": "string"
+                        },
+                        "type": "array",
+                        "uniqueItems": false
+                    },
+                    "vars": {
+                        "additionalProperties": {},
+                        "description": "Vars are the role's own variables, handed to the template verbatim under the role's vars",
+                        "type": "object"
                     }
                 },
                 "type": "object"
@@ -1551,6 +1605,9 @@
                     "size": {
                         "type": "integer"
                     },
+                    "source": {
+                        "type": "string"
+                    },
                     "source_url": {
                         "type": "string"
                     },
@@ -1567,7 +1624,7 @@
                         "type": "boolean"
                     },
                     "version": {
-                        "type": "string"
+                        "$ref": "#/components/schemas/assets.VersionInfo"
                     }
                 },
                 "type": "object"
@@ -2269,6 +2326,13 @@
                         "description": "Hypervisor is the per-machine hypervisor selection: \"\"/virtualbox =\nVirtualBox (the default), utm = UTM. Finalize persists it onto the row.",
                         "type": "string"
                     },
+                    "id_files": {
+                        "items": {
+                            "$ref": "#/components/schemas/machines.IDFileRef"
+                        },
+                        "type": "array",
+                        "uniqueItems": false
+                    },
                     "name": {
                         "type": "string"
                     },
@@ -2328,6 +2392,14 @@
                         "description": "Vbox is the document's vbox section at create — VirtualBox's own\nper-hypervisor key (Mark's ruling, sync 2026-07-19): the first-class\nknob vocabulary (vbox.\u003csection\u003e.\u003ckey\u003e — cpu, memory, graphics, audio,\nusb, integration, platform, firmware, recording, vrde, autostart,\nserial[], parallel[]), the directives[] passthrough, and the\nguest_agent/post_provision_boot booleans.",
                         "type": "object"
                     },
+                    "wait_for": {
+                        "description": "WaitFor names queued tasks, downloads in flight, the create's first task waits on; they are chained behind one another in this order",
+                        "items": {
+                            "type": "string"
+                        },
+                        "type": "array",
+                        "uniqueItems": false
+                    },
                     "zones": {
                         "additionalProperties": {},
                         "description": "Zones is the document's zones section at create (autostart today; the\nbase's system attrs land through Vbox below).",
@@ -2377,6 +2449,13 @@
                     },
                     "success": {
                         "type": "boolean"
+                    },
+                    "waited_on": {
+                        "items": {
+                            "type": "string"
+                        },
+                        "type": "array",
+                        "uniqueItems": false
                     }
                 },
                 "type": "object"
@@ -2430,7 +2509,7 @@
                         "type": "string"
                     },
                     "type": {
-                        "description": "Type is one of iso, image, installer, fixpack, hotfix.",
+                        "description": "Type is one of iso, image, installer, fixpack, hotfix, id_file.",
                         "type": "string"
                     }
                 },
@@ -3147,6 +3226,29 @@
                 },
                 "type": "object"
             },
+            "server.fetchArtifactResponse": {
+                "properties": {
+                    "artifact_id": {
+                        "type": "integer"
+                    },
+                    "filename": {
+                        "type": "string"
+                    },
+                    "source": {
+                        "type": "string"
+                    },
+                    "status": {
+                        "type": "string"
+                    },
+                    "success": {
+                        "type": "boolean"
+                    },
+                    "task_id": {
+                        "type": "string"
+                    }
+                },
+                "type": "object"
+            },
             "server.filePermissions": {
                 "properties": {
                     "executable": {
@@ -3498,8 +3600,33 @@
                 },
                 "type": "object"
             },
+            "server.healthNote": {
+                "properties": {
+                    "code": {
+                        "type": "string"
+                    },
+                    "level": {
+                        "type": "string"
+                    },
+                    "text": {
+                        "type": "string"
+                    }
+                },
+                "type": "object"
+            },
             "server.healthReport": {
                 "properties": {
+                    "host": {
+                        "$ref": "#/components/schemas/hostinfo.Info"
+                    },
+                    "notes": {
+                        "description": "The cautions of the host, empty while it has nothing to say",
+                        "items": {
+                            "$ref": "#/components/schemas/server.healthNote"
+                        },
+                        "type": "array",
+                        "uniqueItems": false
+                    },
                     "services": {
                         "additionalProperties": {
                             "type": "string"
@@ -3515,6 +3642,14 @@
                     "timestamp": {
                         "description": "When the report was taken, RFC 3339",
                         "type": "string"
+                    },
+                    "tools": {
+                        "description": "The detected tools with their versions, the rows GET /api/version answers",
+                        "items": {
+                            "$ref": "#/components/schemas/prereqs.Tool"
+                        },
+                        "type": "array",
+                        "uniqueItems": false
                     }
                 },
                 "type": "object"
@@ -8716,7 +8851,7 @@
         },
         "/api/artifacts": {
             "get": {
-                "description": "Minimum role: viewer. Every registry row — present files and expectation-only entries — with zoneweaver's filtering and paging.",
+                "description": "Minimum role: viewer. Every registry row — present files and expectation-only entries — with zoneweaver's filtering and paging. version is the row's structured version {major, minor, patch, fix_pack, ea_access_release, full_version}, the bundled registry's where it recorded one, else the version string split on dots. A row whose file is missing carries source, the registry the agent can fetch it from: boxvault when its source_url is under a configured box registry, hcl for the HCL portal and every bundled expectation, custom for any other URL; POST /api/artifacts/{id}/fetch queues that download. type id_file lists the ID files, role the id type (safe_id, server_id, user_id).",
                 "parameters": [
                     {
                         "description": "Filter by artifact type",
@@ -9357,7 +9492,7 @@
                                 }
                             }
                         },
-                        "description": "name, path or type missing (required); type outside iso, image, installer, fixpack, hotfix (enum at /type); path not absolute (pattern absolutePath at /path); directory not creatable (writable at /path)"
+                        "description": "name, path or type missing (required); type outside iso, image, installer, fixpack, hotfix, id_file (enum at /type); path not absolute (pattern absolutePath at /path); directory not creatable (writable at /path)"
                     },
                     "503": {
                         "content": {
@@ -9732,6 +9867,50 @@
                     }
                 },
                 "summary": "Download an artifact file",
+                "tags": [
+                    "Artifacts"
+                ]
+            }
+        },
+        "/api/artifacts/{id}/fetch": {
+            "post": {
+                "description": "Minimum role: operator. Queues the download of a known row whose file is not on this host, from the source the row names: boxvault queues artifact_registry_download as the signed-in person for the file its source_url names on the configured box registry; hcl queues hcl_download under the first hcl_download_portal_api_keys secret; custom queues artifact_download of the source_url. The file lands in the row's own location under its role, the row's expected sha256 verified during the stream, and the task reports progress as every other download does. No body.",
+                "parameters": [
+                    {
+                        "description": "Artifact id",
+                        "in": "path",
+                        "name": "id",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "202": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/server.fetchArtifactResponse"
+                                }
+                            }
+                        },
+                        "description": "Download queued"
+                    },
+                    "400": {
+                        "description": "The row names no source the agent can fetch from, or no HCL portal key is stored"
+                    },
+                    "404": {
+                        "description": "Artifact not found"
+                    },
+                    "409": {
+                        "description": "The file is already on this host"
+                    },
+                    "503": {
+                        "description": "Artifact storage is disabled"
+                    }
+                },
+                "summary": "Fetch a missing artifact from its source",
                 "tags": [
                     "Artifacts"
                 ]
@@ -11060,7 +11239,7 @@
         },
         "/api/events": {
             "get": {
-                "description": "Minimum role: viewer. The one event stream of the Universal Events Contract, plain WHATWG server-sent events. topics is a comma-separated list of health, tasks, hosts, admin, monitoring, profile, notifications and sessions; unknown names are ignored, an empty list asks for every topic, and the stream answers the topics the key's role may read, admin left out for a non-admin key, so the ready event's topics list is the subscription that stands; 403 only when nothing is left. The first frame is retry: 3000 followed by the ready event carrying the newest id and the subscribed topics. Every event carries id \u003cepoch-ms\u003e-\u003cseq\u003e, a kebab-case event name and one line of JSON data; a :hb comment line is sent after 25 seconds without a frame. Topic tasks sends task-updated, one task row as GET /api/tasks answers it, when a task is created and on every change of its status, progress_percent, progress_info or error_message. Topic hosts sends stats-updated, the GET /api/stats document, when a machine is created or removed and when one changes status. Topic health sends health, the GET /api/health report, whenever a task ends and the report differs from the last one sent. Topic admin sends restart-required, {required, last_modified_by, last_modified_time}, after every configuration save and backup restore, and {required: false} as the agent restarts; it is subscribed for an admin key alone. Topic admin also sends update-available {current_version, latest_version, release_date} when a check finds a newer release. Topic monitoring sends cpu-sample {cpu: [sample]} with per_core_parsed, memory-sample {memory: [sample]} and network-sample {usage: [samples]}, the members GET /api/monitoring/system/cpu, /api/system/memory and /api/network/usage answer, whenever the agent takes them: every monitoring.live_interval seconds while at least one client is subscribed to the topic, whether or not storage is on, and nothing while none is; on every collector tick while monitoring.storage_enabled; and on POST /api/monitoring/collect. A live sample is one event in the ring like any other. Topic profile is the person's profile topic of the contract; this agent keeps no preferences, so it sends nothing on it. Topic notifications sends, to the one person whose inbox changed, notification-created (the row as GET /api/notifications answers it), notification-read {id, read_at}, notification-unread {id}, notification-dismissed {id}, inbox-read-all {read_at} and inbox-cleared {}, each followed by unread-count {count}, the person's unread rows, the local inbox's and, for the account the agent is bound to, the hub's. For the bound account, while at least one client here is subscribed to the topic, the agent also holds the identity provider's stream open on its session and notifications topics under the account's token and relays the notifications topic to that person: the hub's notification-created row arrives marked origin hub, its unread-count, ready and reset each send this agent's combined unread-count, and every other event of the topic passes as it came; the hub's session-terminated ends the bound account's grant on the agent, and the account signs in again. Topic sessions sends, to the person whose key started the terminal, session-started and session-ended, each {kind, id, machine_name}, kind host_shell or ssh and machine_name empty for the host shell, when a host shell or an SSH session starts and when it ends, whoever ended it. No topic has a snapshot event. The ring keeps the last 500 events or 5 minutes, whichever is larger: a Last-Event-ID inside it replays every later event of the subscribed topics, one outside it answers a reset event naming the subscribed topics. A task's output and every terminal stay on their WebSockets.",
+                "description": "Minimum role: viewer. The one event stream of the Universal Events Contract, plain WHATWG server-sent events. topics is a comma-separated list of health, tasks, hosts, admin, monitoring, profile, notifications and sessions; unknown names are ignored, an empty list asks for every topic, and the stream answers the topics the key's role may read, admin left out for a non-admin key, so the ready event's topics list is the subscription that stands; 403 only when nothing is left. The first frame is retry: 3000 followed by the ready event carrying the newest id and the subscribed topics. Every event carries id \u003cepoch-ms\u003e-\u003cseq\u003e, a kebab-case event name and one line of JSON data; a :hb comment line is sent after 25 seconds without a frame. Topic tasks sends task-updated, one task row as GET /api/tasks answers it, when a task is created and on every change of its status, progress_percent, progress_info or error_message. Topic hosts sends stats-updated, the GET /api/stats document, when a machine is created or removed and when one changes status. Topic health sends health, the GET /api/health report with its services, tools, host and notes, whenever a task ends and the report differs from the last one sent. Topic admin sends restart-required, {required, last_modified_by, last_modified_time}, after every configuration save and backup restore, and {required: false} as the agent restarts; it is subscribed for an admin key alone. Topic admin also sends update-available {current_version, latest_version, release_date} when a check finds a newer release. Topic monitoring sends cpu-sample {cpu: [sample]} with per_core_parsed, memory-sample {memory: [sample]} and network-sample {usage: [samples]}, the members GET /api/monitoring/system/cpu, /api/system/memory and /api/network/usage answer, whenever the agent takes them: every monitoring.live_interval seconds while at least one client is subscribed to the topic, whether or not storage is on, and nothing while none is; on every collector tick while monitoring.storage_enabled; and on POST /api/monitoring/collect. A live sample is one event in the ring like any other. Topic profile is the person's profile topic of the contract; this agent keeps no preferences, so it sends nothing on it. Topic notifications sends, to the one person whose inbox changed, notification-created (the row as GET /api/notifications answers it), notification-read {id, read_at}, notification-unread {id}, notification-dismissed {id}, inbox-read-all {read_at} and inbox-cleared {}, each followed by unread-count {count}, the person's unread rows, the local inbox's and, for the account the agent is bound to, the hub's. For the bound account, while at least one client here is subscribed to the topic, the agent also holds the identity provider's stream open on its session and notifications topics under the account's token and relays the notifications topic to that person: the hub's notification-created row arrives marked origin hub, its unread-count, ready and reset each send this agent's combined unread-count, and every other event of the topic passes as it came; the hub's session-terminated ends the bound account's grant on the agent, and the account signs in again. Topic sessions sends, to the person whose key started the terminal, session-started and session-ended, each {kind, id, machine_name}, kind host_shell or ssh and machine_name empty for the host shell, when a host shell or an SSH session starts and when it ends, whoever ended it. No topic has a snapshot event. The ring keeps the last 500 events or 5 minutes, whichever is larger: a Last-Event-ID inside it replays every later event of the subscribed topics, one outside it answers a reset event naming the subscribed topics. A task's output and every terminal stay on their WebSockets.",
                 "parameters": [
                     {
                         "description": "Comma-separated topics: health, tasks, hosts, admin, monitoring, profile, notifications, sessions",
@@ -11884,7 +12063,7 @@
         },
         "/api/health": {
             "get": {
-                "description": "Public. The one health shape every UI backend answers: status is ok, warning or error, the worst of the services; timestamp is when the report was taken; services carries one coarse status word each for database (every open database file answers a ping), hypervisor (VBoxManage or a usable UTM is present), tasks (the task processor runs) and monitoring (error when storage is on and the collector is down, warning after a collector error). The same report is sent as the health event on the health topic of GET /api/events whenever a task ends and the report differs from the last one sent.",
+                "description": "Public. The one health shape every UI backend answers: status is ok, warning or error, the worst of the services; timestamp is when the report was taken; services carries one coarse status word each for database (every open database file answers a ping), hypervisor (VBoxManage or a usable UTM is present; warning on a Windows host where a WSL distribution runs beside VirtualBox), tasks (the task processor runs) and monitoring (error when storage is on and the collector is down, warning after a collector error). tools lists the detected tools as GET /api/version does, each {name, installed, version}, version left out while unknown; host is the host as GET /api/version answers it; notes lists the cautions of the host as {code, level, text}, level warning or error: virtualbox_wsl on a Windows host running WSL beside VirtualBox, rsync_old on a non-Windows host whose rsync is 2.6.9 or older; empty while there is nothing to say. The same report is sent as the health event on the health topic of GET /api/events whenever a task ends and the report differs from the last one sent.",
                 "responses": {
                     "200": {
                         "content": {
@@ -11934,7 +12113,7 @@
                 ]
             },
             "post": {
-                "description": "Minimum role: operator (the machine-create capability token). Queues the CREATE ORCHESTRATION (the zoneweaver mechanism — the agent builds real infrastructure natively, no vagrant): a parent task plus chained children machine_prepare (render the package's Jinja2 template + materialize the working directory + hash-verified installer mounts — queued ONLY when the spec names a provisioner; the reference is OPTIONAL, a machine is just a machine and provisioning never gates its existence) → machine_create_storage (clone the box template's disk image, grow to disks.boot.size, create additional media; rollback on failure) → machine_create_config (createvm/modifyvm/storage/NICs from the document + vbox.directives passthrough + cloud-init guest properties; adapter 1 is the PROVISIONING NIC — NAT with an allocated ssh port-forward (127.0.0.1:\u003cport\u003e → guest 22), giving guest egress and the host's provisioning access, vagrant's exact layout; document networks[] ride adapters 2+) → machine_create_finalize (registry row + document sections + — package-based creates only — the render-produced provisioner document stored in configuration + UUID) → optional start. Provisioner-less creates build straight from the spec's own settings/networks; a provisioner document can attach later via PUT + POST /provision (the base's model). The machine ROW appears at finalize, not at POST. settings.hostname AND settings.domain are REQUIRED (settings.machine_domain overrides the naming domain). With machines.prefix_machine_names, settings.server_id is REQUIRED (numeric, padded to 4; never auto-assigned — GET /api/machines/ids/next feeds the field) and the name becomes \u003cid\u003e--\u003chostname\u003e.\u003cdomain\u003e. settings.box is OPTIONAL (the base's contract): present under an effective boot type of template, it resolves against the local template registry and a missing box chains a template_download child in front (requires_download: true; box_version must then be specific); absent, the boot medium comes from disks.boot's declared type (image | blank) or the machine is DISKLESS — a stub, Proxmox-style: hostname + domain alone makes a machine, media/NICs attach later via modify, first start is manual. notes/tags/cloud_init/vbox.directives are accepted at create too (zones is bhyve-only and inert here — see MachineSpec.zones). CONSOLEPORT PRE-FLIGHT (the converged validation, sync 2026-07-17 — both agents ship the identical refusal): settings.consoleport, when the request carries it, must be an integer in 1025-65535 (number or numeric string — the value feeds VRDE's TCP/Ports); anything else answers 400 `consoleport \u003cvalue\u003e is outside the valid console port range (1025-65535)`, and an ABSENT consoleport stays absent (no invented default). The RENDERED document's consoleport (the 0.1.31 package defaults it to server_id, which this pre-flight never sees — packaged creates render in the task chain) is guarded again by the machine_create_config task, which FAILS with the SAME message before any modifyvm instead of surfacing VRDE's cryptic mid-chain E_INVALIDARG. VCPUS PRE-FLIGHT (the converged validation, sync 2026-07-17 — zoneweaver's proposal, ACKED; both agents ship the identical refusal): settings.vcpus, when the request carries it, must be a WHOLE number \u003e= 1 (integers pass, and an INTEGRAL float like 2.0 passes too — the 0.1.31 template renders it from the wizard's integer 2; 2.5, zero, negatives, and non-numerics refuse); anything else answers 400 `vcpus \u003cvalue\u003e is not a valid vCPU count (whole number \u003e= 1)`, and an ABSENT vcpus keeps the existing default-2 behavior byte-identical. The RENDERED document's vcpus is guarded again by the machine_create_config task, which FAILS with the SAME message before any createvm/modifyvm. THE TYPED DISK SPEC (Mark's word, sync 2026-07-17 — the ZERO-inference model; both agents ship the identical frozen refusal strings): disks.boot.type is REQUIRED whenever disks.boot is present and is the ONLY dispatcher — template|image|blank|none. Per type: template clones from settings.box (size is the grow-to; REQUIRES settings.box; takes no path), image attaches an EXISTING file at path AS-IS — never created, deleted, or resized (size/volume_name refused; at task time the file must exist on this host and must not be attached to another machine — the refusal names the path and holder verbatim, and entry-level force: true skips the in-use pre-check), blank creates a fresh VDI (REQUIRES size; sparse?/volume_name? legal; takes no path), none is diskless (no other keys beside type). blank and template entries may carry directory (the converged addendum, sync 2026-07-17 — the pool/dataset mirror): the CREATED disk file lands in that agent-host folder; absent = the machine folder (the spelled default); the folder must already exist and be absolute — the machine_create_storage task refuses `\u003cwhere\u003e directory \u003cpath\u003e is not an absolute existing directory on this host`, and image entries refuse the key outright (`\u003cwhere\u003e type image does not take directory`). Template clones name their file by volume_name (absent = \"boot\"), keeping the template's own extension. An ABSENT disks.boot is the SPELLED default: template when settings.box is present, none otherwise — exactly the old box/diskless ladder; the old presence-dispatch branches (path-only, size-only boot) DIED with the model. additional_disks[] entries REQUIRE type too (image|blank only, same per-type rules; every refusal indexes entries 1-BASED). cdroms[] entries take EXACTLY one of iso|path. controllers[] is unchanged. Unknown keys in disks entries (mount, filesystem, driver, ...) are NEVER read for behavior and always preserved verbatim in the stored document. Template resolution + auto-download run ONLY when the EFFECTIVE boot type is template — a box named under any other type never chains a download; it yields a warning instead. THE CLONE STRATEGY (frozen, sync 2026-07-19): disks.boot.clone_strategy on a template boot — copy (default, independent full copy) | clone (differencing child off the template's shared multiattach clone base; takes no size/volume_name/directory; localize refused as zfs-only) — see MachineSpec.disks for the full contract. WARNINGS (never refusals) ride the response's resource_warnings[] as {resource: \"disks\", message}: a bhyve-vocabulary key in any disk entry (pool/dataset/diskif — `\u003ckey\u003e is bhyve vocabulary and has no effect on this hypervisor`), a clone_strategy in an additional_disks entry (`clone_strategy has no effect on additional disks`), and a settings.box the effective type never reads (`settings.box is unused when disks.boot.type is \u003ctype\u003e`). Every medium the agent CREATES (template clones, blank VDIs) is provenance-STAMPED at materialization (the hyperweaver:source medium property, .hw-source sidecar fallback) — the delete flow destroys ONLY stamped media (GET /api/media surfaces the stamps); image media are never stamped and never the agent's to delete. The RENDERED document re-validates in the machine_create_storage task with the SAME frozen strings — SEQUENCING, honestly: package releases predating the typed-disk echo can render a disks.boot WITHOUT type, and those packaged creates REFUSE with the type-required string until the package release echoes the typed vocabulary. MULTI-HOST (the converged M-Q1 wire): when the named provisioner package's rendered document carries hosts[] with N\u003e1 entries, this ONE request creates N machines — the answer is {success, multi_host: true, count, message, machines: [{machine_name, parent_task_id, sub_tasks}] in hosts[] order, resource_warnings? (a MAP of machine_name → warnings[])}. N orchestration parents, NO meta-parent; names are FINAL at POST (each entry's own settings.hostname/domain, the server_id prefix rules applying per entry). The pre-check is ATOMIC: any entry's conflict or validation problem refuses the WHOLE request, its message prefixed \"multi-host entry N: \" (N = the 1-BASED hosts[] position). An explicit request name is a 400 on a multi-host document, and auto-download is single-host only — a multi-host document whose box template is not all local answers 400. Machines create in hosts[] declaration order, and machine k+1's FIRST task depends_on machine k's LAST (the start when start_after_create, else the finalize) — a failed predecessor cancels the rest by dependency propagation. Join vars are template-rendered document data. A single-entry hosts[] (N==1) keeps the single-host wire unchanged. STORAGE PATH: the optional storage_path_id names the machines storage path (GET /api/storage/paths?type=machines) the machine's folder is created in — its definition files, the VirtualBox machine files and its disks; absent, the storage path marked default is used; an unknown or disabled id answers 400. A multi-host request places every machine in the one storage path. The answer carries the storage_path_id used.",
+                "description": "Minimum role: operator (the machine-create capability token). Queues the CREATE ORCHESTRATION (the zoneweaver mechanism — the agent builds real infrastructure natively, no vagrant): a parent task plus chained children machine_prepare (render the package's Jinja2 template + materialize the working directory + hash-verified installer mounts — queued ONLY when the spec names a provisioner; the reference is OPTIONAL, a machine is just a machine and provisioning never gates its existence) → machine_create_storage (clone the box template's disk image, grow to disks.boot.size, create additional media; rollback on failure) → machine_create_config (createvm/modifyvm/storage/NICs from the document + vbox.directives passthrough + cloud-init guest properties; adapter 1 is the PROVISIONING NIC — NAT with an allocated ssh port-forward (127.0.0.1:\u003cport\u003e → guest 22), giving guest egress and the host's provisioning access, vagrant's exact layout; document networks[] ride adapters 2+) → machine_create_finalize (registry row + document sections + — package-based creates only — the render-produced provisioner document stored in configuration + UUID) → optional start. Provisioner-less creates build straight from the spec's own settings/networks; a provisioner document can attach later via PUT + POST /provision (the base's model). The machine ROW appears at finalize, not at POST. settings.hostname AND settings.domain are REQUIRED (settings.machine_domain overrides the naming domain). With machines.prefix_machine_names, settings.server_id is REQUIRED (numeric, padded to 4; never auto-assigned — GET /api/machines/ids/next feeds the field) and the name becomes \u003cid\u003e--\u003chostname\u003e.\u003cdomain\u003e. settings.box is OPTIONAL (the base's contract): present under an effective boot type of template, it resolves against the local template registry and a missing box chains a template_download child in front (requires_download: true; box_version must then be specific); absent, the boot medium comes from disks.boot's declared type (image | blank) or the machine is DISKLESS — a stub, Proxmox-style: hostname + domain alone makes a machine, media/NICs attach later via modify, first start is manual. notes/tags/cloud_init/vbox.directives are accepted at create too (zones is bhyve-only and inert here — see MachineSpec.zones). CONSOLEPORT PRE-FLIGHT (the converged validation, sync 2026-07-17 — both agents ship the identical refusal): settings.consoleport, when the request carries it, must be an integer in 1025-65535 (number or numeric string — the value feeds VRDE's TCP/Ports); anything else answers 400 `consoleport \u003cvalue\u003e is outside the valid console port range (1025-65535)`, and an ABSENT consoleport stays absent (no invented default). The RENDERED document's consoleport (the 0.1.31 package defaults it to server_id, which this pre-flight never sees — packaged creates render in the task chain) is guarded again by the machine_create_config task, which FAILS with the SAME message before any modifyvm instead of surfacing VRDE's cryptic mid-chain E_INVALIDARG. VCPUS PRE-FLIGHT (the converged validation, sync 2026-07-17 — zoneweaver's proposal, ACKED; both agents ship the identical refusal): settings.vcpus, when the request carries it, must be a WHOLE number \u003e= 1 (integers pass, and an INTEGRAL float like 2.0 passes too — the 0.1.31 template renders it from the wizard's integer 2; 2.5, zero, negatives, and non-numerics refuse); anything else answers 400 `vcpus \u003cvalue\u003e is not a valid vCPU count (whole number \u003e= 1)`, and an ABSENT vcpus keeps the existing default-2 behavior byte-identical. The RENDERED document's vcpus is guarded again by the machine_create_config task, which FAILS with the SAME message before any createvm/modifyvm. THE TYPED DISK SPEC (Mark's word, sync 2026-07-17 — the ZERO-inference model; both agents ship the identical frozen refusal strings): disks.boot.type is REQUIRED whenever disks.boot is present and is the ONLY dispatcher — template|image|blank|none. Per type: template clones from settings.box (size is the grow-to; REQUIRES settings.box; takes no path), image attaches an EXISTING file at path AS-IS — never created, deleted, or resized (size/volume_name refused; at task time the file must exist on this host and must not be attached to another machine — the refusal names the path and holder verbatim, and entry-level force: true skips the in-use pre-check), blank creates a fresh VDI (REQUIRES size; sparse?/volume_name? legal; takes no path), none is diskless (no other keys beside type). blank and template entries may carry directory (the converged addendum, sync 2026-07-17 — the pool/dataset mirror): the CREATED disk file lands in that agent-host folder; absent = the machine folder (the spelled default); the folder must already exist and be absolute — the machine_create_storage task refuses `\u003cwhere\u003e directory \u003cpath\u003e is not an absolute existing directory on this host`, and image entries refuse the key outright (`\u003cwhere\u003e type image does not take directory`). Template clones name their file by volume_name (absent = \"boot\"), keeping the template's own extension. An ABSENT disks.boot is the SPELLED default: template when settings.box is present, none otherwise — exactly the old box/diskless ladder; the old presence-dispatch branches (path-only, size-only boot) DIED with the model. additional_disks[] entries REQUIRE type too (image|blank only, same per-type rules; every refusal indexes entries 1-BASED). cdroms[] entries take EXACTLY one of iso|path. controllers[] is unchanged. Unknown keys in disks entries (mount, filesystem, driver, ...) are NEVER read for behavior and always preserved verbatim in the stored document. Template resolution + auto-download run ONLY when the EFFECTIVE boot type is template — a box named under any other type never chains a download; it yields a warning instead. THE CLONE STRATEGY (frozen, sync 2026-07-19): disks.boot.clone_strategy on a template boot — copy (default, independent full copy) | clone (differencing child off the template's shared multiattach clone base; takes no size/volume_name/directory; localize refused as zfs-only) — see MachineSpec.disks for the full contract. WARNINGS (never refusals) ride the response's resource_warnings[] as {resource: \"disks\", message}: a bhyve-vocabulary key in any disk entry (pool/dataset/diskif — `\u003ckey\u003e is bhyve vocabulary and has no effect on this hypervisor`), a clone_strategy in an additional_disks entry (`clone_strategy has no effect on additional disks`), and a settings.box the effective type never reads (`settings.box is unused when disks.boot.type is \u003ctype\u003e`). Every medium the agent CREATES (template clones, blank VDIs) is provenance-STAMPED at materialization (the hyperweaver:source medium property, .hw-source sidecar fallback) — the delete flow destroys ONLY stamped media (GET /api/media surfaces the stamps); image media are never stamped and never the agent's to delete. The RENDERED document re-validates in the machine_create_storage task with the SAME frozen strings — SEQUENCING, honestly: package releases predating the typed-disk echo can render a disks.boot WITHOUT type, and those packaged creates REFUSE with the type-required string until the package release echoes the typed vocabulary. MULTI-HOST (the converged M-Q1 wire): when the named provisioner package's rendered document carries hosts[] with N\u003e1 entries, this ONE request creates N machines — the answer is {success, multi_host: true, count, message, machines: [{machine_name, parent_task_id, sub_tasks}] in hosts[] order, resource_warnings? (a MAP of machine_name → warnings[])}. N orchestration parents, NO meta-parent; names are FINAL at POST (each entry's own settings.hostname/domain, the server_id prefix rules applying per entry). The pre-check is ATOMIC: any entry's conflict or validation problem refuses the WHOLE request, its message prefixed \"multi-host entry N: \" (N = the 1-BASED hosts[] position). An explicit request name is a 400 on a multi-host document, and auto-download is single-host only — a multi-host document whose box template is not all local answers 400. Machines create in hosts[] declaration order, and machine k+1's FIRST task depends_on machine k's LAST (the start when start_after_create, else the finalize) — a failed predecessor cancels the rest by dependency propagation. Join vars are template-rendered document data. A single-entry hosts[] (N==1) keeps the single-host wire unchanged. STORAGE PATH: the optional storage_path_id names the machines storage path (GET /api/storage/paths?type=machines) the machine's folder is created in — its definition files, the VirtualBox machine files and its disks; absent, the storage path marked default is used; an unknown or disabled id answers 400. A multi-host request places every machine in the one storage path. The answer carries the storage_path_id used. WAIT_FOR: the optional wait_for lists queued task ids, the downloads the page started before pressing Create; they are chained behind one another in the order given and the create's first task waits on the last, so the build starts the moment the last file lands and a failed or cancelled download cancels the build with \"Dependency failed\"; an unknown or finished id answers 400 and the answer carries waited_on. ROLES: roles[] rides in body order, each {name, enabled, collection, tags, files, vars}, collection and tags filled from the manifest when absent, and the template's roles loop receives them in that order with run_tasks from enabled; a role naming files mounts them from the registry under the manifest role's installer_dir at installers/\u003cinstaller_dir\u003e/archives/. ID FILES: id_files lists cached id_file artifacts as {artifact_id, name}; each is copied to id-files/\u003cfolder of its type\u003e/\u003cname\u003e, safe_id under the manifest's id_files.safe_id_dir (default user-safe-ids), server_id under server-ids, user_id under user-ids, name defaulting for a safe_id to the USER_SAFE_ID answer, else safe.ids unless id_files.keep_original_name; safe_id_path stays the agent-host file door.",
                 "requestBody": {
                     "content": {
                         "application/json": {

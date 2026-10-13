@@ -25,15 +25,49 @@ type Artifact struct {
 	SHA256         string `json:"checksum"`
 	ExpectedSHA256 string `json:"expected_sha256,omitempty"`
 	// GivenChecksum is the checksum the caller handed in with the file, under GivenAlgorithm; empty when none was given
-	GivenChecksum  string     `json:"given_checksum,omitempty"`
-	GivenAlgorithm string     `json:"given_algorithm,omitempty"`
-	Size           int64      `json:"size"`
-	Version        string     `json:"version,omitempty"`
-	Exists         bool       `json:"file_exists"`
-	VerifiedAt     *time.Time `json:"last_verified"`
-	SourceURL      string     `json:"source_url,omitempty"`
-	CreatedAt      time.Time  `json:"discovered_at"`
-	UpdatedAt      time.Time  `json:"updatedAt"`
+	GivenChecksum  string       `json:"given_checksum,omitempty"`
+	GivenAlgorithm string       `json:"given_algorithm,omitempty"`
+	Size           int64        `json:"size"`
+	Version        string       `json:"version,omitempty"`
+	VersionInfo    *VersionInfo `json:"version_info,omitempty"`
+	Exists         bool         `json:"file_exists"`
+	VerifiedAt     *time.Time   `json:"last_verified"`
+	SourceURL      string       `json:"source_url,omitempty"`
+	CreatedAt      time.Time    `json:"discovered_at"`
+	UpdatedAt      time.Time    `json:"updatedAt"`
+}
+
+// VersionInfo is an artifact's structured version as the wire answers it.
+type VersionInfo struct {
+	Major           string `json:"major"`
+	Minor           string `json:"minor"`
+	Patch           string `json:"patch"`
+	FixPack         string `json:"fix_pack"`
+	EaAccessRelease string `json:"ea_access_release"`
+	FullVersion     string `json:"full_version"`
+}
+
+// VersionDocument answers the structured version: the recorded one, else Version split on dots into major, minor and patch; nil while the row carries none.
+func (a *Artifact) VersionDocument() *VersionInfo {
+	if a.VersionInfo != nil {
+		return a.VersionInfo
+	}
+	if a.Version == "" {
+		return nil
+	}
+	info := &VersionInfo{FullVersion: a.Version}
+	numeric, _, _ := strings.Cut(a.Version, "_")
+	parts := strings.Split(numeric, ".")
+	if len(parts) > 0 {
+		info.Major = parts[0]
+	}
+	if len(parts) > 1 {
+		info.Minor = parts[1]
+	}
+	if len(parts) > 2 {
+		info.Patch = parts[2]
+	}
+	return info
 }
 
 // Verified reports whether the file's hash is trustworthy: it exists, was

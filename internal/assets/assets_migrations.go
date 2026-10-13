@@ -83,3 +83,8 @@ var GivenChecksumMigrations = []string{
 	`ALTER TABLE artifacts ADD COLUMN given_checksum TEXT;
 	ALTER TABLE artifacts ADD COLUMN given_algorithm TEXT;`,
 }
+
+// VersionInfoMigrations adds the structured version the bundled registry records for a file, as JSON.
+var VersionInfoMigrations = []string{
+	`ALTER TABLE artifacts ADD COLUMN version_info TEXT;`,
+}

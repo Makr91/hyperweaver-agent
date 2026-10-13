@@ -216,6 +216,17 @@ func requireTaskRow(res sql.Result) error {
 	return nil
 }
 
+// SetDependsOn makes a still-pending task wait on another: the queue picks it after that task completes and cancels it when that task fails or is cancelled; a task already running or finished is left as it is.
+func (s *Store) SetDependsOn(ctx context.Context, id, dependsOn string) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE tasks
+		SET depends_on = ?, updated_at = ?
+		WHERE id = ? AND status = 'pending'`, dependsOn, formatTime(time.Now()), id)
+	if err == nil {
+		s.changed(ctx, id)
+	}
+	return err
+}
+
 // Requeue flips a prepared task to pending (the artifact-upload handshake's
 // second half — the file has landed, the executor may run). False when the
 // task was not in prepared state.

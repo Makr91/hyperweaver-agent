@@ -92,7 +92,7 @@ func (s *Server) artifactPathIDByPath(path string) string {
 type createStoragePathRequest struct {
 	Name string `json:"name"`
 	Path string `json:"path"`
-	// Type is one of iso, image, installer, fixpack, hotfix.
+	// Type is one of iso, image, installer, fixpack, hotfix, id_file.
 	Type    string `json:"type"`
 	Enabled *bool  `json:"enabled"`
 }
@@ -114,7 +114,7 @@ type storageLocationResponse struct {
 //	@Param			body	body	createStoragePathRequest	true	"New location name, path, type, and enabled flag"
 //	@Success		201	{object}	storageLocationResponse	"Location created"
 //	@Failure		400	{object}	problem.Body	"Unreadable body"
-//	@Failure		422	{object}	problem.Body	"name, path or type missing (required); type outside iso, image, installer, fixpack, hotfix (enum at /type); path not absolute (pattern absolutePath at /path); directory not creatable (writable at /path)"
+//	@Failure		422	{object}	problem.Body	"name, path or type missing (required); type outside iso, image, installer, fixpack, hotfix, id_file (enum at /type); path not absolute (pattern absolutePath at /path); directory not creatable (writable at /path)"
 //	@Failure		409	{object}	problem.Body	"Path already registered (unique at /path); existing_location carries the row"
 //	@Failure		503	{object}	problem.Body	"Artifact storage is disabled"
 //	@Router			/api/artifacts/storage/paths [post]
@@ -136,7 +136,7 @@ func (s *Server) handleCreateStoragePath(w http.ResponseWriter, r *http.Request)
 	case body.Type == "":
 		failures = append(failures, problem.Required("/type"))
 	case !assets.ValidKind(body.Type):
-		failures = append(failures, problem.Enum("/type", "iso", "image", "installer", "fixpack", "hotfix"))
+		failures = append(failures, problem.Enum("/type", "iso", "image", "installer", "fixpack", "hotfix", "id_file"))
 	}
 	clean, err := safepath.CleanAbs(body.Path)
 	if err != nil && body.Path != "" {

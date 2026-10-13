@@ -56,15 +56,21 @@ type artifactDocument struct {
 	UpdatedAt         time.Time                `json:"updatedAt"`
 	Role              string                   `json:"role,omitempty"`
 	ExpectedSHA256    string                   `json:"expected_sha256,omitempty"`
-	Version           string                   `json:"version,omitempty"`
+	Version           *assets.VersionInfo      `json:"version,omitempty"`
 	SourceURL         string                   `json:"source_url,omitempty"`
+	Source            string                   `json:"source,omitempty"`
 	StorageLocation   *artifactStorageLocation `json:"storage_location,omitempty"`
+}
+
+// artifactDocument answers the wire document of one row with the source a missing file can be fetched from.
+func (s *Server) artifactDocument(a *assets.Artifact, location *assets.Location) artifactDocument {
+	return artifactJSON(a, location, s.artifactSource(a))
 }
 
 // artifactJSON is the wire artifact document: zoneweaver's Artifact schema
 // (checksum/file_type/extension/mime_type/checksum_verified/storage_location)
 // merged with the SHI extras the struct itself carries.
-func artifactJSON(a *assets.Artifact, location *assets.Location) artifactDocument {
+func artifactJSON(a *assets.Artifact, location *assets.Location, source string) artifactDocument {
 	doc := artifactDocument{
 		ID:                a.ID,
 		StorageLocationID: a.LocationID,
@@ -86,8 +92,9 @@ func artifactJSON(a *assets.Artifact, location *assets.Location) artifactDocumen
 		UpdatedAt:         a.UpdatedAt,
 		Role:              a.Role,
 		ExpectedSHA256:    a.ExpectedSHA256,
-		Version:           a.Version,
+		Version:           a.VersionDocument(),
 		SourceURL:         a.SourceURL,
+		Source:            source,
 	}
 	if location != nil {
 		doc.StorageLocation = &artifactStorageLocation{

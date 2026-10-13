@@ -15,7 +15,11 @@ const (
 	KindInstaller = "installer"
 	KindFixpack   = "fixpack"
 	KindHotfix    = "hotfix"
+	KindIDFile    = "id_file"
 )
+
+// KindNames lists every artifact type for refusals.
+const KindNames = "iso, image, installer, fixpack, hotfix, id_file"
 
 // kindInterimFix is BoxVault's name for a hotfix on its download files; it is read as KindHotfix on every route that takes a kind.
 const kindInterimFix = "interim-fix"
@@ -52,17 +56,16 @@ func ValidFilename(s string) bool {
 // ValidKind reports whether s is one of the artifact types.
 func ValidKind(s string) bool {
 	switch s {
-	case KindISO, KindImage, KindInstaller, KindFixpack, KindHotfix:
+	case KindISO, KindImage, KindInstaller, KindFixpack, KindHotfix, KindIDFile:
 		return true
 	}
 	return false
 }
 
-// RoleKeyed reports whether a type stores files under role directories
-// (SHI's cache kinds) rather than flat (zoneweaver's iso/image).
+// RoleKeyed reports whether a type stores files under role directories, the installer kinds under the folder a role reads and id_file under the id type, rather than flat (zoneweaver's iso/image).
 func RoleKeyed(kind string) bool {
 	switch kind {
-	case KindInstaller, KindFixpack, KindHotfix:
+	case KindInstaller, KindFixpack, KindHotfix, KindIDFile:
 		return true
 	}
 	return false

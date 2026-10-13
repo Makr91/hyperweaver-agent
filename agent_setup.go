@@ -167,6 +167,7 @@ func setupTasks(cfg *config.Config, secretsStore *secrets.Store) (*agentSystems,
 	agentMigrations = append(agentMigrations, machines.HypervisorMigration...)
 	agentMigrations = append(agentMigrations, inbox.Migrations...)
 	agentMigrations = append(agentMigrations, assets.GivenChecksumMigrations...)
+	agentMigrations = append(agentMigrations, assets.VersionInfoMigrations...)
 	agentDB, err := openDB(agentPath, agentMigrations)
 	if err != nil {
 		_ = tasksDB.Close()
