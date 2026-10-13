@@ -21,6 +21,7 @@ type tokenSource struct {
 	mu           sync.Mutex
 	provider     *provider
 	clientID     string
+	scope        string
 	ctx          context.Context
 	wg           *sync.WaitGroup
 	persist      func(refreshToken string)
@@ -52,13 +53,13 @@ func (t *tokenSource) tokenFor(ctx context.Context, resource string) (string, er
 		return cached.accessToken, nil
 	}
 	if subject == "" {
-		return "", ErrNoToken
+		return "", nil
 	}
 	endpoints, err := t.provider.endpoints(ctx)
 	if err != nil {
 		return "", err
 	}
-	answer, err := exchangeToken(ctx, endpoints, t.clientID, subject, resource)
+	answer, err := exchangeToken(ctx, endpoints, t.clientID, subject, resource, t.scope)
 	if err != nil {
 		return "", err
 	}

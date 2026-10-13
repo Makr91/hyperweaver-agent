@@ -52,15 +52,8 @@ type CatalogSource struct {
 	URL     string `json:"url"`
 	Enabled bool   `json:"enabled"`
 	Default bool   `json:"default"`
-	Auth    string `json:"auth"`
 	CAFile  string `json:"-"`
 }
-
-// The auth a catalog source carries: none sends nothing, oidc sends as Bearer an access token minted for the catalog's resource identifier, the one its protected resource metadata names, from the account of the key that asked, else the bound account's.
-const (
-	CatalogAuthNone = "none"
-	CatalogAuthOIDC = "oidc"
-)
 
 // catalogDocumentLimit bounds one catalog or health document read.
 const catalogDocumentLimit = 16 << 20
@@ -174,7 +167,7 @@ func fetchCatalogDocument(ctx context.Context, source *CatalogSource, target, cr
 		_ = response.Body.Close()
 	}()
 	if response.StatusCode != http.StatusOK {
-		if catalogRefused(response.StatusCode) && source.Auth == CatalogAuthOIDC {
+		if catalogRefused(response.StatusCode) {
 			forgetCatalogCredentials(source, createdBy)
 			return nil, catalogRefusal(source, response.StatusCode)
 		}
@@ -382,7 +375,7 @@ func downloadVerified(ctx context.Context, source *CatalogSource, assetURL, dest
 		_ = response.Body.Close()
 	}()
 	if response.StatusCode != http.StatusOK {
-		if catalogRefused(response.StatusCode) && source.Auth == CatalogAuthOIDC {
+		if catalogRefused(response.StatusCode) {
 			forgetCatalogCredentials(source, createdBy)
 			return "", 0, catalogRefusal(source, response.StatusCode)
 		}

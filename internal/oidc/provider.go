@@ -194,13 +194,14 @@ const (
 	accessTypeURN    = "urn:ietf:params:oauth:token-type:access_token"
 )
 
-func exchangeToken(ctx context.Context, endpoints *providerEndpoints, clientID, subjectToken, resource string) (*tokenAnswer, error) {
+func exchangeToken(ctx context.Context, endpoints *providerEndpoints, clientID, subjectToken, resource, scope string) (*tokenAnswer, error) {
 	form := url.Values{
 		"grant_type":           {exchangeGrantURN},
 		"subject_token":        {subjectToken},
 		"subject_token_type":   {accessTypeURN},
 		"requested_token_type": {accessTypeURN},
 		"resource":             {resource},
+		"scope":                {scope},
 		"client_id":            {clientID},
 	}
 	return tokenCall(ctx, endpoints.Token, form)

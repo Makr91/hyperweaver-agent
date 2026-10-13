@@ -1936,10 +1936,6 @@
             },
             "server.catalogSourceRow": {
                 "properties": {
-                    "auth": {
-                        "description": "none or oidc",
-                        "type": "string"
-                    },
                     "default": {
                         "type": "boolean"
                     },
@@ -2174,10 +2170,6 @@
             },
             "server.createCatalogSourceRequest": {
                 "properties": {
-                    "auth": {
-                        "description": "none or oidc; absent means none",
-                        "type": "string"
-                    },
                     "display_name": {
                         "type": "string"
                     },
@@ -17651,7 +17643,7 @@
         },
         "/api/provisioning/catalog": {
             "get": {
-                "description": "Minimum role: viewer. Fetches the source's catalog.json LIVE (?source= names a configured catalog; empty = the default), validates format_version 1, and relays the document verbatim with every member the catalog publishes: {name, format_version, updated, provisioners: [{name, repo, description, versions: [{version, released_at, artifacts: [{url, checksum_type, checksum}]}]}]} — versions semver-DESC, artifact URLs OPAQUE (release tags carry slashes; never parse or construct them). Versions may disappear between fetches when an author deletes a release. An oidc source is read as the person: the agent reads the catalog's protected resource metadata at its origin's /.well-known/oauth-protected-resource, accepts it while its resource equals the origin and its authorization_servers name this agent's issuer, exchanges the account's access token at the identity provider for one minted for that resource, the calling key's own account before the bound account's, and sends it as Bearer; with no account token held, the identity provider refusing the exchange, or the catalog refusing the token, the answer is 401 with the authentication problem type and the refusal in detail.",
+                "description": "Minimum role: viewer. Fetches the source's catalog.json LIVE (?source= names a configured catalog; empty = the default), validates format_version 1, and relays the document verbatim with every member the catalog publishes: {name, format_version, updated, provisioners: [{name, repo, description, versions: [{version, released_at, artifacts: [{url, checksum_type, checksum}]}]}]} — versions semver-DESC, artifact URLs OPAQUE (release tags carry slashes; never parse or construct them). Versions may disappear between fetches when an author deletes a release. Every source is read as the person whenever the agent holds a token: it reads the catalog's protected resource metadata at its origin's /.well-known/oauth-protected-resource, accepts it while its resource equals the origin and its authorization_servers name this agent's issuer, exchanges the account's access token at the identity provider for one minted for that resource under the login's scopes, the calling key's own account before the bound account's, and sends it as Bearer, so the person's organizations' private provisioners list beside the public ones; with no account token held, or a catalog publishing no metadata or naming another issuer, the read goes out anonymous. The identity provider refusing the exchange, or the catalog refusing the token, answers 401 with the authentication problem type and the refusal in detail.",
                 "parameters": [
                     {
                         "description": "A configured catalog source's id; empty = the default",
@@ -17681,7 +17673,7 @@
                                 }
                             }
                         },
-                        "description": "The source needs a signed-in account"
+                        "description": "The identity provider or the catalog refused the person's token"
                     },
                     "404": {
                         "content": {
@@ -17712,7 +17704,7 @@
         },
         "/api/provisioning/catalog/health": {
             "get": {
-                "description": "Minimum role: viewer. Fetches the source's health.json LIVE, the URL beside the catalog's (catalog.json becoming health.json, /catalog becoming /health), and relays it verbatim: {name, format_version, updated, provisioners: {\u003cfamily\u003e: {repo, tier, presentation, rules, failed_rules, health}}}. 404 while the source publishes none. An oidc source is read as the person under a token exchanged for the catalog's resource identifier, the calling key's own account before the bound account's; with none held, the exchange refused, or the catalog refusing it, the answer is 401 with the authentication problem type.",
+                "description": "Minimum role: viewer. Fetches the source's health.json LIVE, the URL beside the catalog's (catalog.json becoming health.json, /catalog becoming /health), and relays it verbatim: {name, format_version, updated, provisioners: {\u003cfamily\u003e: {repo, tier, presentation, rules, failed_rules, health}}}. 404 while the source publishes none. Read as the person under a token exchanged for the catalog's resource identifier whenever one is held, the calling key's own account before the bound account's, anonymous otherwise; the exchange refused, or the catalog refusing the token, answers 401 with the authentication problem type.",
                 "parameters": [
                     {
                         "description": "A configured catalog source's id; empty = the default",
@@ -17743,7 +17735,7 @@
                                 }
                             }
                         },
-                        "description": "The source needs a signed-in account"
+                        "description": "The identity provider or the catalog refused the person's token"
                     },
                     "404": {
                         "content": {
@@ -17774,7 +17766,7 @@
         },
         "/api/provisioning/catalog/install": {
             "post": {
-                "description": "Minimum role: operator. Queues provisioner_catalog_install, a task and never an inbox row: the executor fetches the catalog FRESH as the person who queued it (an oidc source under a token exchanged for the catalog's resource identifier from that key's own account, else the bound account's; a stale pin would 404 anyway; published checksums never change), downloads the named version's immutable VERSIONED asset, verifies its sha256 DURING the stream (mismatch = loud failure, nothing imported), then runs the ordinary import path — DSL lint gate, non-clobber, role-specs + schema.json derivation all included. While the archive downloads, the TASK carries real byte progress (the converged wire, sync 2026-07-17): progress_info is exactly {status: \"downloading\", received_bytes, total_bytes|null} and progress_percent maps the bytes into 0→90 (this op had no intermediate percents; the sha256 verify + import ride after the window and completion lands 100) — throttled to one update per 1s or 1% of total (whichever first), final update always emitted; an unknown Content-Length parks the percent at 0 while received_bytes streams. Serialized with imports (one registry write at a time).",
+                "description": "Minimum role: operator. Queues provisioner_catalog_install, a task and never an inbox row: the executor fetches the catalog FRESH as the person who queued it (under a token exchanged for the catalog's resource identifier from that key's own account, else the bound account's, whenever one is held; a stale pin would 404 anyway; published checksums never change), downloads the named version's immutable VERSIONED asset, verifies its sha256 DURING the stream (mismatch = loud failure, nothing imported), then runs the ordinary import path — DSL lint gate, non-clobber, role-specs + schema.json derivation all included. While the archive downloads, the TASK carries real byte progress (the converged wire, sync 2026-07-17): progress_info is exactly {status: \"downloading\", received_bytes, total_bytes|null} and progress_percent maps the bytes into 0→90 (this op had no intermediate percents; the sha256 verify + import ride after the window and completion lands 100) — throttled to one update per 1s or 1% of total (whichever first), final update always emitted; an unknown Content-Length parks the percent at 0 while received_bytes streams. Serialized with imports (one registry write at a time).",
                 "requestBody": {
                     "content": {
                         "application/json": {
@@ -17821,7 +17813,7 @@
         },
         "/api/provisioning/catalog/sources": {
             "get": {
-                "description": "Minimum role: viewer. Every catalog_sources definition, the disabled ones included, each with id, name, url, enabled, default and auth (none or oidc) — the HACS model's registries, the rows the Sources modal draws and writes back through PUT /api/config/storage; fork the catalog repo and add your own as another source. The id is what source_name and ?source= name; a catalog read or install names an enabled source alone. CA bundles are never returned.",
+                "description": "Minimum role: viewer. Every catalog_sources definition, the disabled ones included, each with id, name, url, enabled and default — the HACS model's registries, the rows the Sources modal draws and writes back through PUT /api/config/storage; fork the catalog repo and add your own as another source. The id is what source_name and ?source= name; a catalog read or install names an enabled source alone. CA bundles are never returned.",
                 "responses": {
                     "200": {
                         "content": {
@@ -17840,7 +17832,7 @@
                 ]
             },
             "post": {
-                "description": "Minimum role: operator. Adds a catalog to catalog_sources.sources in the storage configuration file, keyed by an id derived from display_name, enabled and not the default; auth is none or oidc, oidc sending as Bearer on the catalog read and its downloads a token exchanged for the catalog's resource identifier from the reading person's account. It takes effect at once, no restart: the sources list, the catalog read and the next catalog install read it.",
+                "description": "Minimum role: operator. Adds a catalog to catalog_sources.sources in the storage configuration file, keyed by an id derived from display_name, enabled and not the default; every read of it carries the reading person's token whenever the agent holds one. It takes effect at once, no restart: the sources list, the catalog read and the next catalog install read it.",
                 "requestBody": {
                     "content": {
                         "application/json": {
@@ -17870,7 +17862,7 @@
                                 }
                             }
                         },
-                        "description": "Source added: {success, source: {id, name, url, enabled, default, auth}}"
+                        "description": "Source added: {success, source: {id, name, url, enabled, default}}"
                     },
                     "400": {
                         "content": {
@@ -17900,7 +17892,7 @@
                                 }
                             }
                         },
-                        "description": "display_name or url missing (required); url not an http(s) URL (format uri at /url); auth outside none, oidc (enum at /auth)"
+                        "description": "display_name or url missing (required); url not an http(s) URL (format uri at /url)"
                     }
                 },
                 "summary": "Add a provisioner catalog source",

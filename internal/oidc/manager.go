@@ -53,7 +53,8 @@ func New(cfg *config.Config, keyStore *keys.Store) *Manager {
 		baseURL:  baseURL,
 		proofs:   dpop.NewSeen(),
 	}
-	m.tokens = &tokenSource{provider: m.provider, clientID: cfg.OIDC.ClientID, ctx: ctx, wg: &m.wg, persist: m.binding.setRefreshToken}
+	scope := strings.Join(cfg.OIDC.Scopes, " ")
+	m.tokens = &tokenSource{provider: m.provider, clientID: cfg.OIDC.ClientID, scope: scope, ctx: ctx, wg: &m.wg, persist: m.binding.setRefreshToken}
 	m.client = &client{
 		provider:    m.provider,
 		binding:     m.binding,
@@ -62,7 +63,7 @@ func New(cfg *config.Config, keyStore *keys.Store) *Manager {
 		ctx:         ctx,
 		wg:          &m.wg,
 		clientID:    cfg.OIDC.ClientID,
-		scope:       strings.Join(cfg.OIDC.Scopes, " "),
+		scope:       scope,
 		deviceScope: deviceScopeOf(cfg.OIDC.Scopes),
 		redirectURI: baseURL + "/api/auth/oidc/callback",
 		hashRounds:  cfg.APIKeys.HashRounds,
@@ -113,7 +114,7 @@ func (m *Manager) BearerTokenFor(createdBy string) string {
 	return m.sourceFor(createdBy).bearer()
 }
 
-// ResourceTokenFor answers an access token minted for the resource identifier by an RFC 8693 exchange of the token BearerTokenFor answers for createdBy, kept per resource until it expires; ErrNoToken while no account token is held, ErrExchangeRefused when the identity provider refuses.
+// ResourceTokenFor answers an access token minted for the resource identifier by an RFC 8693 exchange of the token BearerTokenFor answers for createdBy, under the login's scopes, kept per resource until it expires; the empty string while no account token is held, ErrExchangeRefused when the identity provider refuses.
 func (m *Manager) ResourceTokenFor(ctx context.Context, createdBy, resource string) (string, error) {
 	return m.sourceFor(createdBy).tokenFor(ctx, resource)
 }

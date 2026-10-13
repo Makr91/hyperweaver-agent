@@ -72,6 +72,7 @@ func (c *client) keyTokenSource(id int64) *tokenSource {
 	source := &tokenSource{
 		provider: c.provider,
 		clientID: c.clientID,
+		scope:    c.scope,
 		ctx:      c.ctx,
 		wg:       c.wg,
 		persist:  func(refreshToken string) { c.binding.setKeyRefreshToken(id, refreshToken) },

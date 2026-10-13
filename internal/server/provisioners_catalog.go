@@ -35,14 +35,13 @@ func (s *Server) catalogSourceList() []provisioner.CatalogSource {
 			URL:     source.URL,
 			Enabled: source.Enabled,
 			Default: source.Default,
-			Auth:    source.Auth,
 			CAFile:  source.CAFile,
 		})
 	}
 	return sources
 }
 
-// catalogFailure answers a catalog read that failed: 401 authentication when the source needs a signed-in account, 502 otherwise.
+// catalogFailure answers a catalog read that failed: 401 authentication when the catalog or the identity provider refused the person's token, 502 otherwise.
 func catalogFailure(w http.ResponseWriter, source *provisioner.CatalogSource, err error) {
 	if errors.Is(err, provisioner.ErrCatalogAuth) {
 		problem.Detail(w, http.StatusUnauthorized, err.Error())
@@ -59,8 +58,6 @@ type catalogSourceRow struct {
 	URL     string `json:"url"`
 	Enabled bool   `json:"enabled"`
 	Default bool   `json:"default"`
-	// none or oidc
-	Auth string `json:"auth"`
 }
 
 // listCatalogSourcesResponse is GET /api/provisioning/catalog/sources's answer.
@@ -70,17 +67,12 @@ type listCatalogSourcesResponse struct {
 }
 
 func catalogRow(source *provisioner.CatalogSource) catalogSourceRow {
-	authMode := source.Auth
-	if authMode == "" {
-		authMode = provisioner.CatalogAuthNone
-	}
 	return catalogSourceRow{
 		ID:      source.ID,
 		Name:    source.Name,
 		URL:     source.URL,
 		Enabled: source.Enabled,
 		Default: source.Default,
-		Auth:    authMode,
 	}
 }
 
@@ -88,7 +80,7 @@ func catalogRow(source *provisioner.CatalogSource) catalogSourceRow {
 // (the templates/sources shape — never the CA file path).
 //
 //	@Summary		List configured provisioner catalogs
-//	@Description	Minimum role: viewer. Every catalog_sources definition, the disabled ones included, each with id, name, url, enabled, default and auth (none or oidc) — the HACS model's registries, the rows the Sources modal draws and writes back through PUT /api/config/storage; fork the catalog repo and add your own as another source. The id is what source_name and ?source= name; a catalog read or install names an enabled source alone. CA bundles are never returned.
+//	@Description	Minimum role: viewer. Every catalog_sources definition, the disabled ones included, each with id, name, url, enabled and default — the HACS model's registries, the rows the Sources modal draws and writes back through PUT /api/config/storage; fork the catalog repo and add your own as another source. The id is what source_name and ?source= name; a catalog read or install names an enabled source alone. CA bundles are never returned.
 //	@Tags			Provisioning
 //	@Produce		json
 //	@Success		200	{object}	listCatalogSourcesResponse	"Every configured catalog"
@@ -110,12 +102,12 @@ func (s *Server) handleListCatalogSources(w http.ResponseWriter, _ *http.Request
 // verbatim.
 //
 //	@Summary		Browse a provisioner catalog
-//	@Description	Minimum role: viewer. Fetches the source's catalog.json LIVE (?source= names a configured catalog; empty = the default), validates format_version 1, and relays the document verbatim with every member the catalog publishes: {name, format_version, updated, provisioners: [{name, repo, description, versions: [{version, released_at, artifacts: [{url, checksum_type, checksum}]}]}]} — versions semver-DESC, artifact URLs OPAQUE (release tags carry slashes; never parse or construct them). Versions may disappear between fetches when an author deletes a release. An oidc source is read as the person: the agent reads the catalog's protected resource metadata at its origin's /.well-known/oauth-protected-resource, accepts it while its resource equals the origin and its authorization_servers name this agent's issuer, exchanges the account's access token at the identity provider for one minted for that resource, the calling key's own account before the bound account's, and sends it as Bearer; with no account token held, the identity provider refusing the exchange, or the catalog refusing the token, the answer is 401 with the authentication problem type and the refusal in detail.
+//	@Description	Minimum role: viewer. Fetches the source's catalog.json LIVE (?source= names a configured catalog; empty = the default), validates format_version 1, and relays the document verbatim with every member the catalog publishes: {name, format_version, updated, provisioners: [{name, repo, description, versions: [{version, released_at, artifacts: [{url, checksum_type, checksum}]}]}]} — versions semver-DESC, artifact URLs OPAQUE (release tags carry slashes; never parse or construct them). Versions may disappear between fetches when an author deletes a release. Every source is read as the person whenever the agent holds a token: it reads the catalog's protected resource metadata at its origin's /.well-known/oauth-protected-resource, accepts it while its resource equals the origin and its authorization_servers name this agent's issuer, exchanges the account's access token at the identity provider for one minted for that resource under the login's scopes, the calling key's own account before the bound account's, and sends it as Bearer, so the person's organizations' private provisioners list beside the public ones; with no account token held, or a catalog publishing no metadata or naming another issuer, the read goes out anonymous. The identity provider refusing the exchange, or the catalog refusing the token, answers 401 with the authentication problem type and the refusal in detail.
 //	@Tags			Provisioning
 //	@Produce		json
 //	@Param			source	query	string	false	"A configured catalog source's id; empty = the default"
 //	@Success		200	{object}	provisioner.CatalogDocument	"The catalog document — catalog.json IS the response (no envelope; the resolved source rides /api/provisioning/catalog/sources)"
-//	@Failure		401	{object}	problem.Body	"The source needs a signed-in account"
+//	@Failure		401	{object}	problem.Body	"The identity provider or the catalog refused the person's token"
 //	@Failure		404	{object}	problem.Body	"No such (or no default) enabled catalog source"
 //	@Failure		502	{object}	problem.Body	"Catalog unreachable, unparseable, or wrong format_version"
 //	@Router			/api/provisioning/catalog [get]
@@ -134,12 +126,12 @@ func (s *Server) handleGetCatalog(w http.ResponseWriter, r *http.Request) {
 }
 
 // @Summary		A provisioner catalog's health document
-// @Description	Minimum role: viewer. Fetches the source's health.json LIVE, the URL beside the catalog's (catalog.json becoming health.json, /catalog becoming /health), and relays it verbatim: {name, format_version, updated, provisioners: {<family>: {repo, tier, presentation, rules, failed_rules, health}}}. 404 while the source publishes none. An oidc source is read as the person under a token exchanged for the catalog's resource identifier, the calling key's own account before the bound account's; with none held, the exchange refused, or the catalog refusing it, the answer is 401 with the authentication problem type.
+// @Description	Minimum role: viewer. Fetches the source's health.json LIVE, the URL beside the catalog's (catalog.json becoming health.json, /catalog becoming /health), and relays it verbatim: {name, format_version, updated, provisioners: {<family>: {repo, tier, presentation, rules, failed_rules, health}}}. 404 while the source publishes none. Read as the person under a token exchanged for the catalog's resource identifier whenever one is held, the calling key's own account before the bound account's, anonymous otherwise; the exchange refused, or the catalog refusing the token, answers 401 with the authentication problem type.
 // @Tags			Provisioning
 // @Produce		json
 // @Param			source	query	string	false	"A configured catalog source's id; empty = the default"
 // @Success		200	{object}	map[string]interface{}	"The health document verbatim"
-// @Failure		401	{object}	problem.Body	"The source needs a signed-in account"
+// @Failure		401	{object}	problem.Body	"The identity provider or the catalog refused the person's token"
 // @Failure		404	{object}	problem.Body	"No such (or no default) enabled catalog source, or the source publishes no health document"
 // @Failure		502	{object}	problem.Body	"Catalog unreachable or the document is not JSON"
 // @Router			/api/provisioning/catalog/health [get]
@@ -165,8 +157,6 @@ type createCatalogSourceRequest struct {
 	DisplayName string `json:"display_name"`
 	// The catalog document's URL, fetched as given
 	URL string `json:"url"`
-	// none or oidc; absent means none
-	Auth string `json:"auth"`
 }
 
 type createCatalogSourceResponse struct {
@@ -190,15 +180,15 @@ func (s *Server) catalogSourceID(displayName string) string {
 }
 
 // @Summary		Add a provisioner catalog source
-// @Description	Minimum role: operator. Adds a catalog to catalog_sources.sources in the storage configuration file, keyed by an id derived from display_name, enabled and not the default; auth is none or oidc, oidc sending as Bearer on the catalog read and its downloads a token exchanged for the catalog's resource identifier from the reading person's account. It takes effect at once, no restart: the sources list, the catalog read and the next catalog install read it.
+// @Description	Minimum role: operator. Adds a catalog to catalog_sources.sources in the storage configuration file, keyed by an id derived from display_name, enabled and not the default; every read of it carries the reading person's token whenever the agent holds one. It takes effect at once, no restart: the sources list, the catalog read and the next catalog install read it.
 // @Tags			Provisioning
 // @Accept			json
 // @Produce		json
 // @Param			body	body		createCatalogSourceRequest	true	"The new source"
-// @Success		201		{object}	createCatalogSourceResponse	"Source added: {success, source: {id, name, url, enabled, default, auth}}"
+// @Success		201		{object}	createCatalogSourceResponse	"Source added: {success, source: {id, name, url, enabled, default}}"
 // @Failure		400		{object}	problem.Body	"Unreadable body"
 // @Failure		409		{object}	problem.Body	"A source of that url is already present (unique at /url); source carries it"
-// @Failure		422		{object}	problem.Body	"display_name or url missing (required); url not an http(s) URL (format uri at /url); auth outside none, oidc (enum at /auth)"
+// @Failure		422		{object}	problem.Body	"display_name or url missing (required); url not an http(s) URL (format uri at /url)"
 // @Router			/api/provisioning/catalog/sources [post]
 func (s *Server) handleCreateCatalogSource(w http.ResponseWriter, r *http.Request) {
 	var body createCatalogSourceRequest
@@ -215,12 +205,6 @@ func (s *Server) handleCreateCatalogSource(w http.ResponseWriter, r *http.Reques
 		failures = append(failures, problem.Required("/url"))
 	case err != nil || parsed.Host == "" || (parsed.Scheme != "https" && parsed.Scheme != "http"):
 		failures = append(failures, problem.Rule("/url", "format", map[string]any{"format": "uri"}))
-	}
-	if body.Auth == "" {
-		body.Auth = provisioner.CatalogAuthNone
-	}
-	if body.Auth != provisioner.CatalogAuthNone && body.Auth != provisioner.CatalogAuthOIDC {
-		failures = append(failures, problem.Enum("/auth", provisioner.CatalogAuthNone, provisioner.CatalogAuthOIDC))
 	}
 	if len(failures) > 0 {
 		problem.Invalid(w, failures...)
@@ -246,7 +230,6 @@ func (s *Server) handleCreateCatalogSource(w http.ResponseWriter, r *http.Reques
 		DisplayName: body.DisplayName,
 		URL:         body.URL,
 		Enabled:     true,
-		Auth:        body.Auth,
 	}
 	s.cfg.CatalogSources.Sources = sources
 	if err := s.cfg.MergeAndSave(map[string]any{"catalog_sources": s.cfg.CatalogSources}); err != nil {
@@ -255,11 +238,10 @@ func (s *Server) handleCreateCatalogSource(w http.ResponseWriter, r *http.Reques
 		taskError(w, http.StatusInternalServerError, "Failed to save the catalog source")
 		return
 	}
-	slog.Info("catalog source added", "id", id, "url", body.URL, "auth", body.Auth,
-		"by", auth.FromContext(r.Context()).Name)
+	slog.Info("catalog source added", "id", id, "url", body.URL, "by", auth.FromContext(r.Context()).Name)
 	writeJSONStatus(w, http.StatusCreated, createCatalogSourceResponse{
 		Success: true,
-		Source:  catalogSourceRow{ID: id, Name: body.DisplayName, URL: body.URL, Enabled: true, Default: false, Auth: body.Auth},
+		Source:  catalogSourceRow{ID: id, Name: body.DisplayName, URL: body.URL, Enabled: true, Default: false},
 	})
 }
 
@@ -267,7 +249,7 @@ func (s *Server) handleCreateCatalogSource(w http.ResponseWriter, r *http.Reques
 // named family/version's VERSIONED asset, verify its sha256, import.
 //
 //	@Summary		Install a provisioner from a catalog
-//	@Description	Minimum role: operator. Queues provisioner_catalog_install, a task and never an inbox row: the executor fetches the catalog FRESH as the person who queued it (an oidc source under a token exchanged for the catalog's resource identifier from that key's own account, else the bound account's; a stale pin would 404 anyway; published checksums never change), downloads the named version's immutable VERSIONED asset, verifies its sha256 DURING the stream (mismatch = loud failure, nothing imported), then runs the ordinary import path — DSL lint gate, non-clobber, role-specs + schema.json derivation all included. While the archive downloads, the TASK carries real byte progress (the converged wire, sync 2026-07-17): progress_info is exactly {status: "downloading", received_bytes, total_bytes|null} and progress_percent maps the bytes into 0→90 (this op had no intermediate percents; the sha256 verify + import ride after the window and completion lands 100) — throttled to one update per 1s or 1% of total (whichever first), final update always emitted; an unknown Content-Length parks the percent at 0 while received_bytes streams. Serialized with imports (one registry write at a time).
+//	@Description	Minimum role: operator. Queues provisioner_catalog_install, a task and never an inbox row: the executor fetches the catalog FRESH as the person who queued it (under a token exchanged for the catalog's resource identifier from that key's own account, else the bound account's, whenever one is held; a stale pin would 404 anyway; published checksums never change), downloads the named version's immutable VERSIONED asset, verifies its sha256 DURING the stream (mismatch = loud failure, nothing imported), then runs the ordinary import path — DSL lint gate, non-clobber, role-specs + schema.json derivation all included. While the archive downloads, the TASK carries real byte progress (the converged wire, sync 2026-07-17): progress_info is exactly {status: "downloading", received_bytes, total_bytes|null} and progress_percent maps the bytes into 0→90 (this op had no intermediate percents; the sha256 verify + import ride after the window and completion lands 100) — throttled to one update per 1s or 1% of total (whichever first), final update always emitted; an unknown Content-Length parks the percent at 0 while received_bytes streams. Serialized with imports (one registry write at a time).
 //	@Tags			Provisioning
 //	@Accept			json
 //	@Produce		json

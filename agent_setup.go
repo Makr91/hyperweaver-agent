@@ -81,7 +81,6 @@ func catalogSourceList(cfg *config.Config) []provisioner.CatalogSource {
 			URL:     source.URL,
 			Enabled: source.Enabled,
 			Default: source.Default,
-			Auth:    source.Auth,
 			CAFile:  source.CAFile,
 		})
 	}
