@@ -31,6 +31,7 @@ on:
 
 permissions:
   contents: write
+  id-token: write
 
 jobs:
   build-windows:
@@ -38,7 +39,7 @@ jobs:
     runs-on: windows-latest
     env:
       # secrets are not usable in step `if:` expressions — evaluate here.
-      HAVE_WINDOWS_SIGNING: ${{ secrets.SM_HOST != '' }}
+      HAVE_WINDOWS_SIGNING: ${{ secrets.AZURE_CLIENT_ID != '' }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v7
@@ -148,15 +149,17 @@ jobs:
 
       - name: Sign binary
         if: ${{ env.HAVE_WINDOWS_SIGNING == 'true' }}
-        uses: moonshine-ide/digicert-sign-action@v1.1
+        uses: STARTcloud/sign-artifacts@v1
         with:
-          bin-path: bin/hyperweaver-agent.exe
-          sm-host: ${{ secrets.SM_HOST }}
-          sm-api-key: ${{ secrets.SM_API_KEY }}
-          sm-client-cert-file-b64: ${{ secrets.SM_CLIENT_CERT_FILE_B64 }}
-          sm-client-cert-password: ${{ secrets.SM_CLIENT_CERT_PASSWORD }}
-          sm-thumbprint: ${{ secrets.SM_THUMBPRINT }}
-          sm-keypair-alias: ${{ secrets.SM_KEYPAIR_ALIAS }}
+          files: ${{ github.workspace }}\bin\hyperweaver-agent.exe
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          endpoint: ${{ secrets.AZURE_SIGNING_ENDPOINT }}
+          account: ${{ secrets.AZURE_SIGNING_ACCOUNT }}
+          profile: ${{ secrets.AZURE_SIGNING_PROFILE }}
+          description: Hyperweaver Agent
+          description-url: https://github.com/Makr91/hyperweaver-agent
 
       - name: Create Inno Setup installer
         shell: pwsh
@@ -167,15 +170,17 @@ jobs:
 
       - name: Sign installer
         if: ${{ env.HAVE_WINDOWS_SIGNING == 'true' }}
-        uses: moonshine-ide/digicert-sign-action@v1.1
+        uses: STARTcloud/sign-artifacts@v1
         with:
-          bin-path: dist/HyperweaverAgent-Setup.exe
-          sm-host: ${{ secrets.SM_HOST }}
-          sm-api-key: ${{ secrets.SM_API_KEY }}
-          sm-client-cert-file-b64: ${{ secrets.SM_CLIENT_CERT_FILE_B64 }}
-          sm-client-cert-password: ${{ secrets.SM_CLIENT_CERT_PASSWORD }}
-          sm-thumbprint: ${{ secrets.SM_THUMBPRINT }}
-          sm-keypair-alias: ${{ secrets.SM_KEYPAIR_ALIAS }}
+          files: ${{ github.workspace }}\dist\HyperweaverAgent-Setup.exe
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          endpoint: ${{ secrets.AZURE_SIGNING_ENDPOINT }}
+          account: ${{ secrets.AZURE_SIGNING_ACCOUNT }}
+          profile: ${{ secrets.AZURE_SIGNING_PROFILE }}
+          description: Hyperweaver Agent
+          description-url: https://github.com/Makr91/hyperweaver-agent
 
       - name: Zip bare binary
         shell: bash
