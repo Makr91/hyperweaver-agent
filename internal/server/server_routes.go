@@ -218,6 +218,7 @@ func (s *Server) registerRoutes(mux *http.ServeMux) error {
 	// precedence.
 	mux.Handle("GET /api/machines", requireKey(http.HandlerFunc(s.handleListMachines)))
 	mux.Handle("POST /api/machines", requireKey(http.HandlerFunc(s.handleCreateMachine)))
+	mux.Handle("POST /api/machines/preview", requireKey(http.HandlerFunc(s.handlePreviewMachine)))
 	// Orchestration family (ordered startup/shutdown by settings.boot_priority
 	// — the base's zones.orchestration).
 	mux.Handle("GET /api/machines/orchestration/status", requireKey(http.HandlerFunc(s.handleOrchestrationStatus)))
@@ -428,12 +429,13 @@ func (s *Server) registerRoutes(mux *http.ServeMux) error {
 	mux.Handle("POST /api/filesystem/archive/extract", requireKey(s.fileBrowserGate(s.handleExtractArchive)))
 	mux.Handle("PATCH /api/filesystem/permissions", requireKey(s.fileBrowserGate(s.handleChangePermissions)))
 	s.registerFilesystemExecutors()
+	s.registerProvisionExecutors()
 
-	// Global secrets store (architecture D-C, SHI's SecretsPage categories) —
-	// admin-only via the central role policy; separate from /api/config so
-	// those routes keep serving just the configuration files.
-	mux.Handle("GET /api/secrets", requireKey(http.HandlerFunc(s.handleGetSecrets)))
-	mux.Handle("PUT /api/secrets", requireKey(http.HandlerFunc(s.handleUpdateSecrets)))
+	mux.Handle("GET /api/certs", requireKey(http.HandlerFunc(s.handleListCerts)))
+	mux.Handle("POST /api/certs", requireKey(http.HandlerFunc(s.handleCreateCert)))
+	mux.Handle("GET /api/certs/{id}", requireKey(http.HandlerFunc(s.handleGetCert)))
+	mux.Handle("PUT /api/certs/{id}", requireKey(http.HandlerFunc(s.handleUpdateCert)))
+	mux.Handle("DELETE /api/certs/{id}", requireKey(http.HandlerFunc(s.handleDeleteCert)))
 
 	// Configuration surface (the config contract): the engine's routes plus
 	// the backup history — admin-only via the central role policy.

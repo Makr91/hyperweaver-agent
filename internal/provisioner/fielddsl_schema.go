@@ -178,6 +178,13 @@ func marshalFieldSchema(manifest map[string]any, dsl *FieldDSL) ([]byte, error) 
 			property["x-hyperweaver-kind"] = field.Kind
 			property["x-hyperweaver-role"] = field.Role
 			stringRules(property, field.Validate)
+		case "secret":
+			property["type"] = "string"
+			property["x-hyperweaver-kind"] = field.Kind
+			property["x-hyperweaver-secret-key"] = field.SecretKey
+			if field.Profile != "" {
+				property["x-hyperweaver-profile"] = field.Profile
+			}
 		default:
 			property["type"] = "string"
 			if format := stringFormat(field.Type, field.IPVersion); format != "" {

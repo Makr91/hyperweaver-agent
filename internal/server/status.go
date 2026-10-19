@@ -141,11 +141,11 @@ var platformFeatures = []string{
 	"tasks", "machines", "machine-suspend", "machine-create",
 	"machine-modify", "machine-snapshots", "machine-screenshot",
 	"swap", "monitoring", "processes", "provisioning",
-	"provisioner-registry", "secrets", "ssh", "templates",
+	"provisioner-registry", "ssh", "templates",
 	"host-launchers", "host-terminal", "hosts-file", "dns",
 	"hostname", "ip-addresses", "network-spaces", "devices", "media",
 	"sidebar", "hosts", "footer", "health", "events", "admin", "setup",
-	"update", "search", "notifications", "rules", "certs", "tools",
+	"update", "search", "notifications", "rules", "certs", "certs-store", "tools",
 }
 
 // features derives the advertised token list: platform tokens plus the
@@ -235,7 +235,7 @@ func (s *Server) consoles(ctx context.Context) []string {
 }
 
 // @Summary		Public identity and capabilities
-// @Description	The public status probe. No authentication. role is the package name, hyperweaver-agent, the one member that tells the shared UI it is served by an agent directly. brand, collections, links, ticket, config, events and search are the shared status members: links.api is the path of this agent's API reference while api_docs.enabled is on, ticket is null because GET /api/config/ticket serves the ticket system, config lists the five configuration files (app, auth, db, machines, storage) the /api/config routes serve, and search names GET /api/search and the kinds it answers, artifact among them only while artifact_storage.enabled; the admin and setup tokens name the configuration pages, update the admin's Update row over GET /api/app/updates/check and POST /api/app/updates/apply, search the navbar search over the search member, devices the host's USB device list at GET /api/system/usb, media the host's disk-medium registry at GET /api/media, and oidc-code, present while oidc.enabled, the RFC 8252 authorization-code login over POST /api/auth/oidc/code-start and POST /api/auth/oidc/code beside the device grant, auth staying {apikey, oidc}; notifications, always present, names the agent's local inbox under /api/notifications, which every key reads for the person it stands for, rules names the validation rules document at GET /api/rules the forms read once before sign-in, favorites is present only while the agent holds a valid token for its bound account, and certs names the Certificates feature the shared UI draws from the browser's own vault with no store on this agent, so certs-store is never listed, and tools names the shared UI's Tools group of the sidebar, drawn by the UI alone with no route of this agent.
+// @Description	The public status probe. No authentication. role is the package name, hyperweaver-agent, the one member that tells the shared UI it is served by an agent directly. brand, collections, links, ticket, config, events and search are the shared status members: links.api is the path of this agent's API reference while api_docs.enabled is on, ticket is null because GET /api/config/ticket serves the ticket system, config lists the five configuration files (app, auth, db, machines, storage) the /api/config routes serve, and search names GET /api/search and the kinds it answers, artifact among them only while artifact_storage.enabled; the admin and setup tokens name the configuration pages, update the admin's Update row over GET /api/app/updates/check and POST /api/app/updates/apply, search the navbar search over the search member, devices the host's USB device list at GET /api/system/usb, media the host's disk-medium registry at GET /api/media, and oidc-code, present while oidc.enabled, the RFC 8252 authorization-code login over POST /api/auth/oidc/code-start and POST /api/auth/oidc/code beside the device grant, auth staying {apikey, oidc}; notifications, always present, names the agent's local inbox under /api/notifications, which every key reads for the person it stands for, rules names the validation rules document at GET /api/rules the forms read once before sign-in, favorites is present only while the agent holds a valid token for its bound account, certs names the Certificates feature the shared UI draws from the browser's own vault, certs-store the vault store this agent serves at /api/certs for Shared and Sync, the six secret drawers of the former /api/secrets being rows of it, and tools names the shared UI's Tools group of the sidebar, drawn by the UI alone with no route of this agent.
 // @Tags			Status
 // @Produce		json
 // @Success		200	{object}	statusPayload	"Agent identity and capabilities"

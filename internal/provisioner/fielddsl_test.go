@@ -3,7 +3,18 @@ package provisioner
 import (
 	"strings"
 	"testing"
+
+	"github.com/goccy/go-yaml"
 )
+
+func fieldYAML(t *testing.T, text string) map[string]any {
+	t.Helper()
+	field := map[string]any{}
+	if err := yaml.Unmarshal([]byte(text), &field); err != nil {
+		t.Fatal(err)
+	}
+	return field
+}
 
 func manifestWith(fields []any, defaults any) map[string]any {
 	meta := map[string]any{
@@ -18,11 +29,23 @@ func manifestWith(fields []any, defaults any) map[string]any {
 	return map[string]any{"metadata": meta}
 }
 
-func TestListAndFileFieldsParseAndValidate(t *testing.T) {
+func TestListFileAndSecretFieldsParseAndValidate(t *testing.T) {
+	SetSecretLookup(func(id string) (string, bool) {
+		switch id {
+		case "key-row":
+			return "api_key", true
+		case "cert-row":
+			return "authority", true
+		}
+		return "", false
+	})
+	t.Cleanup(func() { SetSecretLookup(nil) })
 	manifest := manifestWith([]any{
 		map[string]any{"name": "NAMES", "type": "list", "items": "fqdn", "validate": map[string]any{"min_items": 1, "max_items": 2}},
-		map[string]any{"name": "SAFE", "type": "file", "kind": "id_file", "role": "safe_id", "default": "SAFE.ids"},
+		map[string]any{"name": "INSTALLER", "type": "file", "kind": "installer", "role": "domino", "default": "Domino.tar"},
 		map[string]any{"name": "PROVIDER", "type": "select", "options_source": "hypervisor"},
+		fieldYAML(t, "name: IQ_KEY\ntype: secret\nkind: api_key\nsecret_key: domino_iq_api_key\nprofile: openai\n"),
+		fieldYAML(t, "name: CERT\ntype: secret\nkind: certificate\nsecret_key: default-signed\n"),
 	}, nil)
 	dsl, problems := ParseFieldDSL(manifest, nil)
 	if len(problems) > 0 {
@@ -34,12 +57,15 @@ func TestListAndFileFieldsParseAndValidate(t *testing.T) {
 		field   string
 		want    string
 	}{
-		{map[string]any{"NAMES": []any{"a.example.com"}, "SAFE": "SAFE.ids", "PROVIDER": "utm"}, "", ""},
+		{map[string]any{"NAMES": []any{"a.example.com"}, "INSTALLER": "Domino.tar", "PROVIDER": "utm", "IQ_KEY": "key-row", "CERT": "cert-row"}, "", ""},
 		{map[string]any{"NAMES": []any{}}, "NAMES", ""},
 		{map[string]any{"NAMES": []any{"a.example.com", "b.example.com", "c.example.com"}}, "NAMES", "at most 2"},
 		{map[string]any{"NAMES": []any{"not a host"}}, "NAMES", "entry 1 must be a fully qualified domain name"},
 		{map[string]any{"NAMES": "a.example.com"}, "NAMES", "must be a list"},
-		{map[string]any{"SAFE": "ids/SAFE.ids"}, "SAFE", "not a path"},
+		{map[string]any{"INSTALLER": "tars/Domino.tar"}, "INSTALLER", "not a path"},
+		{map[string]any{"IQ_KEY": "missing-row"}, "IQ_KEY", "must name a secret of this host"},
+		{map[string]any{"IQ_KEY": "cert-row"}, "IQ_KEY", "must name a api_key secret"},
+		{map[string]any{"CERT": "key-row"}, "CERT", "must name a certificate secret"},
 	}
 	for _, tc := range cases {
 		got := dsl.ValidateAnswers(tc.answers, nil, nil, false)
@@ -70,11 +96,16 @@ func TestListAndFileLint(t *testing.T) {
 		{map[string]any{"name": "A", "type": "list", "items": "number"}, "list needs items"},
 		{map[string]any{"name": "A", "type": "list", "items": "fqdn", "default": "x"}, "list default must be a list"},
 		{map[string]any{"name": "A", "type": "text", "items": "fqdn"}, "items applies to list only"},
-		{map[string]any{"name": "A", "type": "file", "role": "safe_id"}, "file needs kind"},
-		{map[string]any{"name": "A", "type": "file", "kind": "id_file"}, "file needs role"},
-		{map[string]any{"name": "A", "type": "text", "kind": "id_file"}, "kind and role apply to file only"},
+		{map[string]any{"name": "A", "type": "file", "role": "domino"}, "file needs kind"},
+		{map[string]any{"name": "A", "type": "file", "kind": "installer"}, "file needs role"},
+		{map[string]any{"name": "A", "type": "file", "kind": "id_file", "role": "safe_id"}, "file needs kind"},
+		{map[string]any{"name": "A", "type": "text", "kind": "installer"}, "kind, role and secret_key apply to file and secret only"},
 		{map[string]any{"name": "A", "type": "text", "validate": map[string]any{"min_items": 1}}, "applies to list fields only"},
 		{map[string]any{"name": "A", "type": "select", "options_source": "clouds"}, "hypervisor"},
+		{fieldYAML(t, "name: A\ntype: secret\nsecret_key: k\n"), "secret needs kind"},
+		{fieldYAML(t, "name: A\ntype: secret\nkind: api_key\n"), "secret needs secret_key"},
+		{fieldYAML(t, "name: A\ntype: secret\nkind: api_key\nsecret_key: k\nrole: x\n"), "role applies to file only"},
+		{map[string]any{"name": "A", "type": "text", "profile": "openai"}, "profile applies to secret only"},
 	}
 	for _, tc := range cases {
 		_, problems := ParseFieldDSL(manifestWith([]any{tc.field}, nil), nil)

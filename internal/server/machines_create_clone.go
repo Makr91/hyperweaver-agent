@@ -46,7 +46,7 @@ type cloneCurrentResponse struct {
 //	@Param			machineName	path	string	true	"The SOURCE machine"
 //	@Param			request	body		cloneMachineRequest	true	"Clone request: name, settings (hostname required), overrides, and disk source"
 //	@Success		200	{object}	createMachineResponse	"Clone create orchestration queued (the row lands at the finalize child); source=current answers {task_id, operation: machine_clone_current, ...} (+start_task_id) instead"
-//	@Failure		400	"Missing settings.hostname, invalid name, source has no creation spec, or the source's provisioner/safe-ID/box no longer resolves"
+//	@Failure		400	"Missing settings.hostname, invalid name, source has no creation spec, or the source's provisioner/box no longer resolves"
 //	@Failure		404	"Source machine not found"
 //	@Failure		409	"Clone name, server_id, or working directory already in use"
 //	@Router			/api/machines/{machineName}/clone [post]
@@ -160,7 +160,8 @@ func (s *Server) handleCloneMachine(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	document, err := s.resolutionDocument(r.Context(), spec)
+	createdBy := auth.FromContext(r.Context()).Name
+	document, err := s.resolutionDocument(r.Context(), spec, s.personsOfKeyName(createdBy))
 	if err != nil {
 		taskError(w, http.StatusBadRequest, "Template render failed: "+err.Error())
 		return
@@ -172,9 +173,8 @@ func (s *Server) handleCloneMachine(w http.ResponseWriter, r *http.Request) {
 	}
 	// The typed-disk warning rows join the clone response too.
 	resourceWarnings = append(diskWarningRows(cloneDiskWarnings), resourceWarnings...)
-	createdBy := auth.FromContext(r.Context()).Name
 	parentID, subTasks, requiresDownload, _, err := s.queueCreateOrchestration(
-		r.Context(), name, home, spec, document, body.StartAfterCreate, createdBy, nil)
+		r.Context(), name, home, spec, document, body.StartAfterCreate, false, createdBy, nil)
 	if err != nil {
 		taskError(w, http.StatusBadRequest, err.Error())
 		return

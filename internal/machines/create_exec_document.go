@@ -65,7 +65,7 @@ func (e *executors) prepareDocument(ctx context.Context, task *tasks.Task, out *
 	if len(warnings) > 0 {
 		e.taskProgressWarnings(task, 20, "resolving_installer_files", warnings)
 	}
-	idFiles, err := e.resolveIDFiles(ctx, spec)
+	secrets, err := resolveSecrets(ctx, version, spec, task.CreatedBy)
 	if err != nil {
 		return err
 	}
@@ -79,7 +79,7 @@ func (e *executors) prepareDocument(ctx context.Context, task *tasks.Task, out *
 		Disks:          spec.Disks,
 		Roles:          roles,
 		UserProperties: spec.Properties,
-		SecretsVars:    e.env.SecretsVars(),
+		SecretsVars:    e.env.SecretsVars(personsOf(task.CreatedBy)),
 	})
 	if err != nil {
 		return err
@@ -104,8 +104,9 @@ func (e *executors) prepareDocument(ctx context.Context, task *tasks.Task, out *
 		HostsYML:      rendered,
 		InstallerDirs: installerDirs(version),
 		Installers:    mounts,
-		SafeIDPath:    spec.SafeIDPath,
-		IDFiles:       idFiles,
+		Secrets:       secrets.doc,
+		SecretFiles:   secrets.files,
+		SSLFiles:      secrets.ssls,
 		CACertPath:    e.env.CACertPath,
 		CAKeyPath:     e.env.CAKeyPath,
 	}); merr != nil {
@@ -132,8 +133,13 @@ func effectiveSettings(ctx context.Context, env *ProvisionEnv, spec *Spec) map[s
 // base's create accepts rides through: disks (boot/additional/cdroms), zones,
 // cloud_init, and the vbox directives passthrough.
 func specDocument(ctx context.Context, env *ProvisionEnv, spec *Spec) map[string]any {
+	return SpecDocument(ctx, spec, env.DefaultSyncMethod, env.DefaultNetworkInterface)
+}
+
+// SpecDocument builds the document a provisioner-less create stores from the spec: the effective settings, the networks with their dns declared, and the disks, zones, cloud_init and vbox sections it carries.
+func SpecDocument(ctx context.Context, spec *Spec, defaultSync, defaultNIC string) map[string]any {
 	document := map[string]any{
-		"settings": effectiveSettings(ctx, env, spec),
+		"settings": EffectiveSettings(ctx, spec, defaultSync, defaultNIC),
 	}
 	if len(spec.Networks) > 0 {
 		document["networks"] = normalizeNetworkDNS(spec.Networks)
@@ -229,6 +235,28 @@ func ParseHostsDocuments(rendered []byte) ([]map[string]any, error) {
 		return nil, errors.New("rendered document carries no hosts[] entry")
 	}
 	return parsed.Hosts, nil
+}
+
+// ParseHostsDocumentsOrdered extracts every hosts[] entry of a rendered Hosts.yml as ordered JSON bytes, each object's keys in the rendered order.
+func ParseHostsDocumentsOrdered(rendered []byte) ([]json.RawMessage, error) {
+	var parsed struct {
+		Hosts []any `yaml:"hosts"`
+	}
+	if err := yaml.UnmarshalWithOptions(rendered, &parsed, yaml.UseOrderedMap()); err != nil {
+		return nil, fmt.Errorf("parse rendered document: %w", err)
+	}
+	if len(parsed.Hosts) == 0 {
+		return nil, errors.New("rendered document carries no hosts[] entry")
+	}
+	hosts := make([]json.RawMessage, 0, len(parsed.Hosts))
+	for i := range parsed.Hosts {
+		raw, err := orderedYAMLToJSON(parsed.Hosts[i])
+		if err != nil {
+			return nil, err
+		}
+		hosts = append(hosts, raw)
+	}
+	return hosts, nil
 }
 
 // parseHostsDocumentOrdered extracts hosts[index] as ordered JSON bytes: the

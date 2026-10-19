@@ -10,6 +10,7 @@ import (
 
 	"github.com/Makr91/hyperweaver-agent/internal/assets"
 	"github.com/Makr91/hyperweaver-agent/internal/auth"
+	"github.com/Makr91/hyperweaver-agent/internal/certs"
 	"github.com/Makr91/hyperweaver-agent/internal/config"
 	"github.com/Makr91/hyperweaver-agent/internal/inbox"
 	"github.com/Makr91/hyperweaver-agent/internal/keys"
@@ -37,6 +38,7 @@ type Server struct {
 	provisioners   *provisioner.Registry
 	storage        *locations.Set
 	secrets        *secrets.Store
+	certs          *certs.Store
 	assets         *assets.Store
 	artifactSvc    *assets.Service
 	monitor        *monitoring.Service
@@ -102,7 +104,7 @@ func (s *Server) markUnread(unread bool) {
 }
 
 // New builds the server and its routes.
-func New(cfg *config.Config, keyStore *keys.Store, trayTokens *auth.TrayTokens, sessions *auth.Sessions, taskQueue *tasks.Queue, machineStore *machines.Store, inboxStore *inbox.Store, provisioners *provisioner.Registry, storage *locations.Set, secretsStore *secrets.Store, assetsStore *assets.Store, artifactSvc *assets.Service, monitor *monitoring.Service, updates *updater.Service, dbs []DBHandle, restartArgs []string, teardown func(), openUI func(query string)) (*Server, error) {
+func New(cfg *config.Config, keyStore *keys.Store, trayTokens *auth.TrayTokens, sessions *auth.Sessions, taskQueue *tasks.Queue, machineStore *machines.Store, inboxStore *inbox.Store, provisioners *provisioner.Registry, storage *locations.Set, secretsStore *secrets.Store, certsStore *certs.Store, assetsStore *assets.Store, artifactSvc *assets.Service, monitor *monitoring.Service, updates *updater.Service, dbs []DBHandle, restartArgs []string, teardown func(), openUI func(query string)) (*Server, error) {
 	s := &Server{
 		cfg:            cfg,
 		keys:           keyStore,
@@ -114,6 +116,7 @@ func New(cfg *config.Config, keyStore *keys.Store, trayTokens *auth.TrayTokens, 
 		provisioners:   provisioners,
 		storage:        storage,
 		secrets:        secretsStore,
+		certs:          certsStore,
 		assets:         assetsStore,
 		artifactSvc:    artifactSvc,
 		monitor:        monitor,
@@ -137,11 +140,15 @@ func New(cfg *config.Config, keyStore *keys.Store, trayTokens *auth.TrayTokens, 
 	s.oidcMgr = oidc.New(cfg, keyStore)
 	s.oidcStarts = newStartLimiter()
 	machines.SetOIDCTokenSource(s.oidcMgr.BearerTokenFor)
+	machines.SetPersonsOf(s.personsOfKeyName)
+	machines.SetSecretReader(s.secretRow)
 	provisioner.SetOIDCTokenSource(cfg.OIDC.Issuer, s.oidcMgr.ResourceTokenFor, s.oidcMgr.ForgetResourceToken)
+	provisioner.SetSecretLookup(s.secretKindOf)
 	inboxStore.System = agentBrand.Name
 	taskQueue.Store().Notify = s.publishTask
 	machineStore.Notify = s.publishStats
 	inboxStore.Notify = s.publishInbox
+	certsStore.Notify = s.publishCert
 	monitor.SetOnCollected(s.publishSamples)
 	s.live.SetOnSampled(s.publishSamples)
 	s.events.onTopicSubscribers = s.topicSubscribersChanged

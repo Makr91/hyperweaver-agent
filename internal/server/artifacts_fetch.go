@@ -62,12 +62,12 @@ type fetchArtifactResponse struct {
 // fetchArtifact: POST /api/artifacts/{id}/fetch.
 //
 //	@Summary		Fetch a missing artifact from its source
-//	@Description	Minimum role: operator. Queues the download of a known row whose file is not on this host, from the source the row names: boxvault queues artifact_registry_download as the signed-in person for the file its source_url names on the configured box registry; hcl queues hcl_download under the first hcl_download_portal_api_keys secret; custom queues artifact_download of the source_url. The file lands in the row's own location under its role, the row's expected sha256 verified during the stream, and the task reports progress as every other download does. No body.
+//	@Description	Minimum role: operator. Queues the download of a known row whose file is not on this host, from the source the row names: boxvault queues artifact_registry_download as the signed-in person for the file its source_url names on the configured box registry; hcl queues hcl_download under the newest api_key secret the person may reach; custom queues artifact_download of the source_url. The file lands in the row's own location under its role, the row's expected sha256 verified during the stream, and the task reports progress as every other download does. No body.
 //	@Tags			Artifacts
 //	@Produce		json
 //	@Param			id	path	int	true	"Artifact id"
 //	@Success		202	{object}	fetchArtifactResponse	"Download queued"
-//	@Failure		400	"The row names no source the agent can fetch from, or no HCL portal key is stored"
+//	@Failure		400	"The row names no source the agent can fetch from, or no api_key secret is stored"
 //	@Failure		404	"Artifact not found"
 //	@Failure		409	"The file is already on this host"
 //	@Failure		503	"Artifact storage is disabled"
@@ -117,13 +117,13 @@ func (s *Server) fetchArtifact(w http.ResponseWriter, r *http.Request) {
 		meta.OverwriteExisting = true
 		operation, metadata = assets.OpRegistryDownload, meta
 	case artifactSourceHCL:
-		keys := s.secrets.Get().HCLDownloadPortalAPIKeys
-		if len(keys) == 0 {
-			taskError(w, http.StatusBadRequest, "No hcl_download_portal_api_keys secret is stored to fetch from the HCL portal")
+		keyName := s.secrets.FirstAPIKey(s.personsOfKeyName(auth.FromContext(r.Context()).Name))
+		if keyName == "" {
+			taskError(w, http.StatusBadRequest, "No api_key secret the person may reach is stored to fetch from the HCL portal")
 			return
 		}
 		operation, metadata = assets.OpHCLDownload, assets.HCLDownloadMetadata{
-			KeyName: keys[0].Name, Filename: artifact.Filename, Role: artifact.Role,
+			KeyName: keyName, Filename: artifact.Filename, Role: artifact.Role,
 			Kind: artifact.Kind, LocationID: artifact.LocationID,
 		}
 	case artifactSourceCustom:

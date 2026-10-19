@@ -132,6 +132,8 @@ func parseField(where string, raw map[string]any, dsl *FieldDSL) (field *Field, 
 		Items:         anyString(raw["items"]),
 		Kind:          anyString(raw["kind"]),
 		Role:          anyString(raw["role"]),
+		SecretKey:     anyString(raw["secret_key"]),
+		Profile:       anyString(raw["profile"]),
 		OptionsSource: anyString(raw["options_source"]),
 		ShowIf:        raw["show_if"],
 	}
@@ -167,7 +169,7 @@ func parseField(where string, raw map[string]any, dsl *FieldDSL) (field *Field, 
 			problems = append(problems, where+fmt.Sprintf(": ipaddr version must be 4 or 6 (got %d)", field.IPVersion))
 		}
 	}
-	problems = append(problems, lintListFile(where, field)...)
+	problems = append(problems, lintTypedMembers(where, field)...)
 
 	for _, entry := range anyList(raw["options"]) {
 		switch option := entry.(type) {
@@ -235,11 +237,10 @@ func parseField(where string, raw map[string]any, dsl *FieldDSL) (field *Field, 
 	return field, problems
 }
 
-// lintListFile lints the members only a list or a file field carries: items names a string type on a list, kind and role name the artifact row on a file.
-func lintListFile(where string, field *Field) []string {
+// lintTypedMembers lints the members only a list, a file or a secret field carries: items names a string type on a list, kind and role name the artifact row on a file, kind and secret_key name the vault row and the key the roles read on a secret.
+func lintTypedMembers(where string, field *Field) []string {
 	problems := []string{}
-	switch field.Type {
-	case "list":
+	if field.Type == "list" {
 		if !stringFields[field.Items] {
 			problems = append(problems, where+fmt.Sprintf(": list needs items, one of: %s (got %q)", strings.Join(sortedKeys(stringFields), ", "), field.Items))
 		}
@@ -248,23 +249,37 @@ func lintListFile(where string, field *Field) []string {
 				problems = append(problems, where+": list default must be a list")
 			}
 		}
-	default:
-		if field.Items != "" {
-			problems = append(problems, where+": items applies to list only")
-		}
+	} else if field.Items != "" {
+		problems = append(problems, where+": items applies to list only")
 	}
 	switch field.Type {
 	case "file":
 		if !fileKinds[field.Kind] {
-			problems = append(problems, where+fmt.Sprintf(": file needs kind, id_file or installer (got %q)", field.Kind))
+			problems = append(problems, where+fmt.Sprintf(": file needs kind, one of: %s (got %q)", strings.Join(sortedKeys(fileKinds), ", "), field.Kind))
 		}
 		if !ValidName(field.Role) {
 			problems = append(problems, where+fmt.Sprintf(": file needs role, the artifact row's role (got %q)", field.Role))
 		}
-	default:
-		if field.Kind != "" || field.Role != "" {
-			problems = append(problems, where+": kind and role apply to file only")
+		if field.SecretKey != "" {
+			problems = append(problems, where+": secret_key applies to secret only")
 		}
+	case "secret":
+		if !secretKinds[field.Kind] {
+			problems = append(problems, where+fmt.Sprintf(": secret needs kind, one of: %s (got %q)", strings.Join(sortedKeys(secretKinds), ", "), field.Kind))
+		}
+		if !ValidName(field.SecretKey) {
+			problems = append(problems, where+fmt.Sprintf(": secret needs secret_key, the key the roles read from the secrets dict (got %q)", field.SecretKey))
+		}
+		if field.Role != "" {
+			problems = append(problems, where+": role applies to file only")
+		}
+	default:
+		if field.Kind != "" || field.Role != "" || field.SecretKey != "" {
+			problems = append(problems, where+": kind, role and secret_key apply to file and secret only")
+		}
+	}
+	if field.Type != "secret" && field.Profile != "" {
+		problems = append(problems, where+": profile applies to secret only")
 	}
 	return problems
 }

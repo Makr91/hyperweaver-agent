@@ -290,6 +290,10 @@ Boolean running the full provision pipeline on a machine's VERY FIRST start —
 a stored provisioner document present and never provisioned — instead of a
 bare boot. Later starts, restarts, and document-less machines always boot
 plainly (default: false).
+.It Cm default_domain
+The settings.domain a create whose body names none takes, answered as
+settings.domain of GET /api/machines/defaults; empty keeps domain required
+(default: empty).
 .El
 .Ss provisioning
 Provisioning engine (the provisioner package registry and the provisioning
@@ -669,19 +673,22 @@ and
 (the bound account's refresh token and the refresh tokens of the other
 federated accounts whose SSO logins minted keys, 0600),
 .Pa protocol.secret
-(per-boot hwa:// handoff secret, 0600),
-.Pa secrets.yaml
-(the global secrets store, 0600 — plain text by design; served by the
-admin-only /api/secrets API and injected into generated Hosts.yml files as
-SECRETS_* variables), and
+(per-boot hwa:// handoff secret, 0600), and
 .Pa backups/
-(configuration backups). Under the data directory
+(configuration backups). A
+.Pa secrets.yaml
+found beside them at boot is read once: its entries become rows of the vault
+store in
+.Pa agent.sqlite
+and the file is removed. Under the data directory
 .Pq Cm data.dir
 it keeps
 .Pa tasks.sqlite
 (the task queue and its output),
 .Pa agent.sqlite
-(core state), and — when
+(core state: the machines, templates, artifacts, the inbox and the vault
+store's certificates and secrets, the secret rows reaching generated
+Hosts.yml files as SECRETS_* variables), and — when
 .Cm monitoring.storage_enabled
 is on —
 .Pa monitoring-cpu.sqlite ,

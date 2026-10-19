@@ -76,6 +76,12 @@ properties:
         title: Provision on first start
         description: Run the full provision pipeline on a machine's very first start instead of a bare boot
         order: 7
+      default_domain:
+        type: string
+        default: ''
+        title: Default domain
+        description: The settings.domain a create whose body names none takes; empty keeps domain required
+        order: 8
       orchestration:
         type: object
         subsection: orchestration

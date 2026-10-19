@@ -147,6 +147,22 @@ func (f *Field) validateValue(answer any) string {
 			}
 		}
 		return ""
+	case "secret":
+		id, ok := answer.(string)
+		if !ok || id == "" {
+			return "must name a secret"
+		}
+		if secretLookup == nil {
+			return ""
+		}
+		kind, found := secretLookup(id)
+		if !found {
+			return "must name a secret of this host"
+		}
+		if !secretKindMatches(f.Kind, kind) {
+			return "must name a " + f.Kind + " secret"
+		}
+		return ""
 	case "list":
 		entries, ok := answer.([]any)
 		if !ok {

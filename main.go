@@ -52,8 +52,8 @@
 //	@tag.description	The five configuration files (app, auth, db, machines, storage) over the config contract's routes: the raw file, its JSON Schema, a merge-patch write refused with 422 and pointers, the pending restart list, the restart, uploads, and the timestamped backup history with restore. Admin only.
 //	@tag.name		Setup
 //	@tag.description	First-run setup of a headless install under the setup token in setup.token beside the configuration files: every file and schema at once, one write that completes setup and deletes the token. A desktop install counts as set up.
-//	@tag.name		Secrets
-//	@tag.description	Global secrets store (the secrets capability token; admin only): SHI's six categories in secrets.yaml beside the config — kept OUT of /api/settings so that surface stays a pure configuration document. Values are plain text by design (it is the user's local machine; the generated Hosts.yml carries them as SECRETS_* template vars). Independently, Hosts.rb merges the working copy's secrets.yml/.secrets.yml at vagrant runtime — both mechanisms coexist.
+//	@tag.name		Certificates
+//	@tag.description	The vault store of the shared UI's Certificates feature (the certs-store capability token) at /api/certs: fourteen kinds, the vault's certificate, authority, request, key, ssh_certificate and template and the eight secret kinds password, api_key, basic_auth, key_pair, oauth_client, ssh_key, file and custom, each row read by its creator, by every admin and, while published, by every signed-in person of the host, written by its creator and every admin, no row public. Secret rows feed the agent's own reads by kind and name, the HCL portal key, a custom resource's credentials, a git token, and reach the generated Hosts.yml as SECRETS_* variables and the working copy as .secrets.yml through a form's secret fields.
 package main
 
 //go:generate goversioninfo -platform-specific=true
@@ -79,7 +79,6 @@ import (
 	"github.com/Makr91/hyperweaver-agent/internal/openbrowser"
 	"github.com/Makr91/hyperweaver-agent/internal/protocol"
 	"github.com/Makr91/hyperweaver-agent/internal/provisioner"
-	"github.com/Makr91/hyperweaver-agent/internal/secrets"
 	"github.com/Makr91/hyperweaver-agent/internal/server"
 	"github.com/Makr91/hyperweaver-agent/internal/tray"
 	"github.com/Makr91/hyperweaver-agent/internal/updater"
@@ -169,15 +168,6 @@ func run() error {
 		return err
 	}
 
-	// Global secrets store (architecture D-C): secrets.yaml beside the
-	// config, feeding SECRETS_* template vars and private-repo import
-	// tokens. Missing file = empty store.
-	secretsStore, err := secrets.Open(cfg.SecretsPath())
-	if err != nil {
-		slog.Error("secrets store setup failed", "error", err)
-		return err
-	}
-
 	// First-boot setup token on a headless install: while the agent can still
 	// be bootstrapped (no keys yet), ensure the token exists and print it so a
 	// host admin can read it. It opens the setup page and guards
@@ -242,7 +232,7 @@ func run() error {
 			"start_at_login", cfg.Startup.StartAtLogin)
 	}
 
-	systems, err := setupTasks(cfg, secretsStore)
+	systems, err := setupTasks(cfg)
 	if err != nil {
 		slog.Error("task system setup failed", "error", err)
 		return err
@@ -268,7 +258,7 @@ func run() error {
 		systems.closeDBs()
 	}
 
-	srv, err := server.New(cfg, keyStore, trayTokens, sessions, taskQueue, systems.machines, systems.inbox, systems.provisioners, systems.storage, secretsStore, systems.assets, systems.artifactSvc, monitor, updateChecks, systems.dbs, restartArgs, teardown, openUI)
+	srv, err := server.New(cfg, keyStore, trayTokens, sessions, taskQueue, systems.machines, systems.inbox, systems.provisioners, systems.storage, systems.secrets, systems.certs, systems.assets, systems.artifactSvc, monitor, updateChecks, systems.dbs, restartArgs, teardown, openUI)
 	if err != nil {
 		slog.Error("server setup failed", "error", err)
 		return err

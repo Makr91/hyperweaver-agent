@@ -11,9 +11,22 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/goccy/go-yaml"
+
 	"github.com/Makr91/hyperweaver-agent/internal/safepath"
 	"github.com/Makr91/hyperweaver-agent/internal/sslcert"
 )
+
+// secretsFile is the working copy's secrets document the package's roles read, written from the secret fields' rows.
+const secretsFile = ".secrets.yml"
+
+// SSLFile is one vault row's PEM material placed under ssls for the ssl role: the certificate, its key and its issuer's certificate, each absent when the row holds none.
+type SSLFile struct {
+	Name string
+	Cert []byte
+	Key  []byte
+	CA   []byte
+}
 
 // Working-directory materialization (architecture §8 Phase-C spec): each
 // machine gets a working copy of its provisioner version plus the generated
@@ -68,12 +81,15 @@ const (
 	idDirUserSafeIDs = "user-safe-ids"
 )
 
-// IDFile is one cached ID file to place under id-files: Type is the id file's type (safe_id, server_id, user_id, or another folder name), Name the file name it lands under, empty for the type's default.
-type IDFile struct {
-	SourcePath string
-	Type       string
-	Name       string
+// SecretFile is one file row to place in the working copy: under id-files by IDType for a Notes ID (safe_id, server_id, user_id, or another folder name), under secrets otherwise.
+type SecretFile struct {
+	IDType   string
+	Filename string
+	Data     []byte
 }
+
+// secretsDir is the working-copy folder a file row that is not a Notes ID lands in.
+const secretsDir = "secrets"
 
 // MaterializeInput is everything one working-directory materialization
 // consumes.
@@ -90,11 +106,12 @@ type MaterializeInput struct {
 	// Installers are the cache-verified files to mount (resolved and
 	// hash-checked by the caller against the file cache).
 	Installers []InstallerFile
-	// SafeIDPath optionally names an agent-host Domino safe-ID file to place
-	// under id-files per the package's conventions.
-	SafeIDPath string
-	// IDFiles are the cached ID files to place under id-files, each by the folder its type names.
-	IDFiles []IDFile
+	// Secrets is the .secrets.yml document the secret fields' rows fill; empty writes none.
+	Secrets map[string]any
+	// SecretFiles are the file rows placed under id-files or secrets.
+	SecretFiles []SecretFile
+	// SSLFiles are the vault rows placed under ssls by their secret_key.
+	SSLFiles []SSLFile
 	// CACertPath/CAKeyPath locate the agent's CA pair (the installer-seeded
 	// STARTcloud CA, or the generated one) seeding ssls/ca and signing the
 	// default-signed pair.
@@ -145,6 +162,9 @@ func Materialize(in *MaterializeInput) error {
 	if werr := safepath.WriteFile(filepath.Join(dir, "Hosts.yml"), in.HostsYML, 0o600); werr != nil {
 		return fmt.Errorf("write Hosts.yml: %w", werr)
 	}
+	if serr := writeSecretsFile(dir, in.Secrets); serr != nil {
+		return serr
+	}
 	if ierr := materializeIDFiles(dir, in); ierr != nil {
 		return ierr
 	}
@@ -154,7 +174,55 @@ func Materialize(in *MaterializeInput) error {
 	if ierr := mountInstallerFiles(dir, in.Installers); ierr != nil {
 		return ierr
 	}
-	return materializeSSLs(dir, in.CACertPath, in.CAKeyPath)
+	if serr := materializeSSLs(dir, in.CACertPath, in.CAKeyPath); serr != nil {
+		return serr
+	}
+	return writeSSLFiles(dir, in.SSLFiles)
+}
+
+// writeSecretsFile writes the secrets document as the working copy's .secrets.yml; an empty document writes nothing.
+func writeSecretsFile(dir string, secrets map[string]any) error {
+	if len(secrets) == 0 {
+		return nil
+	}
+	raw, err := yaml.Marshal(secrets)
+	if err != nil {
+		return fmt.Errorf("serialize %s: %w", secretsFile, err)
+	}
+	if werr := safepath.WriteFile(filepath.Join(dir, secretsFile), raw, 0o600); werr != nil {
+		return fmt.Errorf("write %s: %w", secretsFile, werr)
+	}
+	return nil
+}
+
+// writeSSLFiles places every vault row's PEM material under ssls: crt/<name>.crt, key/<name>.key and ca/<name>.ca, each written while the row holds it.
+func writeSSLFiles(dir string, files []SSLFile) error {
+	root := filepath.Join(dir, "ssls")
+	for i := range files {
+		if !ValidName(files[i].Name) {
+			return fmt.Errorf("secret_key %q is unusable as a file name", files[i].Name)
+		}
+		for _, part := range []struct {
+			sub, ext string
+			data     []byte
+		}{
+			{"crt", ".crt", files[i].Cert},
+			{"key", ".key", files[i].Key},
+			{"ca", ".ca", files[i].CA},
+		} {
+			if len(part.data) == 0 {
+				continue
+			}
+			target, err := safepath.Under(root, filepath.Join(part.sub, files[i].Name+part.ext))
+			if err != nil {
+				return err
+			}
+			if werr := safepath.WriteFile(target, part.data, 0o600); werr != nil {
+				return fmt.Errorf("write %s: %w", target, werr)
+			}
+		}
+	}
+	return nil
 }
 
 // mountInstallerFiles places the cached files into installers/<role>/archives/.
@@ -263,24 +331,21 @@ func syncPackage(src, dst string) error {
 	})
 }
 
-// idFileRules reads the manifest's top-level id_files: the safe ID folder (default user-safe-ids) and whether a safe ID keeps its own file name (default false, landing as safe.ids).
-func idFileRules(version *Version) (safeIDDir string, keepName bool, err error) {
-	safeIDDir = idDirUserSafeIDs
+// safeIDDirOf reads the manifest's top-level id_files.safe_id_dir, the folder a safe ID lands in (default user-safe-ids).
+func safeIDDirOf(version *Version) (string, error) {
+	safeIDDir := idDirUserSafeIDs
 	if idFiles, ok := version.Metadata["id_files"].(map[string]any); ok {
 		if v, sok := idFiles["safe_id_dir"].(string); sok && v != "" {
 			safeIDDir = v
 		}
-		if v, bok := idFiles["keep_original_name"].(bool); bok {
-			keepName = v
-		}
 	}
 	if !ValidName(safeIDDir) {
-		return "", false, fmt.Errorf("package declares an unusable id_files.safe_id_dir %q", safeIDDir)
+		return "", fmt.Errorf("package declares an unusable id_files.safe_id_dir %q", safeIDDir)
 	}
-	return safeIDDir, keepName, nil
+	return safeIDDir, nil
 }
 
-// materializeIDFiles creates the id-files tree and places every ID file: the agent-host safe ID of safe_id_path and each cached id file, by the folder its type names, safe_id under the manifest's id_files.safe_id_dir, server_id under server-ids, user_id under user-ids, any other type under a folder of its own name.
+// materializeIDFiles creates the id-files tree and places every file row: a Notes ID under id-files by its id type, safe_id under the manifest's id_files.safe_id_dir, server_id under server-ids, user_id under user-ids, any other type under a folder of its own name; every other file under secrets.
 func materializeIDFiles(dir string, in *MaterializeInput) error {
 	idRoot := filepath.Join(dir, "id-files")
 	for _, sub := range []string{idDirServerIDs, idDirUserIDs, idDirUserSafeIDs} {
@@ -288,64 +353,47 @@ func materializeIDFiles(dir string, in *MaterializeInput) error {
 			return err
 		}
 	}
-	safeIDDir, keepName, err := idFileRules(in.Version)
+	safeIDDir, err := safeIDDirOf(in.Version)
 	if err != nil {
 		return err
 	}
-	files := make([]IDFile, 0, len(in.IDFiles)+1)
-	if in.SafeIDPath != "" {
-		files = append(files, IDFile{SourcePath: in.SafeIDPath, Type: IDTypeSafeID})
-	}
-	files = append(files, in.IDFiles...)
-	for i := range files {
-		if perr := placeIDFile(idRoot, &files[i], safeIDDir, keepName); perr != nil {
+	for i := range in.SecretFiles {
+		if perr := placeSecretFile(dir, idRoot, &in.SecretFiles[i], safeIDDir); perr != nil {
 			return perr
 		}
 	}
 	return nil
 }
 
-// placeIDFile copies one ID file under id-files/<folder>/<name>.
-func placeIDFile(idRoot string, file *IDFile, safeIDDir string, keepName bool) error {
-	source, err := safepath.CleanAbs(file.SourcePath)
-	if err != nil {
-		return err
+// placeSecretFile writes one file row: under id-files/<folder>/<filename> for a Notes ID, under secrets/<filename> otherwise.
+func placeSecretFile(dir, idRoot string, file *SecretFile, safeIDDir string) error {
+	if !ValidName(file.Filename) {
+		return fmt.Errorf("file name %q is unusable", file.Filename)
 	}
-	folder := file.Type
-	switch file.Type {
-	case IDTypeSafeID:
-		folder = safeIDDir
-	case IDTypeServerID:
-		folder = idDirServerIDs
-	case IDTypeUserID:
-		folder = idDirUserIDs
+	root, folder := filepath.Join(dir, secretsDir), ""
+	if file.IDType != "" {
+		root = idRoot
+		folder = file.IDType
+		switch file.IDType {
+		case IDTypeSafeID:
+			folder = safeIDDir
+		case IDTypeServerID:
+			folder = idDirServerIDs
+		case IDTypeUserID:
+			folder = idDirUserIDs
+		}
+		if !ValidName(folder) {
+			return fmt.Errorf("id file type %q is unusable as a folder", file.IDType)
+		}
 	}
-	if !ValidName(folder) {
-		return fmt.Errorf("id file type %q is unusable as a folder", file.Type)
-	}
-	name := file.Name
-	switch {
-	case name != "":
-	case file.Type == IDTypeSafeID && !keepName:
-		name = "safe.ids"
-	default:
-		name = filepath.Base(source)
-	}
-	if !ValidName(name) {
-		return fmt.Errorf("id file name %q is unusable", name)
-	}
-	target, err := safepath.Under(idRoot, filepath.Join(folder, name))
+	target, err := safepath.Under(root, filepath.Join(folder, file.Filename))
 	if err != nil {
 		return err
 	}
 	if merr := os.MkdirAll(filepath.Dir(target), 0o750); merr != nil {
 		return merr
 	}
-	data, err := os.ReadFile(filepath.Clean(source))
-	if err != nil {
-		return fmt.Errorf("read id file %s: %w", source, err)
-	}
-	return safepath.WriteFile(target, data, 0o600)
+	return safepath.WriteFile(target, file.Data, 0o600)
 }
 
 // materializeInstallers creates the installers/<installer_dir>/ mount skeletons for every folder the manifest's roles read.

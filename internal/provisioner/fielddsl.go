@@ -23,7 +23,7 @@ var fieldTypes = map[string]bool{
 	"text": true, "textarea": true, "number": true, "checkbox": true,
 	"select": true, "multiselect": true, "password": true,
 	"fqdn": true, "ipaddr": true, "cidr": true, "path": true,
-	"list": true, "file": true,
+	"list": true, "file": true, "secret": true,
 }
 
 // optionsSources is the closed live-picker vocabulary for select fields.
@@ -32,7 +32,15 @@ var optionsSources = map[string]bool{
 }
 
 // fileKinds is the closed kind vocabulary of a file field: the artifact kind the picked row carries.
-var fileKinds = map[string]bool{"id_file": true, "installer": true}
+var fileKinds = map[string]bool{
+	"installer": true, "fixpack": true, "hotfix": true, "iso": true, "image": true,
+}
+
+// secretKinds is the closed kind vocabulary of a secret field: the eight secret kinds of the vault store, and certificate or key for a row of its certificate, authority, key or ssh_certificate kinds.
+var secretKinds = map[string]bool{
+	"password": true, "api_key": true, "basic_auth": true, "key_pair": true, "oauth_client": true,
+	"ssh_key": true, "file": true, "custom": true, "certificate": true, "key": true,
+}
 
 // fieldNamePattern: a field's name is the EXACT Jinja2 context key, so it
 // must be a legal Jinja2 identifier.
@@ -90,6 +98,8 @@ type Field struct {
 	Items          string
 	Kind           string
 	Role           string
+	SecretKey      string
+	Profile        string
 	Options        []FieldOption
 	OptionsSource  string
 	GenerateLength int // password generate:{length}

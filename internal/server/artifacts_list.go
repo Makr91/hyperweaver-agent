@@ -171,11 +171,11 @@ func (s *Server) handleListImageArtifacts(w http.ResponseWriter, r *http.Request
 // handleArtifactDetails: GET /api/artifacts/{id}.
 //
 //	@Summary		Artifact details
-//	@Description	Minimum role: viewer.
+//	@Description	Minimum role: viewer. One row in the list's document shape, version the structured object.
 //	@Tags			Artifacts
 //	@Produce		json
 //	@Param			id	path	int	true	"Artifact id"
-//	@Success		200	{object}	assets.Artifact	"The artifact"
+//	@Success		200	{object}	artifactDocument	"The artifact"
 //	@Failure		404	"Artifact not found"
 //	@Failure		503	"Artifact storage is disabled"
 //	@Router			/api/artifacts/{id} [get]

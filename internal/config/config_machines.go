@@ -93,6 +93,8 @@ type MachinesConfig struct {
 	// machines, restarts, and provision-chain boot children are never
 	// affected. Default false.
 	ProvisionOnStart bool `yaml:"provision_on_start" json:"provision_on_start"`
+	// DefaultDomain is the settings.domain a create whose body names none takes; empty leaves domain required.
+	DefaultDomain string `yaml:"default_domain" json:"default_domain"`
 }
 
 // GuestAgentConfig gates the QEMU guest-agent channel (the `guest-agent`

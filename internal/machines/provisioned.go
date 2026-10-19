@@ -122,12 +122,10 @@ type Spec struct {
 	HostIndex int `json:"host_index,omitempty"`
 	// Notes/Tags persist onto the machine row at finalize (the base's
 	// SubTaskExecutors finalize does exactly this).
-	Notes            string      `json:"notes"`
-	Tags             []string    `json:"tags"`
-	SyncMethod       string      `json:"sync_method"`
-	SafeIDPath       string      `json:"safe_id_path"`
-	IDFiles          []IDFileRef `json:"id_files,omitempty"`
-	StartAfterCreate bool        `json:"start_after_create"`
+	Notes            string   `json:"notes"`
+	Tags             []string `json:"tags"`
+	SyncMethod       string   `json:"sync_method"`
+	StartAfterCreate bool     `json:"start_after_create"`
 	// RemoveTransportOnCompletion is the wizard's per-create transport signal
 	// (the converged cross-agent key, sync 2026-07-18 — UI's Q1(b) answer with
 	// Go's NAT input consumed): true asks the provision pipeline to remove the
@@ -139,12 +137,6 @@ type Spec struct {
 	// remove_transport_on_completion — the ONE effective-flag home the
 	// provision chain, knob_current, and the PUT flip all read.
 	RemoveTransportOnCompletion *bool `json:"remove_transport_on_completion,omitempty"`
-}
-
-// IDFileRef names one id_file artifact of the registry and the file name it lands under, the type's default when empty.
-type IDFileRef struct {
-	ArtifactID int64  `json:"artifact_id"`
-	Name       string `json:"name,omitempty"`
 }
 
 // HasProvisioner reports whether the spec references a provisioner package.
@@ -174,8 +166,9 @@ func ParseSpec(machine *Machine) (*Spec, error) {
 // assets.enabled is off), and the agent CA pair seeding each working copy's
 // ssls tree.
 type ProvisionEnv struct {
-	Registry    *provisioner.Registry
-	SecretsVars func() map[string]string
+	Registry *provisioner.Registry
+	// SecretsVars answers the SECRETS_* template variables of the rows the persons may reach.
+	SecretsVars func(persons []string) map[string]string
 	Locations   *locations.Set
 	Assets      *assets.Store
 	CACertPath  string
@@ -304,38 +297,6 @@ func installerDirs(version *provisioner.Version) []string {
 		dirs = append(dirs, role.InstallerDir)
 	}
 	return dirs
-}
-
-// resolveIDFiles resolves the spec's id_files against the registry: each must be a present id_file row, its role the id type; a safe_id with no name takes the USER_SAFE_ID answer when the form carries one.
-func (e *executors) resolveIDFiles(ctx context.Context, spec *Spec) ([]provisioner.IDFile, error) {
-	if len(spec.IDFiles) == 0 {
-		return nil, nil
-	}
-	if e.env.Assets == nil {
-		return nil, errors.New("id_files need artifact storage, which is disabled")
-	}
-	files := make([]provisioner.IDFile, 0, len(spec.IDFiles))
-	for _, ref := range spec.IDFiles {
-		artifact, err := e.env.Assets.Get(ctx, ref.ArtifactID)
-		if errors.Is(err, assets.ErrNotFound) {
-			return nil, fmt.Errorf("id_files: artifact %d is not in the registry", ref.ArtifactID)
-		}
-		if err != nil {
-			return nil, err
-		}
-		if artifact.Kind != assets.KindIDFile {
-			return nil, fmt.Errorf("id_files: artifact %d is a %s, not an id_file", ref.ArtifactID, artifact.Kind)
-		}
-		if !artifact.Exists || artifact.Path == "" {
-			return nil, fmt.Errorf("id_files: artifact %d (%s) has no file on this host", ref.ArtifactID, artifact.Filename)
-		}
-		name := ref.Name
-		if name == "" && artifact.Role == provisioner.IDTypeSafeID {
-			name, _ = spec.Properties["USER_SAFE_ID"].(string)
-		}
-		files = append(files, provisioner.IDFile{SourcePath: artifact.Path, Type: artifact.Role, Name: name})
-	}
-	return files, nil
 }
 
 // installerWarning answers why a present file is mounted as the person's own rather than verified, empty when it verifies.

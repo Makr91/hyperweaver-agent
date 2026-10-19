@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/Makr91/hyperweaver-agent/internal/assets"
+	"github.com/Makr91/hyperweaver-agent/internal/certs"
 	"github.com/Makr91/hyperweaver-agent/internal/config"
 	"github.com/Makr91/hyperweaver-agent/internal/db"
 	"github.com/Makr91/hyperweaver-agent/internal/hostname"
@@ -33,6 +34,8 @@ type agentSystems struct {
 	queue        *tasks.Queue
 	machines     *machines.Store
 	inbox        *inbox.Store
+	certs        *certs.Store
+	secrets      *secrets.Store
 	provisioners *provisioner.Registry
 	storage      *locations.Set
 	assets       *assets.Store
@@ -115,7 +118,7 @@ func storageLocations(cfg *config.Config) (*locations.Set, error) {
 // only when monitoring.storage_enabled — the per-datatype telemetry files
 // carry stored samples. Every executor is registered before the queue ever
 // starts. The returned closer releases every database handle.
-func setupTasks(cfg *config.Config, secretsStore *secrets.Store) (*agentSystems, error) {
+func setupTasks(cfg *config.Config) (*agentSystems, error) {
 	tasksPath, err := cfg.TasksDBPath()
 	if err != nil {
 		return nil, err
@@ -168,6 +171,7 @@ func setupTasks(cfg *config.Config, secretsStore *secrets.Store) (*agentSystems,
 	agentMigrations = append(agentMigrations, inbox.Migrations...)
 	agentMigrations = append(agentMigrations, assets.GivenChecksumMigrations...)
 	agentMigrations = append(agentMigrations, assets.VersionInfoMigrations...)
+	agentMigrations = append(agentMigrations, certs.Migrations...)
 	agentDB, err := openDB(agentPath, agentMigrations)
 	if err != nil {
 		_ = tasksDB.Close()
@@ -178,7 +182,7 @@ func setupTasks(cfg *config.Config, secretsStore *secrets.Store) (*agentSystems,
 	// them all, and the closer releases them in reverse-open order.
 	handles := []server.DBHandle{
 		{Name: "tasks.sqlite", Path: tasksPath, DB: tasksDB, Tables: []string{"tasks"}},
-		{Name: "agent.sqlite", Path: agentPath, DB: agentDB, Tables: []string{"machines", "artifacts", "artifact_locations", "templates", "notifications"}},
+		{Name: "agent.sqlite", Path: agentPath, DB: agentDB, Tables: []string{"machines", "artifacts", "artifact_locations", "templates", "notifications", "certs"}},
 	}
 	closer := func() {
 		for i := len(handles) - 1; i >= 0; i-- {
@@ -186,6 +190,15 @@ func setupTasks(cfg *config.Config, secretsStore *secrets.Store) (*agentSystems,
 				slog.Error("close database", "name", handles[i].Name, "error", cerr)
 			}
 		}
+	}
+
+	certsStore := certs.NewStore(agentDB)
+	secretsStore := secrets.New(certsStore)
+	if imported, ierr := secretsStore.Import(context.Background(), cfg.SecretsPath()); ierr != nil {
+		closer()
+		return nil, ierr
+	} else if imported > 0 {
+		slog.Info("secrets moved into the vault store", "rows", imported, "file", cfg.SecretsPath())
 	}
 
 	// Telemetry storage (monitoring.storage_enabled): one database file per
@@ -371,6 +384,8 @@ func setupTasks(cfg *config.Config, secretsStore *secrets.Store) (*agentSystems,
 		queue:        queue,
 		machines:     machineStore,
 		inbox:        inboxStore,
+		certs:        certsStore,
+		secrets:      secretsStore,
 		provisioners: provisioners,
 		storage:      storage,
 		assets:       assetsStore,

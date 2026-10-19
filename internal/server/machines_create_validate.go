@@ -5,12 +5,9 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
-	"os"
 	"runtime"
-	"strconv"
 	"strings"
 
-	"github.com/Makr91/hyperweaver-agent/internal/assets"
 	"github.com/Makr91/hyperweaver-agent/internal/machines"
 	"github.com/Makr91/hyperweaver-agent/internal/provisioner"
 	"github.com/Makr91/hyperweaver-agent/internal/safepath"
@@ -20,9 +17,9 @@ import (
 // validateSpec checks the creation spec: the provisioner reference is
 // OPTIONAL (the base's provisioner-free create — Mark's ruling 2026-07-07)
 // and validated against the registry only when given; hostname and domain are
-// required (the name derives from them), the typed disk spec must hold, role
-// names must be usable, the safe-ID source must exist, sync_method must be
-// valid. diskWarnings carry the typed-disk never-refuse rows (bhyve
+// required (the name derives from them, an absent domain taking
+// machines.default_domain), the typed disk spec must hold, role names must be
+// usable, sync_method must be valid. diskWarnings carry the typed-disk never-refuse rows (bhyve
 // vocabulary keys, an unused settings.box) for the create response's
 // resource_warnings.
 func (s *Server) validateSpec(w http.ResponseWriter, spec *machines.Spec) (ok bool, diskWarnings []string) {
@@ -61,6 +58,10 @@ func (s *Server) validateSpec(w http.ResponseWriter, spec *machines.Spec) (ok bo
 	}
 	hostname, _ := spec.Settings["hostname"].(string)
 	domain, _ := spec.Settings["domain"].(string)
+	if domain == "" && s.cfg.Machines.DefaultDomain != "" {
+		domain = s.cfg.Machines.DefaultDomain
+		spec.Settings["domain"] = domain
+	}
 	if hostname == "" || domain == "" {
 		taskError(w, http.StatusBadRequest,
 			"Missing required parameters: settings.hostname and settings.domain are required")
@@ -127,42 +128,11 @@ func (s *Server) validateSpec(w http.ResponseWriter, spec *machines.Spec) (ok bo
 			return false, nil
 		}
 	}
-	if spec.SafeIDPath != "" {
-		clean, err := safepath.CleanAbs(spec.SafeIDPath)
-		if err != nil {
-			taskError(w, http.StatusBadRequest, "safe_id_path is not a usable path")
-			return false, nil
-		}
-		if info, serr := os.Stat(clean); serr != nil || info.IsDir() {
-			taskError(w, http.StatusBadRequest, "safe_id_path does not name a file on the agent host")
-			return false, nil
-		}
-		spec.SafeIDPath = clean
-	}
 	switch spec.SyncMethod {
 	case "", machines.SyncRsync, machines.SyncSCP:
 	default:
 		taskError(w, http.StatusBadRequest, "sync_method must be rsync or scp")
 		return false, nil
-	}
-	for _, ref := range spec.IDFiles {
-		artifact, err := s.assets.Get(context.Background(), ref.ArtifactID)
-		if errors.Is(err, assets.ErrNotFound) {
-			taskError(w, http.StatusBadRequest, "id_files: artifact "+strconv.FormatInt(ref.ArtifactID, 10)+" is not in the registry")
-			return false, nil
-		}
-		if err != nil {
-			taskError(w, http.StatusInternalServerError, "Failed to read the id_files artifacts")
-			return false, nil
-		}
-		if artifact.Kind != assets.KindIDFile {
-			taskError(w, http.StatusBadRequest, "id_files: artifact "+strconv.FormatInt(ref.ArtifactID, 10)+" is a "+artifact.Kind+", not an id_file")
-			return false, nil
-		}
-		if ref.Name != "" && !assets.ValidFilename(ref.Name) {
-			taskError(w, http.StatusBadRequest, "id_files: name "+ref.Name+" is not usable")
-			return false, nil
-		}
 	}
 	return true, diskWarnings
 }

@@ -295,7 +295,8 @@ func (s *Server) createMultiHostMachines(w http.ResponseWriter, r *http.Request,
 	for k := range plans {
 		plan := &plans[k]
 		parentID, subTasks, _, lastTaskID, qerr := s.queueCreateOrchestration(r.Context(),
-			plan.name, plan.home, plan.spec, plan.document, body.StartAfterCreate, createdBy, dependsOn)
+			plan.name, plan.home, plan.spec, plan.document, body.StartAfterCreate || body.ProvisionAfterCreate,
+			body.ProvisionAfterCreate, createdBy, dependsOn)
 		if qerr != nil {
 			cancelAll()
 			entryError(k, http.StatusBadRequest, qerr.Error())

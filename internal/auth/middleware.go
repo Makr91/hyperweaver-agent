@@ -39,7 +39,7 @@ var adminWritePrefixes = []string{
 // store, and the host terminal (a shell as the agent's own user is full host
 // access — even listing sessions stays admin). GET /api/config/ticket is
 // public and never passes through this middleware.
-var adminAlwaysPrefixes = []string{"/api/api-keys", "/api/config", "/api/secrets", "/api/term"}
+var adminAlwaysPrefixes = []string{"/api/api-keys", "/api/config", "/api/term"}
 
 func underPrefix(path string, prefixes []string) bool {
 	for _, prefix := range prefixes {
