@@ -93,6 +93,19 @@ func anyStringList(value any) []string {
 	return nil
 }
 
+func stringList(value any) bool {
+	entries, ok := value.([]any)
+	if !ok {
+		return false
+	}
+	for _, entry := range entries {
+		if _, isString := entry.(string); !isString {
+			return false
+		}
+	}
+	return true
+}
+
 func manifestRoleNames(metadata map[string]any) []string {
 	roles := ManifestRoles(metadata)
 	names := make([]string, 0, len(roles))
@@ -102,7 +115,7 @@ func manifestRoleNames(metadata map[string]any) []string {
 	return names
 }
 
-// lintDefaults lints metadata.defaults, the package's machine defaults the create wizard prefills from: a map whose keys are settings and disks, each a map, and networks, a list; absent is legal.
+// lintDefaults lints metadata.defaults, the package's machine defaults the create wizard prefills from: a map whose keys are settings and disks, each a map, networks, a list, tags, a list of strings, and guest_agent, a boolean the wizard maps onto the host hypervisor's own section; absent is legal.
 func lintDefaults(metadata map[string]any) []string {
 	meta, _ := metadata["metadata"].(map[string]any)
 	raw, present := meta["defaults"]
@@ -111,7 +124,7 @@ func lintDefaults(metadata map[string]any) []string {
 	}
 	defaults, ok := raw.(map[string]any)
 	if !ok {
-		return []string{"metadata.defaults: must be a map with settings, disks and networks"}
+		return []string{"metadata.defaults: must be a map with settings, disks, networks, tags and guest_agent"}
 	}
 	problems := []string{}
 	keys := make([]string, 0, len(defaults))
@@ -129,8 +142,16 @@ func lintDefaults(metadata map[string]any) []string {
 			if _, isList := defaults[key].([]any); !isList {
 				problems = append(problems, "metadata.defaults.networks: must be a list")
 			}
+		case "tags":
+			if !stringList(defaults[key]) {
+				problems = append(problems, "metadata.defaults.tags: must be a list of strings")
+			}
+		case "guest_agent":
+			if _, isBool := defaults[key].(bool); !isBool {
+				problems = append(problems, "metadata.defaults.guest_agent: must be a boolean")
+			}
 		default:
-			problems = append(problems, fmt.Sprintf("metadata.defaults.%s: unknown key — the closed set is: disks, networks, settings", key))
+			problems = append(problems, fmt.Sprintf("metadata.defaults.%s: unknown key — the closed set is: disks, guest_agent, networks, settings, tags", key))
 		}
 	}
 	if len(problems) == 0 {

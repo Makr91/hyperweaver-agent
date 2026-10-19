@@ -117,9 +117,11 @@ func TestListAndFileLint(t *testing.T) {
 
 func TestLintDefaults(t *testing.T) {
 	legal := map[string]any{
-		"settings": map[string]any{"box": "STARTcloud/debian13-server"},
-		"disks":    map[string]any{"boot": map[string]any{"type": "template"}},
-		"networks": []any{map[string]any{"type": "external", "dhcp4": true}},
+		"settings":    map[string]any{"box": "STARTcloud/debian13-server"},
+		"disks":       map[string]any{"boot": map[string]any{"type": "template"}},
+		"networks":    []any{map[string]any{"type": "external", "dhcp4": true}},
+		"tags":        []any{"domino", "standalone"},
+		"guest_agent": true,
 	}
 	if problems := lintDefaults(manifestWith(nil, legal)); len(problems) != 0 {
 		t.Fatalf("legal defaults refused: %v", problems)
@@ -132,9 +134,12 @@ func TestLintDefaults(t *testing.T) {
 		want     string
 	}{
 		{"x", "must be a map"},
-		{map[string]any{"vbox": map[string]any{}}, "unknown key"},
+		{map[string]any{"vbox": map[string]any{"guest_agent": true}}, "unknown key"},
 		{map[string]any{"settings": "x"}, "settings: must be a map"},
 		{map[string]any{"networks": map[string]any{}}, "networks: must be a list"},
+		{map[string]any{"tags": "domino"}, "tags: must be a list of strings"},
+		{map[string]any{"tags": []any{"domino", 1}}, "tags: must be a list of strings"},
+		{map[string]any{"guest_agent": "yes"}, "guest_agent: must be a boolean"},
 	}
 	for _, tc := range cases {
 		problems := lintDefaults(manifestWith(nil, tc.defaults))
