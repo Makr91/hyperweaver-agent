@@ -1,6 +1,8 @@
 package server
 
 import (
+	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -9,6 +11,7 @@ import (
 	"github.com/Makr91/hyperweaver-agent/internal/assets"
 	"github.com/Makr91/hyperweaver-agent/internal/auth"
 	"github.com/Makr91/hyperweaver-agent/internal/problem"
+	"github.com/Makr91/hyperweaver-agent/internal/provisioner"
 	"github.com/Makr91/hyperweaver-agent/internal/tasks"
 )
 
@@ -65,6 +68,57 @@ func (s *Server) handleRegistryDownloads(w http.ResponseWriter, r *http.Request)
 		Source:    registrySourceSummary{ID: source.ID, Name: source.Name, URL: source.URL},
 		Downloads: downloads,
 	})
+}
+
+// queueRegistrySync queues artifact_registry_sync, for one source when named, as createdBy; a queue failure logs.
+func (s *Server) queueRegistrySync(ctx context.Context, sourceName, createdBy string) {
+	raw, err := json.Marshal(assets.RegistrySyncMetadata{SourceName: sourceName})
+	if err != nil {
+		return
+	}
+	metadata := string(raw)
+	if _, terr := s.tasks.Store().Create(ctx, &tasks.NewTask{
+		MachineName: "artifact",
+		Operation:   assets.OpRegistrySync,
+		Priority:    tasks.PriorityBackground,
+		CreatedBy:   createdBy,
+		Metadata:    &metadata,
+	}); terr != nil {
+		slog.Warn("queue registry sync", "source", sourceName, "error", terr)
+	}
+}
+
+// syncOnTaskFinished queues the registry sync after a provisioner version lands by import or catalog install.
+func (s *Server) syncOnTaskFinished(task *tasks.Task) {
+	if task.Status != tasks.StatusCompleted {
+		return
+	}
+	switch task.Operation {
+	case provisioner.OpImport, provisioner.OpCatalogInstall:
+		s.queueRegistrySync(context.Background(), "", task.CreatedBy)
+	}
+}
+
+// handleRegistrySync: POST /api/artifacts/registry/{sourceName}/sync.
+//
+//	@Summary		Resolve the host's expectations against a box registry
+//	@Description	Minimum role: operator. Queues artifact_registry_sync for the source: the host reads the registry's /api/downloads/discover as the person who queued it, rebuilds its index of registry files, looks every installed provisioner's manifest defaults up by file name, upserts a hit's expectation row under the role's installer_dir and the registry's kind with registry, the sha256 and the version of the release and patch, seeds a miss without a hash and no registry, and stamps registry onto every row carrying a sha256 a registry lists. The agent queues the same sync on its own when a provisioner version is imported or installed from a catalog and when the storage configuration is saved.
+//	@Tags			Artifacts
+//	@Produce		json
+//	@Param			sourceName	path	string	true	"The configured template source's id"
+//	@Success		202	"Registry sync task queued"
+//	@Failure		404	"Source not found or disabled"
+//	@Failure		503	"Artifact storage is disabled"
+//	@Router			/api/artifacts/registry/{sourceName}/sync [post]
+func (s *Server) handleRegistrySync(w http.ResponseWriter, r *http.Request) {
+	source := s.findRegistrySource(r.PathValue("sourceName"))
+	if source == nil {
+		taskError(w, http.StatusNotFound, "Template source not found or disabled")
+		return
+	}
+	s.queueArtifactTask(w, r, assets.OpRegistrySync, tasks.PriorityMedium,
+		assets.RegistrySyncMetadata{SourceName: source.ID},
+		"Registry sync task created for '"+source.Name+"'")
 }
 
 // handleRegistryDownload: POST /api/artifacts/registry-download.

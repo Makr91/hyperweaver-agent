@@ -110,6 +110,9 @@ func Load(options Options) (*Config, error) {
 	if ferr := cfg.fill(); ferr != nil {
 		return nil, ferr
 	}
+	if werr := cfg.writeRunningValues(); werr != nil {
+		return nil, werr
+	}
 	return cfg, nil
 }
 
@@ -133,6 +136,11 @@ func (c *Config) fill() error {
 	}
 	*c = fresh
 	return nil
+}
+
+// Reload refills the typed view from the engine's filled documents, so a write through the configuration routes reaches every reader of the typed view at once.
+func (c *Config) Reload() error {
+	return c.fill()
 }
 
 // Engine answers the configuration engine.

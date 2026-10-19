@@ -40,7 +40,7 @@ type keyRotateMetadata struct {
 
 // keyRotate executes machine_key_rotate.
 func (e *executors) keyRotate(ctx context.Context, task *tasks.Task, out *tasks.OutputWriter) error {
-	meta, err := readProvisionMetadata(task)
+	meta, err := e.readProvisionMetadata(ctx, task)
 	if err != nil {
 		return err
 	}
@@ -68,7 +68,7 @@ func (e *executors) keyRotate(ctx context.Context, task *tasks.Task, out *tasks.
 
 	e.taskProgress(task, 15, "fetching_rotated_key")
 	out.Write("stdout", "Fetching rotated key "+remote+" from the guest\n")
-	raw, derr := sshrun.DownloadFile(ctx, meta.IP, meta.Port, meta.Credentials,
+	raw, derr := sshrun.DownloadFile(ctx, meta.IP, meta.Port, &meta.Credentials,
 		remote, workdir, e.env.ProvisionKeyPath)
 	if errors.Is(derr, os.ErrNotExist) {
 		// The box built without rotation — a narrated skip, the task SUCCEEDS.
@@ -92,7 +92,7 @@ func (e *executors) keyRotate(ctx context.Context, task *tasks.Task, out *tasks.
 	// shipped behavior, converged 2026-07-17); the landed key stays — the next
 	// connect still rides it, and the whole-walk stamp never sat on this child.
 	e.taskProgress(task, 80, "stripping_bootstrap_key")
-	if serr := sshrun.Run(ctx, meta.IP, meta.Port, meta.Credentials,
+	if serr := sshrun.Run(ctx, meta.IP, meta.Port, &meta.Credentials,
 		"sed -i '/vagrantup/d' "+remote, workdir, e.env.ProvisionKeyPath,
 		time.Minute, out.Write); serr != nil {
 		out.Write("stderr", "Bootstrap key strip failed (rotated key already landed at "+local+")\n")
@@ -154,7 +154,7 @@ func (e *executors) rewaitAfterKeyRecovery(ctx context.Context, task *tasks.Task
 		return 0, fmt.Errorf("%w — guest-agent key recovery failed (%w) — re-provision the machine or supply the key", waitErr, rerr)
 	}
 	out.Write("stdout", "Recovered key landed at "+local+" — retrying the SSH wait once\n")
-	return sshrun.WaitForSSH(ctx, meta.IP, meta.Port, meta.Credentials,
+	return sshrun.WaitForSSH(ctx, meta.IP, meta.Port, &meta.Credentials,
 		workdir, e.env.ProvisionKeyPath, timeout, interval, out.Write)
 }
 

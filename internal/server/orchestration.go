@@ -202,7 +202,7 @@ type orchestrationTestResponse struct {
 // nothing executes.
 //
 //	@Summary		Test orchestration (dry run)
-//	@Description	Minimum role: operator. Computes the SHUTDOWN execution plan over running machines — priority groups of ten, lowest first — without executing anything, plus a duration estimate (30s between groups + 120s per machine in the largest group, the base's arithmetic).
+//	@Description	Minimum role: operator. Computes the SHUTDOWN execution plan over running machines — priority groups of ten, lowest first — without executing anything, plus a duration estimate: machines.orchestration.priority_delay seconds between groups and machines.shutdown_timeout seconds per machine in the largest group.
 //	@Tags			Machine Management
 //	@Accept			json
 //	@Produce		json
@@ -257,9 +257,7 @@ func (s *Server) handleOrchestrationTest(w http.ResponseWriter, r *http.Request)
 			largest = len(group.Machines)
 		}
 	}
-	// The base's estimate: 30s between groups + 120s per machine in the
-	// largest group.
-	estimated := len(plan)*30 + largest*120
+	estimated := len(plan)*s.cfg.Machines.Orchestration.PriorityDelay + largest*s.cfg.Machines.ShutdownTimeout
 
 	writeJSON(w, orchestrationTestResponse{
 		EstimatedDuration: estimated,

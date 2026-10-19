@@ -41,7 +41,7 @@ func (w shellWriter) Write(p []byte) (int, error) {
 // until Close or remote exit — cancelling the connect context after a
 // successful connect must never kill the live terminal (the runtime-found
 // 2026-07-09 instant "SSH connection closed").
-func StartShell(ctx context.Context, ip string, port int, credentials Credentials,
+func StartShell(ctx context.Context, ip string, port int, credentials *Credentials,
 	basePath, defaultKeyPath string, cols, rows int, onData func(string),
 ) (*Shell, error) {
 	client, closeClient, disarm, err := connectSSH(ctx, ip, port, credentials, basePath, defaultKeyPath)

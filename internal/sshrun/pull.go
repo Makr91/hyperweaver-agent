@@ -29,7 +29,7 @@ import (
 // environment variable, never argv; password engages ONLY when the resolver
 // found no key file anywhere, so the caller hands its resolved keyPath). Nil
 // when password auth is requested but sshpass is absent on the agent host.
-func newCommand(ctx context.Context, exe string, args []string, credentials Credentials, keyPath string) *exec.Cmd {
+func newCommand(ctx context.Context, exe string, args []string, credentials *Credentials, keyPath string) *exec.Cmd {
 	command := exec.CommandContext(ctx, exe, args...)
 	command.Env = toolEnv(exe)
 	if credentials.Password != "" && keyPath == "" {
@@ -48,7 +48,7 @@ func newCommand(ctx context.Context, exe string, args []string, credentials Cred
 // (`rsync -e ssh user@ip:remote/ local`). The remote sender runs `sudo
 // rsync` (the push path's --rsync-path rule) so root-owned provisioning
 // results are readable. folder args/exclude apply; delete never does.
-func SyncFilesPull(ctx context.Context, rsyncExe, ip string, port int, credentials Credentials,
+func SyncFilesPull(ctx context.Context, rsyncExe, ip string, port int, credentials *Credentials,
 	remoteDir, localDir, basePath, defaultKeyPath string, options *SyncOptions, stream StreamFunc,
 ) error {
 	exe, err := safepath.ValidateExecutable(rsyncExe)
@@ -101,7 +101,7 @@ func SyncFilesPull(ctx context.Context, rsyncExe, ip string, port int, credentia
 // SCPSyncPull copies a remote directory's content into a local directory
 // with `scp -r user@ip:remote/. local`. scp cannot elevate on the remote
 // side, so root-only files fail — the rsync path is the stronger pull.
-func SCPSyncPull(ctx context.Context, scpExe, ip string, port int, credentials Credentials,
+func SCPSyncPull(ctx context.Context, scpExe, ip string, port int, credentials *Credentials,
 	remoteDir, localDir, basePath, defaultKeyPath string, stream StreamFunc,
 ) error {
 	exe, err := safepath.ValidateExecutable(scpExe)
@@ -146,7 +146,7 @@ func SCPSyncPull(ctx context.Context, scpExe, ip string, port int, credentials C
 // pure-Go rsync client in its default RECEIVER mode — the remote half is the
 // guest's own `sudo rsync --server --sender` over one SSH session, so folder
 // args and exclude keep their rsync semantics (delete is never passed).
-func BuiltinRsyncSyncPull(ctx context.Context, ip string, port int, credentials Credentials,
+func BuiltinRsyncSyncPull(ctx context.Context, ip string, port int, credentials *Credentials,
 	remoteDir, localDir, basePath, defaultKeyPath string, options *SyncOptions, stream StreamFunc,
 ) error {
 	flags := append([]string{}, defaultRsyncArgs...)
@@ -216,7 +216,7 @@ func BuiltinRsyncSyncPull(ctx context.Context, ip string, port int, credentials 
 // SFTPSyncPull downloads a remote directory's content over sshd's sftp
 // subsystem — the always-available floor. Reads as the SSH user (no sudo in
 // sftp); root-only files narrate and skip rather than failing the pull.
-func SFTPSyncPull(ctx context.Context, ip string, port int, credentials Credentials,
+func SFTPSyncPull(ctx context.Context, ip string, port int, credentials *Credentials,
 	remoteDir, localDir, basePath, defaultKeyPath string, stream StreamFunc,
 ) error {
 	sshClient, closeSSH, _, err := connectSSH(ctx, ip, port, credentials, basePath, defaultKeyPath)

@@ -28,7 +28,7 @@ properties:
         type: string
         default: ''
         title: Built-in templates path
-        description: Downloaded box images under <root>/<organization>/<box>/<version>; empty = templates under the data folder
+        description: Downloaded box images under <root>/<organization>/<box>/<version>; empty = templates under the data folder, written here at boot
         order: 1
       storage_paths:
         type: object
@@ -159,7 +159,7 @@ properties:
         type: boolean
         default: true
         title: Artifact storage
-        description: Serve /api/artifacts and verify installer hashes at machine prepare; disabled skips both with a warning
+        description: Serve /api/artifacts and verify installer hashes at machine prepare; disabled skips both with a warning; written here at boot when absent
         order: 1
         requiresRestart: true
         restartReason: the artifact service and routes are built at boot
@@ -167,7 +167,7 @@ properties:
         type: string
         default: ''
         title: Built-in locations root
-        description: Parent of isos, images, installers, fixpacks and hotfixes; empty = artifacts under the data folder
+        description: Parent of isos, images, installers, fixpacks and hotfixes; empty = artifacts under the data folder, written here at boot
         order: 2
         requiresRestart: true
         restartReason: the built-in locations are synced at boot
@@ -188,6 +188,7 @@ properties:
             minimum: 60
             default: 3600
             title: Download timeout (seconds)
+            description: Bound on one URL download into a location
             order: 1
       scanning:
         type: object
@@ -237,7 +238,7 @@ properties:
               order: 2
             type:
               type: string
-              enum: [iso, image, installer, fixpack, hotfix, id_file]
+              enum: [iso, image, installer, fixpack, hotfix]
               title: Type
               order: 3
             enabled:

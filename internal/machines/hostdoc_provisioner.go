@@ -149,19 +149,6 @@ func ProvisionerHooks(provisioner map[string]any, phase string) []Hook {
 	return hooks
 }
 
-// FilterHooksByRun applies the hook run vocabulary: once fires only while the
-// machine has never provisioned; always (the default) fires every run.
-func FilterHooksByRun(hooks []Hook, provisionedBefore bool) []Hook {
-	out := make([]Hook, 0, len(hooks))
-	for i := range hooks {
-		if hooks[i].Run == "once" && provisionedBefore {
-			continue
-		}
-		out = append(out, hooks[i])
-	}
-	return out
-}
-
 // HasHostHooks reports whether the document carries ANY host-target hook —
 // the pre-flight confirmation's trigger.
 func HasHostHooks(provisioner map[string]any) bool {
@@ -237,40 +224,4 @@ func HasProvisionedBefore(config MachineConfig) bool {
 	state := config.Section("provisioner_state")
 	stamp, _ := state["last_provisioned_at"].(string)
 	return stamp != ""
-}
-
-// SkippedPlaybook is one run-directive skip record ({playbook, run}).
-type SkippedPlaybook struct {
-	Playbook string `json:"playbook"`
-	Run      string `json:"run"`
-}
-
-// FilterPlaybooksByRun applies Hosts.rb's run-directive semantics
-// (filterPlaybooksByRun verbatim): always = every provision; not_first = only
-// after a prior success; once and anything unrecognized = only when never
-// provisioned.
-func FilterPlaybooksByRun(playbooks []Playbook, provisionedBefore bool) (included []Playbook, skipped []SkippedPlaybook) {
-	included = []Playbook{}
-	skipped = []SkippedPlaybook{}
-	for i := range playbooks {
-		run := playbooks[i].Run
-		if run == "" {
-			run = "once"
-		}
-		var shouldRun bool
-		switch run {
-		case "always":
-			shouldRun = true
-		case "not_first":
-			shouldRun = provisionedBefore
-		default:
-			shouldRun = !provisionedBefore
-		}
-		if shouldRun {
-			included = append(included, playbooks[i])
-		} else {
-			skipped = append(skipped, SkippedPlaybook{Playbook: playbooks[i].Playbook, Run: run})
-		}
-	}
-	return included, skipped
 }

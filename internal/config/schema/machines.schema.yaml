@@ -82,6 +82,32 @@ properties:
         title: Default domain
         description: The settings.domain a create whose body names none takes; empty keeps domain required
         order: 8
+      default_credentials:
+        type: object
+        subsection: defaultCredentials
+        title: Default credentials
+        description: The vault rows, password, ssh_key or key_pair, every machine whose document names no credentials signs in with, one per use
+        properties:
+          ssh:
+            type: string
+            default: ''
+            title: SSH console
+            order: 1
+          rdp:
+            type: string
+            default: ''
+            title: Remote desktop
+            order: 2
+          console:
+            type: string
+            default: ''
+            title: Hypervisor console
+            order: 3
+          vagrant:
+            type: string
+            default: ''
+            title: Provisioning
+            order: 4
       orchestration:
         type: object
         subsection: orchestration
@@ -107,6 +133,7 @@ properties:
             maximum: 300
             default: 30
             title: Priority delay (seconds)
+            description: Seconds between priority groups in the shutdown plan's duration estimate
             order: 3
       resource_validation:
         type: object
@@ -236,7 +263,7 @@ properties:
         type: string
         default: ''
         title: Built-in provisioners path
-        description: Provisioner packages in SHI's on-disk format; installer-bundled packages are extracted here without overwriting existing versions. Empty = provisioners under the configuration folder on Windows, under the data folder elsewhere or when data.dir is set
+        description: Provisioner packages in SHI's on-disk format; installer-bundled packages are extracted here without overwriting existing versions. Empty = provisioners under the configuration folder on Windows, under the data folder elsewhere, written here at boot
         order: 1
       provisioners_paths:
         type: object
@@ -272,7 +299,7 @@ properties:
         type: string
         default: ''
         title: Built-in machines path
-        description: Root of the per-machine folders holding the definition files, the hypervisor's files and the disks. Empty = machines under the configuration folder on Windows, under the data folder elsewhere or when data.dir is set
+        description: Root of the per-machine folders holding the definition files, the hypervisor's files and the disks. Empty = machines under the configuration folder on Windows, under the data folder elsewhere, written here at boot
         order: 3
       machines_paths:
         type: object
@@ -344,7 +371,7 @@ properties:
             type: string
             default: ''
             title: Provisioning key
-            description: The agent's own key, the auth fallback when the document supplies none; generated when absent. Empty = ssh/provision_key beside the configuration files
+            description: The agent's own key, the auth fallback when the document supplies none; generated when absent. Empty = ssh/provision_key beside the configuration files, written here at boot
             order: 1
             requiresRestart: true
             restartReason: the key is generated and read at boot

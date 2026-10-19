@@ -26,7 +26,7 @@ import (
 // uploads too), chmod +x, execute with sudo (vagrant's privileged default,
 // shebang honored), remove. The guest exit code fails the task honestly.
 func (e *executors) runShellScript(ctx context.Context, task *tasks.Task, out *tasks.OutputWriter) error {
-	meta, err := readProvisionMetadata(task)
+	meta, err := e.readProvisionMetadata(ctx, task)
 	if err != nil {
 		return err
 	}
@@ -86,7 +86,7 @@ func (e *executors) runGuestScript(ctx context.Context, task *tasks.Task,
 
 	e.taskProgress(task, 15, "uploading_script")
 	out.Write("stdout", "Uploading "+script+" → "+remote+"\n")
-	if uerr := sshrun.UploadFile(ctx, meta.IP, meta.Port, meta.Credentials,
+	if uerr := sshrun.UploadFile(ctx, meta.IP, meta.Port, &meta.Credentials,
 		local, remote, workdir, e.env.ProvisionKeyPath); uerr != nil {
 		return fmt.Errorf("upload %s: %w", script, uerr)
 	}
@@ -94,7 +94,7 @@ func (e *executors) runGuestScript(ctx context.Context, task *tasks.Task,
 	e.taskProgress(task, 30, "running_script")
 	out.Write("stdout", "Running "+script+" (sudo)\n")
 	command := fmt.Sprintf("chmod +x %[1]s && sudo %[2]s%[1]s; rc=$?; rm -f %[1]s; exit $rc", remote, env)
-	if rerr := sshrun.Run(ctx, meta.IP, meta.Port, meta.Credentials, command,
+	if rerr := sshrun.Run(ctx, meta.IP, meta.Port, &meta.Credentials, command,
 		workdir, e.env.ProvisionKeyPath, timeout, out.Write); rerr != nil {
 		return fmt.Errorf("script %s failed: %w", script, rerr)
 	}
@@ -109,7 +109,7 @@ func (e *executors) runGuestScript(ctx context.Context, task *tasks.Task,
 // documents — this gate is the backstop). on_failure: continue narrates the
 // failure and lets the sequence proceed.
 func (e *executors) runHook(ctx context.Context, task *tasks.Task, out *tasks.OutputWriter) error {
-	meta, err := readProvisionMetadata(task)
+	meta, err := e.readProvisionMetadata(ctx, task)
 	if err != nil {
 		return err
 	}

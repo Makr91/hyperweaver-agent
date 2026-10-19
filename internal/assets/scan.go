@@ -96,6 +96,23 @@ func listLocationFiles(location *Location, extensions []string) ([]foundFile, er
 	return found, nil
 }
 
+// scannedKind answers a discovered file's kind: a known row's own, else the registry file's whose sha256 the index lists, else the expectation row's of the role carrying the sha256, else the name rule in an installer location.
+func (s *Store) scannedKind(ctx context.Context, location *Location, file foundFile, sha string, existing *Artifact) string {
+	if existing != nil {
+		return existing.Kind
+	}
+	if !RoleKeyed(location.Type) {
+		return location.Type
+	}
+	if ref, ok := s.RegistryIndex().BySHA(sha); ok && registryKind(&ref) != "" {
+		return registryKind(&ref)
+	}
+	if expectation, err := s.FindExpectationBySHA(ctx, file.role, sha); err == nil {
+		return expectation.Kind
+	}
+	return KindOfName(file.filename, location.Type)
+}
+
 func matchesExtension(name string, extensions []string) bool {
 	for _, ext := range extensions {
 		if strings.HasSuffix(strings.ToLower(name), strings.ToLower(ext)) {
@@ -106,7 +123,8 @@ func matchesExtension(name string, extensions []string) bool {
 }
 
 // ScanLocation reconciles one location's rows with its directory: new files
-// hash and register, known-present rows refresh (re-hash on
+// hash and register under the kind the registries or the expectations give
+// their sha256, the name rule last, known-present rows refresh (re-hash on
 // verify_checksums), vanished files mark missing (expectations survive;
 // remove_orphaned deletes expectation-less rows). Mismatch counts land in
 // the result — the caller decides whether they fail the operation.
@@ -152,10 +170,7 @@ func (s *Store) ScanLocation(ctx context.Context, location *Location,
 			report("stderr", file.path+": hash failed ("+herr.Error()+")\n")
 			continue
 		}
-		kind := KindOfName(file.filename, location.Type)
-		if existing != nil {
-			kind = existing.Kind
-		}
+		kind := s.scannedKind(ctx, location, file, sha, existing)
 		artifact, rerr := s.RecordIngested(ctx, &Ingested{
 			LocationID: location.ID, Role: file.role, Kind: kind,
 			Filename: file.filename, Path: file.path, SHA256: sha, Size: size,

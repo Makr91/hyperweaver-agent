@@ -39,11 +39,17 @@ type sshSession struct {
 	CreatedAt    time.Time `json:"created_at"`
 	LastActivity time.Time `json:"last_activity"`
 
-	person  string
-	shell   *sshrun.Shell
-	link    terminalLink
-	done    chan struct{}
-	startMu sync.Mutex
+	person      string
+	credentials *sshrun.Credentials
+	shell       *sshrun.Shell
+	link        terminalLink
+	done        chan struct{}
+	startMu     sync.Mutex
+}
+
+// sshStartRequest is POST /api/machines/{name}/ssh/start's optional body: the vault row the shell signs in with.
+type sshStartRequest struct {
+	CredentialID string `json:"credential_id"`
 }
 
 // sshSessions is the in-memory session store.
@@ -165,12 +171,14 @@ func (s *Server) sshTransport(ctx context.Context, machine *machines.Machine,
 // /api/machines/{name}/ssh/start — each call is an independent session).
 //
 //	@Summary		Start an SSH terminal session
-//	@Description	Minimum role: operator. Mints an SSH terminal session for a RUNNING machine, created_by the calling key; the shell opens when the first terminal connects at the /api/ssh/{sessionId} WebSocket and lives until DELETE /api/ssh/sessions/{sessionId}/stop, the remote shell's exit, the calling key's revocation or deletion while no socket is attached, or the agent's stop; a socket's close leaves it running, its last output kept for the next socket. session-started {kind: ssh, id, machine_name} goes to the person on the sessions topic of GET /api/events. Each call is an independent session. Credentials come from the stored configuration (settings.vagrant_user/vagrant_user_pass/vagrant_user_private_key_path; the agent's provisioning key is the last-resort fallback). Transport = the pipeline's ladder: the provisioning NAT ssh port-forward first (immune to guest network reconfiguration), the document's control IP as fallback.
+//	@Description	Minimum role: operator. Mints an SSH terminal session for a RUNNING machine, created_by the calling key; the shell opens when the first terminal connects at the /api/ssh/{sessionId} WebSocket and lives until DELETE /api/ssh/sessions/{sessionId}/stop, the remote shell's exit, the calling key's revocation or deletion while no socket is attached, or the agent's stop; a socket's close leaves it running, its last output kept for the next socket. session-started {kind: ssh, id, machine_name} goes to the person on the sessions topic of GET /api/events. Each call is an independent session. CREDENTIAL: the body's credential_id names a password or ssh_key row of the certs store the caller may read; absent, the machine's credentials[] entry with use ssh (default first) applies, else machines.default_credentials.ssh, else the stored settings (settings.vagrant_user/vagrant_user_pass/vagrant_user_private_key_path; the agent's provisioning key is the last-resort fallback). A row's username comes from its extra.username or extra.user, else settings.vagrant_user; its password or private key and passphrase are resolved on the agent, never sent to the browser. Transport = the pipeline's ladder: the provisioning NAT ssh port-forward first (immune to guest network reconfiguration), the document's control IP as fallback.
 //	@Tags			Console
+//	@Accept			json
 //	@Produce		json
 //	@Param			machineName	path	string	true	"Machine name"
+//	@Param			request		body	sshStartRequest	false	"Optional {credential_id}"
 //	@Success		200	{object}	sshSession	"Session created"
-//	@Failure		400	"Machine not running, no credentials configured, or no SSH transport"
+//	@Failure		400	"Machine not running, no credentials configured, a credential_id naming no readable password or ssh_key row, or no SSH transport"
 //	@Failure		404	"Machine not found"
 //	@Router			/api/machines/{machineName}/ssh/start [post]
 func (s *Server) handleStartSSHSession(w http.ResponseWriter, r *http.Request) {
@@ -182,11 +190,39 @@ func (s *Server) handleStartSSHSession(w http.ResponseWriter, r *http.Request) {
 		taskError(w, http.StatusBadRequest, "Machine is not running")
 		return
 	}
+	var body sshStartRequest
+	if r.ContentLength > 0 {
+		if err := decodeBody(r, &body); err != nil {
+			taskError(w, http.StatusBadRequest, "Invalid JSON body")
+			return
+		}
+	}
 	config := machines.ParseConfiguration(machine)
 	credentials := machines.ExtractCredentials(config.Section("settings"))
+	var vault *sshrun.Credentials
+	row, err := s.pickCredential(r.Context(), machine, s.certReader(r), "ssh", body.CredentialID)
+	if err != nil {
+		taskError(w, http.StatusBadRequest, "credential_id "+err.Error())
+		return
+	}
+	if row != nil {
+		resolved, rerr := machines.SSHCredentialOf(row)
+		if rerr != nil {
+			taskError(w, http.StatusBadRequest, "credential "+row.ID+": "+rerr.Error())
+			return
+		}
+		if resolved.Username == "" {
+			resolved.Username = credentials.Username
+		}
+		if resolved.PrivateKey == "" {
+			resolved.SSHKeyPath = credentials.SSHKeyPath
+		}
+		credentials.Username = resolved.Username
+		vault = &resolved
+	}
 	if credentials.Username == "" {
 		taskError(w, http.StatusBadRequest,
-			"SSH credentials not configured. Set settings.vagrant_user in the machine configuration.")
+			"SSH credentials not configured. Set settings.vagrant_user in the machine configuration or pick a credential.")
 		return
 	}
 	host, port := s.sshTransport(r.Context(), machine, config)
@@ -213,6 +249,7 @@ func (s *Server) handleStartSSHSession(w http.ResponseWriter, r *http.Request) {
 		CreatedAt:    time.Now(),
 		LastActivity: time.Now(),
 		person:       s.personOf(identity),
+		credentials:  vault,
 		done:         make(chan struct{}),
 	}
 	s.sshSessions.put(session)
@@ -286,7 +323,7 @@ type terminalControl struct {
 	Rows int    `json:"rows"`
 }
 
-// sshShell answers the session's shell, opening it on the first socket with the machine's stored credentials; a session already closed answers nil.
+// sshShell answers the session's shell, opening it on the first socket with the session's vault credential or the machine's stored credentials; a session already closed answers nil.
 func (s *Server) sshShell(ctx context.Context, session *sshSession, sendText func(string)) (*sshrun.Shell, error) {
 	session.startMu.Lock()
 	defer session.startMu.Unlock()
@@ -301,7 +338,15 @@ func (s *Server) sshShell(ctx context.Context, session *sshSession, sendText fun
 		return nil, err
 	}
 	config := machines.ParseConfiguration(machine)
-	credentials := machines.ExtractCredentials(config.Section("settings"))
+	stored := machines.ExtractCredentials(config.Section("settings"))
+	credentials := sshrun.Credentials{
+		Username:   stored.Username,
+		Password:   stored.Password,
+		SSHKeyPath: stored.SSHKeyPath,
+	}
+	if session.credentials != nil {
+		credentials = *session.credentials
+	}
 	basePath := ""
 	if machine.Home != nil {
 		basePath = *machine.Home
@@ -309,12 +354,7 @@ func (s *Server) sshShell(ctx context.Context, session *sshSession, sendText fun
 	sendText("Connecting to SSH...\r\n")
 	connectCtx, connectCancel := context.WithTimeout(ctx, 20*time.Second)
 	defer connectCancel()
-	shell, err = sshrun.StartShell(connectCtx, session.SSHHost, session.SSHPort,
-		sshrun.Credentials{
-			Username:   credentials.Username,
-			Password:   credentials.Password,
-			SSHKeyPath: credentials.SSHKeyPath,
-		},
+	shell, err = sshrun.StartShell(connectCtx, session.SSHHost, session.SSHPort, &credentials,
 		basePath, s.cfg.ProvisionKeyPath(), 80, 24, session.link.output)
 	if err != nil {
 		return nil, err

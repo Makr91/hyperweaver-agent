@@ -30,12 +30,14 @@ func (s *Server) registrySourceForURL(raw string) *machines.TemplateSource {
 	return nil
 }
 
-// artifactSource answers where a missing row's file can be fetched from: boxvault for a source_url under a configured box registry, hcl for the HCL portal and for a bundled expectation with no URL, custom for any other URL; empty for a present file or a row with nothing to fetch.
+// artifactSource answers where a missing row's file can be fetched from: boxvault for a row carrying a registry file or a source_url under a configured box registry, hcl for the HCL portal and for a bundled expectation with no URL, custom for any other URL; empty for a present file or a row with nothing to fetch.
 func (s *Server) artifactSource(a *assets.Artifact) string {
 	if a.Exists && a.Path != "" {
 		return ""
 	}
 	switch {
+	case a.Registry != nil:
+		return artifactSourceBoxVault
 	case a.SourceURL == "":
 		if a.ExpectedSHA256 != "" {
 			return artifactSourceHCL
@@ -62,7 +64,7 @@ type fetchArtifactResponse struct {
 // fetchArtifact: POST /api/artifacts/{id}/fetch.
 //
 //	@Summary		Fetch a missing artifact from its source
-//	@Description	Minimum role: operator. Queues the download of a known row whose file is not on this host, from the source the row names: boxvault queues artifact_registry_download as the signed-in person for the file its source_url names on the configured box registry; hcl queues hcl_download under the newest api_key secret the person may reach; custom queues artifact_download of the source_url. The file lands in the row's own location under its role, the row's expected sha256 verified during the stream, and the task reports progress as every other download does. No body.
+//	@Description	Minimum role: operator. Queues the download of a known row whose file is not on this host, from the source the row names: boxvault queues artifact_registry_download as the signed-in person for the registry file the row's registry names, else for the file its source_url names on the configured box registry; hcl queues hcl_download under the newest api_key secret the person may reach; custom queues artifact_download of the source_url. The file lands in the row's own location under its role, the row's expected sha256 verified during the stream, and the task reports progress as every other download does. No body.
 //	@Tags			Artifacts
 //	@Produce		json
 //	@Param			id	path	int	true	"Artifact id"
@@ -102,13 +104,26 @@ func (s *Server) fetchArtifact(w http.ResponseWriter, r *http.Request) {
 	var metadata any
 	switch source {
 	case artifactSourceBoxVault:
-		registry := s.registrySourceForURL(artifact.SourceURL)
-		meta, ok := assets.ParseRegistryFileURL(artifact.SourceURL)
-		if !ok {
-			taskError(w, http.StatusBadRequest, "The artifact's source_url is not a registry file download")
-			return
+		var meta assets.RegistryDownloadMetadata
+		if ref := artifact.Registry; ref != nil {
+			if s.findRegistrySource(ref.SourceName) == nil {
+				taskError(w, http.StatusBadRequest, "The artifact's registry "+ref.SourceName+" is not a configured, enabled box registry")
+				return
+			}
+			meta = assets.RegistryDownloadMetadata{
+				SourceName: ref.SourceName, Organization: ref.Organization, Download: ref.Download,
+				Release: ref.Release, Patch: ref.Patch, Filename: artifact.Filename,
+			}
+		} else {
+			registry := s.registrySourceForURL(artifact.SourceURL)
+			parsed, ok := assets.ParseRegistryFileURL(artifact.SourceURL)
+			if !ok {
+				taskError(w, http.StatusBadRequest, "The artifact's source_url is not a registry file download")
+				return
+			}
+			meta = parsed
+			meta.SourceName = registry.ID
 		}
-		meta.SourceName = registry.ID
 		meta.Kind = artifact.Kind
 		meta.Role = artifact.Role
 		meta.LocationID = artifact.LocationID

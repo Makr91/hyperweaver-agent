@@ -22,7 +22,7 @@ import (
 // provisioner_state.last_provisioned_at stamps only on the walk's final task
 // (metadata final: true — stampIfFinal).
 func (e *executors) provisionPlaybook(ctx context.Context, task *tasks.Task, out *tasks.OutputWriter) error {
-	meta, err := readProvisionMetadata(task)
+	meta, err := e.readProvisionMetadata(ctx, task)
 	if err != nil {
 		return err
 	}
@@ -54,7 +54,7 @@ func (e *executors) provisionPlaybook(ctx context.Context, task *tasks.Task, out
 		if playbook.InstallMode == "pip" {
 			installCommand = "pip3 install ansible 2>/dev/null || pip install ansible 2>/dev/null"
 		}
-		if ierr := sshrun.Run(ctx, meta.IP, meta.Port, meta.Credentials, installCommand,
+		if ierr := sshrun.Run(ctx, meta.IP, meta.Port, &meta.Credentials, installCommand,
 			workdir, e.env.ProvisionKeyPath, installTimeout, out.Write); ierr != nil {
 			out.Write("stderr", "ansible install reported: "+ierr.Error()+" (continuing — it may already be present)\n")
 		}
@@ -63,7 +63,7 @@ func (e *executors) provisionPlaybook(ctx context.Context, task *tasks.Task, out
 	e.taskProgress(task, 25, "installing_collections")
 	if playbook.RemoteCollections {
 		for _, collection := range playbook.Collections {
-			if cerr := sshrun.Run(ctx, meta.IP, meta.Port, meta.Credentials,
+			if cerr := sshrun.Run(ctx, meta.IP, meta.Port, &meta.Credentials,
 				"ansible-galaxy collection install "+collection+" --force",
 				workdir, e.env.ProvisionKeyPath, installTimeout, out.Write); cerr != nil {
 				return fmt.Errorf("install collection %s: %w", collection, cerr)
@@ -80,7 +80,7 @@ func (e *executors) provisionPlaybook(ctx context.Context, task *tasks.Task, out
 
 	e.taskProgress(task, 40, "running_playbook")
 	extraVars := BuildPlaybookExtraVars(
-		BuildExtraVars(machine, config, workdir), playbook)
+		NarrowRoles(BuildExtraVars(machine, config, workdir), meta.Roles), playbook)
 	varsJSON, err := json.Marshal(extraVars)
 	if err != nil {
 		return err
@@ -120,7 +120,7 @@ func (e *executors) provisionPlaybook(ctx context.Context, task *tasks.Task, out
 		scanner.Scan(stream, data)
 		out.Write(stream, data)
 	}
-	if rerr := sshrun.Run(ctx, meta.IP, meta.Port, meta.Credentials, command,
+	if rerr := sshrun.Run(ctx, meta.IP, meta.Port, &meta.Credentials, command,
 		workdir, e.env.ProvisionKeyPath, playbookTimeout, streamWrite); rerr != nil {
 		return fmt.Errorf("ansible-local failed: %w", rerr)
 	}

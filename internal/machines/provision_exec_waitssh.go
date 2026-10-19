@@ -16,7 +16,7 @@ import (
 // win_ping instead of the SSH loop — same timeout config, same
 // setup_wait-larger-wins rule, same poll interval.
 func (e *executors) waitSSH(ctx context.Context, task *tasks.Task, out *tasks.OutputWriter) error {
-	meta, err := readProvisionMetadata(task)
+	meta, err := e.readProvisionMetadata(ctx, task)
 	if err != nil {
 		return err
 	}
@@ -54,7 +54,7 @@ func (e *executors) waitSSH(ctx context.Context, task *tasks.Task, out *tasks.Ou
 	e.taskProgress(task, 10, "waiting_for_ssh")
 	out.Write("stdout", fmt.Sprintf("Waiting for SSH on %s:%d (timeout %ds)\n",
 		meta.IP, meta.Port, int(timeout.Seconds())))
-	elapsed, err := sshrun.WaitForSSH(ctx, meta.IP, meta.Port, meta.Credentials,
+	elapsed, err := sshrun.WaitForSSH(ctx, meta.IP, meta.Port, &meta.Credentials,
 		e.machineWorkdir(ctx, task), e.env.ProvisionKeyPath, timeout, interval, out.Write)
 	if err != nil {
 		// Tier 3 (Mark's three-tier ruling, sync 2026-07-17 — RECOVERY ONLY):

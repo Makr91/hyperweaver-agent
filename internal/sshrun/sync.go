@@ -103,7 +103,7 @@ type SyncOptions struct {
 // them, --delete/--exclude appended, remote side runs `sudo rsync`, the
 // source carries a trailing slash (content sync), password auth rides
 // sshpass via the SSHPASS environment variable (never argv).
-func SyncFiles(ctx context.Context, rsyncExe, ip string, port int, credentials Credentials,
+func SyncFiles(ctx context.Context, rsyncExe, ip string, port int, credentials *Credentials,
 	localDir, remoteDir, basePath, defaultKeyPath string, options *SyncOptions, stream StreamFunc,
 ) error {
 	exe, err := safepath.ValidateExecutable(rsyncExe)
@@ -178,7 +178,7 @@ func SyncFiles(ctx context.Context, rsyncExe, ip string, port int, credentials C
 // ancient Apple rsync with broken chown handling; scp is why SCP support
 // exists at all). Folder args/exclude/delete do not apply — scp has no
 // equivalents; the caller narrates the downgrade.
-func SCPSync(ctx context.Context, scpExe, ip string, port int, credentials Credentials,
+func SCPSync(ctx context.Context, scpExe, ip string, port int, credentials *Credentials,
 	localDir, remoteDir, basePath, defaultKeyPath string, stream StreamFunc,
 ) error {
 	exe, err := safepath.ValidateExecutable(scpExe)
@@ -234,7 +234,7 @@ func SCPSync(ctx context.Context, scpExe, ip string, port int, credentials Crede
 // ruling, sync 2026-07-17: one resolver, two consumers). Empty ONLY when the
 // ladder resolved to password auth (no key file exists anywhere) — the
 // callers' sshpass gate keys off exactly that.
-func credentialKeyPath(credentials Credentials, basePath, defaultKeyPath string) string {
+func credentialKeyPath(credentials *Credentials, basePath, defaultKeyPath string) string {
 	path, _ := effectiveKeyPath(credentials, basePath, defaultKeyPath)
 	return path
 }

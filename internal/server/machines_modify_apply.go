@@ -209,6 +209,50 @@ func (s *Server) applyModifySnapshots(w http.ResponseWriter, r *http.Request, ma
 	return true
 }
 
+// applyModifyCredentialRefs stores the credentials field, the machine's vault credential entries, into configuration.credentials: every entry names a readable password, ssh_key or key_pair row and one of the four uses; null or an empty list clears the section. False return = response already written.
+func (s *Server) applyModifyCredentialRefs(w http.ResponseWriter, r *http.Request, machineName string, body map[string]any) bool {
+	value := body["credentials"]
+	refs := []machineCredentialRef{}
+	if value != nil {
+		entries, ok := value.([]any)
+		if !ok {
+			taskError(w, http.StatusBadRequest, "credentials must be a list of {id, use, default} entries or null")
+			return false
+		}
+		reader := s.certReader(r)
+		for i, entry := range entries {
+			where := "credentials[" + strconv.Itoa(i) + "]"
+			raw, merr := json.Marshal(entry)
+			if merr != nil {
+				taskError(w, http.StatusBadRequest, where+" must be an object")
+				return false
+			}
+			var ref machineCredentialRef
+			if uerr := json.Unmarshal(raw, &ref); uerr != nil || ref.ID == "" {
+				taskError(w, http.StatusBadRequest, where+".id must name a vault row")
+				return false
+			}
+			if !machines.CredentialUses[ref.Use] {
+				taskError(w, http.StatusBadRequest, where+".use must be one of ssh, rdp, console, vagrant")
+				return false
+			}
+			if _, rerr := s.credentialRow(r.Context(), ref.ID, reader); rerr != nil {
+				taskError(w, http.StatusBadRequest, where+".id "+rerr.Error())
+				return false
+			}
+			refs = append(refs, ref)
+		}
+	}
+	if err := s.machines.MergeConfigurationSections(r.Context(), machineName, map[string]any{"credentials": refs}); err != nil {
+		slog.Error("update machine credentials", "machine", machineName, "error", err)
+		taskError(w, http.StatusInternalServerError, "Failed to update machine credentials")
+		return false
+	}
+	slog.Info("machine credentials updated", "machine", machineName, "entries", len(refs),
+		"by", auth.FromContext(r.Context()).Name)
+	return true
+}
+
 // applyModifyCredentials merges the credentials family into
 // configuration.settings key-by-key (the provisioner document's DB-immediate
 // rule, one level deeper — the rest of settings survives). Empty string or

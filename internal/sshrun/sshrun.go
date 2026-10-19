@@ -35,11 +35,26 @@ func plog() *slog.Logger {
 }
 
 // Credentials mirrors the task-metadata credential shape ({username,
-// password, ssh_key_path}).
+// password, ssh_key_path}); PrivateKey and Passphrase carry a vault row's key material, resolved at run and never written to task metadata.
 type Credentials struct {
 	Username   string `json:"username"`
 	Password   string `json:"password,omitempty"`
 	SSHKeyPath string `json:"ssh_key_path,omitempty"`
+	PrivateKey string `json:"-"`
+	Passphrase string `json:"-"`
+	// Vault marks a credential picked from the certs store: its password signs in as given, no key file on disk outranking it.
+	Vault bool `json:"-"`
+}
+
+// materialKeyFile is the working-copy file a vault row's key material lands in for the binary transports.
+const materialKeyFile = ".hw-credential.key"
+
+// materialSigner parses the credential's key material, with its passphrase when one is given.
+func materialSigner(credentials *Credentials) (ssh.Signer, error) {
+	if credentials.Passphrase != "" {
+		return ssh.ParsePrivateKeyWithPassphrase([]byte(credentials.PrivateKey), []byte(credentials.Passphrase))
+	}
+	return ssh.ParsePrivateKey([]byte(credentials.PrivateKey))
 }
 
 // StreamFunc receives live remote output (stream = "stdout" | "stderr").
@@ -57,6 +72,7 @@ func resolveKeyPath(keyPath, basePath string) string {
 // Key-resolution tiers (Mark's three-tier ruling, sync 2026-07-17) — carried
 // alongside the effective path so callers can narrate which rung answered.
 const (
+	keyTierMaterial    = "vault key material"
 	keyTierWorkingCopy = "tier 1 (working-copy key)"
 	keyTierPassword    = "password"
 	keyTierPackaged    = "tier 2 (packaged bootstrap key)"
@@ -99,7 +115,21 @@ func keyFileExists(path string) bool {
 //	          always beats a document password (zoneweaver's exact rule).
 //	last:     no key anywhere, no password — the agent key path answers
 //	          UNCHECKED so the downstream load errors honestly.
-func effectiveKeyPath(credentials Credentials, basePath, defaultKeyPath string) (path, tier string) {
+func effectiveKeyPath(credentials *Credentials, basePath, defaultKeyPath string) (path, tier string) {
+	if credentials.Vault && credentials.PrivateKey == "" && credentials.Password != "" {
+		return "", keyTierPassword
+	}
+	if credentials.PrivateKey != "" {
+		if basePath == "" {
+			return "", keyTierMaterial
+		}
+		landed := filepath.Join(basePath, materialKeyFile)
+		if werr := os.WriteFile(landed, []byte(credentials.PrivateKey), 0o600); werr != nil {
+			plog().Warn("vault key material could not be written for the binary transports", "path", landed, "error", werr)
+			return "", keyTierMaterial
+		}
+		return landed, keyTierMaterial
+	}
 	if credentials.SSHKeyPath != "" {
 		named := resolveKeyPath(credentials.SSHKeyPath, basePath)
 		if keyFileExists(named) {
@@ -127,7 +157,14 @@ func effectiveKeyPath(credentials Credentials, basePath, defaultKeyPath string) 
 // → packaged bootstrap key → the agent's provisioning key → password ONLY
 // when no key file exists anywhere. ONE method per attempt — never
 // key+password on one connection (zoneweaver's exact exclusivity).
-func authMethods(credentials Credentials, basePath, defaultKeyPath string) ([]ssh.AuthMethod, error) {
+func authMethods(credentials *Credentials, basePath, defaultKeyPath string) ([]ssh.AuthMethod, error) {
+	if credentials.PrivateKey != "" {
+		signer, err := materialSigner(credentials)
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", keyTierMaterial, err)
+		}
+		return []ssh.AuthMethod{ssh.PublicKeys(signer)}, nil
+	}
 	path, tier := effectiveKeyPath(credentials, basePath, defaultKeyPath)
 	if tier == keyTierPassword {
 		return []ssh.AuthMethod{ssh.Password(credentials.Password)}, nil
@@ -166,7 +203,7 @@ func acceptAndLogHostKey(hostname string, _ net.Addr, key ssh.PublicKey) error {
 }
 
 // clientConfig builds the ssh client configuration.
-func clientConfig(credentials Credentials, basePath, defaultKeyPath string) (*ssh.ClientConfig, error) {
+func clientConfig(credentials *Credentials, basePath, defaultKeyPath string) (*ssh.ClientConfig, error) {
 	username := credentials.Username
 	if username == "" {
 		username = "root"
@@ -197,7 +234,7 @@ func clientConfig(credentials Credentials, basePath, defaultKeyPath string) (*ss
 // killing the live terminal the moment it was cancelled, runtime-found
 // 2026-07-09) disarm after a successful connect and own the lifetime through
 // the closer.
-func connectSSH(ctx context.Context, ip string, port int, credentials Credentials,
+func connectSSH(ctx context.Context, ip string, port int, credentials *Credentials,
 	basePath, defaultKeyPath string,
 ) (client *ssh.Client, closer, disarm func(), err error) {
 	config, err := clientConfig(credentials, basePath, defaultKeyPath)
@@ -247,7 +284,7 @@ func connectSSH(ctx context.Context, ip string, port int, credentials Credential
 
 // Run executes one command on the machine, streaming its output. The context
 // bounds the whole call (task cancellation kills the session).
-func Run(ctx context.Context, ip string, port int, credentials Credentials,
+func Run(ctx context.Context, ip string, port int, credentials *Credentials,
 	command, basePath, defaultKeyPath string, timeout time.Duration, stream StreamFunc,
 ) error {
 	runCtx := ctx
@@ -300,7 +337,7 @@ func (w streamWriter) Write(p []byte) (int, error) {
 // WaitForSSH polls until the machine answers `echo ready` over SSH
 // (waitForSSH verbatim: bounded total timeout, fixed poll interval, elapsed
 // time reported).
-func WaitForSSH(ctx context.Context, ip string, port int, credentials Credentials,
+func WaitForSSH(ctx context.Context, ip string, port int, credentials *Credentials,
 	basePath, defaultKeyPath string, timeout, interval time.Duration, stream StreamFunc,
 ) (time.Duration, error) {
 	start := time.Now()

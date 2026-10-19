@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/Makr91/hyperweaver-agent/internal/safepath"
 	"github.com/Makr91/hyperweaver-agent/internal/tasks"
@@ -57,12 +58,26 @@ type DeleteFolderMetadata struct {
 	Force           bool   `json:"force"`
 }
 
-// RegisterExecutors wires the artifact operations into the task queue; registryFetch reads a box registry as the person for the registry download.
-func RegisterExecutors(queue *tasks.Queue, store *Store, resourceAuth ResourceAuth, hcl HCLTokens, extensions map[string][]string, registryFetch RegistryFetch) {
-	if len(extensions) == 0 {
-		extensions = DefaultExtensions()
+// Deps are what the artifact executors reach beyond the store: the custom-resource credentials, the HCL tokens, the scan extensions, the box registry read, its enabled sources, the manifest defaults and the URL download bound.
+type Deps struct {
+	ResourceAuth ResourceAuth
+	HCL          HCLTokens
+	Extensions   map[string][]string
+	// RegistryFetch reads a box registry as the person for the registry download and the sync
+	RegistryFetch RegistryFetch
+	// RegistrySources answers the ids of the enabled box registries
+	RegistrySources func() []string
+	// ExpectedFiles answers every file the installed provisioners' manifest roles default to
+	ExpectedFiles   func() []ExpectedFile
+	DownloadTimeout time.Duration
+}
+
+// RegisterExecutors wires the artifact operations into the task queue.
+func RegisterExecutors(queue *tasks.Queue, store *Store, deps Deps) {
+	if len(deps.Extensions) == 0 {
+		deps.Extensions = DefaultExtensions()
 	}
-	e := &executors{queue: queue, store: store, resourceAuth: resourceAuth, hcl: hcl, extensions: extensions, registryFetch: registryFetch}
+	e := &executors{queue: queue, store: store, deps: deps}
 	queue.Register(OpScan, tasks.Executor{Run: e.scan})
 	queue.Register(OpDownload, tasks.Executor{Run: e.download})
 	queue.Register(OpUpload, tasks.Executor{Run: e.uploadProcess})
@@ -72,15 +87,13 @@ func RegisterExecutors(queue *tasks.Queue, store *Store, resourceAuth ResourceAu
 	queue.Register(OpDeleteFolder, tasks.Executor{Run: e.deleteFolder})
 	queue.Register(OpHCLDownload, tasks.Executor{Run: e.hclDownload})
 	queue.Register(OpRegistryDownload, tasks.Executor{Run: e.registryDownload})
+	queue.Register(OpRegistrySync, tasks.Executor{Run: e.registrySync})
 }
 
 type executors struct {
-	queue         *tasks.Queue
-	store         *Store
-	resourceAuth  ResourceAuth
-	hcl           HCLTokens
-	extensions    map[string][]string
-	registryFetch RegistryFetch
+	queue *tasks.Queue
+	store *Store
+	deps  Deps
 }
 
 // progress records progress on the task row.
@@ -133,7 +146,7 @@ func (e *executors) scan(ctx context.Context, task *tasks.Task, out *tasks.Outpu
 	failures := 0
 	for _, location := range locations {
 		out.Write("stdout", "Scanning "+location.Name+" ("+location.Path+")\n")
-		result, err := e.store.ScanLocation(ctx, location, e.extensions[location.Type], &meta.ScanOptions, out.Write)
+		result, err := e.store.ScanLocation(ctx, location, e.deps.Extensions[location.Type], &meta.ScanOptions, out.Write)
 		if err != nil {
 			failures++
 			out.Write("stderr", location.Name+": "+err.Error()+"\n")

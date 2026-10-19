@@ -409,6 +409,7 @@ func (s *Server) registerRoutes(mux *http.ServeMux) error {
 	mux.Handle("POST /api/artifacts/hcl-download", requireKey(s.assetsGate(s.handleHCLDownload)))
 	mux.Handle("POST /api/artifacts/register", requireKey(s.assetsGate(s.handleRegisterArtifact)))
 	mux.Handle("GET /api/artifacts/registry/{sourceName}/downloads", requireKey(s.assetsGate(s.handleRegistryDownloads)))
+	mux.Handle("POST /api/artifacts/registry/{sourceName}/sync", requireKey(s.assetsGate(s.handleRegistrySync)))
 	mux.Handle("POST /api/artifacts/registry-download", requireKey(s.assetsGate(s.handleRegistryDownload)))
 
 	// Host file browser (the `file-browser` token, config-gated by

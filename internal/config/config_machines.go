@@ -95,6 +95,8 @@ type MachinesConfig struct {
 	ProvisionOnStart bool `yaml:"provision_on_start" json:"provision_on_start"`
 	// DefaultDomain is the settings.domain a create whose body names none takes; empty leaves domain required.
 	DefaultDomain string `yaml:"default_domain" json:"default_domain"`
+	// DefaultCredentials maps a use, ssh, rdp, console or vagrant, onto the vault row id every machine whose document names no credentials signs in with.
+	DefaultCredentials map[string]string `yaml:"default_credentials" json:"default_credentials"`
 }
 
 // GuestAgentConfig gates the QEMU guest-agent channel (the `guest-agent`

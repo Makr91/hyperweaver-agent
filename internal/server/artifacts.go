@@ -59,6 +59,7 @@ type artifactDocument struct {
 	Version           *assets.VersionInfo      `json:"version,omitempty"`
 	SourceURL         string                   `json:"source_url,omitempty"`
 	Source            string                   `json:"source,omitempty"`
+	Registry          *assets.RegistryRef      `json:"registry"`
 	StorageLocation   *artifactStorageLocation `json:"storage_location,omitempty"`
 }
 
@@ -95,6 +96,7 @@ func artifactJSON(a *assets.Artifact, location *assets.Location, source string) 
 		Version:           a.VersionDocument(),
 		SourceURL:         a.SourceURL,
 		Source:            source,
+		Registry:          a.Registry,
 	}
 	if location != nil {
 		doc.StorageLocation = &artifactStorageLocation{

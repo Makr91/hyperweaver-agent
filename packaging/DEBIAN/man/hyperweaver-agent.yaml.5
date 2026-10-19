@@ -294,6 +294,18 @@ plainly (default: false).
 The settings.domain a create whose body names none takes, answered as
 settings.domain of GET /api/machines/defaults; empty keeps domain required
 (default: empty).
+.It Cm default_credentials
+Map of a use,
+.Cm ssh ,
+.Cm rdp ,
+.Cm console
+or
+.Cm vagrant ,
+onto the id of a vault row (a password, ssh_key or key_pair row of the
+certificate store) every machine whose document names no
+.Cm credentials
+signs in with; the SSH console, the desktop RDP launcher and the provisioning
+pipeline resolve the row's members on the agent (default: empty).
 .El
 .Ss provisioning
 Provisioning engine (the provisioner package registry and the provisioning

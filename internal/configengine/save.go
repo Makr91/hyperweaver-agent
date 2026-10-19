@@ -51,10 +51,17 @@ func (e *Engine) writeFile(name string, merged map[string]any) error {
 	return safepath.WriteFile(target, raw, 0o600)
 }
 
-func (e *Engine) commit(p prepared, actor string) ([]RestartEntry, error) {
+// saved is one write the after-write function is told about once the lock is released.
+type saved struct {
+	name   string
+	actor  string
+	status RestartStatus
+}
+
+func (e *Engine) commit(p prepared, actor string) ([]RestartEntry, saved, error) {
 	diff := restartDiff(e.schemas[p.name], e.filled[p.name], p.filled, "")
 	if err := e.writeFile(p.name, p.merged); err != nil {
-		return nil, err
+		return nil, saved{}, err
 	}
 	e.raw[p.name] = p.merged
 	e.filled[p.name] = p.filled
@@ -65,30 +72,45 @@ func (e *Engine) commit(p prepared, actor string) ([]RestartEntry, error) {
 	when := now()
 	e.lastModifiedBy = &who
 	e.lastModifiedTime = &when
-	if e.hooks.OnSaved != nil {
-		e.hooks.OnSaved(p.name, actor, e.pendingStatus())
-	}
-	return diff, nil
+	return diff, saved{name: p.name, actor: actor, status: e.pendingStatus()}, nil
 }
 
-// Save applies a JSON Merge Patch to one file: validate, write atomically with a .bak, replace the cache, record the restart diff.
+func (e *Engine) notifySaved(writes ...saved) {
+	e.mu.RLock()
+	hook := e.hooks.OnSaved
+	e.mu.RUnlock()
+	if hook == nil {
+		return
+	}
+	for _, write := range writes {
+		hook(write.name, write.actor, write.status)
+	}
+}
+
+// Save applies a JSON Merge Patch to one file: validate, write atomically with a .bak, replace the cache, record the restart diff, then run the after-write function outside the lock.
 func (e *Engine) Save(name string, body map[string]any, actor string) ([]RestartEntry, error) {
 	e.mu.Lock()
-	defer e.mu.Unlock()
 	if !e.known(name) {
+		e.mu.Unlock()
 		return nil, errors.New("unknown configuration name " + name)
 	}
 	p := e.prepare(name, body)
 	if len(p.errors) > 0 {
+		e.mu.Unlock()
 		return nil, &ValidationError{Errors: p.errors}
 	}
-	return e.commit(p, actor)
+	diff, write, err := e.commit(p, actor)
+	e.mu.Unlock()
+	if err != nil {
+		return nil, err
+	}
+	e.notifySaved(write)
+	return diff, nil
 }
 
 // SaveAll validates every patch before writing any, as PUT /api/setup does.
 func (e *Engine) SaveAll(patches map[string]map[string]any, actor string) error {
 	e.mu.Lock()
-	defer e.mu.Unlock()
 	list := []prepared{}
 	errs := []problem.Error{}
 	for _, name := range e.names {
@@ -107,21 +129,28 @@ func (e *Engine) SaveAll(patches map[string]map[string]any, actor string) error 
 		list = append(list, p)
 	}
 	if len(errs) > 0 {
+		e.mu.Unlock()
 		return &ValidationError{Errors: errs}
 	}
+	writes := make([]saved, 0, len(list))
 	for _, p := range list {
-		if _, err := e.commit(p, actor); err != nil {
+		_, write, err := e.commit(p, actor)
+		if err != nil {
+			e.mu.Unlock()
 			return err
 		}
+		writes = append(writes, write)
 	}
+	e.mu.Unlock()
+	e.notifySaved(writes...)
 	return nil
 }
 
 // Restore writes a whole raw document for one file after validating it, the backup-restore path.
 func (e *Engine) Restore(name string, document map[string]any, actor string) error {
 	e.mu.Lock()
-	defer e.mu.Unlock()
 	if !e.known(name) {
+		e.mu.Unlock()
 		return errors.New("unknown configuration name " + name)
 	}
 	schema := e.schemas[name]
@@ -129,10 +158,16 @@ func (e *Engine) Restore(name string, document map[string]any, actor string) err
 	errs := validation.Object(schema, filled, schema)
 	errs = append(errs, e.hookErrors(name, filled, filled, e.hooks)...)
 	if len(errs) > 0 {
+		e.mu.Unlock()
 		return &ValidationError{Errors: errs}
 	}
-	_, err := e.commit(prepared{name: name, merged: document, filled: filled}, actor)
-	return err
+	_, write, err := e.commit(prepared{name: name, merged: document, filled: filled}, actor)
+	e.mu.Unlock()
+	if err != nil {
+		return err
+	}
+	e.notifySaved(write)
+	return nil
 }
 
 // WithDeletions adds null for every map entry the raw file holds and the patch's full section omits.

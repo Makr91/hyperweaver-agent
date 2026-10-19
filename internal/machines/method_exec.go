@@ -39,7 +39,7 @@ var verbosePattern = regexp.MustCompile(`^v{1,4}$`)
 // control node anywhere is an honest failure, never a silent skip. The
 // provisioned-state stamp rides Final exactly like the local executor.
 func (e *executors) runRemotePlaybook(ctx context.Context, task *tasks.Task, out *tasks.OutputWriter) error {
-	meta, err := readProvisionMetadata(task)
+	meta, err := e.readProvisionMetadata(ctx, task)
 	if err != nil {
 		return err
 	}
@@ -117,7 +117,7 @@ func (e *executors) runRemotePlaybook(ctx context.Context, task *tasks.Task, out
 
 	e.taskProgress(task, 40, "running_playbook")
 	extraVars := BuildPlaybookExtraVars(
-		BuildExtraVars(machine, config, workdir), playbook)
+		NarrowRoles(BuildExtraVars(machine, config, workdir), meta.Roles), playbook)
 	varsJSON, err := json.Marshal(extraVars)
 	if err != nil {
 		return err
@@ -125,6 +125,18 @@ func (e *executors) runRemotePlaybook(ctx context.Context, task *tasks.Task, out
 
 	args := []string{"-i", dialIP + ","}
 	keyPath := ""
+	if meta.Credentials.PrivateKey != "" {
+		materialPath := filepath.Join(workdir, "hw-credential-"+task.ID+".key")
+		if werr := os.WriteFile(materialPath, []byte(meta.Credentials.PrivateKey), 0o600); werr != nil {
+			return werr
+		}
+		defer func() {
+			if cerr := os.Remove(materialPath); cerr != nil {
+				out.Write("stderr", "cleanup of "+materialPath+" failed: "+cerr.Error()+"\n")
+			}
+		}()
+		meta.Credentials.SSHKeyPath = materialPath
+	}
 	if meta.Communicator == "winrm" {
 		// winrm guests replace the SSH connection args with the ruled winrm
 		// var set (zoneweaver's shipped winrm shape, sync 2026-07-17:
@@ -242,7 +254,7 @@ func verboseFlag(verbose any) string {
 // engine is NEVER installed here — an absent guest engine fails the task
 // honestly through the in-guest neither-plugin-nor-binary branch below.
 func (e *executors) dockerCompose(ctx context.Context, task *tasks.Task, out *tasks.OutputWriter) error {
-	meta, err := readProvisionMetadata(task)
+	meta, err := e.readProvisionMetadata(ctx, task)
 	if err != nil {
 		return err
 	}
@@ -263,7 +275,7 @@ func (e *executors) dockerCompose(ctx context.Context, task *tasks.Task, out *ta
 			"elif command -v docker-compose >/dev/null 2>&1; then sudo docker-compose -f %[1]s up -d; "+
 			"else echo 'neither the docker compose plugin nor docker-compose exists in the guest' >&2; exit 1; fi",
 		quoted)
-	if rerr := sshrun.Run(ctx, meta.IP, meta.Port, meta.Credentials, command,
+	if rerr := sshrun.Run(ctx, meta.IP, meta.Port, &meta.Credentials, command,
 		workdir, e.env.ProvisionKeyPath, timeout, out.Write); rerr != nil {
 		return fmt.Errorf("docker compose %s failed: %w", meta.ComposeFile, rerr)
 	}

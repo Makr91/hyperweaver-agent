@@ -51,7 +51,6 @@ var builtinLocations = []struct {
 	{"installers", "Installer Cache", KindInstaller},
 	{"fixpacks", "Fixpack Cache", KindFixpack},
 	{"hotfixes", "Hotfix Cache", KindHotfix},
-	{"id-files", "ID Files", KindIDFile},
 }
 
 // DefaultExtensions is the scanning filter fallback (zoneweaver's
@@ -103,8 +102,8 @@ func configHash(p *PathConfig) string {
 
 // SyncLocations converges the database onto the built-in set plus the
 // configured paths: directories are created, entries upserted by path, and
-// config-sourced rows dropped from configuration are removed (their artifact
-// rows with them — the files stay on disk).
+// rows dropped from configuration or from the built-in set are removed (their
+// artifact rows with them — the files stay on disk).
 func (s *Service) SyncLocations(ctx context.Context) error {
 	keepPaths := map[string]bool{}
 
@@ -132,7 +131,6 @@ func (s *Service) SyncLocations(ctx context.Context) error {
 		}
 	}
 
-	// Remove config-sourced rows no longer configured; builtins never leave.
 	locations, err := s.store.ListLocations(ctx, &LocationFilter{})
 	if err != nil {
 		return err
@@ -143,11 +141,7 @@ func (s *Service) SyncLocations(ctx context.Context) error {
 			kept++
 			continue
 		}
-		if location.Source == "builtin" {
-			kept++
-			continue
-		}
-		alog().Info("removing storage location no longer in config",
+		alog().Info("removing storage location no longer configured or built in",
 			"name", location.Name, "path", location.Path)
 		if derr := s.store.DeleteLocation(ctx, location.ID); derr != nil {
 			return derr

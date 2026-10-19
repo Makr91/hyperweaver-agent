@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/url"
 	"os/exec"
 	"runtime"
 	"strconv"
@@ -148,17 +149,30 @@ func (s *Server) handleMachineRDPInfo(w http.ResponseWriter, r *http.Request) {
 }
 
 // launchRDP hands one target to the agent host's RDP client: mstsc directly
-// on Windows (no rdp:// handler exists there), the OS rdp:// handler
+// on Windows (no rdp:// handler exists there), the credential stored for the
+// target through cmdkey first when one is picked; the OS rdp:// handler
 // elsewhere (Microsoft Remote Desktop on macOS, Remmina and friends on
-// Linux). Fire-and-forget like every launcher.
-func launchRDP(target *rdpTarget) {
+// Linux), the username in the URL. Fire-and-forget like every launcher.
+func launchRDP(target *rdpTarget, user, password string) {
 	if runtime.GOOS != "windows" {
-		openbrowser.Open(target.RDPURL, "")
+		launch := target.RDPURL
+		if user != "" {
+			launch += "&username=s:" + url.QueryEscape(user)
+		}
+		openbrowser.Open(launch, "")
 		return
 	}
+	address := net.JoinHostPort(target.Host, strconv.Itoa(target.Port))
+	if user != "" && password != "" {
+		store := exec.CommandContext(context.Background(), "cmdkey",
+			"/generic:TERMSRV/"+target.Host, "/user:"+user, "/pass:"+password)
+		store.SysProcAttr = procattr.NoConsole()
+		if err := store.Run(); err != nil {
+			slog.Error("store rdp credential with cmdkey", "target", target.Host, "error", err)
+		}
+	}
 	// mstsc ships with Windows and lives on the system PATH.
-	cmd := exec.CommandContext(context.Background(), "mstsc",
-		"/v:"+net.JoinHostPort(target.Host, strconv.Itoa(target.Port)))
+	cmd := exec.CommandContext(context.Background(), "mstsc", "/v:"+address)
 	cmd.SysProcAttr = procattr.NoConsole()
 	if err := cmd.Start(); err != nil {
 		slog.Error("launch mstsc", "target", target.Host, "error", err)
@@ -175,6 +189,8 @@ func launchRDP(target *rdpTarget) {
 type openRDPRequest struct {
 	// Which resolved target to open (default: console if resolvable, else guest)
 	Target string `json:"target"`
+	// CredentialID names the password row of the certs store the client signs in with
+	CredentialID string `json:"credential_id"`
 }
 
 // openRDPResponse is POST /api/machines/{machineName}/open-rdp's answer: the target
@@ -191,14 +207,14 @@ type openRDPResponse struct {
 // else the guest target.
 //
 //	@Summary		Open an RDP client on the agent host
-//	@Description	Minimum role: operator (the host-launchers capability token — the launcher pattern, open-ftp's shape). Launches the AGENT HOST'S RDP client at the chosen target: mstsc /v:<host>:<port> on Windows, the OS rdp:// handler elsewhere (Microsoft Remote Desktop, Remmina). Body optionally picks the target; default = console when VRDE is live, else guest. Direct-mode desktop contract; fire-and-forget.
+//	@Description	Minimum role: operator (the host-launchers capability token — the launcher pattern, open-ftp's shape). Launches the AGENT HOST'S RDP client at the chosen target: mstsc /v:<host>:<port> on Windows, the OS rdp:// handler elsewhere (Microsoft Remote Desktop, Remmina). Body optionally picks the target; default = console when VRDE is live, else guest. CREDENTIAL: credential_id names a password row of the certs store the caller may read; absent, the machine's credentials[] entry with use rdp for the guest target or console for the console target (default first) applies, else machines.default_credentials; the row's username (extra.username or extra.user) and password are resolved on the agent, stored for the target through cmdkey before mstsc opens on Windows and carried as the username of the rdp:// link elsewhere, never sent to the browser. Direct-mode desktop contract; fire-and-forget.
 //	@Tags			Machine Management
 //	@Accept			json
 //	@Produce		json
 //	@Param			machineName	path	string	true	"Machine name"
-//	@Param			request	body	openRDPRequest	false	"Optional target selection (console | guest)"
+//	@Param			request	body	openRDPRequest	false	"Optional target selection (console | guest) and credential_id"
 //	@Success		200	{object}	openRDPResponse	"Launch requested"
-//	@Failure		400	"Machine not running, requested target unresolvable, or no target at all"
+//	@Failure		400	"Machine not running, requested target unresolvable, no target at all, or a credential_id naming no readable password row"
 //	@Failure		404	"Machine not found, or no VM exists behind it yet"
 //	@Failure		503	"VirtualBox is not installed"
 //	@Router			/api/machines/{machineName}/open-rdp [post]
@@ -230,8 +246,24 @@ func (s *Server) handleOpenMachineRDP(w http.ResponseWriter, r *http.Request) {
 	} else {
 		chosen = &targets[0]
 	}
+	use := "rdp"
+	if chosen.Type == "console" {
+		use = "console"
+	}
+	user, password := "", ""
+	row, err := s.pickCredential(r.Context(), machine, s.certReader(r), use, body.CredentialID)
+	if err != nil {
+		taskError(w, http.StatusBadRequest, "credential_id "+err.Error())
+		return
+	}
+	if row != nil {
+		if user, password, err = machines.PasswordCredentialOf(row); err != nil {
+			taskError(w, http.StatusBadRequest, "credential "+row.ID+": "+err.Error())
+			return
+		}
+	}
 
-	launchRDP(chosen)
+	launchRDP(chosen, user, password)
 	writeJSON(w, openRDPResponse{
 		Success:     true,
 		MachineName: machine.Name,

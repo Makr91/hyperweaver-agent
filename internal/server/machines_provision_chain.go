@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 
 	"github.com/Makr91/hyperweaver-agent/internal/machines"
@@ -79,14 +80,9 @@ func (s *Server) buildProvisionChain(ctx context.Context, machine *machines.Mach
 	previous = &sshTask.ID
 
 	// The walk, PLANNED before any of its tasks exist.
-	provisionedBefore := machines.HasProvisionedBefore(v.config)
 	folders := machines.ProvisionerFolders(v.provisioner)
 	syncbackFolders := machines.SyncbackFolders(folders)
-	walk, skippedMethods, skippedPlaybooks, _ := planWalk(machine, v, provisionedBefore)
-	if len(skippedPlaybooks) > 0 {
-		slog.Info("playbooks skipped by run directive",
-			"machine", machine.Name, "skipped", len(skippedPlaybooks))
-	}
+	walk, skippedMethods, _ := planWalk(machine, v, nil)
 
 	// FINAL flag: exactly ONE task in the whole chain carries final: true —
 	// the walk's overall LAST task in chain order. When the walk is
@@ -291,16 +287,10 @@ func (s *Server) buildProvisionChain(ctx context.Context, machine *machines.Mach
 		chain = append(chain, taskChainEntry{Step: "post_provision_boot", TaskID: bootTask.ID})
 	}
 
-	// The narrate-skip and run-directive records land on the orchestration
-	// parent's metadata (the POST /provision response carries them too).
-	if len(skippedMethods) > 0 || len(skippedPlaybooks) > 0 {
-		doc := map[string]any{"ip": v.ip, "port": v.port}
-		if len(skippedMethods) > 0 {
-			doc["skipped_methods"] = skippedMethods
-		}
-		if len(skippedPlaybooks) > 0 {
-			doc["skipped_playbooks"] = skippedPlaybooks
-		}
+	// The narrate-skip records land on the orchestration parent's metadata
+	// (the POST /provision response carries them too).
+	if len(skippedMethods) > 0 {
+		doc := map[string]any{"ip": v.ip, "port": v.port, "skipped_methods": skippedMethods}
 		raw, merr := json.Marshal(doc)
 		if merr != nil {
 			return nil, nil, merr
@@ -396,6 +386,46 @@ func (s *Server) startProvisionPipeline(ctx context.Context, machine *machines.M
 	return parent.ID, chain, skippedMethods, nil
 }
 
+// startNarrowedRun queues a narrowed run as bare tasks, one per planned entry chained behind one another with no parent and no final stamp, and answers the first task's id with the chain entries.
+func (s *Server) startNarrowedRun(ctx context.Context, machine *machines.Machine,
+	v *provisionValidation, narrow *walkNarrow, createdBy string,
+) (firstID string, chain []taskChainEntry, skippedMethods []string, err error) {
+	walk, skippedMethods, _ := planWalk(machine, v, narrow)
+	chain = []taskChainEntry{}
+	var previous *string
+	for i := range walk {
+		if walk[i].operation == "" {
+			entry := walk[i].stepInfo
+			entry.Step = walk[i].step
+			chain = append(chain, entry)
+			continue
+		}
+		stepMeta, merr := childMetadata(v, walk[i].extra)
+		if merr != nil {
+			return "", nil, nil, merr
+		}
+		task, terr := s.createChainTask(ctx, machine.Name, walk[i].operation, stepMeta, previous, "", createdBy)
+		if terr != nil {
+			return "", nil, nil, terr
+		}
+		if firstID == "" {
+			firstID = task.ID
+		}
+		entry := walk[i].stepInfo
+		entry.Step = walk[i].step
+		if entry.Step == "" {
+			entry.Step = walk[i].operation
+		}
+		entry.TaskID = task.ID
+		chain = append(chain, entry)
+		previous = &task.ID
+	}
+	if firstID == "" {
+		return "", nil, nil, errors.New("the narrowed run names nothing the document carries")
+	}
+	return firstID, chain, skippedMethods, nil
+}
+
 // provisionOnStartPipeline queues the full provision pipeline for a start
 // request when machines.provision_on_start applies — the machine's VERY
 // FIRST start only (Mark's semantics 2026-07-07): a stored provisioner
@@ -408,7 +438,7 @@ func (s *Server) provisionOnStartPipeline(ctx context.Context, machine *machines
 	if !s.cfg.Machines.ProvisionOnStart {
 		return "", false
 	}
-	validation, problem := validateProvisionRequest(machine)
+	validation, problem := s.validateProvisionRequest(ctx, machine)
 	if problem != "" {
 		slog.Info("provision_on_start skipped — plain start queued",
 			"machine", machine.Name, "reason", problem)

@@ -16,6 +16,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"time"
 
 	"github.com/Makr91/hyperweaver-agent/internal/logging"
@@ -46,15 +47,62 @@ func newLocationID() (string, error) {
 }
 
 // Store persists locations and artifacts in agent.sqlite; root is the
-// built-in locations' parent directory.
+// built-in locations' parent directory; registry is the files the box registries list, rebuilt by every sync.
 type Store struct {
-	db   *sql.DB
-	root string
+	db       *sql.DB
+	root     string
+	registry atomic.Pointer[RegistryIndex]
 }
 
 // NewStore wraps the opened agent database over the artifact root.
 func NewStore(database *sql.DB, root string) *Store {
-	return &Store{db: database, root: root}
+	store := &Store{db: database, root: root}
+	store.registry.Store(newRegistryIndex())
+	return store
+}
+
+// RegistryIndex answers the files the box registries listed at the last sync.
+func (s *Store) RegistryIndex() *RegistryIndex {
+	return s.registry.Load()
+}
+
+// SetRegistryIndex replaces the registry index whole.
+func (s *Store) SetRegistryIndex(index *RegistryIndex) {
+	s.registry.Store(index)
+}
+
+// MergeRegistryIndex adds one registry's files to the index, replacing the files it listed before.
+func (s *Store) MergeRegistryIndex(index *RegistryIndex) {
+	merged := newRegistryIndex()
+	sources := map[string]bool{}
+	index.mu.RLock()
+	for sha := range index.bySHA {
+		sources[index.bySHA[sha].SourceName] = true
+	}
+	for _, refs := range index.byName {
+		for i := range refs {
+			sources[refs[i].SourceName] = true
+		}
+	}
+	index.mu.RUnlock()
+	current := s.registry.Load()
+	current.mu.RLock()
+	for _, refs := range current.byName {
+		for i := range refs {
+			if !sources[refs[i].SourceName] {
+				merged.add(&refs[i])
+			}
+		}
+	}
+	current.mu.RUnlock()
+	index.mu.RLock()
+	for _, refs := range index.byName {
+		for i := range refs {
+			merged.add(&refs[i])
+		}
+	}
+	index.mu.RUnlock()
+	s.registry.Store(merged)
 }
 
 // Root returns the artifact root (the built-in locations' parent).

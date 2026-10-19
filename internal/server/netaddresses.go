@@ -106,24 +106,8 @@ func (s *Server) handleCreateNetworkAddress(w http.ResponseWriter, r *http.Reque
 		netconfigError(w, http.StatusBadRequest, "interface, type, and addrobj are required", "")
 		return
 	}
-	switch body.Type {
-	case "static":
-		if body.Address == "" {
-			netconfigError(w, http.StatusBadRequest, "address is required for static type", "")
-			return
-		}
-	case "dhcp":
-		if runtime.GOOS != "windows" {
-			netconfigError(w, http.StatusBadRequest,
-				"dhcp address creation is Windows-only on this agent (no cross-distro verb on "+runtime.GOOS+")", "")
-			return
-		}
-	case "addrconf":
-		netconfigError(w, http.StatusBadRequest,
-			"addrconf has no verb on this agent — IPv6 SLAAC configures itself", "")
-		return
-	default:
-		netconfigError(w, http.StatusBadRequest, "type must be one of: static, dhcp, addrconf", "")
+	if problem := addressTypeProblem(body.Type, body.Address); problem != "" {
+		netconfigError(w, http.StatusBadRequest, problem, "")
 		return
 	}
 	s.queueAddressTask(w, r, netaddr.OpCreate, &netaddr.Metadata{
@@ -191,17 +175,118 @@ func (s *Server) handleDeleteNetworkAddress(w http.ResponseWriter, r *http.Reque
 	})
 }
 
+// modifyNetworkAddressRequest is PUT /api/network/addresses/{addrobj}'s body: the create body less addrobj.
+type modifyNetworkAddressRequest struct {
+	Interface string `json:"interface"`
+	Type      string `json:"type"`
+	Address   string `json:"address"`
+	Primary   bool   `json:"primary"`
+	Wait      int    `json:"wait"`
+	Temporary bool   `json:"temporary"`
+	Down      bool   `json:"down"`
+}
+
+// handleModifyNetworkAddress serves PUT /api/network/addresses/{addrobj}.
+//
+//	@Summary		Edit an IP address in place (task)
+//	@Description	Minimum role: operator. Queues modify_ip_address: the addrobj's current live address is removed the way DELETE removes it and the body's address is created the way POST creates it, the body being POST /api/network/addresses' less addrobj, the same per-OS refusals applying. The synthetic <interface>/<version> addrobj can cover SEVERAL live addresses — ?address= names the one to replace; without it exactly one live address of that version must exist or the request answers 400 listing the candidates. An addrobj with no live address answers 404.
+//	@Tags			Host Configuration
+//	@Accept			json
+//	@Produce		json
+//	@Param			addrobj	path	string	true	"The listing's addrobj value — may carry a slash (<interface>/v4)"
+//	@Param			address	query	string	false	"Which of the addrobj's live addresses to replace (IP or CIDR) — required when several exist"
+//	@Param			request	body	modifyNetworkAddressRequest	true	"The address as POST creates it, less addrobj"
+//	@Success		202	{object}	addressTaskResponse	"Modify task queued ({success, message, task_id, addrobj, type, interface})"
+//	@Failure		400	"Malformed addrobj, missing interface/type, missing address for static, non-CIDR address, dhcp off-Windows, addrconf, or several live addresses without ?address="
+//	@Failure		404	"Address object not found ({error, details})"
+//	@Router			/api/network/addresses/{addrobj} [put]
+func (s *Server) handleModifyNetworkAddress(w http.ResponseWriter, r *http.Request, addrobj string) {
+	var body modifyNetworkAddressRequest
+	if err := decodeBody(r, &body); err != nil {
+		netconfigError(w, http.StatusBadRequest, "Invalid JSON body", "")
+		return
+	}
+	iface, version, ok := netaddr.SplitAddrObj(addrobj)
+	if !ok {
+		netconfigError(w, http.StatusBadRequest,
+			"addrobj must be the listing's <interface>/v4|v6 form", "")
+		return
+	}
+	if body.Interface == "" {
+		body.Interface = iface
+	}
+	if problem := addressTypeProblem(body.Type, body.Address); problem != "" {
+		netconfigError(w, http.StatusBadRequest, problem, "")
+		return
+	}
+	live, err := netaddr.InterfaceAddresses(iface, version)
+	if err != nil {
+		netconfigError(w, http.StatusNotFound, "Address object "+addrobj+" not found", err.Error())
+		return
+	}
+	current := r.URL.Query().Get("address")
+	if current == "" && len(live) == 0 {
+		netconfigError(w, http.StatusNotFound, "Address object "+addrobj+" not found",
+			"interface "+iface+" carries no "+version+" address")
+		return
+	}
+	if current == "" && len(live) > 1 {
+		netconfigError(w, http.StatusBadRequest,
+			"interface "+iface+" carries several "+version+" addresses — name the one to replace with ?address=",
+			strings.Join(live, ", "))
+		return
+	}
+	if current == "" {
+		current = live[0]
+	}
+	s.queueAddressTask(w, r, netaddr.OpModify, &netaddr.Metadata{
+		Interface: body.Interface,
+		Type:      body.Type,
+		AddrObj:   addrobj,
+		Address:   body.Address,
+		Current:   current,
+		Primary:   body.Primary,
+		Wait:      body.Wait,
+		Temporary: body.Temporary,
+		Down:      body.Down,
+	}, &addressTaskResponse{
+		Message:   "IP address modification task created for " + addrobj,
+		Type:      body.Type,
+		Interface: body.Interface,
+	})
+}
+
+// addressTypeProblem answers why a create or modify body's type and address are refused on this host, empty when they pass.
+func addressTypeProblem(kind, address string) string {
+	switch kind {
+	case "static":
+		if address == "" {
+			return "address is required for static type"
+		}
+	case "dhcp":
+		if runtime.GOOS != "windows" {
+			return "dhcp address creation is Windows-only on this agent (no cross-distro verb on " + runtime.GOOS + ")"
+		}
+	case "addrconf":
+		return "addrconf has no verb on this agent — IPv6 SLAAC configures itself"
+	case "":
+		return "type is required"
+	default:
+		return "type must be one of: static, dhcp, addrconf"
+	}
+	return ""
+}
+
 // handleNetworkAddressAction serves PUT /api/network/addresses/{rest...} — the
-// enable/disable verbs split from the one wildcard here.
+// enable/disable verbs split from the one wildcard here, a bare addrobj the edit.
 //
 //	@Summary		Enable an address's interface (task)
-//	@Description	Minimum role: operator. Queues enable_ip_address. HONESTY, loud: no platform here has illumos's per-address enable — the toggle applies to the INTERFACE the addrobj names (netsh set interface / `ip link set up` / ifconfig up), affecting every address on it; the 202 body and the task output both say so. (Route mechanics: one PUT wildcard under /api/network/addresses/ splits the enable/disable suffix — Go 1.22 ServeMux forbids literal segments after a trailing wildcard.)
+//	@Description	Minimum role: operator. Queues enable_ip_address. HONESTY, loud: no platform here has illumos's per-address enable — the toggle applies to the INTERFACE the addrobj names (netsh set interface / `ip link set up` / ifconfig up), affecting every address on it; the 202 body and the task output both say so. (Route mechanics: one PUT wildcard under /api/network/addresses/ splits the enable/disable suffix — Go 1.22 ServeMux forbids literal segments after a trailing wildcard; a bare addrobj is the in-place edit.)
 //	@Tags			Host Configuration
 //	@Produce		json
 //	@Param			addrobj	path	string	true	"The listing's addrobj value — may carry a slash (<interface>/v4)"
 //	@Success		202	{object}	addressTaskResponse	"Enable task queued ({success, message, task_id, addrobj, note})"
 //	@Failure		400	"Malformed addrobj"
-//	@Failure		404	"Unknown action suffix"
 //	@Router			/api/network/addresses/{addrobj}/enable [put]
 //	@Router			/api/network/addresses/{addrobj}/disable [put]
 func (s *Server) handleNetworkAddressAction(w http.ResponseWriter, r *http.Request) {
@@ -214,8 +299,7 @@ func (s *Server) handleNetworkAddressAction(w http.ResponseWriter, r *http.Reque
 		}
 	}
 	if action == "" {
-		netconfigError(w, http.StatusNotFound,
-			"Unknown address action — PUT /api/network/addresses/{addrobj}/enable or /disable", "")
+		s.handleModifyNetworkAddress(w, r, rest)
 		return
 	}
 	iface, _, ok := netaddr.SplitAddrObj(addrobj)

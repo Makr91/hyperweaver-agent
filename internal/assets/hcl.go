@@ -84,7 +84,7 @@ func (e *executors) hclDownload(ctx context.Context, task *tasks.Task, out *task
 		return err
 	}
 
-	refresh, ok := e.hcl.HCLToken(meta.KeyName)
+	refresh, ok := e.deps.HCL.HCLToken(meta.KeyName)
 	if !ok {
 		return errors.New("no hcl_download_portal_api_keys secret named " + meta.KeyName)
 	}
@@ -97,7 +97,7 @@ func (e *executors) hclDownload(ctx context.Context, task *tasks.Task, out *task
 	// The rotation persists BEFORE anything else can fail — SHI's critical
 	// rule: reusing the stale token breaks the next run.
 	if rotated != "" && rotated != refresh {
-		if uerr := e.hcl.UpdateHCLToken(meta.KeyName, rotated); uerr != nil {
+		if uerr := e.deps.HCL.UpdateHCLToken(meta.KeyName, rotated); uerr != nil {
 			out.Write("stderr", "CRITICAL: persisting the rotated HCL refresh token failed ("+
 				uerr.Error()+") — future downloads with this key will fail until it is re-entered\n")
 		} else {

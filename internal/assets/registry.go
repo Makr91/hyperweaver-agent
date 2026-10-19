@@ -108,7 +108,7 @@ func (e *executors) registryDownload(ctx context.Context, task *tasks.Task, out 
 	if err := meta.Validate(); err != nil {
 		return err
 	}
-	if e.registryFetch == nil {
+	if e.deps.RegistryFetch == nil {
 		return errors.New("no box registries are configured")
 	}
 	location, err := e.kindLocation(ctx, meta.Kind, meta.LocationID)
@@ -129,7 +129,7 @@ func (e *executors) registryDownload(ctx context.Context, task *tasks.Task, out 
 	}
 
 	out.Write("stdout", "Downloading "+meta.Filename+" from registry "+meta.SourceName+"\n")
-	response, err := e.registryFetch(ctx, meta.SourceName, task.CreatedBy, meta.FilePath())
+	response, err := e.deps.RegistryFetch(ctx, meta.SourceName, task.CreatedBy, meta.FilePath())
 	if err != nil {
 		return err
 	}
@@ -145,6 +145,14 @@ func (e *executors) registryDownload(ctx context.Context, task *tasks.Task, out 
 	return e.landStream(ctx, task, out, &landing{
 		location: location, role: meta.Role, filename: meta.Filename, target: target,
 		body: response.Body, total: response.ContentLength, sourceURL: response.Request.URL.String(),
-		checksum: meta.Checksum, algorithm: meta.ChecksumAlgorithm,
+		checksum: meta.Checksum, algorithm: meta.ChecksumAlgorithm, registry: meta.registryRef(),
 	})
+}
+
+// registryRef answers the registry file the metadata names, the index's row for the file when it lists one, else the address alone.
+func (m *RegistryDownloadMetadata) registryRef() *RegistryRef {
+	return &RegistryRef{
+		SourceName: m.SourceName, Organization: m.Organization, Download: m.Download,
+		Release: m.Release, Patch: m.Patch, Key: m.Filename, Kind: m.Kind, SHA256: strings.ToLower(m.Checksum),
+	}
 }

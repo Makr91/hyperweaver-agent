@@ -60,7 +60,7 @@ func shellQuoteArgs(args []string) string {
 // remote half is the guest's own `sudo rsync --server` (the identical remote
 // command the binary path's --rsync-path drives), so folder args, exclude,
 // and delete all keep their rsync semantics.
-func BuiltinRsyncSync(ctx context.Context, ip string, port int, credentials Credentials,
+func BuiltinRsyncSync(ctx context.Context, ip string, port int, credentials *Credentials,
 	localDir, remoteDir, basePath, defaultKeyPath string, options *SyncOptions, stream StreamFunc,
 ) error {
 	flags := append([]string{}, defaultRsyncArgs...)
@@ -135,7 +135,7 @@ func BuiltinRsyncSync(ctx context.Context, ip string, port int, credentials Cred
 // nothing but a stock sshd on the guest. Folder args/exclude/delete do not
 // apply (no rsync semantics without rsync); files land as the SSH user, so
 // the caller pre-hands the destination to that user and chowns afterwards.
-func SFTPSync(ctx context.Context, ip string, port int, credentials Credentials,
+func SFTPSync(ctx context.Context, ip string, port int, credentials *Credentials,
 	localDir, remoteDir, basePath, defaultKeyPath string, stream StreamFunc,
 ) error {
 	sshClient, closeSSH, _, err := connectSSH(ctx, ip, port, credentials, basePath, defaultKeyPath)
@@ -224,7 +224,7 @@ func SFTPSync(ctx context.Context, ip string, port int, credentials Credentials,
 // UploadFile lands ONE local file at a remote path over the sftp subsystem —
 // the shell-provisioner transport (scripts upload the way vagrant's shell
 // provisioner does, never relying on a folder sync to have carried them).
-func UploadFile(ctx context.Context, ip string, port int, credentials Credentials,
+func UploadFile(ctx context.Context, ip string, port int, credentials *Credentials,
 	localPath, remotePath, basePath, defaultKeyPath string,
 ) error {
 	sshClient, closeSSH, _, err := connectSSH(ctx, ip, port, credentials, basePath, defaultKeyPath)
@@ -268,7 +268,7 @@ func UploadFile(ctx context.Context, ip string, port int, credentials Credential
 // mode — a rotated private key wants 0600); a missing remote file answers an
 // error wrapping os.ErrNotExist (pkg/sftp normalizes SSH_FX_NO_SUCH_FILE) so
 // callers can narrate the skip.
-func DownloadFile(ctx context.Context, ip string, port int, credentials Credentials,
+func DownloadFile(ctx context.Context, ip string, port int, credentials *Credentials,
 	remotePath, basePath, defaultKeyPath string,
 ) ([]byte, error) {
 	sshClient, closeSSH, _, err := connectSSH(ctx, ip, port, credentials, basePath, defaultKeyPath)

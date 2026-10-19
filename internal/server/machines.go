@@ -135,14 +135,15 @@ func (s *Server) handleListMachines(w http.ResponseWriter, r *http.Request) {
 }
 
 type machineDetailsResponse struct {
-	MachineInfo      *machines.Machine `json:"machine_info"`
-	Configuration    json.RawMessage   `json:"configuration"`
-	ActiveVNCSession any               `json:"active_vnc_session"`
-	PendingTasks     []*tasks.Task     `json:"pending_tasks"`
-	SystemStatus     string            `json:"system_status"`
-	WebAddress       *string           `json:"web_address"`
-	KnobCurrent      map[string]any    `json:"knob_current"`
-	PendingChanges   map[string]any    `json:"pending_changes"`
+	MachineInfo      *machines.Machine   `json:"machine_info"`
+	Configuration    json.RawMessage     `json:"configuration"`
+	ActiveVNCSession any                 `json:"active_vnc_session"`
+	PendingTasks     []*tasks.Task       `json:"pending_tasks"`
+	SystemStatus     string              `json:"system_status"`
+	WebAddress       *string             `json:"web_address"`
+	KnobCurrent      map[string]any      `json:"knob_current"`
+	PendingChanges   map[string]any      `json:"pending_changes"`
+	Credentials      []machineCredential `json:"credentials"`
 }
 
 // handleMachineDetails: live status check (updating the registry when it
@@ -150,7 +151,7 @@ type machineDetailsResponse struct {
 // tasks.
 //
 //	@Summary		Machine details
-//	@Description	Minimum role: viewer. Live-checks VirtualBox (updating the registry on drift) and returns the record, its live configuration, pending tasks, and knob_current — the current values in PUT's own vocabulary (the Edit-surface prefill); a bridged adapter's knob_current.nics[] entry carries interface, the OS interface name GET /api/monitoring/network/interfaces answers as link, joined through VirtualBox's bridged interfaces list by MAC address and then IP address. configuration carries nat_forwards, the NAT port-forward rules as the rows GET /api/machines/{machineName}/config answers ({name, protocol, host_ip, host_port, guest_ip, guest_port, adapter}), read from the live view and from the last reconciled copy when the hypervisor does not answer.
+//	@Description	Minimum role: viewer. Live-checks VirtualBox (updating the registry on drift) and returns the record, its live configuration, pending tasks, credentials — the machine's vault credentials as [{id, kind, name, use, default}], the document's credentials[] entries else the host's machines.default_credentials, each row's id, kind and name and never a member value, rows the caller may not read left out — and knob_current — the current values in PUT's own vocabulary (the Edit-surface prefill); a bridged adapter's knob_current.nics[] entry carries interface, the OS interface name GET /api/monitoring/network/interfaces answers as link, joined through VirtualBox's bridged interfaces list by MAC address and then IP address. configuration carries nat_forwards, the NAT port-forward rules as the rows GET /api/machines/{machineName}/config answers ({name, protocol, host_ip, host_port, guest_ip, guest_port, adapter}), read from the live view and from the last reconciled copy when the hypervisor does not answer.
 //	@Tags			Machine Management
 //	@Produce		json
 //	@Param			machineName	path	string	true	"Machine name"
@@ -268,6 +269,7 @@ func (s *Server) handleMachineDetails(w http.ResponseWriter, r *http.Request) {
 		WebAddress:       webAddress,
 		KnobCurrent:      machines.KnobCurrent(fresh, liveRaw, osTypeID, settingsFile, s.bridgedInterfaceNames(r.Context(), liveRaw)),
 		PendingChanges:   pendingChanges,
+		Credentials:      s.machineCredentials(r.Context(), fresh, s.certReader(r)),
 	})
 }
 

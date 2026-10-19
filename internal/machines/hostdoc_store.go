@@ -12,7 +12,7 @@ import (
 var preservedConfigKeys = []string{
 	"settings", "zones", "networks", "disks", "metadata",
 	"provisioner", "provisioner_state", "pending_changes", "guest_info",
-	"snapshots", "host_hooks_confirmed",
+	"snapshots", "host_hooks_confirmed", "credentials",
 }
 
 // StampProvisionerState records a successful provision on the machine row —

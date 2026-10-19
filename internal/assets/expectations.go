@@ -5,6 +5,7 @@ import (
 	_ "embed"
 	"encoding/json"
 	"fmt"
+	"strings"
 )
 
 // initial-registry.json is SHI's bundled hash-expectation registry, embedded
@@ -56,9 +57,10 @@ var kindByGroup = map[string]string{
 
 // SeedExpectations loads the bundled expectations into the registry —
 // insert-if-absent, so user-observed reality is never overwritten (SHI's
-// initializeWithDefaults semantics). Entries land in each kind's default
-// storage location (the built-in cache), so the locations must be synced
-// first. Malformed seed data is logged and skipped, never fatal.
+// initializeWithDefaults semantics); an entry listed under a specific kind and
+// under installers seeds once, under the specific kind. Entries land in each
+// kind's default storage location (the built-in cache), so the locations must
+// be synced first. Malformed seed data is logged and skipped, never fatal.
 func SeedExpectations(ctx context.Context, store *Store) error {
 	var registry map[string]map[string][]shiRegistryEntry
 	if err := json.Unmarshal(initialRegistryJSON, &registry); err != nil {
@@ -80,6 +82,15 @@ func SeedExpectations(ctx context.Context, store *Store) error {
 			alog().Warn("skipping unusable initial-registry role", "role", role)
 			continue
 		}
+		specific := map[string]bool{}
+		for group, entries := range groups {
+			if group == "installers" {
+				continue
+			}
+			for i := range entries {
+				specific[strings.ToLower(entries[i].SHA256)] = true
+			}
+		}
 		for group, entries := range groups {
 			kind, known := kindByGroup[group]
 			if !known {
@@ -96,6 +107,9 @@ func SeedExpectations(ctx context.Context, store *Store) error {
 				if !ValidFilename(entry.FileName) || entry.SHA256 == "" {
 					alog().Warn("skipping unusable initial-registry entry",
 						"role", role, "group", group, "filename", entry.FileName)
+					continue
+				}
+				if kind == KindInstaller && specific[strings.ToLower(entry.SHA256)] {
 					continue
 				}
 				if err := store.SeedExpectation(ctx, location.ID, role, kind,

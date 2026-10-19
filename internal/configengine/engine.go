@@ -246,7 +246,7 @@ func (e *Engine) Schema(name string) validation.Schema {
 	return e.schemas[name]
 }
 
-// SetOnSaved attaches the after-write function; it runs after every save and restore with the pending restart list, outside no lock, so it must not call the engine.
+// SetOnSaved attaches the after-write function; it runs after every save and restore with the pending restart list, once the engine's lock is released, so it may read the engine.
 func (e *Engine) SetOnSaved(fn func(name, actor string, status RestartStatus)) {
 	e.mu.Lock()
 	defer e.mu.Unlock()

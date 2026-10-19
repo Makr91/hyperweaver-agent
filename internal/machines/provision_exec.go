@@ -60,9 +60,14 @@ type provisionTaskMetadata struct {
 	ComposeFile string    `json:"compose_file,omitempty"`
 	Hook        *Hook     `json:"hook,omitempty"`
 	Final       bool      `json:"final,omitempty"`
+	// Roles narrows a playbook run to these document roles; empty runs every role the document enables.
+	Roles []string `json:"roles,omitempty"`
+	// CredentialID names the vault row whose credential the step signs in with, resolved at run so no secret rides the task row.
+	CredentialID string `json:"credential_id,omitempty"`
 }
 
-func readProvisionMetadata(task *tasks.Task) (*provisionTaskMetadata, error) {
+// readProvisionMetadata decodes a walk child's metadata and resolves its vault credential as the persons the task's key stands for.
+func (e *executors) readProvisionMetadata(ctx context.Context, task *tasks.Task) (*provisionTaskMetadata, error) {
 	if len(task.Metadata) == 0 {
 		return nil, errors.New("provision task has no metadata")
 	}
@@ -75,6 +80,20 @@ func readProvisionMetadata(task *tasks.Task) (*provisionTaskMetadata, error) {
 	}
 	if meta.Port == 0 {
 		meta.Port = 22
+	}
+	if meta.CredentialID != "" {
+		if secretReader == nil {
+			return nil, errors.New("the credential needs the certificate store")
+		}
+		row, rerr := secretReader(ctx, meta.CredentialID, personsOf(task.CreatedBy))
+		if rerr != nil {
+			return nil, fmt.Errorf("credential %s: %w", meta.CredentialID, rerr)
+		}
+		merged, merr := applyCredential(&meta.Credentials, row)
+		if merr != nil {
+			return nil, fmt.Errorf("credential %s: %w", meta.CredentialID, merr)
+		}
+		meta.Credentials = merged
 	}
 	return &meta, nil
 }

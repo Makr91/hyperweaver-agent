@@ -41,7 +41,7 @@ func SyncbackFolders(folders []Folder) []Folder {
 
 // syncbackFolder executes machine_syncback — ONE folder, guest→host.
 func (e *executors) syncbackFolder(ctx context.Context, task *tasks.Task, out *tasks.OutputWriter) error {
-	meta, err := readProvisionMetadata(task)
+	meta, err := e.readProvisionMetadata(ctx, task)
 	if err != nil {
 		return err
 	}
@@ -91,14 +91,14 @@ func (e *executors) runFolderPullTransport(ctx context.Context, meta *provisionT
 ) error {
 	if transportFor(folder) == SyncSCP {
 		if scpExe, lerr := sshrun.FindTool("scp"); lerr == nil {
-			if serr := sshrun.SCPSyncPull(ctx, scpExe, meta.IP, meta.Port, meta.Credentials,
+			if serr := sshrun.SCPSyncPull(ctx, scpExe, meta.IP, meta.Port, &meta.Credentials,
 				folder.To, dest, workdir, e.env.ProvisionKeyPath, out.Write); serr != nil {
 				return errors.Join(errors.New(folder.To+" → "+folder.Map), serr)
 			}
 			return nil
 		}
 		out.Write("stdout", "scp binary not found on this host — using the built-in SFTP pull (pure Go, no host tools)\n")
-		if serr := sshrun.SFTPSyncPull(ctx, meta.IP, meta.Port, meta.Credentials,
+		if serr := sshrun.SFTPSyncPull(ctx, meta.IP, meta.Port, &meta.Credentials,
 			folder.To, dest, workdir, e.env.ProvisionKeyPath, out.Write); serr != nil {
 			return errors.Join(errors.New(folder.To+" → "+folder.Map), serr)
 		}
@@ -111,14 +111,14 @@ func (e *executors) runFolderPullTransport(ctx context.Context, meta *provisionT
 		// Delete deliberately unset: pull never deletes host files.
 	}
 	if rsyncExe, lerr := sshrun.FindTool("rsync"); lerr == nil {
-		if serr := sshrun.SyncFilesPull(ctx, rsyncExe, meta.IP, meta.Port, meta.Credentials,
+		if serr := sshrun.SyncFilesPull(ctx, rsyncExe, meta.IP, meta.Port, &meta.Credentials,
 			folder.To, dest, workdir, e.env.ProvisionKeyPath, options, out.Write); serr != nil {
 			return errors.Join(errors.New(folder.To+" → "+folder.Map), serr)
 		}
 		return nil
 	}
 	out.Write("stdout", "rsync binary not found on this host — using the built-in Go rsync pull (the guest's own rsync serves the remote half)\n")
-	if serr := sshrun.BuiltinRsyncSyncPull(ctx, meta.IP, meta.Port, meta.Credentials,
+	if serr := sshrun.BuiltinRsyncSyncPull(ctx, meta.IP, meta.Port, &meta.Credentials,
 		folder.To, dest, workdir, e.env.ProvisionKeyPath, options, out.Write); serr != nil {
 		return errors.Join(errors.New(folder.To+" → "+folder.Map), serr)
 	}

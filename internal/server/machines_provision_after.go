@@ -21,7 +21,7 @@ func (s *Server) provisionAfterCreateTask(ctx context.Context, task *tasks.Task,
 	if err != nil {
 		return fmt.Errorf("machine %s: %w", task.MachineName, err)
 	}
-	validation, reason := validateProvisionRequest(machine)
+	validation, reason := s.validateProvisionRequest(ctx, machine)
 	if reason != "" {
 		return errors.New(reason)
 	}

@@ -14,15 +14,15 @@ import (
 
 const artifactColumns = `id, location_id, role, kind, filename, path, sha256,
 	expected_sha256, size, version, file_exists, verified_at, source_url,
-	created_at, updated_at, given_checksum, given_algorithm, version_info`
+	created_at, updated_at, given_checksum, given_algorithm, version_info, registry`
 
 func scanArtifact(row interface{ Scan(...any) error }) (*Artifact, error) {
 	var a Artifact
-	var locationID, path, sha, expected, version, sourceURL, verifiedAt, given, givenAlgorithm, versionInfo sql.NullString
+	var locationID, path, sha, expected, version, sourceURL, verifiedAt, given, givenAlgorithm, versionInfo, registry sql.NullString
 	var createdAt, updatedAt string
 	err := row.Scan(&a.ID, &locationID, &a.Role, &a.Kind, &a.Filename, &path,
 		&sha, &expected, &a.Size, &version, &a.Exists, &verifiedAt, &sourceURL,
-		&createdAt, &updatedAt, &given, &givenAlgorithm, &versionInfo)
+		&createdAt, &updatedAt, &given, &givenAlgorithm, &versionInfo, &registry)
 	if err != nil {
 		return nil, err
 	}
@@ -38,6 +38,12 @@ func scanArtifact(row interface{ Scan(...any) error }) (*Artifact, error) {
 		info := &VersionInfo{}
 		if uerr := json.Unmarshal([]byte(versionInfo.String), info); uerr == nil {
 			a.VersionInfo = info
+		}
+	}
+	if registry.Valid && registry.String != "" {
+		ref := &RegistryRef{}
+		if uerr := json.Unmarshal([]byte(registry.String), ref); uerr == nil {
+			a.Registry = ref
 		}
 	}
 	if a.CreatedAt, err = time.Parse(timeLayout, createdAt); err != nil {
@@ -228,17 +234,40 @@ type Ingested struct {
 	// GivenChecksum and GivenAlgorithm record the checksum the caller handed in with the file, kept beside the agent's own sha256
 	GivenChecksum  string
 	GivenAlgorithm string
+	// Registry is the registry file the ingest came from, when it did
+	Registry *RegistryRef
+}
+
+func registryJSON(ref *RegistryRef) (any, error) {
+	if ref == nil {
+		return nil, nil
+	}
+	raw, err := json.Marshal(ref)
+	if err != nil {
+		return nil, err
+	}
+	return string(raw), nil
 }
 
 // RecordIngested upserts a row for a file just hashed on disk. An existing
 // row keeps its expectation (and version/source when the ingest carries
-// none).
+// none); a row without a registry takes the registry file the index lists under its sha256.
 func (s *Store) RecordIngested(ctx context.Context, in *Ingested) (*Artifact, error) {
 	now := formatTime(time.Now())
-	_, err := s.db.ExecContext(ctx, `INSERT INTO artifacts
+	registry := in.Registry
+	if registry == nil {
+		if ref, ok := s.RegistryIndex().BySHA(in.SHA256); ok {
+			registry = &ref
+		}
+	}
+	registryValue, err := registryJSON(registry)
+	if err != nil {
+		return nil, err
+	}
+	_, err = s.db.ExecContext(ctx, `INSERT INTO artifacts
 		(location_id, role, kind, filename, path, sha256, size, version,
-		 file_exists, verified_at, source_url, created_at, updated_at, given_checksum, given_algorithm)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?)
+		 file_exists, verified_at, source_url, created_at, updated_at, given_checksum, given_algorithm, registry)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT (location_id, role, kind, filename) DO UPDATE SET
 		 path = excluded.path, sha256 = excluded.sha256, size = excluded.size,
 		 version = CASE WHEN excluded.version != '' THEN excluded.version ELSE artifacts.version END,
@@ -246,9 +275,10 @@ func (s *Store) RecordIngested(ctx context.Context, in *Ingested) (*Artifact, er
 		 source_url = CASE WHEN excluded.source_url != '' THEN excluded.source_url ELSE artifacts.source_url END,
 		 given_checksum = CASE WHEN excluded.given_checksum != '' THEN excluded.given_checksum ELSE artifacts.given_checksum END,
 		 given_algorithm = CASE WHEN excluded.given_checksum != '' THEN excluded.given_algorithm ELSE artifacts.given_algorithm END,
+		 registry = COALESCE(excluded.registry, artifacts.registry),
 		 updated_at = excluded.updated_at`,
 		in.LocationID, in.Role, in.Kind, in.Filename, in.Path, in.SHA256,
-		in.Size, in.Version, now, in.SourceURL, now, now, in.GivenChecksum, in.GivenAlgorithm)
+		in.Size, in.Version, now, in.SourceURL, now, now, in.GivenChecksum, in.GivenAlgorithm, registryValue)
 	if err != nil {
 		return nil, err
 	}
@@ -282,6 +312,95 @@ func (s *Store) SeedExpectation(ctx context.Context, locationID, role, kind, fil
 		 version_info = COALESCE(artifacts.version_info, excluded.version_info)`,
 		locationID, role, kind, filename, sha, fullVersion, info, now, now)
 	return err
+}
+
+// UpsertExpectation writes the expectation a registry resolves: the sha256, the structured version and the registry file, onto the row of the identity, creating it without a binary when absent.
+func (s *Store) UpsertExpectation(ctx context.Context, locationID, role, kind, filename, sha string, version *VersionInfo, ref *RegistryRef) error {
+	now := formatTime(time.Now())
+	var fullVersion, info any
+	if version != nil {
+		fullVersion = version.FullVersion
+		raw, err := json.Marshal(version)
+		if err != nil {
+			return err
+		}
+		info = string(raw)
+	}
+	registryValue, err := registryJSON(ref)
+	if err != nil {
+		return err
+	}
+	_, err = s.db.ExecContext(ctx, `INSERT INTO artifacts
+		(location_id, role, kind, filename, expected_sha256, version, version_info, registry, file_exists, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
+		ON CONFLICT (location_id, role, kind, filename) DO UPDATE SET
+		 expected_sha256 = CASE WHEN excluded.expected_sha256 != '' THEN excluded.expected_sha256 ELSE artifacts.expected_sha256 END,
+		 version = COALESCE(excluded.version, artifacts.version),
+		 version_info = COALESCE(excluded.version_info, artifacts.version_info),
+		 registry = COALESCE(excluded.registry, artifacts.registry),
+		 updated_at = excluded.updated_at`,
+		locationID, role, kind, filename, sha, fullVersion, info, registryValue, now, now)
+	return err
+}
+
+// FindExpectationBySHA answers the row of the role whose expectation is the sha256, ErrNotFound when none.
+func (s *Store) FindExpectationBySHA(ctx context.Context, role, sha string) (*Artifact, error) {
+	a, err := scanArtifact(s.db.QueryRowContext(ctx,
+		`SELECT `+artifactColumns+` FROM artifacts
+		 WHERE role = ? AND expected_sha256 = ? COLLATE NOCASE
+		 ORDER BY file_exists DESC, id ASC LIMIT 1`, role, sha))
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	return a, err
+}
+
+// SetRegistry writes the registry file onto one row.
+func (s *Store) SetRegistry(ctx context.Context, id int64, ref *RegistryRef) error {
+	registryValue, err := registryJSON(ref)
+	if err != nil {
+		return err
+	}
+	_, err = s.db.ExecContext(ctx, `UPDATE artifacts SET registry = ?, updated_at = ? WHERE id = ?`,
+		registryValue, formatTime(time.Now()), id)
+	return err
+}
+
+// StampRegistryRows writes the registry file onto every row carrying a sha256 the index lists and no registry, answering how many.
+func (s *Store) StampRegistryRows(ctx context.Context) (int, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT `+artifactColumns+` FROM artifacts
+		WHERE registry IS NULL AND (COALESCE(expected_sha256, '') != '' OR COALESCE(sha256, '') != '')`)
+	if err != nil {
+		return 0, err
+	}
+	candidates := []*Artifact{}
+	for rows.Next() {
+		a, serr := scanArtifact(rows)
+		if serr != nil {
+			_ = rows.Close()
+			return 0, serr
+		}
+		candidates = append(candidates, a)
+	}
+	if cerr := rows.Close(); cerr != nil {
+		return 0, cerr
+	}
+	index := s.RegistryIndex()
+	stamped := 0
+	for _, a := range candidates {
+		ref, ok := index.BySHA(a.ExpectedSHA256)
+		if !ok {
+			ref, ok = index.BySHA(a.SHA256)
+		}
+		if !ok {
+			continue
+		}
+		if serr := s.SetRegistry(ctx, a.ID, &ref); serr != nil {
+			return stamped, serr
+		}
+		stamped++
+	}
+	return stamped, nil
 }
 
 // SetExpectation records the authoritative hash for an entry (the HCL

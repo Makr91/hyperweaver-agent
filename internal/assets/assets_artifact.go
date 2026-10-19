@@ -33,8 +33,10 @@ type Artifact struct {
 	Exists         bool         `json:"file_exists"`
 	VerifiedAt     *time.Time   `json:"last_verified"`
 	SourceURL      string       `json:"source_url,omitempty"`
-	CreatedAt      time.Time    `json:"discovered_at"`
-	UpdatedAt      time.Time    `json:"updatedAt"`
+	// Registry is the BoxVault download file the row is, nil while the row names none
+	Registry  *RegistryRef `json:"registry"`
+	CreatedAt time.Time    `json:"discovered_at"`
+	UpdatedAt time.Time    `json:"updatedAt"`
 }
 
 // VersionInfo is an artifact's structured version as the wire answers it.

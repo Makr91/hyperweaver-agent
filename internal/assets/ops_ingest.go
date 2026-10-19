@@ -90,7 +90,7 @@ func (e *executors) download(ctx context.Context, task *tasks.Task, out *tasks.O
 		return err
 	}
 	if meta.ResourceName != "" {
-		user, pass, ok := e.resourceAuth(meta.ResourceName)
+		user, pass, ok := e.deps.ResourceAuth(meta.ResourceName)
 		if !ok {
 			return errors.New("no custom resource credentials named " + meta.ResourceName + " in the secrets store")
 		}
@@ -98,7 +98,8 @@ func (e *executors) download(ctx context.Context, task *tasks.Task, out *tasks.O
 	}
 
 	out.Write("stdout", "Downloading "+meta.URL+"\n")
-	response, err := http.DefaultClient.Do(request)
+	client := &http.Client{Timeout: e.deps.DownloadTimeout}
+	response, err := client.Do(request)
 	if err != nil {
 		return err
 	}
@@ -116,7 +117,7 @@ func (e *executors) download(ctx context.Context, task *tasks.Task, out *tasks.O
 	})
 }
 
-// landing is one verified stream into a location.
+// landing is one verified stream into a location; registry names the registry file the stream came from, when it did.
 type landing struct {
 	location  *Location
 	role      string
@@ -127,9 +128,10 @@ type landing struct {
 	sourceURL string
 	checksum  string
 	algorithm string
+	registry  *RegistryRef
 }
 
-// landStream hashes the body into a temp file, verifies the given checksum under its algorithm, promotes the file, records the sha256 expectation when the checksum was a sha256, and registers the row with the given checksum beside the agent's own.
+// landStream hashes the body into a temp file, verifies the given checksum under its algorithm, promotes the file, records the sha256 expectation when the checksum was a sha256, and registers the row with the given checksum beside the agent's own, its kind the registry file's when the stream came from one or the index lists its sha256.
 func (e *executors) landStream(ctx context.Context, task *tasks.Task, out *tasks.OutputWriter, land *landing) error {
 	temp := land.target + ".download"
 	hashes, size, err := e.streamToFile(task.ID, land.body, temp, land.total, land.algorithm)
@@ -146,14 +148,25 @@ func (e *executors) landStream(ctx context.Context, task *tasks.Task, out *tasks
 		return rerr
 	}
 	sha := hashes.SHA256()
+	registry := land.registry
+	if registry == nil {
+		if ref, ok := e.store.RegistryIndex().BySHA(sha); ok {
+			registry = &ref
+		}
+	}
+	kind := land.location.Type
+	if registry != nil && RoleKeyed(kind) && registryKind(registry) != "" {
+		kind = registryKind(registry)
+	}
 	if land.checksum != "" && land.algorithm == AlgorithmSHA256 {
-		if serr := e.store.SetExpectation(ctx, land.location.ID, land.role, land.location.Type, land.filename, land.checksum); serr != nil {
+		if serr := e.store.SetExpectation(ctx, land.location.ID, land.role, kind, land.filename, land.checksum); serr != nil {
 			out.Write("stderr", "record expectation failed: "+serr.Error()+"\n")
 		}
 	}
 	ingested := &Ingested{
-		LocationID: land.location.ID, Role: land.role, Kind: land.location.Type,
+		LocationID: land.location.ID, Role: land.role, Kind: kind,
 		Filename: land.filename, Path: land.target, SHA256: sha, Size: size, SourceURL: land.sourceURL,
+		Registry: registry,
 	}
 	if land.checksum != "" {
 		ingested.GivenChecksum = strings.ToLower(land.checksum)

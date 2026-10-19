@@ -299,6 +299,7 @@ func (s *Server) publishTask(task *tasks.Task) {
 	s.events.publish("tasks", "task-updated", task)
 	if taskFinished(task.Status) {
 		s.publishHealth()
+		s.syncOnTaskFinished(task)
 		if task.Notify {
 			go s.notifyInbox(task)
 		}

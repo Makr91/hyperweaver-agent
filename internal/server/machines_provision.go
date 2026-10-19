@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"strings"
 
+	"github.com/Makr91/hyperweaver-agent/internal/certs"
 	"github.com/Makr91/hyperweaver-agent/internal/machines"
 	"github.com/Makr91/hyperweaver-agent/internal/provisioner"
 	"github.com/Makr91/hyperweaver-agent/internal/tasks"
@@ -32,16 +33,25 @@ type provisionValidation struct {
 	ip           string
 	port         int
 	credentials  machines.Credentials
+	credentialID string
 	communicator string
 	winrm        machines.WinRMSettings
 	shadowedKeys []string
 }
 
+// walkNarrow is a provision run narrowed to part of the document: the roles, the shell scripts or the one playbook a body names.
+type walkNarrow struct {
+	roles    []string
+	scripts  []string
+	playbook string
+}
+
 // validateProvisionRequest ports validateProvisioningRequest: provisioner
-// config stored (else "set via PUT first"), settings present, vagrant_user
-// required, control IP resolvable. The communicator resolves at READ time
-// through the hostdoc alias reader — stored documents never rewrite.
-func validateProvisionRequest(machine *machines.Machine) (validation *provisionValidation, problem string) {
+// config stored (else "set via PUT first"), settings present, a username from
+// the machine's vagrant credential or settings.vagrant_user, control IP
+// resolvable. The communicator resolves at READ time through the hostdoc
+// alias reader — stored documents never rewrite.
+func (s *Server) validateProvisionRequest(ctx context.Context, machine *machines.Machine) (validation *provisionValidation, problem string) {
 	config := machines.ParseConfiguration(machine)
 	provisionerDoc := config.Provisioner()
 	if len(provisionerDoc) == 0 {
@@ -52,6 +62,15 @@ func validateProvisionRequest(machine *machines.Machine) (validation *provisionV
 		return nil, "Machine configuration has no settings section (Hosts.yml structure required)"
 	}
 	credentials := machines.ExtractCredentials(settings)
+	credentialID := ""
+	if row, rerr := s.pickCredential(ctx, machine, certs.Reader{Admin: true}, "vagrant", ""); rerr != nil {
+		return nil, "The machine's vagrant credential " + rerr.Error()
+	} else if row != nil {
+		if user := machines.CredentialUsername(row); user != "" {
+			credentials.Username = user
+		}
+		credentialID = row.ID
+	}
 	if credentials.Username == "" {
 		return nil, "Credentials missing: settings.vagrant_user is required"
 	}
@@ -70,7 +89,7 @@ func validateProvisionRequest(machine *machines.Machine) (validation *provisionV
 	}
 	return &provisionValidation{
 		config: config, provisioner: provisionerDoc,
-		ip: ip, port: port, credentials: credentials,
+		ip: ip, port: port, credentials: credentials, credentialID: credentialID,
 		communicator: communicator, winrm: winrm, shadowedKeys: shadowed,
 	}, ""
 }
@@ -151,6 +170,9 @@ func childMetadata(v *provisionValidation, extra map[string]any) (*string, error
 		"port":        v.port,
 		"credentials": v.credentials,
 	}
+	if v.credentialID != "" {
+		doc["credential_id"] = v.credentialID
+	}
 	if v.communicator == "winrm" {
 		doc["communicator"] = "winrm"
 		doc["winrm"] = map[string]any{
@@ -202,17 +224,16 @@ type walkStep struct {
 }
 
 type taskChainEntry struct {
-	Step             string   `json:"step"`
-	TaskID           string   `json:"task_id,omitempty"`
-	LastTaskID       string   `json:"last_task_id,omitempty"`
-	Keys             []string `json:"keys,omitempty"`
-	FolderCount      int      `json:"folder_count,omitempty"`
-	HookCount        int      `json:"hook_count,omitempty"`
-	ScriptCount      int      `json:"script_count,omitempty"`
-	ComposeCount     int      `json:"compose_count,omitempty"`
-	PlaybookCount    int      `json:"playbook_count,omitempty"`
-	PlaybooksSkipped *int     `json:"playbooks_skipped,omitempty"`
-	Method           string   `json:"method,omitempty"`
+	Step          string   `json:"step"`
+	TaskID        string   `json:"task_id,omitempty"`
+	LastTaskID    string   `json:"last_task_id,omitempty"`
+	Keys          []string `json:"keys,omitempty"`
+	FolderCount   int      `json:"folder_count,omitempty"`
+	HookCount     int      `json:"hook_count,omitempty"`
+	ScriptCount   int      `json:"script_count,omitempty"`
+	ComposeCount  int      `json:"compose_count,omitempty"`
+	PlaybookCount int      `json:"playbook_count,omitempty"`
+	Method        string   `json:"method,omitempty"`
 }
 
 // docEnabled reads a method section's enabled gate in the document's own
@@ -245,31 +266,63 @@ func hookSteps(hooks []machines.Hook, label string) []walkStep {
 	return steps
 }
 
-// playbookSteps plans one run-filtered playbook batch — entries exactly as
-// the document lists them: the list an entry sits in (local | remote) picks
-// its execution mechanism, never its position.
-func playbookSteps(playbooks []machines.Playbook, skippedCount int) []walkStep {
+// playbookSteps plans one playbook batch — entries exactly as the document
+// lists them: the list an entry sits in (local | remote) picks its execution
+// mechanism, never its position; roles, when given, narrow every entry's run to those document roles.
+func playbookSteps(playbooks []machines.Playbook, roles []string) []walkStep {
 	steps := make([]walkStep, 0, len(playbooks))
 	for i := range playbooks {
 		operation := machines.OpProvisionPlaybook
 		if playbooks[i].Remote {
 			operation = machines.OpRemotePlaybook
 		}
-		step := walkStep{operation: operation, extra: map[string]any{"playbook": playbooks[i]}}
+		extra := map[string]any{"playbook": playbooks[i]}
+		if len(roles) > 0 {
+			extra["roles"] = roles
+		}
+		step := walkStep{operation: operation, extra: extra}
 		if i == 0 {
-			skipped := skippedCount
 			step.step = "method:ansible"
-			step.stepInfo = taskChainEntry{
-				PlaybookCount:    len(playbooks),
-				PlaybooksSkipped: &skipped,
-			}
+			step.stepInfo = taskChainEntry{PlaybookCount: len(playbooks)}
 		}
 		steps = append(steps, step)
 	}
 	return steps
 }
 
-// winnowLocalPlaybooksForWinRM drops the LOCAL playbooks from a run-filtered
+// narrowPlaybooks keeps the playbooks a narrowed run names: the one playbook when the body names one, every entry when it names roles alone.
+func narrowPlaybooks(playbooks []machines.Playbook, narrow *walkNarrow) []machines.Playbook {
+	if narrow == nil || narrow.playbook == "" {
+		return playbooks
+	}
+	kept := []machines.Playbook{}
+	for i := range playbooks {
+		if playbooks[i].Playbook == narrow.playbook {
+			kept = append(kept, playbooks[i])
+		}
+	}
+	return kept
+}
+
+// narrowScripts keeps the shell scripts a narrowed run names; a narrowed run naming none runs no script.
+func narrowScripts(scripts []string, narrow *walkNarrow) []string {
+	if narrow == nil {
+		return scripts
+	}
+	wanted := map[string]bool{}
+	for _, script := range narrow.scripts {
+		wanted[script] = true
+	}
+	kept := []string{}
+	for _, script := range scripts {
+		if wanted[script] {
+			kept = append(kept, script)
+		}
+	}
+	return kept
+}
+
+// winnowLocalPlaybooksForWinRM drops the LOCAL playbooks from a
 // batch on winrm guests — in-guest ansible is impossible over winrm
 // (zoneweaver's exact named shape, W-Q1..W-Q5): the drop is a RESPONSE-ONLY
 // task_chain[] entry {step: ansible_local_skipped_winrm, playbook_count} at
@@ -302,14 +355,21 @@ func winnowLocalPlaybooksForWinRM(v *provisionValidation, playbooks []machines.P
 // planWalk plans the document walk's direct children: pre[] hooks, then the
 // provisioning: methods in the order their KEYS APPEAR in the stored document
 // (each method's entries in list order — Mark's ruling: there are no phases,
-// the document executes AS WRITTEN), then post[] hooks. sync/syncback are the
+// the document executes AS WRITTEN), then post[] hooks; every entry runs on
+// every explicit run, the document's run directives never thin a Provision
+// press. A narrowed run keeps the shell scripts, the playbook or the roles the
+// body names and drops the hooks and the docker entries. sync/syncback are the
 // walk's outer brackets and ride their own sub-parents. Unknown method keys
 // NARRATE-SKIP into skippedMethods — named loudly, never a failure.
-func planWalk(machine *machines.Machine, v *provisionValidation, provisionedBefore bool,
-) (walk []walkStep, skippedMethods []string, skippedPlaybooks []machines.SkippedPlaybook, playbookCount int) {
-	skippedPlaybooks = []machines.SkippedPlaybook{}
-	walk = append(walk, hookSteps(machines.FilterHooksByRun(
-		machines.ProvisionerHooks(v.provisioner, "pre"), provisionedBefore), "pre_hooks")...)
+func planWalk(machine *machines.Machine, v *provisionValidation, narrow *walkNarrow,
+) (walk []walkStep, skippedMethods []string, playbookCount int) {
+	if narrow == nil {
+		walk = append(walk, hookSteps(machines.ProvisionerHooks(v.provisioner, "pre"), "pre_hooks")...)
+	}
+	var roles []string
+	if narrow != nil {
+		roles = narrow.roles
+	}
 
 	// The method key order comes from the stored document's RAW bytes — the
 	// map view alphabetizes; only the arrays inside each method survive maps.
@@ -322,7 +382,7 @@ func planWalk(machine *machines.Machine, v *provisionValidation, provisionedBefo
 		case "pre", "post":
 			// The walk's brackets — planned above/below, never methods.
 		case "shell":
-			scripts := machines.ProvisionerShellScripts(v.provisioner)
+			scripts := narrowScripts(machines.ProvisionerShellScripts(v.provisioner), narrow)
 			for i, script := range scripts {
 				step := walkStep{
 					operation: machines.OpShellScript,
@@ -341,15 +401,16 @@ func planWalk(machine *machines.Machine, v *provisionValidation, provisionedBefo
 			if !docEnabled(ansible["enabled"]) {
 				continue
 			}
-			playbooks, skipped := machines.FilterPlaybooksByRun(
-				machines.ProvisionerPlaybooks(v.provisioner), provisionedBefore)
-			skippedPlaybooks = append(skippedPlaybooks, skipped...)
+			if narrow != nil && narrow.playbook == "" && len(narrow.roles) == 0 {
+				continue
+			}
+			playbooks := narrowPlaybooks(machines.ProvisionerPlaybooks(v.provisioner), narrow)
 			playbooks, methods = winnowLocalPlaybooksForWinRM(v, playbooks, methods)
 			playbookCount += len(playbooks)
-			methods = append(methods, playbookSteps(playbooks, len(skipped))...)
+			methods = append(methods, playbookSteps(playbooks, roles)...)
 		case "docker":
 			enabled, composeFiles := machines.ProvisionerDocker(v.provisioner)
-			if !enabled {
+			if !enabled || narrow != nil {
 				continue
 			}
 			if v.communicator == "winrm" {
@@ -383,18 +444,63 @@ func planWalk(machine *machines.Machine, v *provisionValidation, provisionedBefo
 	// simplest shape) — no method keys, but ProvisionerPlaybooks still
 	// answers entries; they plan as the sole method batch. No ansible.enabled
 	// gate applies: there is no ansible section.
-	if len(methodKeys) == 0 {
-		if flat := machines.ProvisionerPlaybooks(v.provisioner); len(flat) > 0 {
-			playbooks, skipped := machines.FilterPlaybooksByRun(flat, provisionedBefore)
-			skippedPlaybooks = append(skippedPlaybooks, skipped...)
-			playbooks, methods = winnowLocalPlaybooksForWinRM(v, playbooks, methods)
+	if len(methodKeys) == 0 && (narrow == nil || narrow.playbook != "" || len(narrow.roles) > 0) {
+		if flat := narrowPlaybooks(machines.ProvisionerPlaybooks(v.provisioner), narrow); len(flat) > 0 {
+			var playbooks []machines.Playbook
+			playbooks, methods = winnowLocalPlaybooksForWinRM(v, flat, methods)
 			playbookCount += len(playbooks)
-			methods = append(methods, playbookSteps(playbooks, len(skipped))...)
+			methods = append(methods, playbookSteps(playbooks, roles)...)
 		}
 	}
 	walk = append(walk, methods...)
 
-	walk = append(walk, hookSteps(machines.FilterHooksByRun(
-		machines.ProvisionerHooks(v.provisioner, "post"), provisionedBefore), "post_hooks")...)
-	return walk, skippedMethods, skippedPlaybooks, playbookCount
+	if narrow == nil {
+		walk = append(walk, hookSteps(machines.ProvisionerHooks(v.provisioner, "post"), "post_hooks")...)
+	}
+	return walk, skippedMethods, playbookCount
+}
+
+// narrowOf reads a provision body's narrowing members and checks each against the stored document: the roles against roles[], the scripts against provisioning.shell.scripts, the playbook against the ansible entries; nil when the body narrows nothing.
+func narrowOf(body *provisionRequest, v *provisionValidation) (narrow *walkNarrow, problem string) {
+	if len(body.Roles) == 0 && len(body.Scripts) == 0 && body.Playbook == "" {
+		return nil, ""
+	}
+	if !machines.HasProvisionedBefore(v.config) {
+		return nil, "roles, scripts and playbook narrow a run on a machine that has provisioned once"
+	}
+	known := map[string]bool{}
+	for _, name := range machines.DocumentRoleNames(v.provisioner) {
+		known[name] = true
+		if dot := strings.LastIndex(name, "."); dot >= 0 {
+			known[name[dot+1:]] = true
+		}
+	}
+	for _, role := range body.Roles {
+		if !known[role] {
+			return nil, "role " + role + " is not a role of the machine's document"
+		}
+	}
+	scripts := map[string]bool{}
+	for _, script := range machines.ProvisionerShellScripts(v.provisioner) {
+		scripts[script] = true
+	}
+	for _, script := range body.Scripts {
+		if !scripts[script] {
+			return nil, "script " + script + " is not one of the document's provisioning.shell.scripts"
+		}
+	}
+	if body.Playbook != "" {
+		found := false
+		playbooks := machines.ProvisionerPlaybooks(v.provisioner)
+		for i := range playbooks {
+			if playbooks[i].Playbook == body.Playbook {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return nil, "playbook " + body.Playbook + " is not one of the document's provisioning.playbooks"
+		}
+	}
+	return &walkNarrow{roles: body.Roles, scripts: body.Scripts, playbook: body.Playbook}, ""
 }

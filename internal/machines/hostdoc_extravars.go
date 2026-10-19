@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/goccy/go-yaml"
 )
@@ -101,6 +102,69 @@ func BuildPlaybookExtraVars(base map[string]any, playbook *Playbook) map[string]
 		vars["ansible_python_interpreter"] = playbook.PythonInterpreter
 	}
 	return vars
+}
+
+// NarrowRoles keeps only the named roles in the extra_vars' provision_roles, in the document's order, a name matching the role's full name or its last dotted segment; an empty list leaves every role.
+func NarrowRoles(vars map[string]any, roles []string) map[string]any {
+	if len(roles) == 0 {
+		return vars
+	}
+	raw, ok := vars["provision_roles"].(json.RawMessage)
+	if !ok {
+		return vars
+	}
+	var entries []json.RawMessage
+	if err := json.Unmarshal(raw, &entries); err != nil {
+		return vars
+	}
+	wanted := map[string]bool{}
+	for _, role := range roles {
+		wanted[role] = true
+	}
+	kept := make([]json.RawMessage, 0, len(entries))
+	for _, entry := range entries {
+		var named struct {
+			Name string `json:"name"`
+		}
+		if uerr := json.Unmarshal(entry, &named); uerr != nil {
+			continue
+		}
+		if RoleNamed(named.Name, wanted) {
+			kept = append(kept, entry)
+		}
+	}
+	narrowed, err := json.Marshal(kept)
+	if err != nil {
+		return vars
+	}
+	vars["provision_roles"] = json.RawMessage(narrowed)
+	return vars
+}
+
+// RoleNamed reports whether a document role's name is in the set, by its full name or its last dotted segment.
+func RoleNamed(name string, wanted map[string]bool) bool {
+	if wanted[name] {
+		return true
+	}
+	if dot := strings.LastIndex(name, "."); dot >= 0 {
+		return wanted[name[dot+1:]]
+	}
+	return false
+}
+
+// DocumentRoleNames answers the names of the stored document's roles[] in order.
+func DocumentRoleNames(provisioner map[string]any) []string {
+	names := []string{}
+	for _, entry := range listOr(provisioner["roles"]) {
+		role, ok := entry.(map[string]any)
+		if !ok {
+			continue
+		}
+		if name := stringOr(role["name"], ""); name != "" {
+			names = append(names, name)
+		}
+	}
+	return names
 }
 
 func orDefault(value any, fallback string) string {

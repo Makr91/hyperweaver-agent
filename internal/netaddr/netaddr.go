@@ -23,14 +23,16 @@ const (
 	OpDelete  = "delete_ip_address"
 	OpEnable  = "enable_ip_address"
 	OpDisable = "disable_ip_address"
+	OpModify  = "modify_ip_address"
 )
 
-// Metadata is the address task document (zoneweaver's wire fields verbatim).
+// Metadata is the address task document (zoneweaver's wire fields verbatim); Current is the live address a modify replaces.
 type Metadata struct {
 	Interface string `json:"interface,omitempty"`
 	Type      string `json:"type,omitempty"`
 	AddrObj   string `json:"addrobj"`
 	Address   string `json:"address,omitempty"`
+	Current   string `json:"current,omitempty"`
 	Primary   bool   `json:"primary,omitempty"`
 	Wait      int    `json:"wait,omitempty"`
 	Temporary bool   `json:"temporary,omitempty"`
@@ -85,12 +87,32 @@ func InterfaceAddresses(iface, version string) ([]string, error) {
 	return matches, nil
 }
 
-// RegisterExecutors wires the four address operations into the task queue.
+// RegisterExecutors wires the five address operations into the task queue.
 func RegisterExecutors(queue *tasks.Queue) {
 	queue.Register(OpCreate, tasks.Executor{Run: createAddress})
 	queue.Register(OpDelete, tasks.Executor{Run: deleteAddress})
 	queue.Register(OpEnable, tasks.Executor{Run: interfaceToggle(true)})
 	queue.Register(OpDisable, tasks.Executor{Run: interfaceToggle(false)})
+	queue.Register(OpModify, tasks.Executor{Run: modifyAddress})
+}
+
+// modifyAddress executes modify_ip_address: the current live address of the addrobj is removed the way delete removes it, then the new one is created the way create creates it.
+func modifyAddress(ctx context.Context, task *tasks.Task, out *tasks.OutputWriter) error {
+	meta, err := parseMeta(task)
+	if err != nil {
+		return err
+	}
+	if meta.Current != "" {
+		removal := &Metadata{AddrObj: meta.AddrObj, Address: meta.Current}
+		iface, cidr, v4, rerr := resolveDelete(removal)
+		if rerr != nil {
+			return rerr
+		}
+		if derr := removeAddress(ctx, out, iface, cidr, v4); derr != nil {
+			return derr
+		}
+	}
+	return createAddress(ctx, task, out)
 }
 
 func parseMeta(task *tasks.Task) (*Metadata, error) {
@@ -214,9 +236,6 @@ func deleteAddress(ctx context.Context, task *tasks.Task, out *tasks.OutputWrite
 	if err != nil {
 		return err
 	}
-	ip, ipNet, _ := net.ParseCIDR(cidr)
-	prefix, _ := ipNet.Mask.Size()
-
 	if meta.Release {
 		if runtime.GOOS == "windows" {
 			if rerr := runTool(ctx, out, "ipconfig", "/release", iface); rerr != nil {
@@ -226,7 +245,14 @@ func deleteAddress(ctx context.Context, task *tasks.Task, out *tasks.OutputWrite
 			out.Write("stderr", "release has no analog on this platform — skipped\n")
 		}
 	}
+	return removeAddress(ctx, out, iface, cidr, v4)
+}
 
+// removeAddress removes one live CIDR from an interface with the platform's own tool.
+func removeAddress(ctx context.Context, out *tasks.OutputWriter, iface, cidr string, v4 bool) error {
+	ip, ipNet, _ := net.ParseCIDR(cidr)
+	prefix, _ := ipNet.Mask.Size()
+	var err error
 	switch runtime.GOOS {
 	case "windows":
 		if v4 {

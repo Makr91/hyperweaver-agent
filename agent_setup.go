@@ -101,6 +101,24 @@ func artifactPathList(cfg *config.Config) []assets.PathConfig {
 	return paths
 }
 
+// expectedFiles answers every file the installed provisioners' manifest roles default to, across every family and version.
+func expectedFiles(registry *provisioner.Registry) []assets.ExpectedFile {
+	collections, err := registry.List()
+	if err != nil {
+		slog.Warn("list provisioners for the registry sync", "error", err)
+		return nil
+	}
+	files := []assets.ExpectedFile{}
+	for _, collection := range collections {
+		for _, version := range collection.Versions {
+			for _, expected := range provisioner.ExpectedFiles(version) {
+				files = append(files, assets.ExpectedFile{Role: expected.Role, Kind: expected.Kind, Filename: expected.Filename})
+			}
+		}
+	}
+	return files
+}
+
 func storageLocations(cfg *config.Config) (*locations.Set, error) {
 	set := locations.New()
 	for _, kind := range []locations.Kind{locations.Machines, locations.Provisioners, locations.Templates} {
@@ -173,6 +191,7 @@ func setupTasks(cfg *config.Config) (*agentSystems, error) {
 	agentMigrations = append(agentMigrations, assets.VersionInfoMigrations...)
 	agentMigrations = append(agentMigrations, certs.Migrations...)
 	agentMigrations = append(agentMigrations, machines.TemplateDiskSizeMigration...)
+	agentMigrations = append(agentMigrations, assets.RegistryMigrations...)
 	agentDB, err := openDB(agentPath, agentMigrations)
 	if err != nil {
 		_ = tasksDB.Close()
@@ -282,11 +301,25 @@ func setupTasks(cfg *config.Config) (*agentSystems, error) {
 		return nil, err
 	}
 	assetsStore := assets.NewStore(agentDB, artifactsRoot)
-	assets.RegisterExecutors(queue, assetsStore, secretsStore.ResourceAuth, secretsStore,
-		cfg.ArtifactStorage.Scanning.SupportedExtensions,
-		func(ctx context.Context, sourceID, createdBy, path string) (*http.Response, error) {
+	assets.RegisterExecutors(queue, assetsStore, assets.Deps{
+		ResourceAuth: secretsStore.ResourceAuth,
+		HCL:          secretsStore,
+		Extensions:   cfg.ArtifactStorage.Scanning.SupportedExtensions,
+		RegistryFetch: func(ctx context.Context, sourceID, createdBy, path string) (*http.Response, error) {
 			return machines.RegistryFetch(ctx, templateSourceList(cfg), sourceID, createdBy, path)
-		})
+		},
+		RegistrySources: func() []string {
+			ids := []string{}
+			for _, source := range templateSourceList(cfg) {
+				if source.Enabled {
+					ids = append(ids, source.ID)
+				}
+			}
+			return ids
+		},
+		ExpectedFiles:   func() []assets.ExpectedFile { return expectedFiles(provisioners) },
+		DownloadTimeout: time.Duration(cfg.ArtifactStorage.Download.TimeoutSeconds) * time.Second,
+	})
 	artifactSvc := assets.NewService(assetsStore, assets.ServiceConfig{
 		Enabled:      cfg.ArtifactStorage.Enabled,
 		Root:         artifactsRoot,

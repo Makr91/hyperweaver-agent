@@ -112,6 +112,47 @@
                 },
                 "type": "object"
             },
+            "assets.RegistryRef": {
+                "properties": {
+                    "architecture": {
+                        "type": "string"
+                    },
+                    "download": {
+                        "type": "string"
+                    },
+                    "key": {
+                        "type": "string"
+                    },
+                    "kind": {
+                        "type": "string"
+                    },
+                    "language": {
+                        "type": "string"
+                    },
+                    "organization": {
+                        "type": "string"
+                    },
+                    "patch": {
+                        "type": "string"
+                    },
+                    "platform": {
+                        "type": "string"
+                    },
+                    "release": {
+                        "type": "string"
+                    },
+                    "sha256": {
+                        "type": "string"
+                    },
+                    "source_name": {
+                        "type": "string"
+                    },
+                    "variant": {
+                        "type": "string"
+                    }
+                },
+                "type": "object"
+            },
             "assets.ScanTaskMetadata": {
                 "properties": {
                     "remove_orphaned": {
@@ -519,7 +560,7 @@
                         "type": "string"
                     },
                     "spec": {
-                        "description": "The creation document (machines this agent created; discovered VMs have none) — the user's intent, never overwritten by discovery. THE DOCUMENT SHAPE (the Hosts.yml-shaped MachineSpec, design §4), stored verbatim on the machine row. The provisioner reference is OPTIONAL — a machine is just a machine, provisioning is optional (the base's provisioner-free create). WITH a provisioner: machine_prepare renders the package's Jinja2 templates/Hosts.template.yml — at create and again before every provision — and the rendered hosts[0] drives everything: its settings/networks/disks build the VM natively (VBoxManage), and its folders/provisioning/vars/roles become the stored provisioner document the pipeline consumes. WITHOUT one: no prepare/render step exists, the spec's own settings/networks build the VM directly, finalize persists no provisioner, and a provisioner document can attach later via PUT /api/machines/{name} + POST /provision. Template context precedence (package-based creates): settings (also flattened UPPERCASE) → per-role \u003cROLE\u003e_INSTALLER/_INSTALLER_HASH/_INSTALLER_VERSION/_FIXPACK*/_HOTFIX* vars + boolean role flags (both casings) → the Field DSL's contribution (metadata.configuration {groups, fields} — defaults merge BEFORE conditional evaluation, answers apply by exact field name, hidden fields are ABSENT from the context) → SECRETS_* vars. Structured settings/networks/disks/roles ride alongside — disks joined the context 2026-07-17 (the converged ask, the networks model exactly): the request's disks section, structured and VERBATIM, inert until a template echoes it (the agent guarantees no keys; the Provisioner's next release adds the echo). Answers are validated authoritatively pre-render: a failing create answers 422 whose body IS the {FIELD: message} map (design §3.1, ruled 2026-07-16). KEY VOCABULARY — provisioner: OPTIONAL package reference; omit it entirely for a provisioner-less machine; when present, both name and version are required and must exist in the registry. hypervisor: OPTIONAL per-machine hypervisor selection (default virtualbox); utm requires a macOS agent host and a box template (settings.box — the .box carries a box.utm bundle imported whole); other boot types are not yet supported on utm. settings: Hosts.yml settings vocabulary. hostname and domain are REQUIRED (machine_domain optionally overrides the naming domain); with machines.prefix_machine_names server_id is REQUIRED too (numeric 1-8 digits, padded to 4 — never auto-assigned; GET /api/machines/ids/next prefills it). box/box_version/box_arch/box_url select the template (package defaults apply); vcpus/memory/os_type/firmware_type/consoleport/consolehost/setup_wait/vagrant_user* drive the build and the pipeline. boot_order: ordered list of floppy|dvd|disk|net|none → --boot1..4 (remaining slots cleared) — the ISO-first install story with disks.cdroms. firmware_type (BIOS|UEFI) is generic — both hypervisors consume it (Hosts.rb reads it for the virtualbox AND zone providers). THE COMMUNICATOR FAMILY (the winrm convergence, sync 2026-07-17): communicator selects the guest transport — ssh (default) or winrm (Windows guests); winrm_port (default 5985, 5986 when winrm_transport is ssl), winrm_transport (default negotiate), and winrm_ssl_peer_verification (default true) tune it. Each of these FOUR keys has a RULED vagrant_-prefixed alias (vagrant_communicator, vagrant_winrm_port, vagrant_winrm_transport, vagrant_winrm_ssl_peer_verification) — these four pairs ONLY, a ruled exception to the no-alias rule; the new spelling WINS when both are present and the shadowed key is narrated as a {step: 'communicator_keys_shadowed', keys: []} task_chain entry on the provision response. networks: Hosts.yml networks vocabulary; entry i rides adapter i+2 (adapter 1 is the reserved NAT transport). dns DECLARE-normalizes at ad-hoc create: wire strings become the document's map shape [{nameserver: ip}] (converged contract, sync 2026-07-18 — the networking role hard-consumes dns[0]['nameserver']; packaged renders already emit maps). disks: OPTIONAL disks section at create (omit entirely = the SPELLED default: boot type template when settings.box is present, else none — a DISKLESS stub; attach media later via modify). THE TYPED DISK SPEC (Mark's word, sync 2026-07-17 — the ZERO-inference model): boot.type is REQUIRED whenever boot is present and is the ONLY dispatcher — template (clone settings.box's image; size = the grow-to; takes no path) | image (attach the EXISTING file at path AS-IS — never created/deleted/resized; size/volume_name refused; force: true skips the task-time attached-elsewhere pre-check) | blank (fresh VDI; size REQUIRED; sparse?/volume_name? legal; takes no path) | none (diskless; no other keys). THE DIRECTORY ADDENDUM (converged, sync 2026-07-17 — the pool/dataset mirror for VBox): blank and template entries may additionally carry directory — the agent-host folder the CREATED disk file lands in; ABSENT = the machine folder (the spelled default). The folder must already exist and be absolute — the agent NEVER creates it (task-time refusal: `\u003cwhere\u003e directory \u003cpath\u003e is not an absolute existing directory on this host`); image entries refuse the key outright (`\u003cwhere\u003e type image does not take directory` — an image's own path already places it). Template clones name their file by volume_name (absent = \"boot\"), keeping the template's own extension. THE CLONE STRATEGY (frozen, sync 2026-07-19 — the converged cross-platform vocabulary): a template boot may carry clone_strategy — copy (DEFAULT everywhere, Mark's ruling: an independent full copy of the template image, exactly today's behavior) | clone (a differencing child off the template's shared multiattach clone base: the base materializes ONCE beside the template image as clone-base.vdi — a one-time full copy, promoted to multiattach — and every clone machine links from it, so creates are near-instant and siblings share the base's blocks; VirtualBox creates the child in the machine folder at the template's size, so clone takes NO size, volume_name, or directory — each is refused; the child is stamped template like any agent-created boot, and template delete gains a children gate). localize is zfs vocabulary (the cross-pool cure — no analog here, clonemedium already crosses drives) and is REFUSED, never warned; a clone_strategy on a non-template boot is refused too. additional_disks[]: type REQUIRED, image|blank only, same per-type rules — {type: \"blank\", size, volume_name?, sparse?, directory?, controller?, port?, device?} or {type: \"image\", path, force?, controller?, port?, device?} (refusal indexes are 1-based). Unknown keys in disk entries are never read for behavior and always preserved verbatim. Agent-created media (template clones, blank VDIs) are provenance-stamped at materialization (hyperweaver:source property / .hw-source sidecar — GET /api/media lists the stamps; delete destroys ONLY stamped media). THE DEVICE MODEL (VirtualBox's real storage surface): controllers[] declares the storage controllers ({name?, type: ide|sata|scsi|sas|nvme|virtio|usb|floppy, ports?, bootable?} — name defaults per type, e.g. \"NVMe Controller\"); every media entry may address one by `controller` name plus `port`/`device` (device matters on IDE — two devices per port). Omitting controllers[] creates ONE controller named \"SATA Controller\" of type sata — the original shape. boot lands on the FIRST controller port 0 unless it names its own controller/port/device. cdroms[]: [{path: agent-host ISO path | iso: a cached-ISO FILENAME resolved through the artifact registry (GET /api/artifacts/iso lists them; the file must exist in an enabled location) — EXACTLY one of the two, controller?, port?, device?}] — the attach-an-ISO-and-install-yourself flow. With a provisioner package the render's disks win. zones: DEAD ON THIS AGENT (Mark's ruling, sync 2026-07-19): zones is Solaris/bhyve configuration — zoneweaver's own section. This agent reads NOTHING from it; a document carrying one stores and survives verbatim, inert (foreign-hypervisor vocabulary, preserved like bhyve disk keys). The keys it used to drive have per-hypervisor homes now: diskif → disks.controllers[].type, bootrom → settings.firmware_type, netif → networks[].nic_type per entry (generic — Hosts.rb consumes those for both providers), and the rest under the vbox key: hostbridge → vbox.platform.chipset, acpi → vbox.platform.acpi, xhci → vbox.usb.xhci, vnc → vbox.vrde.enabled, autostart → vbox.autostart.enabled, guest_agent → vbox.guest_agent, post_provision_boot → vbox.post_provision_boot. cloud_init: OPTIONAL cloud-init section at create (enabled/dns_domain/password/resolvers/sshkey — set as guest properties under /Hyperweaver/CloudInit/). vbox: OPTIONAL vbox section at create — VirtualBox's own PER-HYPERVISOR key (Mark's ruling, sync 2026-07-19: zones is bhyve's, vbox is VirtualBox's, utm reserved; the former top-level hardware key is DEAD — its whole tree lives here now). Contents: (1) the first-class knob vocabulary, vbox.\u003csection\u003e.\u003ckey\u003e grouped by VBoxManage's own usage sections: cpu (hotplug, execution_cap, profile, pae, long_mode, hwvirtex, nested_paging, large_pages, nested_hw_virt, virt_vmsave_vmload, vtx_vpid, vtx_ux, apic, x2apic, hpet, spec_ctrl, ibpb_on_vm_exit/entry, l1d_flush_on_sched/vm_entry, mds_clear_on_sched/vm_entry, arm_gic_its, cpuid_portability_level) · memory (vram, page_fusion, balloon) · graphics (controller, monitor_count, accelerate_3d) · audio (enabled, driver, controller, codec, in, out) · usb (ohci, ehci, xhci, card_reader) · integration (clipboard_mode, clipboard_file_transfers, drag_and_drop, mouse, keyboard) · platform (acpi, chipset, iommu, tpm_type, tpm_location, rtc_use_utc, paravirt_provider, ioapic, triple_fault_reset, hardware_uuid, system_uuid_le, snapshot_folder, description, groups, icon_file, default_frontend, vm_process_priority, vm_execution_engine) · firmware (boot_menu, apic, logo_fade_in/out, logo_display_time, logo_image_path, system_time_offset, pxe_debug) · recording (enabled, screens, file, max_size_mb, max_time_seconds, opts, video_fps, video_rate, video_res) · vrde (enabled, port — range strings allowed, extpack, address, auth_type, auth_library, multi_con, reuse_con, video_channel, video_channel_quality) · autostart (enabled, delay — enabled also drives the agent's startup orchestration) · serial[] ({port 1-4, io_base|\"off\", irq, mode, type}) · parallel[] ({port 1-2, io_base|\"off\", irq, device}) — values pass to VirtualBox UNVALIDATED, unknown sections/keys fail honestly; (2) directives[] = [{directive, value}], the generic modifyvm passthrough (any --flag=value) and the FINAL word after the knobs — the passthrough-only exotica (teleporter, cpuid-set, tracing/testing, guest-debug, pci-attach, plug/unplug-cpu) rides it; (3) guest_agent (boolean, default false — the QEMU guest-agent UART opt-in, the Proxmox model, under the guest_agent.enabled master gate; a document claiming serial port 2 itself always wins) and post_provision_boot (boolean, default false — cycle the machine stop→start after a successful provision run). networks[] entries additionally take per-adapter cable_connected, promisc (deny|allow-vms|allow-all), speed (kbps), boot_prio (0-4), bandwidth_group, nic_type (raw VirtualBox adapter type). notes: free-form notes, persisted onto the machine row at finalize (the base's create contract). tags: tags, persisted at finalize. roles[].files: installer assignments, resolved against the artifact registry at every prepare (artifact_storage.enabled): the named file must exist under (role, type, filename) and pass SHA-256 verification or the start FAILS; hashes are auto-filled from the registry into the template vars, and a spec-supplied hash must match the stored one. Files mount into the working copy's installers/\u003crole\u003e/ tree as hard links or hash-verified copies. properties: THE answers map — one flat map keyed by each Field-DSL field's EXACT name (multiselect answers are native lists). The old basic/advanced split (advanced_properties) died in the one cut. Validated authoritatively pre-render: failures answer 422 {FIELD: message}. sync_method: per-machine file-sync preference (SHI's Rsync/SCP setting), default rsync. Platform rules apply at render time: forced rsync on Windows hosts; macOS auto-falls back to SCP when the system rsync is the ancient Apple 2.x build. The EFFECTIVE value reaches the template context as settings.sync_method / SYNC_METHOD; the stored spec keeps the preference. safe_id_path: agent-host path of a Domino safe-ID file, placed under id-files per the package's id_files metadata (safe_id_dir, keep_original_name). start_after_create: POST /api/machines only — queue the first start immediately. remove_transport_on_completion: the wizard's per-create transport signal (the converged cross-agent key, sync 2026-07-18): true asks the provision pipeline to remove the provisioning transport NIC (the intrinsic NAT, adapter 1 — it has no networks[] entry, so a per-entry flag can never express it) after the whole-walk stamp, via the pipeline-owned power cycle (Mark's execution ruling — stop → machine_transport_remove → start; the post-removal boot gates on NOTHING). ABSENT = this agent's ruled default FALSE (keep — the home/dev model, vagrant-ssh keeps working; zoneweaver's absent-default is true, the datacenter model — knob_defaults['transport.remove_on_completion'] serves each agent's own). Finalize persists the chosen value at configuration.settings.remove_transport_on_completion; flip it later via PUT nics[] {adapter: 1, remove_on_completion}. Document networks[] entries additionally take a per-entry remove_on_completion boolean targeting their own adapters (i+2), same semantics, same cycle.",
+                        "description": "The creation document (machines this agent created; discovered VMs have none) — the user's intent, never overwritten by discovery. THE DOCUMENT SHAPE (the Hosts.yml-shaped MachineSpec, design §4), stored verbatim on the machine row. The provisioner reference is OPTIONAL — a machine is just a machine, provisioning is optional (the base's provisioner-free create). WITH a provisioner: machine_prepare renders the package's Jinja2 templates/Hosts.template.yml — at create and again before every provision — and the rendered hosts[0] drives everything: its settings/networks/disks build the VM natively (VBoxManage), and its folders/provisioning/vars/roles become the stored provisioner document the pipeline consumes. WITHOUT one: no prepare/render step exists, the spec's own settings/networks build the VM directly, finalize persists no provisioner, and a provisioner document can attach later via PUT /api/machines/{name} + POST /provision. Template context precedence (package-based creates): settings (also flattened UPPERCASE) → per-role \u003cROLE\u003e_INSTALLER/_INSTALLER_HASH/_INSTALLER_VERSION/_FIXPACK*/_HOTFIX* vars + boolean role flags (both casings) → the Field DSL's contribution (metadata.configuration {groups, fields} — defaults merge BEFORE conditional evaluation, answers apply by exact field name, hidden fields are ABSENT from the context) → SECRETS_* vars. Structured settings/networks/disks/roles ride alongside — disks joined the context 2026-07-17 (the converged ask, the networks model exactly): the request's disks section, structured and VERBATIM, inert until a template echoes it (the agent guarantees no keys; the Provisioner's next release adds the echo). Answers are validated authoritatively pre-render: a failing create answers 422 whose body IS the {FIELD: message} map (design §3.1, ruled 2026-07-16). KEY VOCABULARY — provisioner: OPTIONAL package reference; omit it entirely for a provisioner-less machine; when present, both name and version are required and must exist in the registry. hypervisor: OPTIONAL per-machine hypervisor selection (default virtualbox); utm requires a macOS agent host and a box template (settings.box — the .box carries a box.utm bundle imported whole); other boot types are not yet supported on utm. settings: Hosts.yml settings vocabulary. hostname and domain are REQUIRED (machine_domain optionally overrides the naming domain); with machines.prefix_machine_names server_id is REQUIRED too (numeric 1-8 digits, padded to 4 — never auto-assigned; GET /api/machines/ids/next prefills it). box/box_version/box_arch/box_url select the template (package defaults apply); vcpus/memory/os_type/firmware_type/consoleport/consolehost/setup_wait/vagrant_user* drive the build and the pipeline. boot_order: ordered list of floppy|dvd|disk|net|none → --boot1..4 (remaining slots cleared) — the ISO-first install story with disks.cdroms. firmware_type (BIOS|UEFI) is generic — both hypervisors consume it (Hosts.rb reads it for the virtualbox AND zone providers). THE COMMUNICATOR FAMILY (the winrm convergence, sync 2026-07-17): communicator selects the guest transport — ssh (default) or winrm (Windows guests); winrm_port (default 5985, 5986 when winrm_transport is ssl), winrm_transport (default negotiate), and winrm_ssl_peer_verification (default true) tune it. Each of these FOUR keys has a RULED vagrant_-prefixed alias (vagrant_communicator, vagrant_winrm_port, vagrant_winrm_transport, vagrant_winrm_ssl_peer_verification) — these four pairs ONLY, a ruled exception to the no-alias rule; the new spelling WINS when both are present and the shadowed key is narrated as a {step: 'communicator_keys_shadowed', keys: []} task_chain entry on the provision response. networks: Hosts.yml networks vocabulary; entry i rides adapter i+2 (adapter 1 is the reserved NAT transport). dns DECLARE-normalizes at ad-hoc create: wire strings become the document's map shape [{nameserver: ip}] (converged contract, sync 2026-07-18 — the networking role hard-consumes dns[0]['nameserver']; packaged renders already emit maps). disks: OPTIONAL disks section at create (omit entirely = the SPELLED default: boot type template when settings.box is present, else none — a DISKLESS stub; attach media later via modify). THE TYPED DISK SPEC (Mark's word, sync 2026-07-17 — the ZERO-inference model): boot.type is REQUIRED whenever boot is present and is the ONLY dispatcher — template (clone settings.box's image; size = the grow-to; takes no path) | image (attach the EXISTING file at path AS-IS — never created/deleted/resized; size/volume_name refused; force: true skips the task-time attached-elsewhere pre-check) | blank (fresh VDI; size REQUIRED; sparse?/volume_name? legal; takes no path) | none (diskless; no other keys). THE DIRECTORY ADDENDUM (converged, sync 2026-07-17 — the pool/dataset mirror for VBox): blank and template entries may additionally carry directory — the agent-host folder the CREATED disk file lands in; ABSENT = the machine folder (the spelled default). The folder must already exist and be absolute — the agent NEVER creates it (task-time refusal: `\u003cwhere\u003e directory \u003cpath\u003e is not an absolute existing directory on this host`); image entries refuse the key outright (`\u003cwhere\u003e type image does not take directory` — an image's own path already places it). Template clones name their file by volume_name (absent = \"boot\"), keeping the template's own extension. THE CLONE STRATEGY (frozen, sync 2026-07-19 — the converged cross-platform vocabulary): a template boot may carry clone_strategy — copy (DEFAULT everywhere, Mark's ruling: an independent full copy of the template image, exactly today's behavior) | clone (a differencing child off the template's shared multiattach clone base: the base materializes ONCE beside the template image as clone-base.vdi — a one-time full copy, promoted to multiattach — and every clone machine links from it, so creates are near-instant and siblings share the base's blocks; VirtualBox creates the child in the machine folder at the template's size, so clone takes NO size, volume_name, or directory — each is refused; the child is stamped template like any agent-created boot, and template delete gains a children gate). localize is zfs vocabulary (the cross-pool cure — no analog here, clonemedium already crosses drives) and is REFUSED, never warned; a clone_strategy on a non-template boot is refused too. additional_disks[]: type REQUIRED, image|blank only, same per-type rules — {type: \"blank\", size, volume_name?, sparse?, directory?, controller?, port?, device?} or {type: \"image\", path, force?, controller?, port?, device?} (refusal indexes are 1-based). Unknown keys in disk entries are never read for behavior and always preserved verbatim. Agent-created media (template clones, blank VDIs) are provenance-stamped at materialization (hyperweaver:source property / .hw-source sidecar — GET /api/media lists the stamps; delete destroys ONLY stamped media). THE DEVICE MODEL (VirtualBox's real storage surface): controllers[] declares the storage controllers ({name?, type: ide|sata|scsi|sas|nvme|virtio|usb|floppy, ports?, bootable?} — name defaults per type, e.g. \"NVMe Controller\"); every media entry may address one by `controller` name plus `port`/`device` (device matters on IDE — two devices per port). Omitting controllers[] creates ONE controller named \"SATA Controller\" of type sata — the original shape. boot lands on the FIRST controller port 0 unless it names its own controller/port/device. cdroms[]: [{path: agent-host ISO path | iso: a cached-ISO FILENAME resolved through the artifact registry (GET /api/artifacts/iso lists them; the file must exist in an enabled location) — EXACTLY one of the two, controller?, port?, device?}] — the attach-an-ISO-and-install-yourself flow. With a provisioner package the render's disks win. zones: DEAD ON THIS AGENT (Mark's ruling, sync 2026-07-19): zones is Solaris/bhyve configuration — zoneweaver's own section. This agent reads NOTHING from it; a document carrying one stores and survives verbatim, inert (foreign-hypervisor vocabulary, preserved like bhyve disk keys). The keys it used to drive have per-hypervisor homes now: diskif → disks.controllers[].type, bootrom → settings.firmware_type, netif → networks[].nic_type per entry (generic — Hosts.rb consumes those for both providers), and the rest under the vbox key: hostbridge → vbox.platform.chipset, acpi → vbox.platform.acpi, xhci → vbox.usb.xhci, vnc → vbox.vrde.enabled, autostart → vbox.autostart.enabled, guest_agent → vbox.guest_agent, post_provision_boot → vbox.post_provision_boot. cloud_init: OPTIONAL cloud-init section at create (enabled/dns_domain/password/resolvers/sshkey — set as guest properties under /Hyperweaver/CloudInit/). vbox: OPTIONAL vbox section at create — VirtualBox's own PER-HYPERVISOR key (Mark's ruling, sync 2026-07-19: zones is bhyve's, vbox is VirtualBox's, utm reserved; the former top-level hardware key is DEAD — its whole tree lives here now). Contents: (1) the first-class knob vocabulary, vbox.\u003csection\u003e.\u003ckey\u003e grouped by VBoxManage's own usage sections: cpu (hotplug, execution_cap, profile, pae, long_mode, hwvirtex, nested_paging, large_pages, nested_hw_virt, virt_vmsave_vmload, vtx_vpid, vtx_ux, apic, x2apic, hpet, spec_ctrl, ibpb_on_vm_exit/entry, l1d_flush_on_sched/vm_entry, mds_clear_on_sched/vm_entry, arm_gic_its, cpuid_portability_level) · memory (vram, page_fusion, balloon) · graphics (controller, monitor_count, accelerate_3d) · audio (enabled, driver, controller, codec, in, out) · usb (ohci, ehci, xhci, card_reader) · integration (clipboard_mode, clipboard_file_transfers, drag_and_drop, mouse, keyboard) · platform (acpi, chipset, iommu, tpm_type, tpm_location, rtc_use_utc, paravirt_provider, ioapic, triple_fault_reset, hardware_uuid, system_uuid_le, snapshot_folder, description, groups, icon_file, default_frontend, vm_process_priority, vm_execution_engine) · firmware (boot_menu, apic, logo_fade_in/out, logo_display_time, logo_image_path, system_time_offset, pxe_debug) · recording (enabled, screens, file, max_size_mb, max_time_seconds, opts, video_fps, video_rate, video_res) · vrde (enabled, port — range strings allowed, extpack, address, auth_type, auth_library, multi_con, reuse_con, video_channel, video_channel_quality) · autostart (enabled, delay — enabled also drives the agent's startup orchestration) · serial[] ({port 1-4, io_base|\"off\", irq, mode, type}) · parallel[] ({port 1-2, io_base|\"off\", irq, device}) — values pass to VirtualBox UNVALIDATED, unknown sections/keys fail honestly; (2) directives[] = [{directive, value}], the generic modifyvm passthrough (any --flag=value) and the FINAL word after the knobs — the passthrough-only exotica (teleporter, cpuid-set, tracing/testing, guest-debug, pci-attach, plug/unplug-cpu) rides it; (3) guest_agent (boolean, default false — the QEMU guest-agent UART opt-in, the Proxmox model, under the guest_agent.enabled master gate; a document claiming serial port 2 itself always wins) and post_provision_boot (boolean, default false — cycle the machine stop→start after a successful provision run). networks[] entries additionally take per-adapter cable_connected, promisc (deny|allow-vms|allow-all), speed (kbps), boot_prio (0-4), bandwidth_group, nic_type (raw VirtualBox adapter type). notes: free-form notes, persisted onto the machine row at finalize (the base's create contract). tags: tags, persisted at finalize. roles[].files: installer assignments, resolved against the artifact registry at every prepare (artifact_storage.enabled): the named file must exist under (role, type, filename) and pass SHA-256 verification or the start FAILS; hashes are auto-filled from the registry into the template vars, and a spec-supplied hash must match the stored one. Files mount into the working copy's installers/\u003crole\u003e/ tree as hard links or hash-verified copies. properties: THE answers map — one flat map keyed by each Field-DSL field's EXACT name (multiselect answers are native lists). The old basic/advanced split (advanced_properties) died in the one cut. Validated authoritatively pre-render: failures answer 422 {FIELD: message}. sync_method: per-machine file-sync preference (SHI's Rsync/SCP setting), default rsync. Platform rules apply at render time: forced rsync on Windows hosts; macOS auto-falls back to SCP when the system rsync is the ancient Apple 2.x build. The EFFECTIVE value reaches the template context as settings.sync_method / SYNC_METHOD; the stored spec keeps the preference. start_after_create: POST /api/machines only — queue the first start immediately. remove_transport_on_completion: the wizard's per-create transport signal (the converged cross-agent key, sync 2026-07-18): true asks the provision pipeline to remove the provisioning transport NIC (the intrinsic NAT, adapter 1 — it has no networks[] entry, so a per-entry flag can never express it) after the whole-walk stamp, via the pipeline-owned power cycle (Mark's execution ruling — stop → machine_transport_remove → start; the post-removal boot gates on NOTHING). ABSENT = this agent's ruled default FALSE (keep — the home/dev model, vagrant-ssh keeps working; zoneweaver's absent-default is true, the datacenter model — knob_defaults['transport.remove_on_completion'] serves each agent's own). Finalize persists the chosen value at configuration.settings.remove_transport_on_completion; flip it later via PUT nics[] {adapter: 1, remove_on_completion}. Document networks[] entries additionally take a per-entry remove_on_completion boolean targeting their own adapters (i+2), same semantics, same cycle.",
                         "items": {
                             "type": "integer"
                         },
@@ -590,17 +631,6 @@
                         "type": "string"
                     },
                     "version": {
-                        "type": "string"
-                    }
-                },
-                "type": "object"
-            },
-            "machines.SkippedPlaybook": {
-                "properties": {
-                    "playbook": {
-                        "type": "string"
-                    },
-                    "run": {
                         "type": "string"
                     }
                 },
@@ -1480,6 +1510,9 @@
                     },
                     "path": {
                         "type": "string"
+                    },
+                    "registry": {
+                        "$ref": "#/components/schemas/assets.RegistryRef"
                     },
                     "role": {
                         "type": "string"
@@ -2420,7 +2453,7 @@
                         "type": "string"
                     },
                     "type": {
-                        "description": "Type is one of iso, image, installer, fixpack, hotfix, id_file.",
+                        "description": "Type is one of iso, image, installer, fixpack, hotfix.",
                         "type": "string"
                     }
                 },
@@ -4328,6 +4361,26 @@
                 },
                 "type": "object"
             },
+            "server.machineCredential": {
+                "properties": {
+                    "default": {
+                        "type": "boolean"
+                    },
+                    "id": {
+                        "type": "string"
+                    },
+                    "kind": {
+                        "type": "string"
+                    },
+                    "name": {
+                        "type": "string"
+                    },
+                    "use": {
+                        "type": "string"
+                    }
+                },
+                "type": "object"
+            },
             "server.machineDefaultDisks": {
                 "properties": {
                     "controller": {
@@ -4463,6 +4516,13 @@
                     "configuration": {
                         "items": {
                             "type": "integer"
+                        },
+                        "type": "array",
+                        "uniqueItems": false
+                    },
+                    "credentials": {
+                        "items": {
+                            "$ref": "#/components/schemas/server.machineCredential"
                         },
                         "type": "array",
                         "uniqueItems": false
@@ -4836,6 +4896,32 @@
                         "$ref": "#/components/schemas/server.monitoringSamplingMeta"
                     },
                     "totalCount": {
+                        "type": "integer"
+                    }
+                },
+                "type": "object"
+            },
+            "server.modifyNetworkAddressRequest": {
+                "properties": {
+                    "address": {
+                        "type": "string"
+                    },
+                    "down": {
+                        "type": "boolean"
+                    },
+                    "interface": {
+                        "type": "string"
+                    },
+                    "primary": {
+                        "type": "boolean"
+                    },
+                    "temporary": {
+                        "type": "boolean"
+                    },
+                    "type": {
+                        "type": "string"
+                    },
+                    "wait": {
                         "type": "integer"
                     }
                 },
@@ -5583,6 +5669,10 @@
             },
             "server.openRDPRequest": {
                 "properties": {
+                    "credential_id": {
+                        "description": "CredentialID names the password row of the certs store the client signs in with",
+                        "type": "string"
+                    },
                     "target": {
                         "description": "Which resolved target to open (default: console if resolvable, else guest)",
                         "type": "string"
@@ -6056,6 +6146,26 @@
                     "confirm_host_hooks": {
                         "type": "boolean"
                     },
+                    "playbook": {
+                        "description": "Playbook narrows the run to this one provisioning.playbooks path",
+                        "type": "string"
+                    },
+                    "roles": {
+                        "description": "Roles narrows the run to these document roles, in the document's order",
+                        "items": {
+                            "type": "string"
+                        },
+                        "type": "array",
+                        "uniqueItems": false
+                    },
+                    "scripts": {
+                        "description": "Scripts narrows the run to these provisioning.shell.scripts paths",
+                        "items": {
+                            "type": "string"
+                        },
+                        "type": "array",
+                        "uniqueItems": false
+                    },
                     "skip_boot": {
                         "type": "boolean"
                     }
@@ -6497,13 +6607,6 @@
                     "playbook_count": {
                         "type": "integer"
                     },
-                    "playbooks_skipped": {
-                        "items": {
-                            "$ref": "#/components/schemas/machines.SkippedPlaybook"
-                        },
-                        "type": "array",
-                        "uniqueItems": false
-                    },
                     "skipped_methods": {
                         "items": {
                             "type": "string"
@@ -6795,6 +6898,14 @@
                     },
                     "status": {
                         "description": "connecting | active | closed | failed",
+                        "type": "string"
+                    }
+                },
+                "type": "object"
+            },
+            "server.sshStartRequest": {
+                "properties": {
+                    "credential_id": {
                         "type": "string"
                     }
                 },
@@ -7336,9 +7447,6 @@
                         "type": "string"
                     },
                     "playbook_count": {
-                        "type": "integer"
-                    },
-                    "playbooks_skipped": {
                         "type": "integer"
                     },
                     "script_count": {
@@ -8795,7 +8903,7 @@
         },
         "/api/artifacts": {
             "get": {
-                "description": "Minimum role: viewer. Every registry row — present files and expectation-only entries — with zoneweaver's filtering and paging. version is the row's structured version {major, minor, patch, fix_pack, ea_access_release, full_version}, the bundled registry's where it recorded one, else the version string split on dots. A row whose file is missing carries source, the registry the agent can fetch it from: boxvault when its source_url is under a configured box registry, hcl for the HCL portal and every bundled expectation, custom for any other URL; POST /api/artifacts/{id}/fetch queues that download. type id_file lists the ID files, role the id type (safe_id, server_id, user_id). A file a scan discovers in an installer location takes its file_type from its name, FP\u003cdigits\u003e a fixpack, HF\u003cdigits\u003e or IF\u003cdigits\u003e a hotfix, the rest installer; a row placed with an explicit kind keeps it.",
+                "description": "Minimum role: viewer. Every registry row — present files and expectation-only entries — with zoneweaver's filtering and paging. version is the row's structured version {major, minor, patch, fix_pack, ea_access_release, full_version}, the bundled registry's or the box registry's release and patch where one recorded it, else the version string split on dots. registry is the BoxVault download file the row is, {source_name, organization, download, release, patch, key, kind, platform, architecture, language, variant, sha256}, every member a string, null while the row names none; file_type is the registry's kind, interim-fix read as hotfix, whenever registry is set. A row whose file is missing carries source, the registry the agent can fetch it from: boxvault while registry is set or its source_url is under a configured box registry, hcl for the HCL portal and every bundled expectation, custom for any other URL; POST /api/artifacts/{id}/fetch queues that download. A file a scan discovers in an installer location takes its file_type from the registry file or the expectation carrying its sha256, else from its name, FP\u003cdigits\u003e a fixpack, HF\u003cdigits\u003e or IF\u003cdigits\u003e a hotfix, the rest installer; a row placed with an explicit kind keeps it. ?role=\u003cinstaller_dir\u003e answers the rows a manifest role reads, each with registry, so a picker matches a default by file name and exact version.",
                 "parameters": [
                     {
                         "description": "Filter by artifact type",
@@ -9237,6 +9345,44 @@
                 ]
             }
         },
+        "/api/artifacts/registry/{sourceName}/sync": {
+            "post": {
+                "description": "Minimum role: operator. Queues artifact_registry_sync for the source: the host reads the registry's /api/downloads/discover as the person who queued it, rebuilds its index of registry files, looks every installed provisioner's manifest defaults up by file name, upserts a hit's expectation row under the role's installer_dir and the registry's kind with registry, the sha256 and the version of the release and patch, seeds a miss without a hash and no registry, and stamps registry onto every row carrying a sha256 a registry lists. The agent queues the same sync on its own when a provisioner version is imported or installed from a catalog and when the storage configuration is saved.",
+                "parameters": [
+                    {
+                        "description": "The configured template source's id",
+                        "in": "path",
+                        "name": "sourceName",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "responses": {
+                    "202": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object"
+                                }
+                            }
+                        },
+                        "description": "Registry sync task queued"
+                    },
+                    "404": {
+                        "description": "Source not found or disabled"
+                    },
+                    "503": {
+                        "description": "Artifact storage is disabled"
+                    }
+                },
+                "summary": "Resolve the host's expectations against a box registry",
+                "tags": [
+                    "Artifacts"
+                ]
+            }
+        },
         "/api/artifacts/scan": {
             "post": {
                 "description": "Minimum role: operator. Queues artifact_scan over one location (storage_path_id), one type, or every enabled location: new files hashed and registered, vanished files marked missing (expectation rows always survive as file_exists:false; remove_orphaned deletes expectation-less rows), verify_checksums re-hashes every present file — the task FAILS when any file mismatches its expectation. Automatic startup/periodic scans run agent-side without task rows.",
@@ -9436,7 +9582,7 @@
                                 }
                             }
                         },
-                        "description": "name, path or type missing (required); type outside iso, image, installer, fixpack, hotfix, id_file (enum at /type); path not absolute (pattern absolutePath at /path); directory not creatable (writable at /path)"
+                        "description": "name, path or type missing (required); type outside iso, image, installer, fixpack, hotfix (enum at /type); path not absolute (pattern absolutePath at /path); directory not creatable (writable at /path)"
                     },
                     "503": {
                         "content": {
@@ -9818,7 +9964,7 @@
         },
         "/api/artifacts/{id}/fetch": {
             "post": {
-                "description": "Minimum role: operator. Queues the download of a known row whose file is not on this host, from the source the row names: boxvault queues artifact_registry_download as the signed-in person for the file its source_url names on the configured box registry; hcl queues hcl_download under the newest api_key secret the person may reach; custom queues artifact_download of the source_url. The file lands in the row's own location under its role, the row's expected sha256 verified during the stream, and the task reports progress as every other download does. No body.",
+                "description": "Minimum role: operator. Queues the download of a known row whose file is not on this host, from the source the row names: boxvault queues artifact_registry_download as the signed-in person for the registry file the row's registry names, else for the file its source_url names on the configured box registry; hcl queues hcl_download under the newest api_key secret the person may reach; custom queues artifact_download of the source_url. The file lands in the row's own location under its role, the row's expected sha256 verified during the stream, and the task reports progress as every other download does. No body.",
                 "parameters": [
                     {
                         "description": "Artifact id",
@@ -12689,7 +12835,7 @@
         },
         "/api/machines/orchestration/test": {
             "post": {
-                "description": "Minimum role: operator. Computes the SHUTDOWN execution plan over running machines — priority groups of ten, lowest first — without executing anything, plus a duration estimate (30s between groups + 120s per machine in the largest group, the base's arithmetic).",
+                "description": "Minimum role: operator. Computes the SHUTDOWN execution plan over running machines — priority groups of ten, lowest first — without executing anything, plus a duration estimate: machines.orchestration.priority_delay seconds between groups and machines.shutdown_timeout seconds per machine in the largest group.",
                 "requestBody": {
                     "content": {
                         "application/json": {
@@ -12971,7 +13117,7 @@
                 ]
             },
             "get": {
-                "description": "Minimum role: viewer. Live-checks VirtualBox (updating the registry on drift) and returns the record, its live configuration, pending tasks, and knob_current — the current values in PUT's own vocabulary (the Edit-surface prefill); a bridged adapter's knob_current.nics[] entry carries interface, the OS interface name GET /api/monitoring/network/interfaces answers as link, joined through VirtualBox's bridged interfaces list by MAC address and then IP address. configuration carries nat_forwards, the NAT port-forward rules as the rows GET /api/machines/{machineName}/config answers ({name, protocol, host_ip, host_port, guest_ip, guest_port, adapter}), read from the live view and from the last reconciled copy when the hypervisor does not answer.",
+                "description": "Minimum role: viewer. Live-checks VirtualBox (updating the registry on drift) and returns the record, its live configuration, pending tasks, credentials — the machine's vault credentials as [{id, kind, name, use, default}], the document's credentials[] entries else the host's machines.default_credentials, each row's id, kind and name and never a member value, rows the caller may not read left out — and knob_current — the current values in PUT's own vocabulary (the Edit-surface prefill); a bridged adapter's knob_current.nics[] entry carries interface, the OS interface name GET /api/monitoring/network/interfaces answers as link, joined through VirtualBox's bridged interfaces list by MAC address and then IP address. configuration carries nat_forwards, the NAT port-forward rules as the rows GET /api/machines/{machineName}/config answers ({name, protocol, host_ip, host_port, guest_ip, guest_port, adapter}), read from the live view and from the last reconciled copy when the hypervisor does not answer.",
                 "parameters": [
                     {
                         "description": "Machine name",
@@ -13004,7 +13150,7 @@
                 ]
             },
             "put": {
-                "description": "Minimum role: operator (the machine-modify capability token). The zoneweaver modify mechanism, changed-fields-only body with three change classes. (1) DB-immediate: notes/tags (registry-only), boot_priority (spec settings), and the SSH CREDENTIALS family — vagrant_user/vagrant_user_pass/vagrant_user_private_key_path merge key-by-key into configuration.settings (the rest of settings survives; empty string or null DELETES a key), instantly live for the SSH terminal, SFTP, and provisioning pipeline — the way to give any machine (wizard-less creates, discovered VMs) working SSH. Credential values never enter task metadata. (2) provisioner: the PROVISIONER DOCUMENT stored verbatim into configuration.provisioner — a Hosts.yml host entry (folders[], provisioning.ansible.playbooks in object or list form, vars, roles[], secrets, pre_tasks/post_tasks, ssh_port); an immediate DB-only update the next /provision consumes; create's finalize auto-fills it from the rendered package template and PUT overrides it whole. When the document carries settings.consoleport it must be an integer in 1025-65535 (number or numeric string — the value feeds VRDE's TCP/Ports); anything else answers 400 `consoleport \u003cvalue\u003e is outside the valid console port range (1025-65535)` BEFORE the document stores (the converged pre-flight, sync 2026-07-17; an absent consoleport is fine). The TOP-LEVEL vcpus field, when present, must be a WHOLE number \u003e= 1 (integral floats like 2.0 pass; 2.5, zero, negatives, and non-numerics refuse); anything else answers 400 `vcpus \u003cvalue\u003e is not a valid vCPU count (whole number \u003e= 1)` BEFORE ANY field applies — even the DB-immediate ones (the same converged pre-flight; an absent vcpus is fine). (3) infrastructure fields: against a POWERED-OFF machine they queue a machine_modify task (requires_restart: true) exactly as before; against ANYTHING ELSE (running/paused/saved/transitioning — VirtualBox only modifies powered-off machines) the ACCRUE-CHANGES contract applies: the fields are DRY-VALIDATED (unknown vbox knobs and malformed serial/parallel entries reject at the PUT), merged into the machine's pending set (per top-level key the last edit wins; vbox merges per section.key so successive edits of different knobs coexist), and the answer is status pending_power_cycle with the merged pending_changes document and NO task_id. Pending changes apply automatically at the next agent-driven power transition — stop chains the modify after the power-off, start runs it FIRST (start depends on it: a bad pending value fails the boot honestly rather than silently skipping), restart slots it between stop and start, and bulk start/stop chain the same way. A successful apply clears the set; a failed one keeps it pending. DELETE /api/machines/{name}/pending-changes cancels the whole set. Pure-GUI stop+start never passes through the agent, so pending changes wait for the next agent-driven transition. Translations from the base vocabulary: ram→memory, vcpus→cpus, os_type→ostype, vnc→VRDE on/off, acpi/xhci→--acpi/--usb-xhci, autoboot→autostart, bootrom→firmware (efi when the value names EFI, else bios), hostbridge→chipset (i440fx→piix3), netif (virtio|e1000)→every configured adapter's hardware type. diskif and complex CPU topology have no modifyvm analog — reported as skipped in task output, never silently accepted. add_nics land on the first free adapters (bridged; global_nic = the bridge interface, mac_addr honored; vlan_id/allowed_address have no analog and are noted); remove_nics name adapter numbers 1-8 — on agent-created machines adapter 1 is the reserved NAT (egress) and document networks sit on 2+, so removing adapter 1 cuts the guest's internet. add_disks create media under the machine's working directory (volume_name/size/sparse) or attach an existing file by path, at the next free SATA port; add_cdroms attach ISOs by raw path or by cached-ISO filename (iso — resolved through the artifact registry). remove_disks/remove_cdroms name SATA PORT numbers 1 and up — port 0 is the boot medium and is refused; detached files are PRESERVED (the base never destroys the volume). cloud_init keys update the machine's guest properties. When only DB-immediate fields changed, the answer is status completed with requires_restart: false and no task. THE TYPED DISK SPEC (disks.boot.type — see POST /api/machines) governs disks at CREATE, and add_disks[] SPEAKS THE SAME TYPED ENTRIES (the modify cut, sync 2026-07-18): type REQUIRED (image|blank), per-type keys and the frozen refusal strings with the add_disks[\u003cn\u003e] prefix (1-based), answered AT THE PUT on both the queue and accrue paths; blank entries are stamped and honor directory, image entries pre-check existence and holders at task time. remove_disks/add_cdroms/remove_cdroms are unchanged, and existing machines' stored documents are never re-read for disks (no migration). UTM MACHINES (the scripting-API subset, machine STOPPED): ram/vcpus apply via the config API, utm.notes and utm.qemu_args[] apply verbatim, add_nics become vmnet QEMU-arg pairs (global_nic → vmnet-bridged+ifname, absent → vmnet-shared; mac_addr honored, else a random MAC), remove_nics name netdev ids (strings like net2), and nics[] applies mac only (adapter = the 0-based interface index); every drive family (add/remove disks, cdroms, controllers) is REFUSED — UTM's scripting API does not expose drives — and os_type/vnc/acpi/xhci/bootrom/hostbridge/netif/diskif/boot_order/autoboot/guest_agent/cloud_init/vbox narrate as skipped (no UTM scripting analog).",
+                "description": "Minimum role: operator (the machine-modify capability token). The zoneweaver modify mechanism, changed-fields-only body with three change classes. (1) DB-immediate: notes/tags (registry-only), boot_priority (spec settings), credentials — the machine's vault credentials as [{id, use, default}], id a password, ssh_key or key_pair row of the certs store the caller may read, use one of ssh, rdp, console and vagrant, stored whole into configuration.credentials (an empty list or null clears it, the host's machines.default_credentials then applying), answered on GET as credentials with each row's id, kind and name — and the SSH CREDENTIALS family — vagrant_user/vagrant_user_pass/vagrant_user_private_key_path merge key-by-key into configuration.settings (the rest of settings survives; empty string or null DELETES a key), instantly live for the SSH terminal, SFTP, and provisioning pipeline — the way to give any machine (wizard-less creates, discovered VMs) working SSH. Credential values never enter task metadata. (2) provisioner: the PROVISIONER DOCUMENT stored verbatim into configuration.provisioner — a Hosts.yml host entry (folders[], provisioning.ansible.playbooks in object or list form, vars, roles[], secrets, pre_tasks/post_tasks, ssh_port); an immediate DB-only update the next /provision consumes; create's finalize auto-fills it from the rendered package template and PUT overrides it whole. When the document carries settings.consoleport it must be an integer in 1025-65535 (number or numeric string — the value feeds VRDE's TCP/Ports); anything else answers 400 `consoleport \u003cvalue\u003e is outside the valid console port range (1025-65535)` BEFORE the document stores (the converged pre-flight, sync 2026-07-17; an absent consoleport is fine). The TOP-LEVEL vcpus field, when present, must be a WHOLE number \u003e= 1 (integral floats like 2.0 pass; 2.5, zero, negatives, and non-numerics refuse); anything else answers 400 `vcpus \u003cvalue\u003e is not a valid vCPU count (whole number \u003e= 1)` BEFORE ANY field applies — even the DB-immediate ones (the same converged pre-flight; an absent vcpus is fine). (3) infrastructure fields: against a POWERED-OFF machine they queue a machine_modify task (requires_restart: true) exactly as before; against ANYTHING ELSE (running/paused/saved/transitioning — VirtualBox only modifies powered-off machines) the ACCRUE-CHANGES contract applies: the fields are DRY-VALIDATED (unknown vbox knobs and malformed serial/parallel entries reject at the PUT), merged into the machine's pending set (per top-level key the last edit wins; vbox merges per section.key so successive edits of different knobs coexist), and the answer is status pending_power_cycle with the merged pending_changes document and NO task_id. Pending changes apply automatically at the next agent-driven power transition — stop chains the modify after the power-off, start runs it FIRST (start depends on it: a bad pending value fails the boot honestly rather than silently skipping), restart slots it between stop and start, and bulk start/stop chain the same way. A successful apply clears the set; a failed one keeps it pending. DELETE /api/machines/{name}/pending-changes cancels the whole set. Pure-GUI stop+start never passes through the agent, so pending changes wait for the next agent-driven transition. Translations from the base vocabulary: ram→memory, vcpus→cpus, os_type→ostype, vnc→VRDE on/off, acpi/xhci→--acpi/--usb-xhci, autoboot→autostart, bootrom→firmware (efi when the value names EFI, else bios), hostbridge→chipset (i440fx→piix3), netif (virtio|e1000)→every configured adapter's hardware type. diskif and complex CPU topology have no modifyvm analog — reported as skipped in task output, never silently accepted. add_nics land on the first free adapters (bridged; global_nic = the bridge interface, mac_addr honored; vlan_id/allowed_address have no analog and are noted); remove_nics name adapter numbers 1-8 — on agent-created machines adapter 1 is the reserved NAT (egress) and document networks sit on 2+, so removing adapter 1 cuts the guest's internet. add_disks create media under the machine's working directory (volume_name/size/sparse) or attach an existing file by path, at the next free SATA port; add_cdroms attach ISOs by raw path or by cached-ISO filename (iso — resolved through the artifact registry). remove_disks/remove_cdroms name SATA PORT numbers 1 and up — port 0 is the boot medium and is refused; detached files are PRESERVED (the base never destroys the volume). cloud_init keys update the machine's guest properties. When only DB-immediate fields changed, the answer is status completed with requires_restart: false and no task. THE TYPED DISK SPEC (disks.boot.type — see POST /api/machines) governs disks at CREATE, and add_disks[] SPEAKS THE SAME TYPED ENTRIES (the modify cut, sync 2026-07-18): type REQUIRED (image|blank), per-type keys and the frozen refusal strings with the add_disks[\u003cn\u003e] prefix (1-based), answered AT THE PUT on both the queue and accrue paths; blank entries are stamped and honor directory, image entries pre-check existence and holders at task time. remove_disks/add_cdroms/remove_cdroms are unchanged, and existing machines' stored documents are never re-read for disks (no migration). UTM MACHINES (the scripting-API subset, machine STOPPED): ram/vcpus apply via the config API, utm.notes and utm.qemu_args[] apply verbatim, add_nics become vmnet QEMU-arg pairs (global_nic → vmnet-bridged+ifname, absent → vmnet-shared; mac_addr honored, else a random MAC), remove_nics name netdev ids (strings like net2), and nics[] applies mac only (adapter = the 0-based interface index); every drive family (add/remove disks, cdroms, controllers) is REFUSED — UTM's scripting API does not expose drives — and os_type/vnc/acpi/xhci/bootrom/hostbridge/netif/diskif/boot_order/autoboot/guest_agent/cloud_init/vbox narrate as skipped (no UTM scripting analog).",
                 "parameters": [
                     {
                         "description": "Machine name",
@@ -14470,7 +14616,7 @@
         },
         "/api/machines/{machineName}/open-rdp": {
             "post": {
-                "description": "Minimum role: operator (the host-launchers capability token — the launcher pattern, open-ftp's shape). Launches the AGENT HOST'S RDP client at the chosen target: mstsc /v:\u003chost\u003e:\u003cport\u003e on Windows, the OS rdp:// handler elsewhere (Microsoft Remote Desktop, Remmina). Body optionally picks the target; default = console when VRDE is live, else guest. Direct-mode desktop contract; fire-and-forget.",
+                "description": "Minimum role: operator (the host-launchers capability token — the launcher pattern, open-ftp's shape). Launches the AGENT HOST'S RDP client at the chosen target: mstsc /v:\u003chost\u003e:\u003cport\u003e on Windows, the OS rdp:// handler elsewhere (Microsoft Remote Desktop, Remmina). Body optionally picks the target; default = console when VRDE is live, else guest. CREDENTIAL: credential_id names a password row of the certs store the caller may read; absent, the machine's credentials[] entry with use rdp for the guest target or console for the console target (default first) applies, else machines.default_credentials; the row's username (extra.username or extra.user) and password are resolved on the agent, stored for the target through cmdkey before mstsc opens on Windows and carried as the username of the rdp:// link elsewhere, never sent to the browser. Direct-mode desktop contract; fire-and-forget.",
                 "parameters": [
                     {
                         "description": "Machine name",
@@ -14493,13 +14639,13 @@
                                     {
                                         "$ref": "#/components/schemas/server.openRDPRequest",
                                         "summary": "request",
-                                        "description": "Optional target selection (console | guest)"
+                                        "description": "Optional target selection (console | guest) and credential_id"
                                     }
                                 ]
                             }
                         }
                     },
-                    "description": "Optional target selection (console | guest)"
+                    "description": "Optional target selection (console | guest) and credential_id"
                 },
                 "responses": {
                     "200": {
@@ -14513,7 +14659,7 @@
                         "description": "Launch requested"
                     },
                     "400": {
-                        "description": "Machine not running, requested target unresolvable, or no target at all"
+                        "description": "Machine not running, requested target unresolvable, no target at all, or a credential_id naming no readable password row"
                     },
                     "404": {
                         "description": "Machine not found, or no VM exists behind it yet"
@@ -14641,7 +14787,7 @@
         },
         "/api/machines/{machineName}/provision": {
             "post": {
-                "description": "Minimum role: operator. Orchestrates the full provisioning run against the STORED provisioner document (the zoneweaver mechanism). THERE ARE NO PHASES: the run executes the stored document's provisioning: section AS WRITTEN — method keys in the order they appear in the stored document, entries within each method in list order — bracketed by the folder sync (outermost) and the pre[]/post[] hooks; the method children chain DIRECTLY under the orchestration parent. The chain: machine_prepare (re-render + refresh the working copy — regenerated before every provision) → boot (the plain start operation as a child, skipped when running or skip_boot) → machine_wait_ssh (credentials = settings.vagrant_user/vagrant_user_pass/vagrant_user_private_key_path — SSH keys resolve over the THREE-TIER ladder (Mark's three-tier ruling, sync 2026-07-17): tier 1 = the working copy's vagrant_user_private_key_path when the file EXISTS (rotated, or user-supplied); tier 2 = the packaged bootstrap key inside the working copy (driver/ssh_keys/id_rsa, then the legacy core/ssh_keys/id_rsa) when the named key is missing or none is named — never a guest fetch; the agent provisioning key is the last existence-checked candidate, and password auth engages ONLY when no key file exists anywhere — a key file on disk always beats a document password (zoneweaver's exact ladder). TIER 3 is RECOVERY ONLY: when the wait exhausts on key auth and the guest-agent channel is enabled, the agent recovers the rotated key over QGA (guest-exec cat of /home/\u003cvagrant_user\u003e/.ssh/id_ssh_rsa), lands it at the working-copy key path (0600), and retries the wait ONCE — without a QGA channel the failure honestly names 'both known keys were rejected and no SSH-free transport exists'; transport = the provisioning NIC's NAT ssh port-forward at 127.0.0.1 when the machine carries one — vagrant's model, immune to guest network reconfiguration — else the control IP from networks[] is_control → provisional → first; neither existing is a 400) → machine_sync_parent + one machine_sync per folders[] entry (transport per folder.type: rsync | scp, each with a pure-Go fallback when the binary is absent — embedded rsync client / SFTP, loudly narrated in the task output; vagrant is optional; disabled entries skipped; type virtualbox registers a REAL VirtualBox shared folder instead of copying — hot-added with automount, guest-mounted via vboxsf when Guest Additions run, a failed guest mount narrates and never fails the pipeline) → one machine_hook per provisioning.pre[] SEQUENCE HOOK entry, before the first method ({script, target: host|guest default guest, on_failure: abort|continue default abort, run: always|once default always} — design §5's ruled shape: guest hooks upload+sudo-run like shell scripts, host hooks run the working-copy script ON THE AGENT HOST gated by provisioning.host_hooks (default ON here), on_failure continue narrates and proceeds, run once skips after the first successful provision) → THE METHOD WALK — provisioning:'s keys in stored-document order, entries in list order: shell → one machine_shell per scripts[] string (the package-relative path resolves against the working copy, uploads over the built-in SFTP to a /tmp path, chmod +x, runs with sudo — shebang honored — then removes itself; a nonzero exit fails the task; bare string entries carry no run directive and execute every time the walk reaches them); ansible → groups in list order, each group's local[] then its remote[] per its own lists — ONE chain, each entry local (machine_provision) or remote (machine_provision_remote — design §5: ansible-playbook ON THE AGENT HOST dialing the guest over the pipeline transport, inventory pinned to the resolved ip/port, credentials from the stored settings with the agent provisioning key as fallback, ANSIBLE_CONFIG/ANSIBLE_COLLECTIONS_PATH resolved against the working copy, remote_collections galaxy-installs host-side; the control node resolves natively where the OS carries ansible and through WSL on Windows hosts — the default WSL distribution's ansible, host paths translated to their /mnt form, extra-vars via an @file in the working copy, the private key riding a chmod-600 mktemp copy (keys on /mnt mounts are world-readable and OpenSSH refuses them), and 127.0.0.1 forward targets (ssh and winrm alike) reached through a RUN-SCOPED twin forward bound to the WSL gateway address (NAT-mode WSL2 shares no loopback with the Windows host and the create-time forwards bind 127.0.0.1 — the twin is added before the run, removed after, host-internal, and the loopback rule is untouched) — and NO control node anywhere fails honestly) per its OWN list, never all-locals-then-all-remotes; run directives filter PER ENTRY (always = every run; not_first = only after a prior success; once/unset = only when never provisioned — judged by configuration.provisioner_state.last_provisioned_at); docker → one machine_docker_compose per docker_compose[] (or docker-compose[]) file (guest path, `up -d`, compose v2 plugin first then docker-compose) — NO engine installation: an absent guest engine fails the task honestly, and compose entries carry no run pin; UNKNOWN method keys SURVIVE in the stored document and are narrate-skipped by the walk — named loudly in the response and the parent's metadata, never a failure → one machine_hook per provisioning.post[] entry, after the last method → when any folder carries syncback: true, machine_syncback_parent + one machine_syncback per flagged folder pulls those folders guest→host — the post-provision results landing (folder.to → folder.map reversed; delete never honored on a pull, no chown) → KEY ROTATION (settings.vagrant_ssh_insert_key, the on/true/1/yes vocabulary — the key_rotate proposal, sync 2026-07-17): ONE machine_key_rotate child AFTER the syncback bracket adopts the box's ROTATED private key — SFTP-reads /home/\u003cvagrant_user\u003e/.ssh/id_ssh_rsa from the guest (a missing remote file is a narrated skip and the task SUCCEEDS — box built without rotation), lands it at settings.vagrant_user_private_key_path in the working copy (0600), then strips the bootstrap pubkey line from the guest file (sed '/vagrantup/d' — Hosts.rb:706's hack; a strip failure fails the task HONESTLY — the landed key stays, and the whole-walk stamp never sits on this child). It NEVER owns the whole-walk stamp; the response task_chain[] carries {step: 'key_rotate', task_id}, and winrm guests get the response-only {step: 'key_rotate_skipped_winrm'} entry instead. THE STAMP: provisioner_state.last_provisioned_at records ONLY when the ENTIRE walk succeeds, whatever type its last entry is — it rides the chain's final task, and the linear chain makes that equivalent to whole-run success; a partial run never marks the machine provisioned. THE PIPELINE-OWNED POWER CYCLE (Mark's execution ruling, sync 2026-07-18): when the machine is flagged for transport removal (settings.remove_transport_on_completion true, or any networks[] entry's remove_on_completion — absent = this agent's default FALSE) the chain appends stop → machine_transport_remove → start AFTER the stamp (task_chain steps post_provision_stop / transport_remove / post_provision_boot): the flagged adapters are removed (the intrinsic NAT's forwards deleted with it), the document updates to match (entries removed, is_control flipped to the first survivor, the settings flag cleared), and the post-removal boot gates on NOTHING — the run is COMPLETE at the boot, the machine comes up on its real NICs. vbox.post_provision_boot (the cycle-after-provisioning knob — per-hypervisor key, sync 2026-07-19) triggers the SAME stop→start cycle without the removal step. The extra_vars networks[] carry each adapter's LIVE MAC when the document leaves mac auto/empty (adapter = network index + 2; resolved into the run's variable document only — the stored document is never modified). Prerequisites: provisioner config stored (create auto-fills it; PUT overrides) and a control IP in networks[]. WINRM MACHINES (settings.communicator: winrm — the converged transport, sync 2026-07-17): the wait step verifies the guest via HOST-ANSIBLE win_ping instead of an SSH dial (ansible + pywinrm on the AGENT HOST are required — on Windows hosts that means ansible + pywinrm inside WSL's default distribution; their absence is an honest task failure, never a pre-flight); shell scripts and guest hooks run via host-ansible win_copy/win_shell/win_file; remote playbooks connect over winrm. Folder sync/syncback, ansible LOCAL playbooks, and docker compose CANNOT run over winrm — they are skipped as RESPONSE-ONLY task_chain entries ({step: 'sync_skipped_winrm', folder_count}, {step: 'syncback_skipped_winrm', folder_count}, {step: 'ansible_local_skipped_winrm', playbook_count}, {step: 'docker_skipped_winrm'}), and unknown methods additionally emit {step: 'method_not_executable', method}.",
+                "description": "Minimum role: operator. Orchestrates the full provisioning run against the STORED provisioner document (the zoneweaver mechanism). THERE ARE NO PHASES: the run executes the stored document's provisioning: section AS WRITTEN — method keys in the order they appear in the stored document, entries within each method in list order — bracketed by the folder sync (outermost) and the pre[]/post[] hooks; the method children chain DIRECTLY under the orchestration parent. Every entry runs on every press, whatever run directive it carries, so a Provision press runs every role the document enables. THREE OPTIONAL MEMBERS narrow the run on a machine that has provisioned once and is running with its transport reachable: roles, a list of document role names (the roles[] name or its last dotted segment), runs the ansible entries with provision_roles narrowed to those roles in the document's order; scripts, a list of provisioning.shell.scripts paths, runs those scripts alone; playbook, one provisioning.playbooks path, runs that playbook alone. A narrowed run is bare tasks and nothing else: no prepare, no boot, no wait, no folder sync, no hooks, no key rotation, no power cycle, no orchestration parent, and last_provisioned_at is never stamped; the answer's parent_task_id is the first task, task_chain the entries, one task per entry chained in order. A name the document does not carry answers 400, as does narrowing a machine never provisioned or not running. CREDENTIAL: the machine's vagrant credential, the document's credentials[] entry with use vagrant (default first) else machines.default_credentials.vagrant, supplies the username when the row names one and its password or key material at run, the row id riding the children as credential_id and never the secret; without one the settings.vagrant_user family applies. The chain: machine_prepare (re-render + refresh the working copy — regenerated before every provision) → boot (the plain start operation as a child, skipped when running or skip_boot) → machine_wait_ssh (credentials = settings.vagrant_user/vagrant_user_pass/vagrant_user_private_key_path — SSH keys resolve over the THREE-TIER ladder (Mark's three-tier ruling, sync 2026-07-17): tier 1 = the working copy's vagrant_user_private_key_path when the file EXISTS (rotated, or user-supplied); tier 2 = the packaged bootstrap key inside the working copy (driver/ssh_keys/id_rsa, then the legacy core/ssh_keys/id_rsa) when the named key is missing or none is named — never a guest fetch; the agent provisioning key is the last existence-checked candidate, and password auth engages ONLY when no key file exists anywhere — a key file on disk always beats a document password (zoneweaver's exact ladder). TIER 3 is RECOVERY ONLY: when the wait exhausts on key auth and the guest-agent channel is enabled, the agent recovers the rotated key over QGA (guest-exec cat of /home/\u003cvagrant_user\u003e/.ssh/id_ssh_rsa), lands it at the working-copy key path (0600), and retries the wait ONCE — without a QGA channel the failure honestly names 'both known keys were rejected and no SSH-free transport exists'; transport = the provisioning NIC's NAT ssh port-forward at 127.0.0.1 when the machine carries one — vagrant's model, immune to guest network reconfiguration — else the control IP from networks[] is_control → provisional → first; neither existing is a 400) → machine_sync_parent + one machine_sync per folders[] entry (transport per folder.type: rsync | scp, each with a pure-Go fallback when the binary is absent — embedded rsync client / SFTP, loudly narrated in the task output; vagrant is optional; disabled entries skipped; type virtualbox registers a REAL VirtualBox shared folder instead of copying — hot-added with automount, guest-mounted via vboxsf when Guest Additions run, a failed guest mount narrates and never fails the pipeline) → one machine_hook per provisioning.pre[] SEQUENCE HOOK entry, before the first method ({script, target: host|guest default guest, on_failure: abort|continue default abort, run: always|once default always} — design §5's ruled shape: guest hooks upload+sudo-run like shell scripts, host hooks run the working-copy script ON THE AGENT HOST gated by provisioning.host_hooks (default ON here), on_failure continue narrates and proceeds, run once skips after the first successful provision) → THE METHOD WALK — provisioning:'s keys in stored-document order, entries in list order: shell → one machine_shell per scripts[] string (the package-relative path resolves against the working copy, uploads over the built-in SFTP to a /tmp path, chmod +x, runs with sudo — shebang honored — then removes itself; a nonzero exit fails the task; bare string entries carry no run directive and execute every time the walk reaches them); ansible → groups in list order, each group's local[] then its remote[] per its own lists — ONE chain, each entry local (machine_provision) or remote (machine_provision_remote — design §5: ansible-playbook ON THE AGENT HOST dialing the guest over the pipeline transport, inventory pinned to the resolved ip/port, credentials from the stored settings with the agent provisioning key as fallback, ANSIBLE_CONFIG/ANSIBLE_COLLECTIONS_PATH resolved against the working copy, remote_collections galaxy-installs host-side; the control node resolves natively where the OS carries ansible and through WSL on Windows hosts — the default WSL distribution's ansible, host paths translated to their /mnt form, extra-vars via an @file in the working copy, the private key riding a chmod-600 mktemp copy (keys on /mnt mounts are world-readable and OpenSSH refuses them), and 127.0.0.1 forward targets (ssh and winrm alike) reached through a RUN-SCOPED twin forward bound to the WSL gateway address (NAT-mode WSL2 shares no loopback with the Windows host and the create-time forwards bind 127.0.0.1 — the twin is added before the run, removed after, host-internal, and the loopback rule is untouched) — and NO control node anywhere fails honestly) per its OWN list, never all-locals-then-all-remotes; docker → one machine_docker_compose per docker_compose[] (or docker-compose[]) file (guest path, `up -d`, compose v2 plugin first then docker-compose) — NO engine installation: an absent guest engine fails the task honestly, and compose entries carry no run pin; UNKNOWN method keys SURVIVE in the stored document and are narrate-skipped by the walk — named loudly in the response and the parent's metadata, never a failure → one machine_hook per provisioning.post[] entry, after the last method → when any folder carries syncback: true, machine_syncback_parent + one machine_syncback per flagged folder pulls those folders guest→host — the post-provision results landing (folder.to → folder.map reversed; delete never honored on a pull, no chown) → KEY ROTATION (settings.vagrant_ssh_insert_key, the on/true/1/yes vocabulary — the key_rotate proposal, sync 2026-07-17): ONE machine_key_rotate child AFTER the syncback bracket adopts the box's ROTATED private key — SFTP-reads /home/\u003cvagrant_user\u003e/.ssh/id_ssh_rsa from the guest (a missing remote file is a narrated skip and the task SUCCEEDS — box built without rotation), lands it at settings.vagrant_user_private_key_path in the working copy (0600), then strips the bootstrap pubkey line from the guest file (sed '/vagrantup/d' — Hosts.rb:706's hack; a strip failure fails the task HONESTLY — the landed key stays, and the whole-walk stamp never sits on this child). It NEVER owns the whole-walk stamp; the response task_chain[] carries {step: 'key_rotate', task_id}, and winrm guests get the response-only {step: 'key_rotate_skipped_winrm'} entry instead. THE STAMP: provisioner_state.last_provisioned_at records ONLY when the ENTIRE walk succeeds, whatever type its last entry is — it rides the chain's final task, and the linear chain makes that equivalent to whole-run success; a partial run never marks the machine provisioned. THE PIPELINE-OWNED POWER CYCLE (Mark's execution ruling, sync 2026-07-18): when the machine is flagged for transport removal (settings.remove_transport_on_completion true, or any networks[] entry's remove_on_completion — absent = this agent's default FALSE) the chain appends stop → machine_transport_remove → start AFTER the stamp (task_chain steps post_provision_stop / transport_remove / post_provision_boot): the flagged adapters are removed (the intrinsic NAT's forwards deleted with it), the document updates to match (entries removed, is_control flipped to the first survivor, the settings flag cleared), and the post-removal boot gates on NOTHING — the run is COMPLETE at the boot, the machine comes up on its real NICs. vbox.post_provision_boot (the cycle-after-provisioning knob — per-hypervisor key, sync 2026-07-19) triggers the SAME stop→start cycle without the removal step. The extra_vars networks[] carry each adapter's LIVE MAC when the document leaves mac auto/empty (adapter = network index + 2; resolved into the run's variable document only — the stored document is never modified). Prerequisites: provisioner config stored (create auto-fills it; PUT overrides) and a control IP in networks[]. WINRM MACHINES (settings.communicator: winrm — the converged transport, sync 2026-07-17): the wait step verifies the guest via HOST-ANSIBLE win_ping instead of an SSH dial (ansible + pywinrm on the AGENT HOST are required — on Windows hosts that means ansible + pywinrm inside WSL's default distribution; their absence is an honest task failure, never a pre-flight); shell scripts and guest hooks run via host-ansible win_copy/win_shell/win_file; remote playbooks connect over winrm. Folder sync/syncback, ansible LOCAL playbooks, and docker compose CANNOT run over winrm — they are skipped as RESPONSE-ONLY task_chain entries ({step: 'sync_skipped_winrm', folder_count}, {step: 'syncback_skipped_winrm', folder_count}, {step: 'ansible_local_skipped_winrm', playbook_count}, {step: 'docker_skipped_winrm'}), and unknown methods additionally emit {step: 'method_not_executable', method}.",
                 "parameters": [
                     {
                         "description": "Machine name",
@@ -14664,13 +14810,13 @@
                                     {
                                         "$ref": "#/components/schemas/server.provisionRequest",
                                         "summary": "request",
-                                        "description": "Optional {skip_boot, confirm_host_hooks}"
+                                        "description": "Optional {skip_boot, confirm_host_hooks, roles, scripts, playbook}"
                                     }
                                 ]
                             }
                         }
                     },
-                    "description": "Optional {skip_boot, confirm_host_hooks}"
+                    "description": "Optional {skip_boot, confirm_host_hooks, roles, scripts, playbook}"
                 },
                 "responses": {
                     "200": {
@@ -14684,7 +14830,7 @@
                         "description": "Provisioning pipeline started"
                     },
                     "400": {
-                        "description": "No provisioner config stored, missing settings.vagrant_user, no control IP in networks[], or host-target hooks while provisioning.host_hooks is false"
+                        "description": "No provisioner config stored, missing settings.vagrant_user, no control IP in networks[], host-target hooks while provisioning.host_hooks is false, or a narrowing member naming a role, script or playbook the document does not carry or narrowing a machine never provisioned"
                     },
                     "404": {
                         "description": "Machine not found"
@@ -14954,7 +15100,7 @@
         },
         "/api/machines/{machineName}/run-provisioners": {
             "post": {
-                "description": "Minimum role: operator. The SAME document walk as POST /api/machines/{machineName}/provision minus the infra and folder brackets, under a machine_provision_parent anchor: one machine_hook per provisioning.pre[] entry, then the stored document's provisioning: method keys in the order they appear (shell scripts, ansible local/remote entries — run-filtered per entry, and docker compose entries all execute here too), then one machine_hook per post[] entry. The machine must be running with SSH reachable. The whole-walk stamp rides the final task — last_provisioned_at records only when the ENTIRE walk succeeds. All entries skipped by their run directives answers a 200 no-op carrying the skipped list; an empty provisioning: section is a 400. The response carries task_chain[] like /provision, and the WINRM rules apply here too (settings.communicator: winrm): shell scripts and guest hooks run via host-ansible win_copy/win_shell/win_file, remote playbooks connect over winrm, while ansible LOCAL playbooks and docker compose entries are skipped as response-only task_chain entries ({step: 'ansible_local_skipped_winrm', playbook_count}, {step: 'docker_skipped_winrm'}) and unknown methods emit {step: 'method_not_executable', method}.",
+                "description": "Minimum role: operator. The SAME document walk as POST /api/machines/{machineName}/provision minus the infra and folder brackets, under a machine_provision_parent anchor: one machine_hook per provisioning.pre[] entry, then the stored document's provisioning: method keys in the order they appear (shell scripts, ansible local/remote entries and docker compose entries all execute here too, every entry on every press), then one machine_hook per post[] entry. The machine must be running with SSH reachable. The whole-walk stamp rides the final task — last_provisioned_at records only when the ENTIRE walk succeeds. An empty provisioning: section is a 400. The response carries task_chain[] like /provision, and the WINRM rules apply here too (settings.communicator: winrm): shell scripts and guest hooks run via host-ansible win_copy/win_shell/win_file, remote playbooks connect over winrm, while ansible LOCAL playbooks and docker compose entries are skipped as response-only task_chain entries ({step: 'ansible_local_skipped_winrm', playbook_count}, {step: 'docker_skipped_winrm'}) and unknown methods emit {step: 'method_not_executable', method}.",
                 "parameters": [
                     {
                         "description": "Machine name",
@@ -14975,7 +15121,7 @@
                                 }
                             }
                         },
-                        "description": "Provisioner tasks created (or the all-skipped no-op)"
+                        "description": "Provisioner tasks created (or the nothing-executable no-op)"
                     },
                     "400": {
                         "description": "No provisioner config, no playbooks configured, missing credentials, or no control IP"
@@ -15217,7 +15363,7 @@
         },
         "/api/machines/{machineName}/ssh/start": {
             "post": {
-                "description": "Minimum role: operator. Mints an SSH terminal session for a RUNNING machine, created_by the calling key; the shell opens when the first terminal connects at the /api/ssh/{sessionId} WebSocket and lives until DELETE /api/ssh/sessions/{sessionId}/stop, the remote shell's exit, the calling key's revocation or deletion while no socket is attached, or the agent's stop; a socket's close leaves it running, its last output kept for the next socket. session-started {kind: ssh, id, machine_name} goes to the person on the sessions topic of GET /api/events. Each call is an independent session. Credentials come from the stored configuration (settings.vagrant_user/vagrant_user_pass/vagrant_user_private_key_path; the agent's provisioning key is the last-resort fallback). Transport = the pipeline's ladder: the provisioning NAT ssh port-forward first (immune to guest network reconfiguration), the document's control IP as fallback.",
+                "description": "Minimum role: operator. Mints an SSH terminal session for a RUNNING machine, created_by the calling key; the shell opens when the first terminal connects at the /api/ssh/{sessionId} WebSocket and lives until DELETE /api/ssh/sessions/{sessionId}/stop, the remote shell's exit, the calling key's revocation or deletion while no socket is attached, or the agent's stop; a socket's close leaves it running, its last output kept for the next socket. session-started {kind: ssh, id, machine_name} goes to the person on the sessions topic of GET /api/events. Each call is an independent session. CREDENTIAL: the body's credential_id names a password or ssh_key row of the certs store the caller may read; absent, the machine's credentials[] entry with use ssh (default first) applies, else machines.default_credentials.ssh, else the stored settings (settings.vagrant_user/vagrant_user_pass/vagrant_user_private_key_path; the agent's provisioning key is the last-resort fallback). A row's username comes from its extra.username or extra.user, else settings.vagrant_user; its password or private key and passphrase are resolved on the agent, never sent to the browser. Transport = the pipeline's ladder: the provisioning NAT ssh port-forward first (immune to guest network reconfiguration), the document's control IP as fallback.",
                 "parameters": [
                     {
                         "description": "Machine name",
@@ -15229,6 +15375,25 @@
                         }
                     }
                 ],
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "oneOf": [
+                                    {
+                                        "type": "object"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/server.sshStartRequest",
+                                        "summary": "request",
+                                        "description": "Optional {credential_id}"
+                                    }
+                                ]
+                            }
+                        }
+                    },
+                    "description": "Optional {credential_id}"
+                },
                 "responses": {
                     "200": {
                         "content": {
@@ -15241,7 +15406,7 @@
                         "description": "Session created"
                     },
                     "400": {
-                        "description": "Machine not running, no credentials configured, or no SSH transport"
+                        "description": "Machine not running, no credentials configured, a credential_id naming no readable password or ssh_key row, or no SSH transport"
                     },
                     "404": {
                         "description": "Machine not found"
@@ -16858,11 +17023,75 @@
                 "tags": [
                     "Host Configuration"
                 ]
+            },
+            "put": {
+                "description": "Minimum role: operator. Queues modify_ip_address: the addrobj's current live address is removed the way DELETE removes it and the body's address is created the way POST creates it, the body being POST /api/network/addresses' less addrobj, the same per-OS refusals applying. The synthetic \u003cinterface\u003e/\u003cversion\u003e addrobj can cover SEVERAL live addresses — ?address= names the one to replace; without it exactly one live address of that version must exist or the request answers 400 listing the candidates. An addrobj with no live address answers 404.",
+                "parameters": [
+                    {
+                        "description": "The listing's addrobj value — may carry a slash (\u003cinterface\u003e/v4)",
+                        "in": "path",
+                        "name": "addrobj",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    {
+                        "description": "Which of the addrobj's live addresses to replace (IP or CIDR) — required when several exist",
+                        "in": "query",
+                        "name": "address",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "oneOf": [
+                                    {
+                                        "type": "object"
+                                    },
+                                    {
+                                        "$ref": "#/components/schemas/server.modifyNetworkAddressRequest",
+                                        "summary": "request",
+                                        "description": "The address as POST creates it, less addrobj"
+                                    }
+                                ]
+                            }
+                        }
+                    },
+                    "description": "The address as POST creates it, less addrobj",
+                    "required": true
+                },
+                "responses": {
+                    "202": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/server.addressTaskResponse"
+                                }
+                            }
+                        },
+                        "description": "Modify task queued ({success, message, task_id, addrobj, type, interface})"
+                    },
+                    "400": {
+                        "description": "Malformed addrobj, missing interface/type, missing address for static, non-CIDR address, dhcp off-Windows, addrconf, or several live addresses without ?address="
+                    },
+                    "404": {
+                        "description": "Address object not found ({error, details})"
+                    }
+                },
+                "summary": "Edit an IP address in place (task)",
+                "tags": [
+                    "Host Configuration"
+                ]
             }
         },
         "/api/network/addresses/{addrobj}/disable": {
             "put": {
-                "description": "Minimum role: operator. Queues enable_ip_address. HONESTY, loud: no platform here has illumos's per-address enable — the toggle applies to the INTERFACE the addrobj names (netsh set interface / `ip link set up` / ifconfig up), affecting every address on it; the 202 body and the task output both say so. (Route mechanics: one PUT wildcard under /api/network/addresses/ splits the enable/disable suffix — Go 1.22 ServeMux forbids literal segments after a trailing wildcard.)",
+                "description": "Minimum role: operator. Queues enable_ip_address. HONESTY, loud: no platform here has illumos's per-address enable — the toggle applies to the INTERFACE the addrobj names (netsh set interface / `ip link set up` / ifconfig up), affecting every address on it; the 202 body and the task output both say so. (Route mechanics: one PUT wildcard under /api/network/addresses/ splits the enable/disable suffix — Go 1.22 ServeMux forbids literal segments after a trailing wildcard; a bare addrobj is the in-place edit.)",
                 "parameters": [
                     {
                         "description": "The listing's addrobj value — may carry a slash (\u003cinterface\u003e/v4)",
@@ -16887,9 +17116,6 @@
                     },
                     "400": {
                         "description": "Malformed addrobj"
-                    },
-                    "404": {
-                        "description": "Unknown action suffix"
                     }
                 },
                 "summary": "Enable an address's interface (task)",
@@ -16900,7 +17126,7 @@
         },
         "/api/network/addresses/{addrobj}/enable": {
             "put": {
-                "description": "Minimum role: operator. Queues enable_ip_address. HONESTY, loud: no platform here has illumos's per-address enable — the toggle applies to the INTERFACE the addrobj names (netsh set interface / `ip link set up` / ifconfig up), affecting every address on it; the 202 body and the task output both say so. (Route mechanics: one PUT wildcard under /api/network/addresses/ splits the enable/disable suffix — Go 1.22 ServeMux forbids literal segments after a trailing wildcard.)",
+                "description": "Minimum role: operator. Queues enable_ip_address. HONESTY, loud: no platform here has illumos's per-address enable — the toggle applies to the INTERFACE the addrobj names (netsh set interface / `ip link set up` / ifconfig up), affecting every address on it; the 202 body and the task output both say so. (Route mechanics: one PUT wildcard under /api/network/addresses/ splits the enable/disable suffix — Go 1.22 ServeMux forbids literal segments after a trailing wildcard; a bare addrobj is the in-place edit.)",
                 "parameters": [
                     {
                         "description": "The listing's addrobj value — may carry a slash (\u003cinterface\u003e/v4)",
@@ -16925,9 +17151,6 @@
                     },
                     "400": {
                         "description": "Malformed addrobj"
-                    },
-                    "404": {
-                        "description": "Unknown action suffix"
                     }
                 },
                 "summary": "Enable an address's interface (task)",

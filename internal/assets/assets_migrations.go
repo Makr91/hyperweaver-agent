@@ -88,3 +88,12 @@ var GivenChecksumMigrations = []string{
 var VersionInfoMigrations = []string{
 	`ALTER TABLE artifacts ADD COLUMN version_info TEXT;`,
 }
+
+// RegistryMigrations adds the registry file a row is, as JSON, and drops every expectation row whose sha256 another row of the role carries under a more specific kind.
+var RegistryMigrations = []string{
+	`ALTER TABLE artifacts ADD COLUMN registry TEXT;
+	DELETE FROM artifacts WHERE file_exists = 0 AND COALESCE(path, '') = '' AND kind = 'installer'
+		AND COALESCE(expected_sha256, '') != ''
+		AND EXISTS (SELECT 1 FROM artifacts other WHERE other.role = artifacts.role
+			AND other.kind IN ('fixpack', 'hotfix') AND other.expected_sha256 = artifacts.expected_sha256);`,
+}
