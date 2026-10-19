@@ -152,8 +152,12 @@ func (s *Store) ScanLocation(ctx context.Context, location *Location,
 			report("stderr", file.path+": hash failed ("+herr.Error()+")\n")
 			continue
 		}
+		kind := KindOfName(file.filename, location.Type)
+		if existing != nil {
+			kind = existing.Kind
+		}
 		artifact, rerr := s.RecordIngested(ctx, &Ingested{
-			LocationID: location.ID, Role: file.role, Kind: location.Type,
+			LocationID: location.ID, Role: file.role, Kind: kind,
 			Filename: file.filename, Path: file.path, SHA256: sha, Size: size,
 		})
 		if rerr != nil {

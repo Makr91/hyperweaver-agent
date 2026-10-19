@@ -74,6 +74,11 @@ var TemplateMigrations = []string{
 	);`,
 }
 
+// TemplateDiskSizeMigration adds the image's disk size column; appended at the end of the composed list.
+var TemplateDiskSizeMigration = []string{
+	`ALTER TABLE templates ADD COLUMN disk_size TEXT NOT NULL DEFAULT '';`,
+}
+
 // Template is one registry row.
 type Template struct {
 	ID           int64           `json:"id"`
@@ -88,7 +93,9 @@ type Template struct {
 	Checksum     string          `json:"checksum"`
 	SourceURL    string          `json:"source_url"`
 	Metadata     json.RawMessage `json:"metadata"`
-	DownloadedAt time.Time       `json:"downloaded_at"`
+	// DiskSize is the virtual disk size the image was built to, in the agents' size vocabulary (64G), the registry's provider row word, empty while the registry answers none
+	DiskSize     string    `json:"disk_size"`
+	DownloadedAt time.Time `json:"downloaded_at"`
 }
 
 // TemplateSource is one configured registry (template_sources.sources, keyed by ID).
@@ -111,7 +118,7 @@ type TemplateSource struct {
 
 const templateColumns = `id, source_name, organization, box_name, version,
 	provider, architecture, disk_path, size, checksum, source_url, metadata,
-	downloaded_at`
+	disk_size, downloaded_at`
 
 func scanTemplate(row interface{ Scan(...any) error }) (*Template, error) {
 	var t Template
@@ -119,7 +126,7 @@ func scanTemplate(row interface{ Scan(...any) error }) (*Template, error) {
 	var downloadedAt string
 	err := row.Scan(&t.ID, &t.SourceName, &t.Organization, &t.BoxName, &t.Version,
 		&t.Provider, &t.Architecture, &t.DiskPath, &t.Size, &checksum, &sourceURL,
-		&metadata, &downloadedAt)
+		&metadata, &t.DiskSize, &downloadedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -411,10 +418,10 @@ func (s *Store) createTemplate(ctx context.Context, t *Template) error {
 	}
 	_, err := s.db.ExecContext(ctx, `INSERT INTO templates
 		(source_name, organization, box_name, version, provider, architecture,
-		 disk_path, size, checksum, source_url, metadata, downloaded_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		 disk_path, size, checksum, source_url, metadata, disk_size, downloaded_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		t.SourceName, t.Organization, t.BoxName, t.Version, t.Provider,
 		t.Architecture, t.DiskPath, t.Size, t.Checksum, t.SourceURL, metadata,
-		formatTime(time.Now()))
+		t.DiskSize, formatTime(time.Now()))
 	return err
 }

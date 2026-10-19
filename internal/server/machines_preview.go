@@ -2,7 +2,10 @@ package server
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
+	"reflect"
+	"strings"
 
 	"github.com/goccy/go-yaml"
 
@@ -16,19 +19,48 @@ type previewMachineResponse struct {
 	Warnings []string          `json:"warnings"`
 }
 
+// bodyTypeProblem answers the {member: message} map for a JSON body whose member carries the wrong type, naming the type the member takes; nil for any other decode error.
+func bodyTypeProblem(err error) map[string]string {
+	var typeErr *json.UnmarshalTypeError
+	if !errors.As(err, &typeErr) || typeErr.Field == "" {
+		return nil
+	}
+	var takes string
+	switch typeErr.Type.Kind() {
+	case reflect.String:
+		takes = "a string"
+	case reflect.Bool:
+		takes = "true or false"
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
+		reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64,
+		reflect.Float32, reflect.Float64:
+		takes = "a number"
+	case reflect.Slice, reflect.Array:
+		takes = "a list"
+	default:
+		takes = "a map"
+	}
+	field := strings.TrimPrefix(typeErr.Field, "Spec.")
+	return map[string]string{field: "takes " + takes}
+}
+
 // @Summary		Preview a machine's document
-// @Description	Minimum role: operator. Takes the body of POST /api/machines, runs its validation and answers its 400s and its 422 map, then answers the Hosts.yml the create would store without writing or queueing anything: yaml is the package's rendered Hosts.template.yml and hosts its hosts[] entries parsed with their key order kept; a provisioner-less body answers the document the create would build from the spec as one hosts[] entry. warnings carries the typed-disk warnings the create's resource_warnings would.
+// @Description	Minimum role: operator. Takes the body of POST /api/machines, runs its validation and answers its 400s and its 422 map, then answers the Hosts.yml the create would store without writing or queueing anything: yaml is the package's rendered Hosts.template.yml and hosts its hosts[] entries parsed with their key order kept; a provisioner-less body answers the document the create would build from the spec as one hosts[] entry. warnings carries the typed-disk warnings the create's resource_warnings would. A body that decodes as JSON but carries a member of the wrong type answers 422 with the {member: message} map naming the type it takes, tags: takes a list for example; a body that is not JSON answers 400 Invalid JSON body.
 // @Tags			Machine Management
 // @Accept			json
 // @Produce		json
 // @Param			request	body		createMachineRequest	true	"The body of POST /api/machines"
 // @Success		200	{object}	previewMachineResponse	"The document"
 // @Failure		400	"Invalid spec or template render failure, as POST /api/machines refuses"
-// @Failure		422	{object}	map[string]string	"Form answers fail the package's Field DSL — the body IS the {FIELD: message} map"
+// @Failure		422	{object}	map[string]string	"Form answers fail the package's Field DSL, or a body member carries the wrong type — the body IS the {FIELD: message} map"
 // @Router			/api/machines/preview [post]
 func (s *Server) handlePreviewMachine(w http.ResponseWriter, r *http.Request) {
 	var body createMachineRequest
 	if err := decodeBody(r, &body); err != nil {
+		if problem := bodyTypeProblem(err); problem != nil {
+			writeJSONStatus(w, http.StatusUnprocessableEntity, problem)
+			return
+		}
 		taskError(w, http.StatusBadRequest, "Invalid JSON body")
 		return
 	}

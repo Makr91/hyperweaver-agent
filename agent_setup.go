@@ -172,6 +172,7 @@ func setupTasks(cfg *config.Config) (*agentSystems, error) {
 	agentMigrations = append(agentMigrations, assets.GivenChecksumMigrations...)
 	agentMigrations = append(agentMigrations, assets.VersionInfoMigrations...)
 	agentMigrations = append(agentMigrations, certs.Migrations...)
+	agentMigrations = append(agentMigrations, machines.TemplateDiskSizeMigration...)
 	agentDB, err := openDB(agentPath, agentMigrations)
 	if err != nil {
 		_ = tasksDB.Close()

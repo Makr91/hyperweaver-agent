@@ -38,10 +38,10 @@ func ParseFieldDSL(metadata map[string]any, roleNames []string) (dsl *FieldDSL, 
 	}
 
 	// Legal show_if operands: role flags always — <metadata.roles[].name>_enabled,
-	// the manifest name verbatim; field names as declared.
-	operands := map[string]bool{}
+	// the manifest name verbatim; field names as declared, each mapped onto its type.
+	operands := map[string]string{}
 	for _, role := range roleNames {
-		operands[role+"_enabled"] = true
+		operands[role+"_enabled"] = "checkbox"
 	}
 
 	for i, entry := range anyList(configuration["groups"]) {
@@ -94,7 +94,7 @@ func ParseFieldDSL(metadata map[string]any, roleNames []string) (dsl *FieldDSL, 
 		}
 		dsl.Fields = append(dsl.Fields, *field)
 		dsl.byName[field.Name] = &dsl.Fields[len(dsl.Fields)-1]
-		operands[field.Name] = true
+		operands[field.Name] = field.Type
 	}
 
 	// Group show_if lints after every field is known — groups wrap fields, so

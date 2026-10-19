@@ -4,8 +4,8 @@ import "fmt"
 
 // lintCondition checks one show_if value against the CLOSED grammar:
 // map = AND; per operand a scalar (equals), a list (IN), or a one-key map of
-// not|gt|gte|lt|lte; the reserved key `any` takes a list of maps (OR).
-func lintCondition(where string, condition any, operands map[string]bool) []string {
+// not|gt|gte|lt|lte, or of min_items|max_items on a list field; the reserved key `any` takes a list of maps (OR). operands maps each legal operand name onto its field type.
+func lintCondition(where string, condition any, operands map[string]string) []string {
 	problems := []string{}
 	block, ok := condition.(map[string]any)
 	if !ok {
@@ -23,13 +23,14 @@ func lintCondition(where string, condition any, operands map[string]bool) []stri
 			}
 			continue
 		}
-		if !operands[key] {
+		operandType, declared := operands[key]
+		if !declared {
 			problems = append(problems, where+fmt.Sprintf(": operand %q is not an earlier-declared field or a role-enable flag (<metadata.roles[].name>_enabled)", key))
 		}
 		switch spec := value.(type) {
 		case map[string]any:
 			if len(spec) != 1 {
-				problems = append(problems, where+"."+key+": operator maps take exactly one of not, gt, gte, lt, lte")
+				problems = append(problems, where+"."+key+": operator maps take exactly one of not, gt, gte, lt, lte, min_items, max_items")
 				continue
 			}
 			for op, operand := range spec {
@@ -39,8 +40,15 @@ func lintCondition(where string, condition any, operands map[string]bool) []stri
 					if _, numeric := anyFloat(operand); !numeric {
 						problems = append(problems, where+"."+key+"."+op+fmt.Sprintf(": needs a numeric operand (%v)", operand))
 					}
+				case "min_items", "max_items":
+					if declared && operandType != "list" {
+						problems = append(problems, where+"."+key+"."+op+": applies to list fields only")
+					}
+					if n := anyInt(operand, -1); n < 0 {
+						problems = append(problems, where+"."+key+"."+op+fmt.Sprintf(": needs a non-negative integer operand (%v)", operand))
+					}
 				default:
-					problems = append(problems, where+"."+key+fmt.Sprintf(": unknown operator %q — the closed set is not, gt, gte, lt, lte", op))
+					problems = append(problems, where+"."+key+fmt.Sprintf(": unknown operator %q — the closed set is not, gt, gte, lt, lte, min_items, max_items", op))
 				}
 			}
 		default:
@@ -79,7 +87,7 @@ func evalCondition(condition any, values map[string]any) bool {
 }
 
 // matchOperand applies one operand's condition: scalar equals, list IN,
-// operator map.
+// operator map; min_items and max_items count the value as a list, a non-list counting as empty.
 func matchOperand(value, spec any) bool {
 	switch condition := spec.(type) {
 	case []any:
@@ -92,6 +100,16 @@ func matchOperand(value, spec any) bool {
 	case map[string]any:
 		for op, operand := range condition {
 			switch op {
+			case "min_items", "max_items":
+				entries, _ := value.([]any)
+				n := anyInt(operand, -1)
+				if n < 0 {
+					return false
+				}
+				if op == "min_items" {
+					return int64(len(entries)) >= n
+				}
+				return int64(len(entries)) <= n
 			case "not":
 				if list, isList := operand.([]any); isList {
 					for _, candidate := range list {

@@ -46,7 +46,7 @@ type templateListResponse struct {
 // handleListTemplates lists the local box-template registry.
 //
 //	@Summary		List box templates
-//	@Description	Minimum role: viewer. The local box-template registry: downloaded box disk images machines clone from (organization/box_name/version/architecture tuples; stale rows whose disk image vanished self-delete on resolution).
+//	@Description	Minimum role: viewer. The local box-template registry: downloaded box disk images machines clone from (organization/box_name/version/architecture tuples; stale rows whose disk image vanished self-delete on resolution). disk_size is the size the image was built to in the agents' size vocabulary (64G), read from the registry's provider row at pull time, else the box's metadata.json, empty while neither names one.
 //	@Tags			Machine Management
 //	@Produce		json
 //	@Success		200	{object}	templateListResponse	"Templates retrieved"

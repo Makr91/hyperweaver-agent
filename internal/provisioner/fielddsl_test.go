@@ -87,6 +87,54 @@ func TestListFileAndSecretFieldsParseAndValidate(t *testing.T) {
 	}
 }
 
+func TestShowIfListLength(t *testing.T) {
+	manifest := manifestWith([]any{
+		map[string]any{"name": "NAMES", "type": "list", "items": "fqdn"},
+		map[string]any{"name": "TOOL", "type": "text", "show_if": map[string]any{"NAMES": map[string]any{"min_items": 1}}},
+		map[string]any{"name": "FEW", "type": "text", "show_if": map[string]any{"NAMES": map[string]any{"max_items": 1}}},
+	}, nil)
+	dsl, problems := ParseFieldDSL(manifest, nil)
+	if len(problems) > 0 {
+		t.Fatalf("lint refused a legal manifest: %v", problems)
+	}
+	cases := []struct {
+		names any
+		tool  bool
+		few   bool
+	}{
+		{nil, false, true},
+		{"a.example.com", false, true},
+		{[]any{}, false, true},
+		{[]any{"a.example.com"}, true, true},
+		{[]any{"a.example.com", "b.example.com"}, true, false},
+	}
+	for _, tc := range cases {
+		visible := dsl.VisibleFields(dsl.visibilityValues(map[string]any{"NAMES": tc.names}, nil))
+		if visible["TOOL"] != tc.tool || visible["FEW"] != tc.few {
+			t.Errorf("NAMES %v: TOOL %v FEW %v, want %v %v", tc.names, visible["TOOL"], visible["FEW"], tc.tool, tc.few)
+		}
+	}
+	refused := []struct {
+		fields []any
+		want   string
+	}{
+		{[]any{
+			map[string]any{"name": "A", "type": "text"},
+			map[string]any{"name": "B", "type": "text", "show_if": map[string]any{"A": map[string]any{"min_items": 1}}},
+		}, "min_items: applies to list fields only"},
+		{[]any{
+			map[string]any{"name": "A", "type": "list", "items": "fqdn"},
+			map[string]any{"name": "B", "type": "text", "show_if": map[string]any{"A": map[string]any{"max_items": "two"}}},
+		}, "needs a non-negative integer operand"},
+	}
+	for _, tc := range refused {
+		_, problems := ParseFieldDSL(manifestWith(tc.fields, nil), nil)
+		if !strings.Contains(strings.Join(problems, "; "), tc.want) {
+			t.Errorf("fields %v: want a problem containing %q, got %v", tc.fields, tc.want, problems)
+		}
+	}
+}
+
 func TestListAndFileLint(t *testing.T) {
 	cases := []struct {
 		field map[string]any

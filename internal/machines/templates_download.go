@@ -146,6 +146,7 @@ func (e *executors) templateDownload(ctx context.Context, task *tasks.Task, out 
 		Checksum:     checksum,
 		SourceURL:    downloadURL,
 		Metadata:     boxMetadata,
+		DiskSize:     diskSizeOf(ctx, client, source, task.CreatedBy, &meta, boxMetadata),
 	}); cerr != nil {
 		return cerr
 	}
@@ -153,6 +154,64 @@ func (e *executors) templateDownload(ctx context.Context, task *tasks.Task, out 
 	out.Write("stdout", "Template "+meta.Organization+"/"+meta.BoxName+" v"+meta.Version+
 		" imported to "+diskPath+"\n")
 	return nil
+}
+
+// diskSizeOf answers the pulled version's disk_size: the registry's box document's provider row first, the box's own metadata.json next, empty when neither names one.
+func diskSizeOf(ctx context.Context, client *http.Client, source *TemplateSource, createdBy string, meta *TemplateDownloadMetadata, boxMetadata json.RawMessage) string {
+	if size := registryDiskSize(ctx, client, source, createdBy, meta); size != "" {
+		return size
+	}
+	var box struct {
+		DiskSize string `json:"disk_size"`
+	}
+	if len(boxMetadata) > 0 && json.Unmarshal(boxMetadata, &box) == nil {
+		return box.DiskSize
+	}
+	return ""
+}
+
+// registryDiskSize reads the registry's box document and answers the disk_size of the provider row matching the pulled version and provider, empty when the read fails or the row carries none.
+func registryDiskSize(ctx context.Context, client *http.Client, source *TemplateSource, createdBy string, meta *TemplateDownloadMetadata) string {
+	boxURL := source.URL + "/api/organization/" + url.PathEscape(meta.Organization) + "/box/" + url.PathEscape(meta.BoxName)
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, boxURL, http.NoBody)
+	if err != nil {
+		return ""
+	}
+	setRegistryAuth(request, registryToken(source, createdBy))
+	request.Header.Set("User-Agent", "Hyperweaver/1.0.0")
+	response, err := client.Do(request)
+	if err != nil {
+		return ""
+	}
+	defer func() {
+		_ = response.Body.Close()
+	}()
+	if response.StatusCode != http.StatusOK {
+		return ""
+	}
+	var box struct {
+		Versions []struct {
+			VersionNumber string `json:"version_number"`
+			Providers     []struct {
+				Name     string `json:"name"`
+				DiskSize string `json:"disk_size"`
+			} `json:"providers"`
+		} `json:"versions"`
+	}
+	if derr := json.NewDecoder(io.LimitReader(response.Body, 8<<20)).Decode(&box); derr != nil {
+		return ""
+	}
+	for _, version := range box.Versions {
+		if strings.TrimPrefix(version.VersionNumber, "v") != meta.Version {
+			continue
+		}
+		for _, provider := range version.Providers {
+			if strings.EqualFold(provider.Name, meta.Provider) {
+				return provider.DiskSize
+			}
+		}
+	}
+	return ""
 }
 
 // findTemplateSource resolves a configured source by id (empty id = the
