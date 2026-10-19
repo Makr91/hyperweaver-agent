@@ -74,11 +74,12 @@ type FieldValidate struct {
 	re           *regexp.Regexp
 }
 
-// FieldGroup is one ordered form group.
+// FieldGroup is one ordered form group; Role names the metadata.roles entry whose card draws the group, empty for a group of its own.
 type FieldGroup struct {
 	Name     string
 	Label    string
 	Help     string
+	Role     string
 	Advanced bool
 	ShowIf   any
 }

@@ -163,6 +163,37 @@ func TestListAndFileLint(t *testing.T) {
 	}
 }
 
+func TestGroupRole(t *testing.T) {
+	groups := func(role string) map[string]any {
+		return map[string]any{"metadata": map[string]any{
+			"roles": []any{map[string]any{"name": "ssl"}},
+			"configuration": map[string]any{
+				"groups": []any{map[string]any{"name": "tls", "role": role}},
+				"fields": []any{map[string]any{"name": "A", "type": "text", "group": "tls"}},
+			},
+		}}
+	}
+	manifest := groups("ssl")
+	dsl, problems := ParseFieldDSL(manifest, manifestRoleNames(manifest))
+	if len(problems) > 0 {
+		t.Fatalf("lint refused a legal manifest: %v", problems)
+	}
+	if dsl.Groups[0].Role != "ssl" {
+		t.Fatalf("group role %q, want ssl", dsl.Groups[0].Role)
+	}
+	raw, err := marshalFieldSchema(manifest, dsl)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), `"role": "ssl"`) {
+		t.Errorf("schema groups carry no role: %s", raw)
+	}
+	unknown := groups("nope")
+	if _, problems := ParseFieldDSL(unknown, manifestRoleNames(unknown)); !strings.Contains(strings.Join(problems, "; "), `role "nope" is not a metadata.roles name`) {
+		t.Errorf("unknown group role accepted: %v", problems)
+	}
+}
+
 func TestLintDefaults(t *testing.T) {
 	legal := map[string]any{
 		"settings":    map[string]any{"box": "STARTcloud/debian13-server"},

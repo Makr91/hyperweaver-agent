@@ -40,8 +40,10 @@ func ParseFieldDSL(metadata map[string]any, roleNames []string) (dsl *FieldDSL, 
 	// Legal show_if operands: role flags always — <metadata.roles[].name>_enabled,
 	// the manifest name verbatim; field names as declared, each mapped onto its type.
 	operands := map[string]string{}
+	knownRoles := map[string]bool{}
 	for _, role := range roleNames {
 		operands[role+"_enabled"] = "checkbox"
+		knownRoles[role] = true
 	}
 
 	for i, entry := range anyList(configuration["groups"]) {
@@ -55,6 +57,7 @@ func ParseFieldDSL(metadata map[string]any, roleNames []string) (dsl *FieldDSL, 
 			Name:     anyString(group["name"]),
 			Label:    anyString(group["label"]),
 			Help:     anyString(group["help"]),
+			Role:     anyString(group["role"]),
 			Advanced: anyBool(group["advanced"]),
 			ShowIf:   group["show_if"],
 		}
@@ -65,6 +68,10 @@ func ParseFieldDSL(metadata map[string]any, roleNames []string) (dsl *FieldDSL, 
 		if _, dup := dsl.byGroup[g.Name]; dup {
 			problems = append(problems, where+fmt.Sprintf(" %q: duplicate group name", g.Name))
 			continue
+		}
+		if g.Role != "" && !knownRoles[g.Role] {
+			problems = append(problems, where+fmt.Sprintf(" %q: role %q is not a metadata.roles name — the declared roles are: %s",
+				g.Name, g.Role, strings.Join(roleNames, ", ")))
 		}
 		dsl.Groups = append(dsl.Groups, g)
 		dsl.byGroup[g.Name] = &dsl.Groups[len(dsl.Groups)-1]

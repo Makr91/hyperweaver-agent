@@ -111,6 +111,9 @@ func marshalFieldSchema(manifest map[string]any, dsl *FieldDSL) ([]byte, error) 
 		if dsl.Groups[i].Label != "" {
 			group["label"] = dsl.Groups[i].Label
 		}
+		if dsl.Groups[i].Role != "" {
+			group["role"] = dsl.Groups[i].Role
+		}
 		if dsl.Groups[i].Advanced {
 			group["advanced"] = true
 		}
