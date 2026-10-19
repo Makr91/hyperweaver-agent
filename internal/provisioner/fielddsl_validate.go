@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net"
 	"regexp"
+	"strings"
 )
 
 // visibilityValues builds the value set conditionals evaluate against:
@@ -146,6 +147,29 @@ func (f *Field) validateValue(answer any) string {
 			}
 		}
 		return ""
+	case "list":
+		entries, ok := answer.([]any)
+		if !ok {
+			return "must be a list"
+		}
+		if f.Validate != nil {
+			if f.Validate.MinItems != nil && len(entries) < *f.Validate.MinItems {
+				return fmt.Sprintf("must have at least %d entries", *f.Validate.MinItems)
+			}
+			if f.Validate.MaxItems != nil && len(entries) > *f.Validate.MaxItems {
+				return fmt.Sprintf("must have at most %d entries", *f.Validate.MaxItems)
+			}
+		}
+		for i, entry := range entries {
+			text, isText := entry.(string)
+			if !isText {
+				return fmt.Sprintf("entry %d must be a string", i+1)
+			}
+			if message := f.stringProblem(f.Items, text); message != "" {
+				return fmt.Sprintf("entry %d %s", i+1, message)
+			}
+		}
+		return ""
 	}
 
 	// The string family.
@@ -153,7 +177,15 @@ func (f *Field) validateValue(answer any) string {
 	if !ok {
 		return "must be a string"
 	}
-	switch f.Type {
+	if f.Type == "file" && strings.ContainsAny(text, `/\`) {
+		return "must be a file name, not a path"
+	}
+	return f.stringProblem(f.Type, text)
+}
+
+// stringProblem applies one string type's format and the field's string rules to a text answer ("" = valid).
+func (f *Field) stringProblem(kind, text string) string {
+	switch kind {
 	case "fqdn":
 		if !fqdnPattern.MatchString(text) {
 			return "must be a fully qualified domain name"
@@ -206,6 +238,9 @@ func isEmptyAnswer(value any) bool {
 	}
 	if text, ok := value.(string); ok {
 		return text == ""
+	}
+	if list, ok := value.([]any); ok {
+		return len(list) == 0
 	}
 	return false
 }

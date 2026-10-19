@@ -76,7 +76,7 @@ func (s *Server) handleProvisionerDetails(w http.ResponseWriter, r *http.Request
 // forms).
 //
 //	@Summary		Provisioner version details
-//	@Description	Minimum role: viewer. One version's full manifest — the document the machine-create forms render from. version matches the manifest version or the directory name.
+//	@Description	Minimum role: viewer. One version's full manifest — the document the machine-create forms render from; metadata.defaults, the package's machine defaults (settings, disks, networks), rides verbatim for the create wizard to prefill from. version matches the manifest version or the directory name.
 //	@Tags			Provisioning
 //	@Produce		json
 //	@Param			name	path	string	true	"Provisioner family name"

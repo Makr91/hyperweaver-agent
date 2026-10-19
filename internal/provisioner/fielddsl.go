@@ -23,12 +23,16 @@ var fieldTypes = map[string]bool{
 	"text": true, "textarea": true, "number": true, "checkbox": true,
 	"select": true, "multiselect": true, "password": true,
 	"fqdn": true, "ipaddr": true, "cidr": true, "path": true,
+	"list": true, "file": true,
 }
 
 // optionsSources is the closed live-picker vocabulary for select fields.
 var optionsSources = map[string]bool{
-	"networks": true, "datastores": true, "hosts": true, "images": true,
+	"networks": true, "datastores": true, "hosts": true, "images": true, "hypervisor": true,
 }
+
+// fileKinds is the closed kind vocabulary of a file field: the artifact kind the picked row carries.
+var fileKinds = map[string]bool{"id_file": true, "installer": true}
 
 // fieldNamePattern: a field's name is the EXACT Jinja2 context key, so it
 // must be a legal Jinja2 identifier.
@@ -55,6 +59,8 @@ type FieldValidate struct {
 	Max          *float64
 	MinLength    *int
 	MaxLength    *int
+	MinItems     *int
+	MaxItems     *int
 	Pattern      string
 	PatternError string
 	re           *regexp.Regexp
@@ -81,6 +87,9 @@ type Field struct {
 	Immutable      bool
 	Rows           int
 	IPVersion      int // ipaddr: 4 | 6 | 0 (either)
+	Items          string
+	Kind           string
+	Role           string
 	Options        []FieldOption
 	OptionsSource  string
 	GenerateLength int // password generate:{length}

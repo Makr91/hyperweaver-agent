@@ -129,6 +129,9 @@ func parseField(where string, raw map[string]any, dsl *FieldDSL) (field *Field, 
 		Immutable:     anyBool(raw["immutable"]),
 		Rows:          int(anyInt(raw["rows"], 0)),
 		IPVersion:     int(anyInt(raw["version"], 0)),
+		Items:         anyString(raw["items"]),
+		Kind:          anyString(raw["kind"]),
+		Role:          anyString(raw["role"]),
 		OptionsSource: anyString(raw["options_source"]),
 		ShowIf:        raw["show_if"],
 	}
@@ -164,6 +167,7 @@ func parseField(where string, raw map[string]any, dsl *FieldDSL) (field *Field, 
 			problems = append(problems, where+fmt.Sprintf(": ipaddr version must be 4 or 6 (got %d)", field.IPVersion))
 		}
 	}
+	problems = append(problems, lintListFile(where, field)...)
 
 	for _, entry := range anyList(raw["options"]) {
 		switch option := entry.(type) {
@@ -185,7 +189,7 @@ func parseField(where string, raw map[string]any, dsl *FieldDSL) (field *Field, 
 			problems = append(problems, where+": options and options_source are mutually exclusive")
 		case field.OptionsSource != "":
 			if !optionsSources[field.OptionsSource] {
-				problems = append(problems, where+fmt.Sprintf(": unknown options_source %q — the closed set is: networks, datastores, hosts, images", field.OptionsSource))
+				problems = append(problems, where+fmt.Sprintf(": unknown options_source %q — the closed set is: networks, datastores, hosts, images, hypervisor", field.OptionsSource))
 			}
 		case len(field.Options) == 0:
 			problems = append(problems, where+": select needs options or options_source")
@@ -231,11 +235,71 @@ func parseField(where string, raw map[string]any, dsl *FieldDSL) (field *Field, 
 	return field, problems
 }
 
+// lintListFile lints the members only a list or a file field carries: items names a string type on a list, kind and role name the artifact row on a file.
+func lintListFile(where string, field *Field) []string {
+	problems := []string{}
+	switch field.Type {
+	case "list":
+		if !stringFields[field.Items] {
+			problems = append(problems, where+fmt.Sprintf(": list needs items, one of: %s (got %q)", strings.Join(sortedKeys(stringFields), ", "), field.Items))
+		}
+		if field.Default != nil {
+			if _, isList := field.Default.([]any); !isList {
+				problems = append(problems, where+": list default must be a list")
+			}
+		}
+	default:
+		if field.Items != "" {
+			problems = append(problems, where+": items applies to list only")
+		}
+	}
+	switch field.Type {
+	case "file":
+		if !fileKinds[field.Kind] {
+			problems = append(problems, where+fmt.Sprintf(": file needs kind, id_file or installer (got %q)", field.Kind))
+		}
+		if !ValidName(field.Role) {
+			problems = append(problems, where+fmt.Sprintf(": file needs role, the artifact row's role (got %q)", field.Role))
+		}
+	default:
+		if field.Kind != "" || field.Role != "" {
+			problems = append(problems, where+": kind and role apply to file only")
+		}
+	}
+	return problems
+}
+
+// stringRuled reports whether a type's answers are strings the string rules apply to: the string types, a file name, and each member of a list.
+func stringRuled(fieldType string) bool {
+	return stringFields[fieldType] || fieldType == "list" || fieldType == "file"
+}
+
+func sortedKeys(set map[string]bool) []string {
+	keys := make([]string, 0, len(set))
+	for key := range set {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
 // parseValidate lints one validate block against its field's type, appending
 // onto the caller's problem list.
 func parseValidate(where string, raw map[string]any, fieldType string, in []string) (v *FieldValidate, problems []string) {
 	problems = in
 	v = &FieldValidate{}
+	for key, target := range map[string]**int{"min_items": &v.MinItems, "max_items": &v.MaxItems} {
+		if value, has := raw[key]; has {
+			if fieldType != "list" {
+				problems = append(problems, where+"."+key+": applies to list fields only")
+			} else if n := anyInt(value, -1); n >= 0 {
+				count := int(n)
+				*target = &count
+			} else {
+				problems = append(problems, where+fmt.Sprintf(".%s: not a non-negative integer (%v)", key, value))
+			}
+		}
+	}
 	if value, has := raw["min"]; has {
 		if fieldType != "number" {
 			problems = append(problems, where+".min: applies to number fields only")
@@ -256,7 +320,7 @@ func parseValidate(where string, raw map[string]any, fieldType string, in []stri
 	}
 	for key, target := range map[string]**int{"min_length": &v.MinLength, "max_length": &v.MaxLength} {
 		if value, has := raw[key]; has {
-			if !stringFields[fieldType] {
+			if !stringRuled(fieldType) {
 				problems = append(problems, where+"."+key+": applies to string fields only")
 			} else if n := anyInt(value, -1); n >= 0 {
 				length := int(n)
@@ -269,7 +333,7 @@ func parseValidate(where string, raw map[string]any, fieldType string, in []stri
 	v.Pattern = anyString(raw["pattern"])
 	v.PatternError = anyString(raw["pattern_error"])
 	if v.Pattern != "" {
-		if !stringFields[fieldType] {
+		if !stringRuled(fieldType) {
 			problems = append(problems, where+".pattern: applies to string fields only")
 		}
 		if v.PatternError == "" {

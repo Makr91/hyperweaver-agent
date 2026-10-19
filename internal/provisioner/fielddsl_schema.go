@@ -66,7 +66,8 @@ func LintVersionManifest(versionRoot string) []string {
 			}
 		}
 	}
-	return append(problems, lintRoles(manifest, declared)...)
+	problems = append(problems, lintRoles(manifest, declared)...)
+	return append(problems, lintDefaults(manifest)...)
 }
 
 // BuildFieldSchema derives a version's schema.json (JSON Schema 2020-12)
@@ -155,32 +156,37 @@ func marshalFieldSchema(manifest map[string]any, dsl *FieldDSL) ([]byte, error) 
 			property["type"] = "array"
 			property["uniqueItems"] = true
 			property["items"] = map[string]any{"enum": optionValues(field.Options)}
+		case "list":
+			property["type"] = "array"
+			items := map[string]any{"type": "string"}
+			if format := stringFormat(field.Items, 0); format != "" {
+				items["format"] = format
+			}
+			stringRules(items, field.Validate)
+			property["items"] = items
+			property["x-hyperweaver-items"] = field.Items
+			if field.Validate != nil {
+				if field.Validate.MinItems != nil {
+					property["minItems"] = *field.Validate.MinItems
+				}
+				if field.Validate.MaxItems != nil {
+					property["maxItems"] = *field.Validate.MaxItems
+				}
+			}
+		case "file":
+			property["type"] = "string"
+			property["x-hyperweaver-kind"] = field.Kind
+			property["x-hyperweaver-role"] = field.Role
+			stringRules(property, field.Validate)
 		default:
 			property["type"] = "string"
-			switch field.Type {
-			case "fqdn":
-				property["format"] = "hostname"
-			case "ipaddr":
-				switch field.IPVersion {
-				case 4:
-					property["format"] = "ipv4"
-				case 6:
-					property["format"] = "ipv6"
-				}
-			case "password":
+			if format := stringFormat(field.Type, field.IPVersion); format != "" {
+				property["format"] = format
+			}
+			if field.Type == "password" {
 				property["writeOnly"] = true
 			}
-			if field.Validate != nil {
-				if field.Validate.MinLength != nil {
-					property["minLength"] = *field.Validate.MinLength
-				}
-				if field.Validate.MaxLength != nil {
-					property["maxLength"] = *field.Validate.MaxLength
-				}
-				if field.Validate.Pattern != "" {
-					property["pattern"] = field.Validate.Pattern
-				}
-			}
+			stringRules(property, field.Validate)
 		}
 		property["x-hyperweaver-type"] = field.Type
 		if field.Group != "" {
@@ -214,6 +220,38 @@ func marshalFieldSchema(manifest map[string]any, dsl *FieldDSL) ([]byte, error) 
 		document["required"] = required
 	}
 	return json.MarshalIndent(document, "", "  ")
+}
+
+// stringFormat answers the JSON Schema format of a string type, "" when it has none.
+func stringFormat(kind string, ipVersion int) string {
+	switch kind {
+	case "fqdn":
+		return "hostname"
+	case "ipaddr":
+		switch ipVersion {
+		case 4:
+			return "ipv4"
+		case 6:
+			return "ipv6"
+		}
+	}
+	return ""
+}
+
+// stringRules writes a field's string rules onto a schema property.
+func stringRules(property map[string]any, validate *FieldValidate) {
+	if validate == nil {
+		return
+	}
+	if validate.MinLength != nil {
+		property["minLength"] = *validate.MinLength
+	}
+	if validate.MaxLength != nil {
+		property["maxLength"] = *validate.MaxLength
+	}
+	if validate.Pattern != "" {
+		property["pattern"] = validate.Pattern
+	}
 }
 
 func optionValues(options []FieldOption) []any {

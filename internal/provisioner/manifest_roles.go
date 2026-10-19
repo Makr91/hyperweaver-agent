@@ -102,6 +102,43 @@ func manifestRoleNames(metadata map[string]any) []string {
 	return names
 }
 
+// lintDefaults lints metadata.defaults, the package's machine defaults the create wizard prefills from: a map whose keys are settings and disks, each a map, and networks, a list; absent is legal.
+func lintDefaults(metadata map[string]any) []string {
+	meta, _ := metadata["metadata"].(map[string]any)
+	raw, present := meta["defaults"]
+	if !present || raw == nil {
+		return nil
+	}
+	defaults, ok := raw.(map[string]any)
+	if !ok {
+		return []string{"metadata.defaults: must be a map with settings, disks and networks"}
+	}
+	problems := []string{}
+	keys := make([]string, 0, len(defaults))
+	for key := range defaults {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		switch key {
+		case "settings", "disks":
+			if _, isMap := defaults[key].(map[string]any); !isMap {
+				problems = append(problems, "metadata.defaults."+key+": must be a map")
+			}
+		case "networks":
+			if _, isList := defaults[key].([]any); !isList {
+				problems = append(problems, "metadata.defaults.networks: must be a list")
+			}
+		default:
+			problems = append(problems, fmt.Sprintf("metadata.defaults.%s: unknown key — the closed set is: disks, networks, settings", key))
+		}
+	}
+	if len(problems) == 0 {
+		return nil
+	}
+	return problems
+}
+
 // lintRoles lints metadata.roles: a role declaring files needs installer_dir, every files key is installer, fixpack or hotfix, and every answers value names a declared field; declared is nil while the form itself failed its lint, which skips the answers check.
 func lintRoles(metadata map[string]any, declared map[string]bool) []string {
 	problems := []string{}
